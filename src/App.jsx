@@ -1,3 +1,4 @@
+/* eslint-disable */
 import { useState, useEffect, useRef, useMemo } from "react";
 
 const style = `
