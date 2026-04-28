@@ -7,7 +7,7 @@ const firebaseConfig = {
   apiKey: "AIzaSyA69m0Jq4GzSxOeUr6ZzumlrSH9wcGy0p0",
   authDomain: "ecdis-route-finder.firebaseapp.com",
   projectId: "ecdis-route-finder",
-  storageBucket: "ecdis-route-finder.firebasestorage.app",
+  storageBucket: "ecdis-route-finder.appspot.com", // ✅ FIXED
   messagingSenderId: "636056685819",
   appId: "1:636056685819:web:20d9dadb661135123eb45e"
 };
