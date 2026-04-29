@@ -1,170 +1,1885 @@
-import { useState, useEffect } from "react";
-import { MapContainer, TileLayer, Polyline } from "react-leaflet";
-import "leaflet/dist/leaflet.css";
+/* eslint-disable */
+import { useState, useEffect, useRef, useMemo } from "react";
+import { auth, db } from "./firebase";
+import {
+  signInWithEmailAndPassword, createUserWithEmailAndPassword,
+  signOut, onAuthStateChanged, sendPasswordResetEmail
+} from "firebase/auth";
+import {
+  collection, getDocs, addDoc, deleteDoc, doc, setDoc, serverTimestamp
+} from "firebase/firestore";
 
-export default function App() {
-  const [routes, setRoutes] = useState([]);
-  const [query, setQuery] = useState("");
-  const [from, setFrom] = useState("");
-  const [to, setTo] = useState("");
-  const [generatedRoute, setGeneratedRoute] = useState([]);
+// ─── ECDIS BRANDS ─────────────────────────────────────────────────────────────
+const ECDIS_BRANDS = [
+  { id:"furuno",    name:"Furuno",             emoji:"🟦", color:"#0066CC", models:"FMD-3200 / FMD-3300" },
+  { id:"jrc",       name:"JRC",                emoji:"🟥", color:"#CC0000", models:"JAN-7201S / JAN-9201S" },
+  { id:"transas",   name:"Transas / Wärtsilä", emoji:"🟩", color:"#007A4D", models:"Navi-Sailor 4000/3000" },
+  { id:"sperry",    name:"Sperry Marine",       emoji:"🟨", color:"#D4900A", models:"VisionMaster FT / Pro" },
+  { id:"tokimec",   name:"Tokimec / JMR",       emoji:"🟪", color:"#6B21A8", models:"JMR-7700 / JMR-9900" },
+  { id:"raytheon",  name:"Raytheon Anschütz",   emoji:"⬛", color:"#374151", models:"ECDIS 1000 / 2000" },
+  { id:"kongsberg", name:"Kongsberg Maritime",  emoji:"🔵", color:"#1D4ED8", models:"K-Bridge ECDIS" },
+  { id:"danelec",   name:"Danelec Marine",      emoji:"🔶", color:"#EA580C", models:"DM800 ECDIS" },
+  { id:"kelvin",    name:"Kelvin Hughes",        emoji:"🔷", color:"#0891B2", models:"SharpEye ECDIS" },
+  { id:"northrop",  name:"Northrop Grumman",    emoji:"⭕", color:"#DC2626", models:"Integrated Bridge" },
+  { id:"sam",       name:"SAM Electronics",     emoji:"🟫", color:"#92400E", models:"NACOS Platinum" },
+  { id:"wartsila",  name:"Wärtsilä Voyage",     emoji:"🔺", color:"#059669", models:"Navi-Sailor Series" },
+];
 
-  // LOAD SAVED ROUTES
-  useEffect(() => {
-    const stored = JSON.parse(localStorage.getItem("routes") || "[]");
-    setRoutes(stored);
-  }, []);
+const ROUTE_TYPES = ["Ocean","Coastal","Deep Sea","Strait","River","Port Approach","Anchorage"];
 
-  // EXTRACT GOOGLE FILE ID
-  const extractFileId = (url) => {
-    const match = url.match(/\/d\/(.*?)\//);
-    return match ? match[1] : null;
-  };
+// ─── PORTS DATABASE ───────────────────────────────────────────────────────────
+const PORTS_DB = [
+  { id:"MUM", name:"Mumbai",          country:"India",       lat:18.93,  lon:72.83,  keywords:"mum mumbai bombay india" },
+  { id:"SIN", name:"Singapore",       country:"Singapore",   lat:1.29,   lon:103.85, keywords:"sin singapore" },
+  { id:"DXB", name:"Dubai",           country:"UAE",         lat:25.05,  lon:55.13,  keywords:"dxb dubai jebel ali uae" },
+  { id:"SHA", name:"Shanghai",        country:"China",       lat:31.23,  lon:121.47, keywords:"sha shanghai china" },
+  { id:"ROT", name:"Rotterdam",       country:"Netherlands", lat:51.92,  lon:4.48,   keywords:"rot rotterdam netherlands europe" },
+  { id:"HKG", name:"Hong Kong",       country:"China",       lat:22.29,  lon:114.16, keywords:"hkg hong kong china" },
+  { id:"COL", name:"Colombo",         country:"Sri Lanka",   lat:6.94,   lon:79.85,  keywords:"col colombo srilanka" },
+  { id:"ADE", name:"Aden",            country:"Yemen",       lat:12.77,  lon:44.99,  keywords:"ade aden yemen gulf" },
+  { id:"KAR", name:"Karachi",         country:"Pakistan",    lat:24.86,  lon:67.01,  keywords:"kar karachi pakistan" },
+  { id:"FUJ", name:"Fujairah",        country:"UAE",         lat:25.12,  lon:56.34,  keywords:"fuj fujairah uae oman" },
+  { id:"CHE", name:"Chennai",         country:"India",       lat:13.08,  lon:80.29,  keywords:"che chennai madras india" },
+  { id:"KOC", name:"Kochi",           country:"India",       lat:9.97,   lon:76.27,  keywords:"koc kochi cochin india" },
+  { id:"BUS", name:"Busan",           country:"South Korea", lat:35.1,   lon:129.04, keywords:"bus busan korea" },
+  { id:"YOK", name:"Yokohama",        country:"Japan",       lat:35.45,  lon:139.65, keywords:"yok yokohama japan tokyo" },
+  { id:"PSD", name:"Port Said",       country:"Egypt",       lat:31.26,  lon:32.31,  keywords:"psd port said egypt suez" },
+  { id:"JAX", name:"Jacksonville",    country:"USA",         lat:30.33,  lon:-81.65, keywords:"jax jacksonville usa" },
+  { id:"LAX", name:"Los Angeles",     country:"USA",         lat:33.74,  lon:-118.27,keywords:"lax los angeles usa" },
+  { id:"HAM", name:"Hamburg",         country:"Germany",     lat:53.54,  lon:9.99,   keywords:"ham hamburg germany europe" },
+  { id:"ANT", name:"Antwerp",         country:"Belgium",     lat:51.23,  lon:4.42,   keywords:"ant antwerp belgium europe" },
+  { id:"BAS", name:"Basra",           country:"Iraq",        lat:30.52,  lon:47.83,  keywords:"bas basra iraq gulf" },
+  { id:"KWI", name:"Kuwait",          country:"Kuwait",      lat:29.37,  lon:47.99,  keywords:"kwi kuwait gulf" },
+  { id:"MAN", name:"Manila",          country:"Philippines", lat:14.59,  lon:120.98, keywords:"man manila philippines" },
+  { id:"DAR", name:"Dar es Salaam",   country:"Tanzania",    lat:-6.82,  lon:39.28,  keywords:"dar dar es salaam tanzania africa" },
+  { id:"MOM", name:"Mombasa",         country:"Kenya",       lat:-4.05,  lon:39.67,  keywords:"mom mombasa kenya africa" },
+  { id:"JAK", name:"Jakarta",         country:"Indonesia",   lat:-6.11,  lon:106.88, keywords:"jak jakarta indonesia" },
+  { id:"POR", name:"Port Klang",      country:"Malaysia",    lat:3.0,    lon:101.37, keywords:"por port klang malaysia" },
+  { id:"ABJ", name:"Abidjan",         country:"Ivory Coast", lat:5.35,   lon:-4.02,  keywords:"abj abidjan ivory coast africa" },
+  { id:"LAG", name:"Lagos",           country:"Nigeria",     lat:6.45,   lon:3.39,   keywords:"lag lagos nigeria africa" },
+];
 
-  // CONVERT TO DIRECT DOWNLOAD
-  const convertToDirectDownload = (fileId) => {
-    return `https://drive.google.com/uc?export=download&id=${fileId}`;
-  };
+// ─── MARITIME ZONES ───────────────────────────────────────────────────────────
+const ECA_ZONES = [
+  { name:"North Sea ECA",       coords:[[48,-5],[62,-5],[62,13],[48,13]] },
+  { name:"Baltic Sea ECA",      coords:[[53,9],[66,9],[66,30],[53,30]] },
+  { name:"N. American ECA",     coords:[[24,-100],[24,-50],[75,-50],[75,-100]] },
+  { name:"US Caribbean ECA",    coords:[[14,-70],[14,-60],[22,-60],[22,-70]] },
+  { name:"China Coastal ECA",   coords:[[18,108],[18,122],[41,122],[41,108]] },
+];
+const SECA_ZONES = [
+  { name:"Baltic Sea SECA",     coords:[[53,9],[66,9],[66,30],[53,30]] },
+  { name:"North Sea SECA",      coords:[[48,-5],[62,-5],[62,13],[48,13]] },
+];
+const MARPOL_ZONES = [
+  { name:"Mediterranean Sea",   coords:[[30,-6],[30,37],[47,37],[47,-6]] },
+  { name:"Baltic Sea",          coords:[[53,9],[66,9],[66,30],[53,30]] },
+  { name:"Black Sea",           coords:[[41,28],[47,28],[47,42],[41,42]] },
+  { name:"Red Sea",             coords:[[12,32],[30,32],[30,44],[12,44]] },
+  { name:"Arabian Gulf",        coords:[[22,48],[30,48],[30,57],[22,57]] },
+  { name:"Gulf of Oman",        coords:[[22,56],[26,56],[26,61],[22,61]] },
+  { name:"Antarctic Waters",    coords:[[-60,-180],[-60,180],[-90,180],[-90,-180]] },
+];
+const PIRACY_ZONES = [
+  { name:"Indian Ocean HRA / Gulf of Aden", coords:[[0,40],[0,78],[25,78],[25,40]] },
+  { name:"Gulf of Guinea / W. Africa",      coords:[[-5,0],[5,0],[5,10],[-5,10]] },
+  { name:"Malacca / Singapore Strait",      coords:[[1,98],[6,98],[6,106],[1,106]] },
+  { name:"Somali Coast",                    coords:[[-2,40],[12,40],[12,55],[-2,55]] },
+  { name:"Gulf of Guinea Coast",            coords:[[-3,-3],[5,-3],[5,5],[-3,5]] },
+];
+const LAYOVER_ZONES = [
+  { name:"Mumbai Anchorage",       coords:[[18.8,72.7],[18.8,73.0],[19.1,73.0],[19.1,72.7]] },
+  { name:"Singapore Western Anch", coords:[[1.1,103.6],[1.1,103.9],[1.4,103.9],[1.4,103.6]] },
+  { name:"Dubai / Jebel Ali Anch", coords:[[24.9,54.9],[24.9,55.2],[25.1,55.2],[25.1,54.9]] },
+  { name:"Fujairah Anchorage",     coords:[[25.0,56.2],[25.0,56.5],[25.3,56.5],[25.3,56.2]] },
+  { name:"Rotterdam Anchorage",    coords:[[51.8,4.0],[51.8,4.6],[52.0,4.6],[52.0,4.0]] },
+  { name:"Colombo Anchorage",      coords:[[6.8,79.7],[6.8,80.0],[7.1,80.0],[7.1,79.7]] },
+];
 
-  // ADD ROUTE (ADMIN)
-  const addRoute = (link) => {
-    const fileId = extractFileId(link);
-    if (!fileId) {
-      alert("Invalid Google Drive link");
-      return;
-    }
+// ─── ROUTING WAYPOINTS ────────────────────────────────────────────────────────
+const PASSAGES = {
+  SUEZ_N:     { lat:31.27, lon:32.33, name:"Suez Canal (N)" },
+  SUEZ_S:     { lat:29.93, lon:32.57, name:"Suez Canal (S)" },
+  RED_SEA_S:  { lat:12.5,  lon:43.5,  name:"Bab-el-Mandeb" },
+  ADEN:       { lat:11.8,  lon:45.5,  name:"Gulf of Aden" },
+  HORMUZ:     { lat:26.5,  lon:56.8,  name:"Strait of Hormuz" },
+  MALACCA_N:  { lat:5.6,   lon:100.3, name:"N Malacca Strait" },
+  MALACCA_S:  { lat:1.29,  lon:103.85,name:"S Malacca / Singapore" },
+  LOMBOK:     { lat:-8.5,  lon:115.7, name:"Lombok Strait" },
+  SUNDA:      { lat:-6.0,  lon:105.8, name:"Sunda Strait" },
+  CAPE_GH:    { lat:-34.4, lon:18.5,  name:"Cape of Good Hope" },
+  GIBRALTAR:  { lat:35.98, lon:-5.5,  name:"Strait of Gibraltar" },
+  DOVER:      { lat:51.1,  lon:1.8,   name:"Dover Strait" },
+  PORT_SAID:  { lat:31.26, lon:32.31, name:"Port Said" },
+};
 
-    const newRoute = {
-      id: Date.now(),
-      downloadUrl: convertToDirectDownload(fileId),
-      originalLink: link,
-    };
+// ─── MATH HELPERS ─────────────────────────────────────────────────────────────
+const DEG = Math.PI / 180;
+function haversine(lat1, lon1, lat2, lon2) {
+  const R = 3440.065; // NM
+  const dLat = (lat2 - lat1) * DEG;
+  const dLon = (lon2 - lon1) * DEG;
+  const a = Math.sin(dLat/2)**2 + Math.cos(lat1*DEG)*Math.cos(lat2*DEG)*Math.sin(dLon/2)**2;
+  return R * 2 * Math.asin(Math.sqrt(a));
+}
 
-    const updated = [...routes, newRoute];
-    setRoutes(updated);
-    localStorage.setItem("routes", JSON.stringify(updated));
-  };
+function calcBearing(lat1, lon1, lat2, lon2) {
+  const dLon = (lon2 - lon1) * DEG;
+  const y = Math.sin(dLon) * Math.cos(lat2 * DEG);
+  const x = Math.cos(lat1*DEG)*Math.sin(lat2*DEG) - Math.sin(lat1*DEG)*Math.cos(lat2*DEG)*Math.cos(dLon);
+  return ((Math.atan2(y, x) / DEG) + 360) % 360;
+}
 
-  // SEARCH FILTER
-  const filtered = routes.filter((r) =>
-    r.originalLink.toLowerCase().includes(query.toLowerCase())
+function greatCircle(lat1, lon1, lat2, lon2, n) {
+  const pts = [];
+  for (let i = 0; i <= n; i++) {
+    const f = i / n;
+    const d = 2*Math.asin(Math.sqrt(Math.sin(((lat2-lat1)*DEG)/2)**2+Math.cos(lat1*DEG)*Math.cos(lat2*DEG)*Math.sin(((lon2-lon1)*DEG)/2)**2));
+    if (d === 0) { pts.push([lat1, lon1]); continue; }
+    const A = Math.sin((1-f)*d)/Math.sin(d);
+    const B = Math.sin(f*d)/Math.sin(d);
+    const x = A*Math.cos(lat1*DEG)*Math.cos(lon1*DEG)+B*Math.cos(lat2*DEG)*Math.cos(lon2*DEG);
+    const y = A*Math.cos(lat1*DEG)*Math.sin(lon1*DEG)+B*Math.cos(lat2*DEG)*Math.sin(lon2*DEG);
+    const z = A*Math.sin(lat1*DEG)+B*Math.sin(lat2*DEG);
+    pts.push([Math.atan2(z,Math.sqrt(x*x+y*y))/DEG, Math.atan2(y,x)/DEG]);
+  }
+  return pts;
+}
+
+function recalcWaypoints(wps) {
+  return wps.map((wp, i) => {
+    if (i === 0) return { ...wp, distance: 0, bearing: 0, totalNM: 0 };
+    const prev = wps[i-1];
+    const dist = haversine(prev.lat, prev.lon, wp.lat, wp.lon);
+    const bear = calcBearing(prev.lat, prev.lon, wp.lat, wp.lon);
+    const totalNM = (wps[i-1].totalNM || 0) + dist;
+    return { ...wp, distance: dist, bearing: bear, totalNM };
+  });
+}
+
+function totalRouteNM(wps) {
+  return wps.reduce((s, w) => s + (w.distance || 0), 0);
+}
+
+// ─── AUTO ROUTE ───────────────────────────────────────────────────────────────
+function buildAutoRoute(fromPort, toPort) {
+  const from = PORTS_DB.find(p => p.id === fromPort);
+  const to   = PORTS_DB.find(p => p.id === toPort);
+  if (!from || !to) return [];
+
+  const intermediates = [];
+
+  // Indian Ocean West <-> SE Asia (through Malacca)
+  const isWIndian = (p) => p.lon < 90 && p.lon > 40 && p.lat < 30;
+  const isSEAsia  = (p) => p.lon >= 90 && p.lon < 130 && p.lat < 25;
+  const isFarEast = (p) => p.lon >= 120;
+  const isPersGulf= (p) => p.lon >= 48 && p.lon < 58 && p.lat > 22;
+  const isEurope  = (p) => p.lon < 20 && p.lat > 40;
+  const isWAfrica = (p) => p.lon < 20 && p.lat < 20;
+  const isMed     = (p) => p.lon > -6 && p.lon < 37 && p.lat > 30 && p.lat < 47;
+
+  // Persian Gulf needs Hormuz
+  if (isPersGulf(from) && !isPersGulf(to)) {
+    intermediates.push(PASSAGES.HORMUZ);
+  }
+  if (isPersGulf(to) && !isPersGulf(from)) {
+    intermediates.push(PASSAGES.HORMUZ);
+  }
+
+  // Determine if needs Suez or Cape
+  const needsSuez = (
+    (isEurope(from) || isMed(from) || from.lon < 30) &&
+    (isWIndian(to) || isSEAsia(to) || isFarEast(to) || isPersGulf(to))
+  ) || (
+    (isWIndian(from) || isSEAsia(from) || isFarEast(from) || isPersGulf(from)) &&
+    (isEurope(to) || isMed(to) || to.lon < 30)
   );
 
-  // SIMPLE ROUTE GENERATOR
-  const generateRoute = (start, end) => {
-    const waypoints = [];
-    const steps = 20;
-
-    for (let i = 0; i <= steps; i++) {
-      const lat =
-        start.lat + ((end.lat - start.lat) * i) / steps;
-
-      const lon =
-        start.lon + ((end.lon - start.lon) * i) / steps;
-
-      waypoints.push({ lat, lon });
+  if (needsSuez) {
+    // Route via Suez Canal
+    if (isEurope(from) || isMed(from)) {
+      intermediates.push(PASSAGES.GIBRALTAR);
+      intermediates.push(PASSAGES.PORT_SAID);
+      intermediates.push(PASSAGES.SUEZ_S);
+      intermediates.push(PASSAGES.RED_SEA_S);
+      intermediates.push(PASSAGES.ADEN);
+    } else {
+      intermediates.push(PASSAGES.ADEN);
+      intermediates.push(PASSAGES.RED_SEA_S);
+      intermediates.push(PASSAGES.SUEZ_S);
+      intermediates.push(PASSAGES.SUEZ_N);
+      intermediates.push(PASSAGES.PORT_SAID);
+      if (isEurope(to)) {
+        intermediates.push(PASSAGES.GIBRALTAR);
+      }
     }
+  }
 
-    return waypoints;
+  // Indian Ocean to Far East - through Malacca
+  if ((isWIndian(from) || isPersGulf(from)) && (isSEAsia(to) || isFarEast(to))) {
+    if (!intermediates.some(p => p === PASSAGES.MALACCA_N)) {
+      intermediates.push(PASSAGES.MALACCA_N);
+      intermediates.push(PASSAGES.MALACCA_S);
+    }
+  }
+  if ((isSEAsia(from) || isFarEast(from)) && (isWIndian(to) || isPersGulf(to))) {
+    if (!intermediates.some(p => p === PASSAGES.MALACCA_S)) {
+      intermediates.push(PASSAGES.MALACCA_S);
+      intermediates.push(PASSAGES.MALACCA_N);
+    }
+  }
+
+  // Build waypoint list
+  const rawPoints = [
+    { lat: from.lat, lon: from.lon, name: from.name },
+    ...intermediates.map(p => ({ lat: p.lat, lon: p.lon, name: p.name })),
+    { lat: to.lat,   lon: to.lon,   name: to.name },
+  ];
+
+  // Interpolate each segment
+  const allWPs = [];
+  for (let i = 0; i < rawPoints.length - 1; i++) {
+    const a = rawPoints[i], b = rawPoints[i+1];
+    const dist = haversine(a.lat, a.lon, b.lat, b.lon);
+    const nPts = Math.max(2, Math.min(8, Math.floor(dist / 300)));
+    const seg = greatCircle(a.lat, a.lon, b.lat, b.lon, nPts);
+    seg.forEach((pt, j) => {
+      if (i > 0 && j === 0) return; // avoid duplicates
+      const isNamed = (i === 0 && j === 0) || (i === rawPoints.length - 2 && j === seg.length - 1);
+      const namedPt = rawPoints.find((rp,ri) => Math.abs(rp.lat - pt[0]) < 0.01 && ri <= i);
+      allWPs.push({
+        lat: Math.round(pt[0]*10000)/10000,
+        lon: Math.round(pt[1]*10000)/10000,
+        name: (j === 0 && rawPoints[i].name) ? rawPoints[i].name : undefined,
+      });
+    });
+  }
+
+  // Add final point name
+  if (allWPs.length > 0) {
+    allWPs[allWPs.length-1].name = to.name;
+  }
+
+  return recalcWaypoints(allWPs);
+}
+
+// ─── RTZ PARSE / EXPORT ───────────────────────────────────────────────────────
+function parseRTZ(xmlText) {
+  try {
+    const parser = new DOMParser();
+    const xml = parser.parseFromString(xmlText, 'text/xml');
+    const wps = xml.querySelectorAll('waypoint');
+    const result = [];
+    wps.forEach(wp => {
+      const pos = wp.querySelector('position');
+      if (pos) {
+        result.push({
+          lat: parseFloat(pos.getAttribute('lat') || 0),
+          lon: parseFloat(pos.getAttribute('lon') || 0),
+          name: wp.getAttribute('name') || undefined,
+        });
+      }
+    });
+    const routeInfo = xml.querySelector('routeInfo');
+    const routeName = routeInfo?.getAttribute('routeName') || 'Loaded Route';
+    return { waypoints: recalcWaypoints(result), name: routeName };
+  } catch (e) {
+    return null;
+  }
+}
+
+function exportRTZ(routeName, waypoints) {
+  const wpsXml = waypoints.map((wp, i) => `
+    <waypoint id="${i+1}" name="WP${String(i+1).padStart(2,'0')}">
+      <position lat="${wp.lat.toFixed(6)}" lon="${wp.lon.toFixed(6)}"/>
+      <leg starboardXTD="0.1" portXTD="0.1" xtdUnit="NM"/>
+    </waypoint>`).join('');
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<route version="1.0" xmlns="http://www.cirm.org/RTZ/1/0">
+  <routeInfo routeName="${routeName}" vesselName="" vesselMMSI="" vesselIMO="" author="ECDIS Route Finder" status="1" routeStatusEnum="1"/>
+  <waypoints>${wpsXml}
+  </waypoints>
+</route>`;
+}
+
+function exportCSV(waypoints) {
+  const header = 'WP,Name,Latitude,Longitude,Bearing(°),Distance(NM),Total(NM)';
+  const rows = waypoints.map((wp, i) =>
+    `WP${String(i+1).padStart(2,'0')},${wp.name||''},${wp.lat.toFixed(6)},${wp.lon.toFixed(6)},${(wp.bearing||0).toFixed(1)},${(wp.distance||0).toFixed(1)},${(wp.totalNM||0).toFixed(1)}`
+  );
+  return [header, ...rows].join('\n');
+}
+
+function downloadFile(content, filename, type) {
+  const blob = new Blob([content], { type });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename; a.click();
+  URL.revokeObjectURL(url);
+}
+
+// ─── TIMEZONES ────────────────────────────────────────────────────────────────
+const TIMEZONES = [
+  { label:"UTC / GMT",            offset:0 },
+  { label:"IST — India (UTC+5:30)",       offset:5.5 },
+  { label:"GST — Gulf / UAE (UTC+4)",     offset:4 },
+  { label:"PKT — Pakistan (UTC+5)",       offset:5 },
+  { label:"SGT — Singapore (UTC+8)",      offset:8 },
+  { label:"CST — China (UTC+8)",          offset:8 },
+  { label:"JST — Japan (UTC+9)",          offset:9 },
+  { label:"KST — Korea (UTC+9)",          offset:9 },
+  { label:"EAT — E.Africa (UTC+3)",       offset:3 },
+  { label:"CET — C.Europe (UTC+1)",       offset:1 },
+  { label:"CEST — C.Europe Summer(UTC+2)",offset:2 },
+  { label:"BST — UK Summer (UTC+1)",      offset:1 },
+  { label:"EST — US East (UTC-5)",        offset:-5 },
+  { label:"EDT — US East Summer (UTC-4)", offset:-4 },
+  { label:"CST — US Central (UTC-6)",     offset:-6 },
+  { label:"PST — US West (UTC-8)",        offset:-8 },
+  { label:"WIB — W.Indonesia (UTC+7)",    offset:7 },
+  { label:"IRST — Iran (UTC+3:30)",       offset:3.5 },
+];
+
+function addHours(date, hours) {
+  return new Date(date.getTime() + hours * 3600000);
+}
+function formatDateLocal(date, offsetHours) {
+  const local = addHours(date, offsetHours);
+  return local.toISOString().replace('T',' ').substring(0,16) + ` (UTC${offsetHours>=0?'+':''}${offsetHours})`;
+}
+
+// ─── STYLES ──────────────────────────────────────────────────────────────────
+const S = `
+  @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700;900&family=Exo+2:wght@300;400;500;600&display=swap');
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+  :root{
+    --bg:#040C1A;--bg2:#071428;--card:#0B1D35;--card2:#0F2444;
+    --border:#1A3A5C;--border2:#1E4570;--blue:#1565C0;--cyan:#00B4D8;
+    --gold:#F0A500;--gold2:#D4900A;--green:#00C896;--red:#FF4757;
+    --purple:#7C3AED;--text:#E2EBF8;--text2:#8A9BBF;--text3:#4A5F80;
+    --glow:0 0 20px rgba(0,180,216,0.25);
+  }
+  body{font-family:'Exo 2',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;overflow-x:hidden;}
+  .grid-bg{position:fixed;inset:0;z-index:0;pointer-events:none;
+    background-image:linear-gradient(rgba(0,180,216,0.04) 1px,transparent 1px),linear-gradient(90deg,rgba(0,180,216,0.04) 1px,transparent 1px);
+    background-size:60px 60px;animation:gm 20s linear infinite;}
+  @keyframes gm{to{background-position:60px 60px;}}
+  .app{position:relative;z-index:2;min-height:100vh;display:flex;flex-direction:column;}
+
+  /* NAV */
+  .nav{position:sticky;top:0;z-index:100;background:rgba(4,12,26,0.97);backdrop-filter:blur(20px);
+    border-bottom:1px solid var(--border);padding:0 1.2rem;display:flex;align-items:center;
+    justify-content:space-between;height:60px;box-shadow:0 4px 30px rgba(0,0,0,0.5);flex-shrink:0;}
+  .nav-brand{display:flex;align-items:center;gap:9px;}
+  .nav-logo{width:36px;height:36px;background:linear-gradient(135deg,var(--cyan),var(--blue));
+    border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:18px;
+    box-shadow:0 0 14px rgba(0,180,216,0.4);flex-shrink:0;}
+  .nav-title{font-family:'Orbitron',monospace;font-size:0.78rem;font-weight:700;letter-spacing:0.08em;}
+  .nav-sub{font-size:0.56rem;color:var(--cyan);letter-spacing:0.14em;text-transform:uppercase;}
+  .nav-tabs{display:flex;gap:2px;}
+  .ntab{padding:7px 10px;border:none;background:transparent;color:var(--text2);font-family:'Exo 2',sans-serif;
+    font-size:0.73rem;font-weight:500;cursor:pointer;border-radius:8px;transition:all 0.2s;
+    display:flex;align-items:center;gap:5px;text-transform:uppercase;letter-spacing:0.04em;white-space:nowrap;}
+  .ntab:hover{color:var(--text);background:rgba(255,255,255,0.05);}
+  .ntab.active{color:var(--cyan);background:rgba(0,180,216,0.1);border:1px solid rgba(0,180,216,0.2);}
+  .ntab.gold.active{color:var(--gold);background:rgba(240,165,0,0.1);border:1px solid rgba(240,165,0,0.2);}
+  .ntab.green.active{color:var(--green);background:rgba(0,200,150,0.1);border:1px solid rgba(0,200,150,0.2);}
+  .sd{width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 7px var(--green);animation:pulse 2s infinite;}
+  @keyframes pulse{0%,100%{opacity:1;}50%{opacity:0.4;}}
+  .burger{display:none;flex-direction:column;gap:4px;cursor:pointer;padding:8px;background:none;border:none;}
+  .burger span{width:20px;height:2px;background:var(--text);border-radius:2px;}
+  @media(max-width:800px){.nav-tabs{display:none;}.burger{display:flex;}}
+  .mob-menu{display:none;position:fixed;top:60px;left:0;right:0;background:rgba(4,12,26,0.98);
+    backdrop-filter:blur(20px);border-bottom:1px solid var(--border);z-index:99;padding:0.8rem;}
+  .mob-menu.open{display:flex;flex-direction:column;gap:4px;}
+  .mtab{padding:11px 14px;border:none;background:transparent;color:var(--text2);font-family:'Exo 2',sans-serif;
+    font-size:0.86rem;cursor:pointer;border-radius:9px;text-align:left;transition:all 0.2s;display:flex;align-items:center;gap:9px;}
+  .mtab:hover{background:rgba(255,255,255,0.05);color:var(--text);}
+  .mtab.active{background:rgba(0,180,216,0.1);color:var(--cyan);}
+
+  /* HERO */
+  .hero{padding:2.5rem 1.2rem 1.5rem;text-align:center;}
+  .hero-tag{display:inline-flex;align-items:center;gap:7px;padding:5px 13px;border-radius:100px;
+    border:1px solid rgba(0,180,216,0.3);background:rgba(0,180,216,0.08);
+    font-size:0.68rem;color:var(--cyan);letter-spacing:0.12em;text-transform:uppercase;margin-bottom:1rem;}
+  .hero-title{font-family:'Orbitron',monospace;font-size:clamp(1.5rem,5vw,2.6rem);font-weight:900;
+    line-height:1.1;letter-spacing:0.04em;margin-bottom:0.7rem;}
+  .accent{color:var(--cyan);}
+  .hero-desc{max-width:500px;margin:0 auto 1.8rem;color:var(--text2);font-size:0.88rem;line-height:1.7;font-weight:300;}
+
+  /* SEARCH */
+  .sw{max-width:640px;margin:0 auto;}
+  .sb{background:var(--card);border:1px solid var(--border2);border-radius:15px;
+    padding:1.2rem;box-shadow:0 20px 60px rgba(0,0,0,0.4),var(--glow);}
+  .sr{display:flex;gap:8px;align-items:center;}
+  .siw{flex:1;position:relative;}
+  .si{width:100%;padding:12px 15px 12px 42px;background:var(--bg2);border:1.5px solid var(--border2);
+    border-radius:10px;color:var(--text);font-family:'Exo 2',sans-serif;font-size:0.9rem;outline:none;transition:all 0.25s;}
+  .si::placeholder{color:var(--text3);}
+  .si:focus{border-color:var(--cyan);box-shadow:0 0 0 3px rgba(0,180,216,0.12);}
+  .si-ic{position:absolute;left:12px;top:50%;transform:translateY(-50%);font-size:1rem;color:var(--text3);pointer-events:none;}
+  .sbtn{padding:12px 18px;background:linear-gradient(135deg,var(--cyan),var(--blue));border:none;
+    border-radius:10px;color:white;font-family:'Orbitron',monospace;font-size:0.7rem;font-weight:700;
+    letter-spacing:0.1em;cursor:pointer;transition:all 0.2s;white-space:nowrap;box-shadow:0 4px 18px rgba(0,180,216,0.3);}
+  .sbtn:hover{transform:translateY(-2px);box-shadow:0 8px 28px rgba(0,180,216,0.45);}
+  .sh{font-size:0.7rem;color:var(--text3);margin-top:8px;text-align:center;}
+  .sh span{color:var(--cyan);}
+  .ac{position:absolute;top:calc(100% + 6px);left:0;right:0;z-index:60;
+    background:var(--card2);border:1px solid var(--border2);border-radius:10px;
+    overflow:hidden;box-shadow:0 20px 50px rgba(0,0,0,0.65);max-height:200px;overflow-y:auto;}
+  .ac-item{padding:9px 13px;cursor:pointer;display:flex;align-items:center;gap:8px;
+    transition:background 0.15s;font-size:0.84rem;border-bottom:1px solid rgba(255,255,255,0.04);}
+  .ac-item:hover{background:rgba(0,180,216,0.1);}
+
+  /* STATS */
+  .stats{display:flex;justify-content:center;gap:2rem;margin-top:1.8rem;flex-wrap:wrap;}
+  .sn{font-family:'Orbitron',monospace;font-size:1.4rem;font-weight:700;color:var(--cyan);}
+  .sl{font-size:0.63rem;color:var(--text2);letter-spacing:0.1em;text-transform:uppercase;}
+
+  /* SECTION */
+  .section{padding:1.2rem;max-width:1100px;margin:0 auto;width:100%;}
+  .sec-hdr{display:flex;align-items:center;justify-content:space-between;
+    margin-bottom:1.1rem;padding-bottom:0.8rem;border-bottom:1px solid var(--border);flex-wrap:wrap;gap:8px;}
+  .sec-title{font-family:'Orbitron',monospace;font-size:0.9rem;font-weight:700;letter-spacing:0.08em;display:flex;align-items:center;gap:7px;}
+  .badge{padding:3px 9px;border-radius:100px;background:rgba(0,180,216,0.12);border:1px solid rgba(0,180,216,0.25);color:var(--cyan);font-size:0.67rem;}
+  .badge-gold{background:rgba(240,165,0,0.12);border-color:rgba(240,165,0,0.25);color:var(--gold);}
+  .badge-green{background:rgba(0,200,150,0.12);border-color:rgba(0,200,150,0.25);color:var(--green);}
+
+  /* BRAND GRID */
+  .brand-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:0.7rem;margin-bottom:1.4rem;}
+  .brand-card{background:var(--card);border:2px solid var(--border);border-radius:12px;padding:0.9rem;
+    cursor:pointer;transition:all 0.2s;text-align:center;}
+  .brand-card:hover,.brand-card.sel{transform:translateY(-3px);box-shadow:0 8px 25px rgba(0,0,0,0.4);}
+  .brand-emoji{font-size:1.8rem;margin-bottom:5px;}
+  .brand-name{font-family:'Orbitron',monospace;font-size:0.66rem;font-weight:700;margin-bottom:2px;}
+  .brand-models{font-size:0.6rem;color:var(--text2);}
+  .brand-count{font-size:0.65rem;margin-top:4px;font-weight:600;}
+
+  /* FILE CARDS */
+  .files-grid{display:grid;gap:0.9rem;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));}
+  .file-card{background:var(--card);border:1px solid var(--border);border-radius:13px;padding:1.1rem;transition:all 0.25s;}
+  .file-card:hover{border-color:rgba(0,180,216,0.35);transform:translateY(-2px);box-shadow:0 10px 35px rgba(0,0,0,0.4),var(--glow);}
+  .file-icon{font-size:1.8rem;margin-bottom:0.6rem;}
+  .file-name{font-family:'Orbitron',monospace;font-size:0.7rem;font-weight:700;color:var(--cyan);margin-bottom:4px;word-break:break-all;}
+  .file-port{font-size:0.78rem;color:var(--text2);margin-bottom:0.8rem;}
+  .file-tags{display:flex;gap:5px;flex-wrap:wrap;margin-bottom:0.8rem;}
+  .ftag{padding:2px 7px;border-radius:5px;font-size:0.62rem;font-weight:500;}
+  .tag-rtz{background:rgba(0,180,216,0.1);color:var(--cyan);border:1px solid rgba(0,180,216,0.2);}
+  .tag-chart{background:rgba(240,165,0,0.1);color:var(--gold);border:1px solid rgba(240,165,0,0.2);}
+  .tag-brand{background:rgba(124,58,237,0.12);color:#A78BFA;border:1px solid rgba(124,58,237,0.2);}
+  .dl-btn{width:100%;padding:10px;background:linear-gradient(135deg,var(--gold),var(--gold2));
+    border:none;border-radius:9px;color:#000;font-family:'Exo 2',sans-serif;font-size:0.8rem;
+    font-weight:700;cursor:pointer;transition:all 0.2s;display:flex;align-items:center;justify-content:center;gap:6px;}
+  .dl-btn:hover{transform:translateY(-1px);box-shadow:0 4px 18px rgba(240,165,0,0.4);}
+  .dl-btn:disabled{opacity:0.35;cursor:not-allowed;transform:none;background:var(--border2);color:var(--text3);}
+  .login-req{width:100%;padding:10px;background:transparent;border:1px solid rgba(240,165,0,0.3);
+    border-radius:9px;color:var(--gold);font-family:'Exo 2',sans-serif;font-size:0.78rem;
+    font-weight:600;cursor:pointer;transition:all 0.2s;display:flex;align-items:center;justify-content:center;gap:6px;}
+  .login-req:hover{background:rgba(240,165,0,0.08);}
+
+  /* FILTER */
+  .fbar{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:1rem;}
+  .fbtn{padding:5px 11px;border-radius:100px;border:1px solid var(--border);background:transparent;
+    color:var(--text2);font-family:'Exo 2',sans-serif;font-size:0.7rem;cursor:pointer;transition:all 0.2s;text-transform:uppercase;}
+  .fbtn:hover{border-color:var(--cyan);color:var(--cyan);}
+  .fbtn.active{background:rgba(0,180,216,0.12);border-color:rgba(0,180,216,0.4);color:var(--cyan);}
+  .fbtn.gold:hover{border-color:var(--gold);color:var(--gold);}
+  .fbtn.gold.active{background:rgba(240,165,0,0.12);border-color:rgba(240,165,0,0.4);color:var(--gold);}
+
+  /* BUTTONS */
+  .btn{padding:8px 13px;border-radius:9px;font-family:'Exo 2',sans-serif;font-size:0.76rem;
+    font-weight:600;cursor:pointer;transition:all 0.2s;border:none;display:inline-flex;align-items:center;gap:5px;}
+  .btn-primary{background:linear-gradient(135deg,var(--cyan),var(--blue));color:white;}
+  .btn-primary:hover{transform:translateY(-1px);box-shadow:0 4px 18px rgba(0,180,216,0.4);}
+  .btn-danger{background:var(--red);color:white;}
+  .btn-danger:hover{opacity:0.85;}
+  .btn-secondary{background:transparent;border:1px solid var(--border2);color:var(--text2);}
+  .btn-secondary:hover{border-color:var(--cyan);color:var(--cyan);}
+  .btn-gold{background:linear-gradient(135deg,var(--gold),var(--gold2));color:#000;font-weight:700;}
+  .btn-green{background:linear-gradient(135deg,var(--green),#00a87a);color:#000;font-weight:700;}
+  .btn:disabled{opacity:0.45;cursor:not-allowed;}
+
+  /* FORMS */
+  .ff{margin-bottom:1rem;}
+  .fl{display:block;font-size:0.7rem;color:var(--text2);text-transform:uppercase;letter-spacing:0.1em;margin-bottom:6px;}
+  .fi{width:100%;padding:10px 13px;background:var(--bg2);border:1px solid var(--border2);
+    border-radius:9px;color:var(--text);font-family:'Exo 2',sans-serif;font-size:0.86rem;outline:none;transition:all 0.2s;}
+  .fi:focus{border-color:var(--cyan);box-shadow:0 0 0 3px rgba(0,180,216,0.1);}
+  .fi::placeholder{color:var(--text3);}
+  select.fi{cursor:pointer;}
+  textarea.fi{resize:vertical;min-height:70px;}
+
+  /* ROUTE PLANNER */
+  .planner-layout{display:flex;gap:0;flex:1;min-height:0;}
+  .planner-sidebar{width:320px;flex-shrink:0;background:var(--card);border-right:1px solid var(--border);
+    display:flex;flex-direction:column;overflow-y:auto;}
+  @media(max-width:800px){.planner-layout{flex-direction:column;}.planner-sidebar{width:100%;max-height:50vh;}}
+  .planner-map{flex:1;min-height:400px;position:relative;}
+  .p-tabs{display:flex;border-bottom:1px solid var(--border);}
+  .p-tab{flex:1;padding:10px 6px;border:none;background:transparent;color:var(--text2);
+    font-family:'Exo 2',sans-serif;font-size:0.72rem;cursor:pointer;transition:all 0.2s;text-align:center;
+    text-transform:uppercase;letter-spacing:0.06em;}
+  .p-tab:hover{color:var(--text);}
+  .p-tab.active{color:var(--cyan);border-bottom:2px solid var(--cyan);}
+  .p-panel{padding:1rem;flex:1;}
+  .p-section{margin-bottom:1.2rem;}
+  .p-label{font-size:0.65rem;color:var(--text2);text-transform:uppercase;letter-spacing:0.1em;margin-bottom:6px;display:block;}
+  .overlay-grid{display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-bottom:0.8rem;}
+  .ov-btn{padding:6px 8px;border-radius:8px;border:1px solid var(--border);background:transparent;
+    color:var(--text2);font-size:0.68rem;cursor:pointer;transition:all 0.2s;text-align:center;}
+  .ov-btn.active{border-color:currentColor;}
+  .map-legend{position:absolute;bottom:10px;right:10px;background:rgba(4,12,26,0.9);
+    border:1px solid var(--border);border-radius:10px;padding:8px 10px;z-index:400;font-size:0.68rem;}
+  .leg-item{display:flex;align-items:center;gap:6px;margin-bottom:3px;}
+  .leg-dot{width:10px;height:10px;border-radius:2px;flex-shrink:0;}
+  .map-controls{position:absolute;top:10px;right:10px;z-index:400;display:flex;flex-direction:column;gap:5px;}
+  .map-ctrl-btn{padding:6px 10px;background:rgba(4,12,26,0.9);border:1px solid var(--border);
+    border-radius:8px;color:var(--text);font-size:0.72rem;cursor:pointer;transition:all 0.2s;white-space:nowrap;}
+  .map-ctrl-btn:hover{border-color:var(--cyan);color:var(--cyan);}
+  .map-ctrl-btn.playing{border-color:var(--green);color:var(--green);}
+  .wp-table{width:100%;border-collapse:collapse;font-size:0.72rem;}
+  .wp-table th{padding:5px 7px;text-align:left;color:var(--text3);font-size:0.62rem;text-transform:uppercase;border-bottom:1px solid var(--border);}
+  .wp-table td{padding:5px 7px;border-bottom:1px solid rgba(255,255,255,0.04);}
+  .wp-table tbody tr:hover{background:rgba(255,255,255,0.03);}
+
+  /* ETA CALC */
+  .eta-result{background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:12px;margin-top:10px;}
+  .eta-row{display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid rgba(255,255,255,0.05);font-size:0.8rem;}
+  .eta-row:last-child{border-bottom:none;}
+  .eta-key{color:var(--text2);font-size:0.74rem;}
+  .eta-val{font-family:'Orbitron',monospace;font-size:0.78rem;color:var(--cyan);}
+  .eta-val.gold{color:var(--gold);}
+  .eta-val.green{color:var(--green);}
+  .eta-mode-tabs{display:flex;gap:4px;margin-bottom:1rem;}
+  .emt{flex:1;padding:7px 4px;border-radius:8px;border:1px solid var(--border);background:transparent;
+    color:var(--text2);font-size:0.65rem;cursor:pointer;transition:all 0.2s;text-align:center;text-transform:uppercase;}
+  .emt.active{background:rgba(0,180,216,0.1);border-color:rgba(0,180,216,0.3);color:var(--cyan);}
+
+  /* AUTH */
+  .auth-wrap{min-height:80vh;display:flex;align-items:center;justify-content:center;padding:2rem;}
+  .auth-card{background:var(--card);border:1px solid var(--border);border-radius:18px;
+    padding:2.2rem;width:100%;max-width:400px;box-shadow:0 30px 80px rgba(0,0,0,0.6);}
+  .auth-logo{text-align:center;margin-bottom:1.6rem;}
+  .auth-icon{width:58px;height:58px;background:linear-gradient(135deg,var(--cyan),var(--blue));
+    border-radius:15px;margin:0 auto 0.7rem;display:flex;align-items:center;justify-content:center;
+    font-size:1.7rem;box-shadow:0 0 26px rgba(0,180,216,0.4);}
+  .auth-title{font-family:'Orbitron',monospace;font-size:1rem;font-weight:700;margin-bottom:3px;}
+  .auth-sub{color:var(--text2);font-size:0.76rem;}
+  .auth-tabs{display:flex;gap:5px;margin-bottom:1.4rem;}
+  .atab{flex:1;padding:8px;border:1px solid var(--border);background:transparent;
+    color:var(--text2);font-family:'Exo 2',sans-serif;font-size:0.78rem;cursor:pointer;
+    border-radius:8px;transition:all 0.2s;text-align:center;}
+  .atab.active{background:rgba(0,180,216,0.1);border-color:rgba(0,180,216,0.3);color:var(--cyan);}
+  .err-box{color:var(--red);font-size:0.77rem;margin-top:7px;text-align:center;
+    background:rgba(255,71,87,0.08);padding:7px;border-radius:8px;border:1px solid rgba(255,71,87,0.2);}
+  .ok-box{color:var(--green);font-size:0.77rem;margin-top:7px;text-align:center;
+    background:rgba(0,200,150,0.08);padding:7px;border-radius:8px;border:1px solid rgba(0,200,150,0.2);}
+  .submit-btn{width:100%;padding:13px;background:linear-gradient(135deg,var(--cyan),var(--blue));
+    border:none;border-radius:10px;color:white;font-family:'Orbitron',monospace;
+    font-size:0.78rem;font-weight:700;letter-spacing:0.1em;cursor:pointer;margin-top:0.8rem;
+    transition:all 0.25s;box-shadow:0 4px 18px rgba(0,180,216,0.3);}
+  .submit-btn:hover{transform:translateY(-2px);}
+  .submit-btn:disabled{opacity:0.5;cursor:not-allowed;transform:none;}
+  .link-txt{font-size:0.72rem;color:var(--text3);text-align:center;margin-top:9px;cursor:pointer;}
+  .link-txt:hover{color:var(--cyan);}
+
+  /* ADMIN */
+  .adm-layout{display:grid;grid-template-columns:195px 1fr;min-height:calc(100vh - 60px);}
+  @media(max-width:720px){.adm-layout{grid-template-columns:1fr;}.adm-sidebar{display:none;}}
+  .adm-sidebar{background:var(--card);border-right:1px solid var(--border);padding:1.1rem 0.8rem;}
+  .s-label{font-size:0.6rem;color:var(--text3);text-transform:uppercase;letter-spacing:0.15em;margin-bottom:6px;padding:0 7px;}
+  .s-item{display:flex;align-items:center;gap:8px;padding:9px 11px;border-radius:9px;cursor:pointer;
+    transition:all 0.15s;color:var(--text2);font-size:0.8rem;margin-bottom:2px;}
+  .s-item:hover{background:rgba(255,255,255,0.04);color:var(--text);}
+  .s-item.active{background:rgba(0,180,216,0.1);color:var(--cyan);}
+  .adm-mob-tabs{display:none;}
+  @media(max-width:720px){.adm-mob-tabs{display:flex;gap:5px;flex-wrap:wrap;padding:0.8rem 1.2rem 0;}}
+  .amtab{padding:6px 10px;border-radius:100px;border:1px solid var(--border);background:transparent;
+    color:var(--text2);font-size:0.7rem;cursor:pointer;transition:all 0.2s;}
+  .amtab.active{background:rgba(0,180,216,0.1);border-color:rgba(0,180,216,0.3);color:var(--cyan);}
+  .adm-content{padding:1.2rem;overflow-y:auto;}
+  .a-hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:1.2rem;flex-wrap:wrap;gap:8px;}
+  .a-title{font-family:'Orbitron',monospace;font-size:0.9rem;font-weight:700;}
+  .tw{overflow-x:auto;}
+  .tbl{width:100%;border-collapse:collapse;}
+  .tbl thead tr{border-bottom:2px solid var(--border);}
+  .tbl th{padding:7px 10px;text-align:left;font-size:0.63rem;color:var(--text2);text-transform:uppercase;letter-spacing:0.1em;font-weight:600;}
+  .tbl td{padding:9px 10px;font-size:0.79rem;border-bottom:1px solid rgba(255,255,255,0.04);vertical-align:middle;}
+  .tbl tbody tr:hover{background:rgba(255,255,255,0.02);}
+  .info-box{background:rgba(0,180,216,0.05);border:1px solid rgba(0,180,216,0.15);border-radius:10px;padding:10px 13px;font-size:0.77rem;color:var(--text2);margin-bottom:1rem;}
+  .warn-box{background:rgba(240,165,0,0.06);border:1px solid rgba(240,165,0,0.18);border-radius:10px;padding:10px 13px;font-size:0.77rem;color:var(--gold);margin-bottom:1rem;}
+
+  /* MISC */
+  .notif{position:fixed;bottom:1.5rem;right:1.5rem;z-index:1000;padding:10px 16px;border-radius:11px;
+    display:flex;align-items:center;gap:8px;font-size:0.82rem;font-weight:500;
+    box-shadow:0 8px 28px rgba(0,0,0,0.5);animation:si 0.3s ease;max-width:90vw;}
+  .notif-success{background:rgba(0,200,150,0.15);border:1px solid rgba(0,200,150,0.3);color:var(--green);}
+  .notif-info{background:rgba(0,180,216,0.15);border:1px solid rgba(0,180,216,0.3);color:var(--cyan);}
+  .notif-error{background:rgba(255,71,87,0.15);border:1px solid rgba(255,71,87,0.3);color:var(--red);}
+  @keyframes si{from{transform:translateY(20px);opacity:0;}to{transform:translateY(0);opacity:1;}}
+  .empty{text-align:center;padding:2.5rem 1.5rem;color:var(--text2);}
+  .empty-icon{font-size:2.5rem;margin-bottom:0.7rem;opacity:0.4;}
+  .empty-t{font-family:'Orbitron',monospace;font-size:0.88rem;margin-bottom:0.4rem;color:var(--text);}
+  .empty-d{font-size:0.78rem;}
+  .loading{display:flex;align-items:center;justify-content:center;padding:3rem;gap:10px;color:var(--text2);font-size:0.88rem;}
+  .spin{width:22px;height:22px;border:2px solid var(--border2);border-top-color:var(--cyan);border-radius:50%;animation:sp 0.8s linear infinite;}
+  @keyframes sp{to{transform:rotate(360deg);}}
+  .uc{display:flex;align-items:center;gap:6px;font-size:0.71rem;color:var(--text2);
+    background:var(--card);border:1px solid var(--border);border-radius:100px;padding:4px 10px;cursor:pointer;}
+  .uc:hover{border-color:var(--red);color:var(--red);}
+
+  /* FOOTER */
+  .footer{background:var(--card);border-top:1px solid var(--border);padding:1.2rem 1.5rem;
+    display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;flex-shrink:0;}
+  .footer-brand{font-family:'Orbitron',monospace;font-size:0.72rem;color:var(--text2);}
+  .footer-brand span{color:var(--cyan);}
+  .ig-btn{display:flex;align-items:center;gap:8px;padding:7px 14px;
+    background:linear-gradient(135deg,#833ab4,#fd1d1d,#fcb045);
+    border:none;border-radius:100px;color:white;font-family:'Exo 2',sans-serif;
+    font-size:0.78rem;font-weight:600;cursor:pointer;transition:all 0.2s;text-decoration:none;}
+  .ig-btn:hover{transform:scale(1.04);box-shadow:0 4px 15px rgba(253,29,29,0.4);}
+  .footer-copy{font-size:0.66rem;color:var(--text3);}
+
+  ::-webkit-scrollbar{width:5px;}
+  ::-webkit-scrollbar-track{background:var(--bg);}
+  ::-webkit-scrollbar-thumb{background:var(--border2);border-radius:3px;}
+  .leaflet-container{background:#040C1A !important;}
+  .leaflet-popup-content-wrapper{background:#0B1D35;border:1px solid #1A3A5C;color:#E2EBF8;border-radius:10px;}
+  .leaflet-popup-tip{background:#0B1D35;}
+`;
+
+// ─── HELPERS ──────────────────────────────────────────────────────────────────
+function Notif({msg,type,onClose}){
+  useEffect(()=>{const t=setTimeout(onClose,4000);return()=>clearTimeout(t);},[]);
+  return<div className={`notif notif-${type}`}>{type==="success"?"✅":type==="error"?"❌":"ℹ️"} {msg}</div>;
+}
+
+function Footer(){
+  return(
+    <footer className="footer">
+      <div>
+        <div className="footer-brand">Owner: <span>Manish Bharti</span></div>
+        <div className="footer-copy">© 2024 ECDIS Route Finder · Maritime Navigation System</div>
+      </div>
+      <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+        <span style={{fontSize:"0.74rem",color:"var(--text2)"}}>Follow for more maritime updates:</span>
+        <a className="ig-btn" href="https://instagram.com/manish_the_navigator" target="_blank" rel="noreferrer">
+          📷 @manish_the_navigator
+        </a>
+      </div>
+    </footer>
+  );
+}
+
+function smartMatch(file,q){
+  if(!q.trim())return true;
+  const ql=q.toLowerCase().trim();
+  return[file.fileName,file.portName,file.keywords,file.brand,file.type,file.region,file.description]
+    .filter(Boolean).map(s=>s.toLowerCase()).some(t=>t.includes(ql));
+}
+
+// ─── MAP VIEW ─────────────────────────────────────────────────────────────────
+function MapView({waypoints,setWaypoints,overlays,playing,setPlaying,speed,onMapClick}){
+  const containerRef=useRef(null);
+  const mapRef=useRef(null);
+  const layersRef=useRef({route:null,markers:[],zones:{},ship:null,trail:null});
+  const animRef=useRef(null);
+  const animIdxRef=useRef(0);
+  const animPtsRef=useRef([]);
+  const [ready,setReady]=useState(false);
+
+  const initMap=()=>{
+    if(mapRef.current||!containerRef.current)return;
+    const L=window.L;
+    mapRef.current=L.map(containerRef.current,{center:[15,70],zoom:3,preferCanvas:true,zoomControl:true});
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{
+      attribution:'© OpenStreetMap © CARTO',subdomains:'abcd',maxZoom:19
+    }).addTo(mapRef.current);
+    L.tileLayer('https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png',{opacity:0.6,maxZoom:18}).addTo(mapRef.current);
+    mapRef.current.on('click',e=>{onMapClick&&onMapClick(e.latlng.lat,e.latlng.lng);});
+    setReady(true);
   };
 
-  // GENERATE ROUTE BUTTON
-  const handleGenerate = () => {
-    const ports = {
-      mumbai: { lat: 19.076, lon: 72.8777 },
-      singapore: { lat: 1.3521, lon: 103.8198 },
-      dubai: { lat: 25.2048, lon: 55.2708 },
+  useEffect(()=>{
+    if(window.L){initMap();return;}
+    if(!document.getElementById('lcss')){
+      const c=document.createElement('link');c.id='lcss';c.rel='stylesheet';
+      c.href='https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css';
+      document.head.appendChild(c);
+    }
+    if(!document.getElementById('ljs')){
+      const s=document.createElement('script');s.id='ljs';
+      s.src='https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js';
+      s.onload=initMap;document.head.appendChild(s);
+    } else { window.L&&initMap(); }
+    return()=>{
+      if(animRef.current)clearInterval(animRef.current);
+      if(mapRef.current){mapRef.current.remove();mapRef.current=null;}
     };
+  },[]);
 
-    const start = ports[from.toLowerCase()];
-    const end = ports[to.toLowerCase()];
+  // Update route on map
+  useEffect(()=>{
+    if(!ready||!window.L)return;
+    const L=window.L;const map=mapRef.current;const lrs=layersRef.current;
+    if(lrs.route){lrs.route.remove();lrs.route=null;}
+    lrs.markers.forEach(m=>m.remove());lrs.markers=[];
+    if(lrs.ship){lrs.ship.remove();lrs.ship=null;}
+    if(waypoints.length===0)return;
+    const latlngs=waypoints.map(w=>[w.lat,w.lon]);
+    lrs.route=L.polyline(latlngs,{color:'#00B4D8',weight:2.5,opacity:0.9,dashArray:'8 4'}).addTo(map);
 
-    if (!start || !end) {
-      alert("Port not found");
-      return;
+    waypoints.forEach((wp,i)=>{
+      const isFirst=i===0,isLast=i===waypoints.length-1;
+      const color=isFirst?'#00C896':isLast?'#FF4757':'#00B4D8';
+      const size=isFirst||isLast?14:9;
+      const icon=L.divIcon({
+        html:`<div style="background:${color};border:2px solid #fff;border-radius:50%;width:${size}px;height:${size}px;cursor:pointer;" title="WP${String(i+1).padStart(2,'0')}"></div>`,
+        className:'',iconSize:[size,size],iconAnchor:[size/2,size/2]
+      });
+      const m=L.marker([wp.lat,wp.lon],{icon,draggable:true,zIndexOffset:i===0||i===waypoints.length-1?100:0});
+      const popupHtml=`<div style="font-size:12px;min-width:130px;">
+        <b style="color:#00B4D8">WP${String(i+1).padStart(2,'0')}${wp.name?` — ${wp.name}`:''}</b><br/>
+        Lat: ${wp.lat.toFixed(5)}°<br/>Lon: ${wp.lon.toFixed(5)}°
+        ${i>0?`<br/>Course: ${(wp.bearing||0).toFixed(1)}°<br/>Leg: ${(wp.distance||0).toFixed(1)} NM`:''}
+        ${wp.totalNM?`<br/>Total: ${wp.totalNM.toFixed(1)} NM`:''}
+      </div>`;
+      m.bindPopup(popupHtml);
+      m.on('dragend',e=>{
+        const{lat,lng}=e.target.getLatLng();
+        setWaypoints(wps=>{const u=[...wps];u[i]={...u[i],lat,lon:lng};return recalcWaypoints(u);});
+      });
+      m.addTo(map);lrs.markers.push(m);
+    });
+    if(waypoints.length>1)map.fitBounds(lrs.route.getBounds(),{padding:[50,50]});
+    // Build animation points
+    const pts=[];
+    for(let i=0;i<waypoints.length-1;i++){
+      const seg=greatCircle(waypoints[i].lat,waypoints[i].lon,waypoints[i+1].lat,waypoints[i+1].lon,30);
+      pts.push(...(i>0?seg.slice(1):seg));
     }
+    animPtsRef.current=pts;
+    animIdxRef.current=0;
+  },[waypoints,ready]);
 
-    setGeneratedRoute(generateRoute(start, end));
-  };
+  // Overlays
+  useEffect(()=>{
+    if(!ready||!window.L)return;
+    const L=window.L;const map=mapRef.current;const lrs=layersRef.current;
+    Object.values(lrs.zones).forEach(l=>l.remove());lrs.zones={};
+    const cfg={
+      eca:{zones:ECA_ZONES,color:'#FF6B35',label:'ECA Area'},
+      seca:{zones:SECA_ZONES,color:'#FFB347',label:'SECA Area'},
+      marpol:{zones:MARPOL_ZONES,color:'#9B59B6',label:'MARPOL Area'},
+      piracy:{zones:PIRACY_ZONES,color:'#E74C3C',label:'Piracy Area'},
+      layover:{zones:LAYOVER_ZONES,color:'#3498DB',label:'Anchorage'},
+    };
+    Object.entries(cfg).forEach(([k,c])=>{
+      if(!overlays[k])return;
+      const lg=L.layerGroup();
+      c.zones.forEach(z=>{
+        L.polygon(z.coords.map(p=>Array.isArray(p)?p:[p[0],p[1]]),
+          {color:c.color,fillColor:c.color,fillOpacity:0.18,weight:1.5,opacity:0.8})
+          .bindPopup(`<b>${z.name}</b><br/>${c.label}`)
+          .addTo(lg);
+      });
+      lg.addTo(map);lrs.zones[k]=lg;
+    });
+  },[overlays,ready]);
 
-  return (
-    <div style={{ background: "#0b1e2d", color: "#00eaff", padding: "10px" }}>
-      
-      <h1>NEW VERSION WORKING ⚓</h1>
+  // Animation
+  useEffect(()=>{
+    if(!ready||!window.L)return;
+    if(animRef.current){clearInterval(animRef.current);animRef.current=null;}
+    if(!playing){if(layersRef.current.ship){layersRef.current.ship.remove();layersRef.current.ship=null;}animIdxRef.current=0;return;}
+    const L=window.L;const map=mapRef.current;const pts=animPtsRef.current;
+    if(pts.length<2)return;
+    const shipIcon=L.divIcon({html:`<div style="font-size:22px;line-height:1;">🚢</div>`,className:'',iconSize:[24,24],iconAnchor:[12,12]});
+    if(!layersRef.current.ship)layersRef.current.ship=L.marker(pts[0],{icon:shipIcon,zIndexOffset:500}).addTo(map);
+    let idx=animIdxRef.current;
+    const ms=Math.max(30,1500/Math.max(1,speed));
+    animRef.current=setInterval(()=>{
+      if(idx>=pts.length){clearInterval(animRef.current);setPlaying(false);animIdxRef.current=0;return;}
+      layersRef.current.ship&&layersRef.current.ship.setLatLng(pts[idx]);
+      idx++;animIdxRef.current=idx;
+    },ms);
+    return()=>{if(animRef.current)clearInterval(animRef.current);};
+  },[playing,speed,ready]);
 
-      <h2>ECDIS ROUTE FINDER</h2>
+  const activeOverlays=Object.entries(overlays).filter(([,v])=>v);
+  const legendColors={eca:'#FF6B35',seca:'#FFB347',marpol:'#9B59B6',piracy:'#E74C3C',layover:'#3498DB'};
+  const legendNames={eca:'ECA',seca:'SECA',marpol:'MARPOL',piracy:'Piracy',layover:'Anchorage'};
 
-      {/* ADMIN INPUT */}
-      <input
-        placeholder="Paste Google Drive link and press Enter"
-        onKeyDown={(e) => {
-          if (e.key === "Enter") addRoute(e.target.value);
-        }}
-      />
-
-      {/* SEARCH */}
-      <input
-        placeholder="Search route"
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
-      />
-
-      {/* DOWNLOAD LIST */}
-      {filtered.map((r) => (
-        <div key={r.id}>
-          <button onClick={() => window.open(r.downloadUrl)}>
-            Download Route
-          </button>
+  return(
+    <div className="planner-map">
+      <div ref={containerRef} style={{width:'100%',height:'100%',minHeight:400}}/>
+      {!ready&&<div style={{position:'absolute',inset:0,display:'flex',alignItems:'center',justifyContent:'center',background:'var(--bg2)',zIndex:10}}>
+        <div className="loading"><div className="spin"/><span>Loading nautical map…</span></div>
+      </div>}
+      {activeOverlays.length>0&&(
+        <div className="map-legend">
+          {activeOverlays.map(([k])=>(
+            <div key={k} className="leg-item">
+              <div className="leg-dot" style={{background:legendColors[k]}}/>
+              <span style={{color:'var(--text2)'}}>{legendNames[k]}</span>
+            </div>
+          ))}
         </div>
-      ))}
+      )}
+    </div>
+  );
+}
 
-      <hr />
+// ─── ETA CALCULATOR ───────────────────────────────────────────────────────────
+function ETACalculator({totalNM}){
+  const [mode,setMode]=useState('speed');
+  const [speed,setSpeed]=useState('');
+  const [depDate,setDepDate]=useState('');
+  const [depTZ,setDepTZ]=useState('0');
+  const [arrDate,setArrDate]=useState('');
+  const [arrTZ,setArrTZ]=useState('0');
+  const [extraHours,setExtraHours]=useState('0');
+  const [distance,setDistance]=useState(totalNM?totalNM.toFixed(1):'');
+  useEffect(()=>{if(totalNM>0)setDistance(totalNM.toFixed(1));},[totalNM]);
 
-      {/* ROUTE GENERATOR */}
-      <h3>Auto Route Generator</h3>
+  const calc=useMemo(()=>{
+    const D=parseFloat(distance)||0;
+    const sp=parseFloat(speed)||0;
+    const extra=parseFloat(extraHours)||0;
+    const depOffset=parseFloat(depTZ)||0;
+    const arrOffset=parseFloat(arrTZ)||0;
 
-      <input
-        placeholder="From (Mumbai)"
-        value={from}
-        onChange={(e) => setFrom(e.target.value)}
-      />
+    if(mode==='speed'&&sp>0&&D>0&&depDate){
+      const sailHrs=D/sp;const totalHrs=sailHrs+extra;
+      const depUTC=addHours(new Date(depDate),-depOffset);
+      const arrUTC=addHours(depUTC,totalHrs);
+      return{
+        sailingTime:`${Math.floor(sailHrs/24)}d ${Math.floor(sailHrs%24)}h ${Math.round((sailHrs%1)*60)}m`,
+        totalTime:`${Math.floor(totalHrs/24)}d ${Math.floor(totalHrs%24)}h`,
+        etaLocal:formatDateLocal(arrUTC,arrOffset),
+        etaUTC:arrUTC.toISOString().replace('T',' ').substring(0,16)+' UTC',
+        depUTC:depUTC.toISOString().replace('T',' ').substring(0,16)+' UTC',
+        speedKt:sp.toFixed(1),
+      };
+    }
+    if(mode==='arrival'&&depDate&&arrDate&&D>0){
+      const depOffset2=parseFloat(depTZ)||0;const arrOffset2=parseFloat(arrTZ)||0;
+      const depUTC=addHours(new Date(depDate),-depOffset2);
+      const arrUTC=addHours(new Date(arrDate),-arrOffset2);
+      const diffHrs=(arrUTC-depUTC)/3600000-extra;
+      const reqSpeed=D/Math.max(0.1,diffHrs);
+      return{
+        requiredSpeed:`${reqSpeed.toFixed(2)} knots`,
+        totalTime:`${Math.floor(diffHrs/24)}d ${Math.floor(diffHrs%24)}h`,
+        feasible:reqSpeed<25?'✅ Feasible':'⚠️ Check vessel max speed',
+        depUTC:depUTC.toISOString().replace('T',' ').substring(0,16)+' UTC',
+        etaUTC:arrUTC.toISOString().replace('T',' ').substring(0,16)+' UTC',
+      };
+    }
+    return null;
+  },[mode,speed,depDate,depTZ,arrDate,arrTZ,extraHours,distance]);
 
-      <input
-        placeholder="To (Singapore)"
-        value={to}
-        onChange={(e) => setTo(e.target.value)}
-      />
-
-      <button onClick={handleGenerate}>Generate Route</button>
-
-      {/* MAP */}
-      <MapContainer
-        center={[20, 70]}
-        zoom={4}
-        style={{ height: "400px", width: "100%", marginTop: "10px" }}
-      >
-        <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-
-        {generatedRoute.length > 0 && (
-          <Polyline
-            positions={generatedRoute.map((p) => [p.lat, p.lon])}
-            color="cyan"
-          />
-        )}
-      </MapContainer>
-
-      {/* DISCLAIMER */}
-      <div style={{ color: "orange", marginTop: "10px" }}>
-        ⚠️ WARNING: This is a rough route for planning only.
-        Not for official navigation. Always verify before use.
+  return(
+    <div>
+      <div className="eta-mode-tabs">
+        {[['speed','Speed → ETA'],['arrival','Arrival → Speed']].map(([k,l])=>(
+          <button key={k} className={`emt ${mode===k?'active':''}`} onClick={()=>setMode(k)}>{l}</button>
+        ))}
       </div>
 
-      {/* FOOTER */}
-      <div style={{ textAlign: "center", marginTop: "20px" }}>
-        MANISH BHARTI <br />
-        @manish_the_navigator <br />
-        Follow for more maritime updates ⚓
+      <div className="ff">
+        <label className="fl">📏 Total Distance (NM)</label>
+        <input className="fi" type="number" placeholder="Auto-filled from route" value={distance} onChange={e=>setDistance(e.target.value)}/>
+      </div>
+      <div className="ff">
+        <label className="fl">🕐 Port Stay / Waiting (hours)</label>
+        <input className="fi" type="number" placeholder="0" value={extraHours} onChange={e=>setExtraHours(e.target.value)}/>
+      </div>
+
+      {mode==='speed'&&(
+        <div className="ff">
+          <label className="fl">⚡ Ship Speed (knots)</label>
+          <input className="fi" type="number" placeholder="e.g. 14.5" value={speed} onChange={e=>setSpeed(e.target.value)}/>
+        </div>
+      )}
+
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
+        <div className="ff">
+          <label className="fl">🛳 Departure Date/Time</label>
+          <input className="fi" type="datetime-local" value={depDate} onChange={e=>setDepDate(e.target.value)}/>
+        </div>
+        <div className="ff">
+          <label className="fl">🌍 Departure Timezone</label>
+          <select className="fi" value={depTZ} onChange={e=>setDepTZ(e.target.value)}>
+            {TIMEZONES.map(tz=><option key={tz.label} value={tz.offset}>{tz.label}</option>)}
+          </select>
+        </div>
+      </div>
+
+      {mode==='arrival'&&(
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
+          <div className="ff">
+            <label className="fl">🏁 Required Arrival</label>
+            <input className="fi" type="datetime-local" value={arrDate} onChange={e=>setArrDate(e.target.value)}/>
+          </div>
+          <div className="ff">
+            <label className="fl">🌍 Arrival Timezone</label>
+            <select className="fi" value={arrTZ} onChange={e=>setArrTZ(e.target.value)}>
+              {TIMEZONES.map(tz=><option key={tz.label} value={tz.offset}>{tz.label}</option>)}
+            </select>
+          </div>
+        </div>
+      )}
+
+      {calc&&(
+        <div className="eta-result">
+          {mode==='speed'&&<>
+            <div className="eta-row"><span className="eta-key">Speed</span><span className="eta-val">{calc.speedKt} kn</span></div>
+            <div className="eta-row"><span className="eta-key">Sailing Time</span><span className="eta-val gold">{calc.sailingTime}</span></div>
+            <div className="eta-row"><span className="eta-key">Total Voyage</span><span className="eta-val gold">{calc.totalTime}</span></div>
+            <div className="eta-row"><span className="eta-key">Dep (UTC)</span><span className="eta-val" style={{fontSize:'0.72rem'}}>{calc.depUTC}</span></div>
+            <div className="eta-row"><span className="eta-key">ETA (UTC)</span><span className="eta-val" style={{fontSize:'0.72rem'}}>{calc.etaUTC}</span></div>
+            <div className="eta-row"><span className="eta-key">ETA Local</span><span className="eta-val green" style={{fontSize:'0.72rem'}}>{calc.etaLocal}</span></div>
+          </>}
+          {mode==='arrival'&&<>
+            <div className="eta-row"><span className="eta-key">Required Speed</span><span className="eta-val gold">{calc.requiredSpeed}</span></div>
+            <div className="eta-row"><span className="eta-key">Total Time</span><span className="eta-val">{calc.totalTime}</span></div>
+            <div className="eta-row"><span className="eta-key">Feasibility</span><span className="eta-val green" style={{fontSize:'0.76rem'}}>{calc.feasible}</span></div>
+            <div className="eta-row"><span className="eta-key">Dep UTC</span><span className="eta-val" style={{fontSize:'0.72rem'}}>{calc.depUTC}</span></div>
+            <div className="eta-row"><span className="eta-key">Arr UTC</span><span className="eta-val" style={{fontSize:'0.72rem'}}>{calc.etaUTC}</span></div>
+          </>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── ROUTE PLANNER PAGE ───────────────────────────────────────────────────────
+function RoutePlannerPage({notify}){
+  const [panel,setPanel]=useState('auto');
+  const [fromPort,setFromPort]=useState('');
+  const [toPort,setToPort]=useState('');
+  const [fromSugg,setFromSugg]=useState([]);
+  const [toSugg,setToSugg]=useState([]);
+  const [waypoints,setWaypoints]=useState([]);
+  const [routeName,setRouteName]=useState('My Route');
+  const [playing,setPlaying]=useState(false);
+  const [speed,setSpeed]=useState(5);
+  const [clickAdd,setClickAdd]=useState(false);
+  const [overlays,setOverlays]=useState({eca:false,seca:false,marpol:false,piracy:false,layover:false});
+  const totalNM=useMemo(()=>totalRouteNM(waypoints),[waypoints]);
+
+  const searchPort=(q,setSugg)=>{
+    if(!q.trim()){setSugg([]);return;}
+    const ql=q.toLowerCase();
+    setSugg(PORTS_DB.filter(p=>p.name.toLowerCase().includes(ql)||p.id.toLowerCase().includes(ql)||p.keywords.includes(ql)).slice(0,6));
+  };
+
+  useEffect(()=>searchPort(fromPort,setFromSugg),[fromPort]);
+  useEffect(()=>searchPort(toPort,setToSugg),[toPort]);
+
+  const generateRoute=()=>{
+    const f=PORTS_DB.find(p=>p.name.toLowerCase()===fromPort.toLowerCase()||p.id.toLowerCase()===fromPort.toLowerCase());
+    const t=PORTS_DB.find(p=>p.name.toLowerCase()===toPort.toLowerCase()||p.id.toLowerCase()===toPort.toLowerCase());
+    if(!f||!t){notify('Select valid departure and arrival ports','error');return;}
+    const wps=buildAutoRoute(f.id,t.id);
+    setWaypoints(wps);
+    setRouteName(`${f.name} to ${t.name}`);
+    notify(`Route generated — ${wps.length} waypoints, ${totalRouteNM(wps).toFixed(0)} NM`,'success');
+  };
+
+  const handleRTZLoad=(e)=>{
+    const file=e.target.files?.[0];
+    if(!file)return;
+    const reader=new FileReader();
+    reader.onload=ev=>{
+      const result=parseRTZ(ev.target.result);
+      if(!result||result.waypoints.length===0){notify('Could not parse RTZ file','error');return;}
+      setWaypoints(result.waypoints);
+      setRouteName(result.name);
+      notify(`Loaded: ${result.name} — ${result.waypoints.length} waypoints`,'success');
+    };
+    reader.readAsText(file);
+  };
+
+  const handleMapClick=(lat,lon)=>{
+    if(!clickAdd)return;
+    setWaypoints(wps=>recalcWaypoints([...wps,{lat:Math.round(lat*10000)/10000,lon:Math.round(lon*10000)/10000}]));
+  };
+
+  const removeWP=(i)=>setWaypoints(wps=>recalcWaypoints(wps.filter((_,j)=>j!==i)));
+  const clearRoute=()=>{setWaypoints([]);setPlaying(false);};
+
+  const toggleOverlay=(k)=>setOverlays(o=>({...o,[k]:!o[k]}));
+
+  const ovCfg=[
+    {k:'eca',    label:'ECA',    color:'#FF6B35', desc:'Emission Control Area'},
+    {k:'seca',   label:'SECA',   color:'#FFB347', desc:'Sulphur ECA'},
+    {k:'marpol', label:'MARPOL', color:'#9B59B6', desc:'MARPOL Special Area'},
+    {k:'piracy', label:'Piracy', color:'#E74C3C', desc:'Piracy Risk Area'},
+    {k:'layover',label:'Anchorage',color:'#3498DB',desc:'Anchorage / Layover'},
+  ];
+
+  return(
+    <div style={{display:'flex',flexDirection:'column',flex:1,minHeight:0}}>
+      {/* Route Name + Export Bar */}
+      <div style={{display:'flex',alignItems:'center',gap:8,padding:'0.7rem 1rem',background:'var(--card)',borderBottom:'1px solid var(--border)',flexWrap:'wrap'}}>
+        <input className="fi" style={{flex:1,minWidth:150,padding:'7px 12px',fontSize:'0.82rem'}} placeholder="Route Name…" value={routeName} onChange={e=>setRouteName(e.target.value)}/>
+        {totalNM>0&&<span style={{fontFamily:'Orbitron,monospace',fontSize:'0.78rem',color:'var(--cyan)',whiteSpace:'nowrap'}}>📏 {totalNM.toFixed(1)} NM</span>}
+        <span style={{fontFamily:'Orbitron,monospace',fontSize:'0.72rem',color:'var(--text2)'}}>{waypoints.length} WPTs</span>
+        <button className="btn btn-gold" style={{padding:'7px 12px',fontSize:'0.72rem'}} disabled={waypoints.length<2}
+          onClick={()=>downloadFile(exportRTZ(routeName,waypoints),`${routeName.replace(/\s+/g,'-')}.rtz`,'application/xml')}>
+          ⬇ RTZ
+        </button>
+        <button className="btn btn-green" style={{padding:'7px 12px',fontSize:'0.72rem'}} disabled={waypoints.length<2}
+          onClick={()=>downloadFile(exportCSV(waypoints),`${routeName.replace(/\s+/g,'-')}.csv`,'text/csv')}>
+          ⬇ CSV
+        </button>
+        <button className="btn btn-danger" style={{padding:'7px 12px',fontSize:'0.72rem'}} onClick={clearRoute}>🗑 Clear</button>
+      </div>
+
+      <div className="planner-layout">
+        {/* SIDEBAR */}
+        <div className="planner-sidebar">
+          <div className="p-tabs">
+            {[['auto','🗺 Auto'],['load','📂 Load RTZ'],['eta','⏱ ETA'],['wpts','📋 WPTs']].map(([k,l])=>(
+              <button key={k} className={`p-tab ${panel===k?'active':''}`} onClick={()=>setPanel(k)}>{l}</button>
+            ))}
+          </div>
+
+          <div className="p-panel" style={{overflowY:'auto'}}>
+            {/* AUTO ROUTE */}
+            {panel==='auto'&&(
+              <>
+                <div className="p-section">
+                  <span className="p-label">🛳 Departure Port</span>
+                  <div style={{position:'relative'}}>
+                    <input className="fi" placeholder="e.g. Mumbai, MUM" value={fromPort}
+                      onChange={e=>setFromPort(e.target.value)} onFocus={()=>searchPort(fromPort,setFromSugg)}/>
+                    {fromSugg.length>0&&(
+                      <div className="ac" style={{position:'absolute',zIndex:200}}>
+                        {fromSugg.map(p=><div key={p.id} className="ac-item" onClick={()=>{setFromPort(p.name);setFromSugg([]);}}>
+                          <span>📍</span><div><div style={{fontWeight:600,fontSize:'0.82rem'}}>{p.name}</div><div style={{fontSize:'0.7rem',color:'var(--text2)'}}>{p.country} · {p.id}</div></div>
+                        </div>)}
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <div className="p-section">
+                  <span className="p-label">🏁 Arrival Port</span>
+                  <div style={{position:'relative'}}>
+                    <input className="fi" placeholder="e.g. Singapore, SIN" value={toPort}
+                      onChange={e=>setToPort(e.target.value)} onFocus={()=>searchPort(toPort,setToSugg)}/>
+                    {toSugg.length>0&&(
+                      <div className="ac" style={{position:'absolute',zIndex:200}}>
+                        {toSugg.map(p=><div key={p.id} className="ac-item" onClick={()=>{setToPort(p.name);setToSugg([]);}}>
+                          <span>📍</span><div><div style={{fontWeight:600,fontSize:'0.82rem'}}>{p.name}</div><div style={{fontSize:'0.7rem',color:'var(--text2)'}}>{p.country} · {p.id}</div></div>
+                        </div>)}
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <button className="btn btn-primary" style={{width:'100%',justifyContent:'center',marginBottom:'1rem'}} onClick={generateRoute}>
+                  🗺 Generate Sea Route
+                </button>
+
+                {/* Map Click Mode */}
+                <div className="p-section">
+                  <span className="p-label">📌 Manual Waypoints</span>
+                  <button className={`btn ${clickAdd?'btn-gold':'btn-secondary'}`} style={{width:'100%',justifyContent:'center'}}
+                    onClick={()=>setClickAdd(c=>!c)}>
+                    {clickAdd?'✅ Click map to add WP (ON)':'Click map to add WP'}
+                  </button>
+                </div>
+
+                {/* Overlays */}
+                <div className="p-section">
+                  <span className="p-label">🗺 Maritime Zone Overlays</span>
+                  <div className="overlay-grid">
+                    {ovCfg.map(ov=>(
+                      <button key={ov.k} className={`ov-btn ${overlays[ov.k]?'active':''}`}
+                        style={{color:overlays[ov.k]?ov.color:'var(--text2)',borderColor:overlays[ov.k]?ov.color:'var(--border)'}}
+                        onClick={()=>toggleOverlay(ov.k)} title={ov.desc}>
+                        {overlays[ov.k]?'✓ ':''}{ov.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Animation */}
+                <div className="p-section">
+                  <span className="p-label">🚢 Ship Animation</span>
+                  <div style={{display:'flex',gap:6,alignItems:'center',marginBottom:8}}>
+                    <button className={`btn ${playing?'btn-danger':'btn-green'}`} style={{flex:1,justifyContent:'center'}}
+                      disabled={waypoints.length<2} onClick={()=>setPlaying(p=>!p)}>
+                      {playing?'⏹ Stop':'▶ Play'}
+                    </button>
+                  </div>
+                  <div style={{display:'flex',alignItems:'center',gap:8}}>
+                    <span style={{fontSize:'0.7rem',color:'var(--text2)'}}>Speed:</span>
+                    <input type="range" min="1" max="20" value={speed} onChange={e=>setSpeed(+e.target.value)} style={{flex:1}}/>
+                    <span style={{fontSize:'0.7rem',color:'var(--cyan)',fontFamily:'Orbitron,monospace',minWidth:20}}>{speed}x</span>
+                  </div>
+                </div>
+              </>
+            )}
+
+            {/* LOAD RTZ */}
+            {panel==='load'&&(
+              <>
+                <div className="p-section">
+                  <span className="p-label">📂 Load RTZ File from your ECDIS</span>
+                  <div style={{border:'2px dashed var(--border2)',borderRadius:10,padding:'1.5rem',textAlign:'center',cursor:'pointer',background:'var(--bg2)',marginBottom:'0.8rem'}}>
+                    <div style={{fontSize:'2rem',marginBottom:6}}>📂</div>
+                    <div style={{fontWeight:600,fontSize:'0.84rem',marginBottom:3}}>Select RTZ File</div>
+                    <div style={{fontSize:'0.72rem',color:'var(--text2)'}}>Accepts .rtz and .rtzp files</div>
+                    <input type="file" accept=".rtz,.rtzp" onChange={handleRTZLoad} style={{display:'block',marginTop:10,width:'100%',fontSize:'0.75rem'}}/>
+                  </div>
+                  {waypoints.length>0&&<div className="ok-box" style={{textAlign:'center',fontSize:'0.78rem'}}>✅ {waypoints.length} waypoints loaded from file</div>}
+                </div>
+                <div className="p-section">
+                  <span className="p-label">✏️ Edit loaded route</span>
+                  <p style={{fontSize:'0.75rem',color:'var(--text2)',lineHeight:1.6}}>
+                    After loading, drag waypoints on the map to adjust. Use the WPTs tab to view and delete waypoints. Export back to RTZ when done.
+                  </p>
+                </div>
+                {/* Also overlays and animation here */}
+                <div className="p-section">
+                  <span className="p-label">🗺 Zone Overlays</span>
+                  <div className="overlay-grid">
+                    {ovCfg.map(ov=>(
+                      <button key={ov.k} className={`ov-btn ${overlays[ov.k]?'active':''}`}
+                        style={{color:overlays[ov.k]?ov.color:'var(--text2)',borderColor:overlays[ov.k]?ov.color:'var(--border)'}}
+                        onClick={()=>toggleOverlay(ov.k)}>{overlays[ov.k]?'✓ ':''}{ov.label}</button>
+                    ))}
+                  </div>
+                </div>
+              </>
+            )}
+
+            {/* ETA */}
+            {panel==='eta'&&<ETACalculator totalNM={totalNM}/>}
+
+            {/* WAYPOINTS TABLE */}
+            {panel==='wpts'&&(
+              <>
+                <div style={{marginBottom:8,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                  <span style={{fontSize:'0.75rem',color:'var(--text2)'}}>{waypoints.length} waypoints</span>
+                  {waypoints.length>0&&<button className="btn btn-danger" style={{padding:'4px 9px',fontSize:'0.7rem'}} onClick={clearRoute}>Clear All</button>}
+                </div>
+                {waypoints.length===0
+                  ?<div className="empty"><div className="empty-icon">📋</div><div className="empty-t">No Waypoints</div><div className="empty-d">Generate a route or load an RTZ file</div></div>
+                  :<div style={{overflowX:'auto'}}>
+                    <table className="wp-table">
+                      <thead><tr><th>WP</th><th>Lat</th><th>Lon</th><th>Crs°</th><th>NM</th><th>Del</th></tr></thead>
+                      <tbody>{waypoints.map((wp,i)=>(
+                        <tr key={i}>
+                          <td style={{color:'var(--cyan)',fontFamily:'Orbitron,monospace'}}>WP{String(i+1).padStart(2,'0')}</td>
+                          <td>{wp.lat.toFixed(4)}</td>
+                          <td>{wp.lon.toFixed(4)}</td>
+                          <td>{i>0?(wp.bearing||0).toFixed(0):'—'}</td>
+                          <td>{i>0?(wp.distance||0).toFixed(1):'0'}</td>
+                          <td><button onClick={()=>removeWP(i)} style={{background:'none',border:'none',color:'var(--red)',cursor:'pointer',fontSize:'0.9rem'}}>✕</button></td>
+                        </tr>
+                      ))}</tbody>
+                    </table>
+                    <div style={{marginTop:8,padding:'8px',background:'var(--bg2)',borderRadius:8,textAlign:'center',fontFamily:'Orbitron,monospace',fontSize:'0.76rem',color:'var(--gold)'}}>
+                      Total: {totalNM.toFixed(1)} NM
+                    </div>
+                  </div>
+                }
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* MAP */}
+        <MapView
+          waypoints={waypoints}
+          setWaypoints={setWaypoints}
+          overlays={overlays}
+          playing={playing}
+          setPlaying={setPlaying}
+          speed={speed}
+          onMapClick={handleMapClick}
+        />
       </div>
     </div>
+  );
+}
+
+// ─── HOME PAGE ────────────────────────────────────────────────────────────────
+function HomePage({routes,charts,onSearch,setTab,user}){
+  const [q,setQ]=useState('');
+  const [sugg,setSugg]=useState([]);
+  const [showSugg,setShowSugg]=useState(false);
+  const wRef=useRef();
+
+  useEffect(()=>{
+    const h=e=>{if(!wRef.current?.contains(e.target))setShowSugg(false);};
+    document.addEventListener('mousedown',h);return()=>document.removeEventListener('mousedown',h);
+  },[]);
+
+  useEffect(()=>{
+    if(!q.trim()){setSugg([]);return;}
+    const ql=q.toLowerCase();
+    const hits=new Set();
+    [...routes,...charts].forEach(f=>[f.fileName,f.portName,f.keywords,f.brand].filter(Boolean).forEach(s=>{if(s.toLowerCase().includes(ql))hits.add(s);}));
+    PORTS_DB.forEach(p=>{if(p.name.toLowerCase().includes(ql))hits.add(p.name);});
+    setSugg([...hits].slice(0,7));
+  },[q,routes,charts]);
+
+  const doSearch=(val)=>{const v=val||q;if(v.trim()){onSearch(v);setShowSugg(false);}};
+
+  return(
+    <div>
+      <div className="hero">
+        <div className="hero-tag">🧭 ECDIS Navigation System v5.0</div>
+        <h1 className="hero-title">ECDIS <span className="accent">Route</span> Finder</h1>
+        <p className="hero-desc">
+          Search &amp; download ECDIS route files, user chart files, and plan your voyage with our Route Planner.
+          {user&&<span style={{color:'var(--cyan)'}}> Welcome, {user.email.split('@')[0]}!</span>}
+        </p>
+        <div className="sw">
+          <div className="sb">
+            <div className="sr" ref={wRef} style={{position:'relative'}}>
+              <div className="siw">
+                <span className="si-ic">🔍</span>
+                <input className="si" placeholder="Search port, route or file name… e.g. Mumbai, MUM, Singapore"
+                  value={q} onChange={e=>{setQ(e.target.value);setShowSugg(true);}} onFocus={()=>setShowSugg(true)}
+                  onKeyDown={e=>e.key==='Enter'&&doSearch()}/>
+                {showSugg&&sugg.length>0&&(
+                  <div className="ac">
+                    {sugg.map((s,i)=><div key={i} className="ac-item" onClick={()=>{setQ(s);doSearch(s);}}>
+                      <span>🔎</span><span>{s}</span>
+                    </div>)}
+                  </div>
+                )}
+              </div>
+              <button className="sbtn" onClick={()=>doSearch()}>🔍 SEARCH</button>
+            </div>
+            <div className="sh">Try: <span>Mumbai</span> · <span>MUM</span> · <span>Singapore</span> · <span>Furuno</span></div>
+          </div>
+        </div>
+        <div style={{display:'flex',gap:'0.8rem',justifyContent:'center',marginTop:'1.5rem',flexWrap:'wrap'}}>
+          <button className="btn btn-gold" onClick={()=>setTab('routes')}>🗺 Browse RTZ Routes</button>
+          <button className="btn btn-primary" onClick={()=>setTab('charts')}>📊 ECDIS Charts</button>
+          <button className="btn btn-green" onClick={()=>setTab('planner')}>✏️ Route Planner</button>
+          {!user&&<button className="btn btn-secondary" onClick={()=>setTab('login')}>🔐 Login</button>}
+        </div>
+        <div className="stats">
+          <div><div className="sn">{routes.length}</div><div className="sl">RTZ Routes</div></div>
+          <div><div className="sn">{charts.length}</div><div className="sl">Chart Files</div></div>
+          <div><div className="sn">{ECDIS_BRANDS.length}</div><div className="sl">ECDIS Brands</div></div>
+          <div><div className="sn">{PORTS_DB.length}</div><div className="sl">Ports</div></div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── ROUTES PAGE ──────────────────────────────────────────────────────────────
+function RoutesPage({routes,searchQuery,notify,user,setTab}){
+  const [q,setQ]=useState(searchQuery||'');
+  const [typeF,setTypeF]=useState('all');
+  useEffect(()=>{if(searchQuery)setQ(searchQuery);},[searchQuery]);
+  const filtered=routes.filter(r=>(typeF==='all'||r.type?.toLowerCase()===typeF)&&smartMatch(r,q));
+
+  const handleDL=(r)=>{
+    if(!user){notify('🔐 Login required to download files','error');setTab('login');return;}
+    if(r.fileUrl){window.open(r.fileUrl,'_blank');notify(`Downloading ${r.fileName}`,'success');}
+    else notify('File link not set. Contact admin.','error');
+  };
+
+  return(
+    <div className="section">
+      <div className="sec-hdr">
+        <div className="sec-title">🗺 RTZ Route Files</div>
+        <span className="badge">{filtered.length} files</span>
+      </div>
+      {!user&&<div className="warn-box">🔐 <strong>Login required to download.</strong> <span style={{cursor:'pointer',textDecoration:'underline'}} onClick={()=>setTab('login')}>Create free account →</span></div>}
+      <div style={{display:'flex',gap:8,marginBottom:'0.9rem'}}>
+        <div className="siw" style={{flex:1}}>
+          <span className="si-ic">🔍</span>
+          <input className="si" style={{paddingLeft:40}} placeholder="Search route, port, file name…" value={q} onChange={e=>setQ(e.target.value)}/>
+        </div>
+      </div>
+      <div className="fbar">
+        {['all',...ROUTE_TYPES].map(t=>(
+          <button key={t} className={`fbtn ${typeF===(t==='all'?'all':t.toLowerCase())?'active':''}`}
+            onClick={()=>setTypeF(t==='all'?'all':t.toLowerCase())}>
+            {t==='all'?'🌐 All':t}
+          </button>
+        ))}
+      </div>
+      {filtered.length===0
+        ?<div className="empty"><div className="empty-icon">🧭</div><div className="empty-t">No Routes Found</div><div className="empty-d">Try "Mumbai", "MUM" or "mumbaitosingapore"</div></div>
+        :<div className="files-grid">{filtered.map(r=>(
+          <div key={r.id} className="file-card">
+            <div className="file-icon">🗺</div>
+            <div className="file-name">{r.fileName}</div>
+            {r.portName&&<div className="file-port">📍 {r.portName}</div>}
+            <div className="file-tags">
+              <span className="ftag tag-rtz">RTZ File</span>
+              {r.type&&<span className="ftag tag-rtz">{r.type}</span>}
+            </div>
+            {user
+              ?<button className="dl-btn" onClick={()=>handleDL(r)} disabled={!r.fileUrl}>{r.fileUrl?'⬇ Download RTZ File':'❌ Link Not Set'}</button>
+              :<button className="login-req" onClick={()=>setTab('login')}>🔐 Login to Download</button>
+            }
+          </div>
+        ))}</div>
+      }
+    </div>
+  );
+}
+
+// ─── CHARTS PAGE ──────────────────────────────────────────────────────────────
+function ChartsPage({charts,notify,user,setTab}){
+  const [selBrand,setSelBrand]=useState(null);
+  const [q,setQ]=useState('');
+  const brandCount=id=>charts.filter(c=>c.brandId===id||c.brand===ECDIS_BRANDS.find(b=>b.id===id)?.name).length;
+  const filtered=selBrand?charts.filter(c=>(c.brandId===selBrand||c.brand===ECDIS_BRANDS.find(b=>b.id===selBrand)?.name)&&smartMatch(c,q)):[];
+  const sb=ECDIS_BRANDS.find(b=>b.id===selBrand);
+
+  const handleDL=(c)=>{
+    if(!user){notify('🔐 Login required','error');setTab('login');return;}
+    if(c.fileUrl){window.open(c.fileUrl,'_blank');notify(`Downloading ${c.fileName}`,'success');}
+    else notify('File link not set. Contact admin.','error');
+  };
+
+  return(
+    <div className="section">
+      {!selBrand?(
+        <>
+          <div className="sec-hdr">
+            <div className="sec-title">📊 User Chart Files</div>
+            <span className="badge badge-gold">{ECDIS_BRANDS.length} ECDIS Brands</span>
+          </div>
+          <div className="info-box">
+            <strong style={{color:'var(--cyan)'}}>Step 1:</strong> Select your ECDIS brand →&nbsp;
+            <strong style={{color:'var(--cyan)'}}>Step 2:</strong> Search by port name →&nbsp;
+            <strong style={{color:'var(--cyan)'}}>Step 3:</strong> Download chart file
+          </div>
+          {!user&&<div className="warn-box">🔐 Login required to download. <span style={{cursor:'pointer',textDecoration:'underline'}} onClick={()=>setTab('login')}>Register free →</span></div>}
+          <div className="brand-grid">
+            {ECDIS_BRANDS.map(b=>{
+              const cnt=brandCount(b.id);
+              return(
+                <div key={b.id} className={`brand-card ${selBrand===b.id?'sel':''}`}
+                  style={{borderColor:cnt>0?b.color+'66':'var(--border)'}} onClick={()=>setSelBrand(b.id)}>
+                  <div className="brand-emoji">{b.emoji}</div>
+                  <div className="brand-name" style={{color:cnt>0?b.color:'var(--text2)'}}>{b.name}</div>
+                  <div className="brand-models">{b.models}</div>
+                  <div className="brand-count" style={{color:cnt>0?'var(--green)':'var(--text3)'}}>
+                    {cnt>0?`${cnt} chart${cnt>1?'s':''}  ✅`:'No charts yet'}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </>
+      ):(
+        <>
+          <div style={{display:'flex',alignItems:'center',gap:12,marginBottom:'1.2rem',flexWrap:'wrap'}}>
+            <button className="btn btn-secondary" onClick={()=>{setSelBrand(null);setQ('');}}>← Back</button>
+            <span style={{fontSize:'1.4rem'}}>{sb?.emoji}</span>
+            <div>
+              <div style={{fontFamily:'Orbitron,monospace',fontSize:'0.88rem',fontWeight:700,color:sb?.color}}>{sb?.name}</div>
+              <div style={{fontSize:'0.7rem',color:'var(--text2)'}}>{sb?.models}</div>
+            </div>
+            <span className="badge badge-gold">{brandCount(selBrand)} chart files</span>
+          </div>
+          {!user&&<div className="warn-box">🔐 Login required. <span style={{cursor:'pointer',textDecoration:'underline'}} onClick={()=>setTab('login')}>Login / Register →</span></div>}
+          <div style={{display:'flex',gap:8,marginBottom:'1rem'}}>
+            <div className="siw" style={{flex:1}}>
+              <span className="si-ic">🔍</span>
+              <input className="si" style={{paddingLeft:40}} placeholder={`Search port name for ${sb?.name}…`} value={q} onChange={e=>setQ(e.target.value)} autoFocus/>
+            </div>
+            {q&&<button className="btn btn-secondary" onClick={()=>setQ('')}>✕</button>}
+          </div>
+          {filtered.length===0
+            ?<div className="empty"><div className="empty-icon">{sb?.emoji}</div><div className="empty-t">{brandCount(selBrand)===0?'No Charts Uploaded Yet':'No Results'}</div><div className="empty-d">{brandCount(selBrand)===0?'Admin will upload charts for this brand soon.':'Try a different keyword.'}</div></div>
+            :<div className="files-grid">{filtered.map(c=>(
+              <div key={c.id} className="file-card">
+                <div className="file-icon">📊</div>
+                <div className="file-name">{c.fileName}</div>
+                {c.portName&&<div className="file-port">⚓ {c.portName}</div>}
+                <div className="file-tags">
+                  <span className="ftag tag-chart">Chart File</span>
+                  <span className="ftag tag-brand">{c.brand}</span>
+                  {c.region&&<span className="ftag tag-rtz">{c.region}</span>}
+                </div>
+                {user
+                  ?<button className="dl-btn" onClick={()=>handleDL(c)} disabled={!c.fileUrl}>{c.fileUrl?'⬇ Download Chart File':'❌ Link Not Set'}</button>
+                  :<button className="login-req" onClick={()=>setTab('login')}>🔐 Login to Download</button>
+                }
+              </div>
+            ))}</div>
+          }
+        </>
+      )}
+    </div>
+  );
+}
+
+// ─── LOGIN PAGE ───────────────────────────────────────────────────────────────
+function LoginPage({notify,onLogin}){
+  const [mode,setMode]=useState('login');
+  const [email,setEmail]=useState('');const [pass,setPass]=useState('');const [name,setName]=useState('');
+  const [loading,setLoading]=useState(false);const [err,setErr]=useState('');const [ok,setOk]=useState('');
+
+  const doLogin=async()=>{
+    setLoading(true);setErr('');
+    try{const c=await signInWithEmailAndPassword(auth,email,pass);notify('Welcome back! 👋','success');onLogin(c.user);}
+    catch{setErr('Invalid email or password.');}
+    setLoading(false);
+  };
+  const doSignup=async()=>{
+    if(!email||!pass){setErr('Fill all fields.');return;}
+    if(pass.length<6){setErr('Password min 6 characters.');return;}
+    setLoading(true);setErr('');
+    try{
+      const c=await createUserWithEmailAndPassword(auth,email,pass);
+      await setDoc(doc(db,'users',c.user.uid),{email,name:name||email.split('@')[0],createdAt:serverTimestamp(),role:'user'});
+      notify('Account created! 🎉','success');onLogin(c.user);
+    }catch(e){setErr(e.code==='auth/email-already-in-use'?'Email already registered. Login instead.':'Error: '+e.message);}
+    setLoading(false);
+  };
+  const doReset=async()=>{
+    if(!email){setErr('Enter your email.');return;}
+    setLoading(true);setErr('');
+    try{await sendPasswordResetEmail(auth,email);setOk('Reset email sent! Check your inbox.');}
+    catch{setErr('Email not found.');}
+    setLoading(false);
+  };
+
+  return(
+    <div className="auth-wrap">
+      <div className="auth-card">
+        <div className="auth-logo">
+          <div className="auth-icon">🧭</div>
+          <div className="auth-title">ECDIS Route Finder</div>
+          <div className="auth-sub">{mode==='reset'?'Reset Password':'Free account · Download all files'}</div>
+        </div>
+        {mode!=='reset'&&(
+          <div className="auth-tabs">
+            <button className={`atab ${mode==='login'?'active':''}`} onClick={()=>{setMode('login');setErr('');setOk('');}}>Login</button>
+            <button className={`atab ${mode==='signup'?'active':''}`} onClick={()=>{setMode('signup');setErr('');setOk('');}}>Create Account</button>
+          </div>
+        )}
+        <div className="info-box" style={{fontSize:'0.74rem'}}>🆓 Free account · Access all RTZ routes &amp; ECDIS charts</div>
+        {mode==='signup'&&<div className="ff"><label className="fl">Your Name</label><input className="fi" placeholder="Captain Ahmed" value={name} onChange={e=>setName(e.target.value)}/></div>}
+        <div className="ff"><label className="fl">Email</label><input className="fi" type="email" placeholder="officer@ship.com" value={email} onChange={e=>setEmail(e.target.value)} onKeyDown={e=>e.key==='Enter'&&(mode==='login'?doLogin():mode==='signup'?doSignup():doReset())}/></div>
+        {mode!=='reset'&&<div className="ff"><label className="fl">Password</label><input className="fi" type="password" placeholder="Min 6 characters" value={pass} onChange={e=>setPass(e.target.value)} onKeyDown={e=>e.key==='Enter'&&(mode==='login'?doLogin():doSignup())}/></div>}
+        {err&&<div className="err-box">{err}</div>}
+        {ok&&<div className="ok-box">{ok}</div>}
+        <button className="submit-btn" onClick={mode==='login'?doLogin:mode==='signup'?doSignup:doReset} disabled={loading}>
+          {loading?'Please wait…':mode==='login'?'🔐 LOGIN':mode==='signup'?'✅ CREATE FREE ACCOUNT':'📧 SEND RESET EMAIL'}
+        </button>
+        {mode==='login'&&<div className="link-txt" onClick={()=>{setMode('reset');setErr('');setOk('');}}>Forgot password?</div>}
+        {mode==='reset'&&<div className="link-txt" onClick={()=>{setMode('login');setErr('');setOk('');}}>← Back to login</div>}
+      </div>
+    </div>
+  );
+}
+
+// ─── ADMIN PAGE ───────────────────────────────────────────────────────────────
+function AdminPage({notify,routes,setRoutes,charts,setCharts}){
+  const [user,setUser]=useState(null);
+  const [email,setEmail]=useState('');const [pass,setPass]=useState('');
+  const [err,setErr]=useState('');const [loading,setLoading]=useState(false);
+  const [section,setSection]=useState('dashboard');
+  const [users,setUsers]=useState([]);
+  // New route form
+  const [nr,setNr]=useState({fileName:'',fileUrl:'',portName:'',keywords:'',type:'Ocean'});
+  // New chart form
+  const [nc,setNc]=useState({fileName:'',fileUrl:'',portName:'',brand:'furuno',region:'',keywords:''});
+
+  useEffect(()=>{const u=onAuthStateChanged(auth,u=>setUser(u));return()=>u();},[]);
+  useEffect(()=>{if(user&&section==='users')loadUsers();},[user,section]);
+
+  const login=async()=>{
+    setLoading(true);setErr('');
+    try{await signInWithEmailAndPassword(auth,email,pass);}
+    catch{setErr('Invalid credentials.');}
+    setLoading(false);
+  };
+
+  const loadUsers=async()=>{
+    try{const snap=await getDocs(collection(db,'users'));setUsers(snap.docs.map(d=>({id:d.id,...d.data()})));}
+    catch{notify('Could not load users','error');}
+  };
+
+  const saveRoute=async()=>{
+    if(!nr.fileName||!nr.fileUrl){notify('File name and Google Drive link are required','error');return;}
+    try{
+      const data={...nr,keywords:(nr.keywords+' '+nr.fileName+' '+nr.portName).toLowerCase().trim(),uploadedAt:serverTimestamp()};
+      const ref=await addDoc(collection(db,'routes'),data);
+      setRoutes(r=>[...r,{id:ref.id,...data}]);
+      setNr({fileName:'',fileUrl:'',portName:'',keywords:'',type:'Ocean'});
+      notify('Route saved ✅','success');
+    }catch(e){notify('Error: '+e.message,'error');}
+  };
+
+  const saveChart=async()=>{
+    if(!nc.fileName||!nc.fileUrl||!nc.portName){notify('File name, port name and link required','error');return;}
+    const brandName=ECDIS_BRANDS.find(b=>b.id===nc.brand)?.name||nc.brand;
+    try{
+      const data={...nc,brand:brandName,brandId:nc.brand,keywords:(nc.keywords+' '+nc.portName+' '+brandName+' '+nc.fileName).toLowerCase().trim(),uploadedAt:serverTimestamp()};
+      const ref=await addDoc(collection(db,'charts'),data);
+      setCharts(c=>[...c,{id:ref.id,...data}]);
+      setNc({fileName:'',fileUrl:'',portName:'',brand:'furuno',region:'',keywords:''});
+      notify('Chart saved ✅','success');
+    }catch(e){notify('Error: '+e.message,'error');}
+  };
+
+  const deleteRoute=async id=>{try{await deleteDoc(doc(db,'routes',id));setRoutes(r=>r.filter(x=>x.id!==id));notify('Deleted','success');}catch{notify('Delete failed','error');}};
+  const deleteChart=async id=>{try{await deleteDoc(doc(db,'charts',id));setCharts(c=>c.filter(x=>x.id!==id));notify('Deleted','success');}catch{notify('Delete failed','error');}};
+
+  if(!user) return(
+    <div className="auth-wrap">
+      <div className="auth-card">
+        <div className="auth-logo">
+          <div className="auth-icon" style={{background:'linear-gradient(135deg,var(--gold),var(--gold2))'}}>🛡</div>
+          <div className="auth-title">Admin Portal</div>
+          <div className="auth-sub">ECDIS Route Finder — Admin Only</div>
+        </div>
+        <div className="ff"><label className="fl">Admin Email</label><input className="fi" type="email" placeholder="admin@example.com" value={email} onChange={e=>setEmail(e.target.value)} onKeyDown={e=>e.key==='Enter'&&login()}/></div>
+        <div className="ff"><label className="fl">Password</label><input className="fi" type="password" placeholder="••••••••" value={pass} onChange={e=>setPass(e.target.value)} onKeyDown={e=>e.key==='Enter'&&login()}/></div>
+        {err&&<div className="err-box">{err}</div>}
+        <button className="submit-btn" style={{background:'linear-gradient(135deg,var(--gold),var(--gold2))',color:'#000'}} onClick={login} disabled={loading}>{loading?'Logging in…':'🛡 ADMIN LOGIN'}</button>
+      </div>
+    </div>
+  );
+
+  const sides=[
+    {k:'dashboard',i:'📊',l:'Dashboard'},
+    {k:'add-route',i:'🗺',l:'Add Route'},
+    {k:'add-chart',i:'📊',l:'Add Chart'},
+    {k:'routes',i:'📋',l:'Manage Routes'},
+    {k:'charts',i:'🗂',l:'Manage Charts'},
+    {k:'users',i:'👥',l:'User Database'},
+  ];
+
+  const GDriveHelp=()=>(
+    <div className="info-box" style={{fontSize:'0.74rem'}}>
+      📁 <strong style={{color:'var(--text)'}}>Google Drive Link Guide:</strong><br/>
+      1. Upload file to <strong>drive.google.com</strong> (ecdisroutes@gmail.com)<br/>
+      2. Right click → Share → Anyone with link<br/>
+      3. Copy link: <code style={{color:'var(--cyan)'}}>drive.google.com/file/d/ID/view</code><br/>
+      4. Convert to: <code style={{color:'var(--green)'}}>drive.google.com/uc?export=download&amp;id=ID</code>
+    </div>
+  );
+
+  return(
+    <div>
+      <div className="adm-mob-tabs">
+        {sides.map(s=><button key={s.k} className={`amtab ${section===s.k?'active':''}`} onClick={()=>setSection(s.k)}>{s.i} {s.l}</button>)}
+        <button className="amtab" onClick={()=>signOut(auth)}>🚪 Logout</button>
+      </div>
+      <div className="adm-layout">
+        <div className="adm-sidebar">
+          <div style={{marginBottom:'1.2rem'}}>
+            <div className="s-label">Navigation</div>
+            {sides.map(s=><div key={s.k} className={`s-item ${section===s.k?'active':''}`} onClick={()=>setSection(s.k)}><span>{s.i}</span>{s.l}</div>)}
+          </div>
+          <div>
+            <div className="s-label">Account</div>
+            <div className="s-item" style={{fontSize:'0.7rem',color:'var(--text3)'}}><span>👤</span>{user.email}</div>
+            <div className="s-item" onClick={()=>signOut(auth)}><span>🚪</span>Logout</div>
+          </div>
+        </div>
+
+        <div className="adm-content">
+
+          {section==='dashboard'&&(
+            <>
+              <div className="a-hdr"><div className="a-title">📊 Dashboard</div><span style={{fontSize:'0.72rem',color:'var(--green)'}}>🔥 Firebase + Google Drive</span></div>
+              <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(145px,1fr))',gap:'0.8rem',marginBottom:'1.4rem'}}>
+                {[
+                  {l:'RTZ Routes',v:routes.length,i:'🗺',c:'var(--cyan)'},
+                  {l:'Chart Files',v:charts.length,i:'📊',c:'var(--gold)'},
+                  {l:'Links Active',v:[...routes,...charts].filter(f=>f.fileUrl).length,i:'✅',c:'var(--green)'},
+                  {l:'ECDIS Brands',v:ECDIS_BRANDS.length,i:'🖥',c:'var(--text2)'},
+                ].map(s=>(
+                  <div key={s.l} className="file-card" style={{padding:'1rem'}}>
+                    <div style={{fontSize:'1.5rem',marginBottom:4}}>{s.i}</div>
+                    <div style={{fontFamily:'Orbitron,monospace',fontSize:'1.5rem',fontWeight:700,color:s.c}}>{s.v}</div>
+                    <div style={{fontSize:'0.64rem',color:'var(--text2)',textTransform:'uppercase',letterSpacing:'0.08em'}}>{s.l}</div>
+                  </div>
+                ))}
+              </div>
+              <div style={{background:'var(--card)',border:'1px solid var(--border)',borderRadius:12,padding:'1rem'}}>
+                <div style={{fontFamily:'Orbitron,monospace',fontSize:'0.78rem',marginBottom:'0.8rem',color:'var(--gold)'}}>📋 How to Add Files</div>
+                {[
+                  '1. Upload your .rtz or chart file to Google Drive (ecdisroutes@gmail.com)',
+                  '2. Set sharing to "Anyone with link"',
+                  '3. Convert the link to direct download format',
+                  '4. Go to Add Route or Add Chart and paste the link',
+                  '5. Files appear in user search instantly',
+                  '6. Users must login to download — see User Database tab',
+                ].map((t,i)=><div key={i} style={{padding:'7px 0',borderBottom:'1px solid var(--border)',fontSize:'0.79rem',color:'var(--text2)'}}>{t}</div>)}
+              </div>
+            </>
+          )}
+
+          {section==='add-route'&&(
+            <>
+              <div className="a-hdr"><div className="a-title">🗺 Add RTZ Route</div></div>
+              <GDriveHelp/>
+              <div style={{background:'var(--card)',border:'1px solid var(--border)',borderRadius:12,padding:'1.2rem'}}>
+                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
+                  <div className="ff" style={{gridColumn:'1/-1'}}>
+                    <label className="fl">📁 RTZ File Name * (exact name)</label>
+                    <input className="fi" placeholder="mumbaitosingapore.rtz" value={nr.fileName} onChange={e=>setNr(r=>({...r,fileName:e.target.value}))}/>
+                  </div>
+                  <div className="ff" style={{gridColumn:'1/-1'}}>
+                    <label className="fl">🔗 Google Drive Direct Download Link *</label>
+                    <input className="fi" placeholder="https://drive.google.com/uc?export=download&id=XXXX" value={nr.fileUrl} onChange={e=>setNr(r=>({...r,fileUrl:e.target.value}))}/>
+                  </div>
+                  <div className="ff">
+                    <label className="fl">📍 Port / Route Description</label>
+                    <input className="fi" placeholder="Mumbai to Singapore" value={nr.portName} onChange={e=>setNr(r=>({...r,portName:e.target.value}))}/>
+                  </div>
+                  <div className="ff">
+                    <label className="fl">Route Type</label>
+                    <select className="fi" value={nr.type} onChange={e=>setNr(r=>({...r,type:e.target.value}))}>
+                      {ROUTE_TYPES.map(t=><option key={t}>{t}</option>)}
+                    </select>
+                  </div>
+                  <div className="ff" style={{gridColumn:'1/-1'}}>
+                    <label className="fl">🔍 Search Keywords (space separated)</label>
+                    <input className="fi" placeholder="mum sin india ocean" value={nr.keywords} onChange={e=>setNr(r=>({...r,keywords:e.target.value}))}/>
+                  </div>
+                </div>
+                <button className="btn btn-primary" onClick={saveRoute}>✅ Save Route to Firebase</button>
+              </div>
+            </>
+          )}
+
+          {section==='add-chart'&&(
+            <>
+              <div className="a-hdr"><div className="a-title">📊 Add Chart File</div></div>
+              <GDriveHelp/>
+              <div style={{background:'var(--card)',border:'1px solid var(--border)',borderRadius:12,padding:'1.2rem'}}>
+                <div className="ff">
+                  <label className="fl">🖥 Select ECDIS Brand *</label>
+                  <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(100px,1fr))',gap:5,marginBottom:8}}>
+                    {ECDIS_BRANDS.map(b=>(
+                      <div key={b.id} onClick={()=>setNc(c=>({...c,brand:b.id}))}
+                        style={{padding:'6px',borderRadius:8,cursor:'pointer',textAlign:'center',
+                          border:`2px solid ${nc.brand===b.id?b.color:'var(--border)'}`,
+                          background:nc.brand===b.id?b.color+'22':'transparent',transition:'all 0.2s'}}>
+                        <div style={{fontSize:'1.2rem'}}>{b.emoji}</div>
+                        <div style={{fontSize:'0.6rem',fontWeight:700,color:nc.brand===b.id?b.color:'var(--text2)',fontFamily:'Orbitron,monospace'}}>{b.name}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
+                  <div className="ff">
+                    <label className="fl">📁 Chart File Name *</label>
+                    <input className="fi" placeholder="mumbai_furuno.bin" value={nc.fileName} onChange={e=>setNc(c=>({...c,fileName:e.target.value}))}/>
+                  </div>
+                  <div className="ff">
+                    <label className="fl">⚓ Port Name *</label>
+                    <input className="fi" placeholder="Mumbai" value={nc.portName} onChange={e=>setNc(c=>({...c,portName:e.target.value}))}/>
+                  </div>
+                  <div className="ff" style={{gridColumn:'1/-1'}}>
+                    <label className="fl">🔗 Google Drive Direct Download Link *</label>
+                    <input className="fi" placeholder="https://drive.google.com/uc?export=download&id=XXXX" value={nc.fileUrl} onChange={e=>setNc(c=>({...c,fileUrl:e.target.value}))}/>
+                  </div>
+                  <div className="ff">
+                    <label className="fl">Region</label>
+                    <input className="fi" placeholder="Arabian Sea" value={nc.region} onChange={e=>setNc(c=>({...c,region:e.target.value}))}/>
+                  </div>
+                  <div className="ff">
+                    <label className="fl">Extra Keywords</label>
+                    <input className="fi" placeholder="west coast india" value={nc.keywords} onChange={e=>setNc(c=>({...c,keywords:e.target.value}))}/>
+                  </div>
+                </div>
+                <button className="btn btn-gold" onClick={saveChart}>✅ Save Chart to Firebase</button>
+              </div>
+            </>
+          )}
+
+          {section==='routes'&&(
+            <>
+              <div className="a-hdr"><div className="a-title">📋 Manage Routes</div><span className="badge">{routes.length}</span></div>
+              <div className="tw">
+                <table className="tbl">
+                  <thead><tr><th>File Name</th><th>Port/Route</th><th>Type</th><th>Link</th><th>Del</th></tr></thead>
+                  <tbody>{routes.length===0
+                    ?<tr><td colSpan={5} style={{textAlign:'center',color:'var(--text3)',padding:'2rem'}}>No routes added yet</td></tr>
+                    :routes.map(r=>(
+                    <tr key={r.id}>
+                      <td><span style={{fontFamily:'Orbitron,monospace',fontSize:'0.68rem',color:'var(--cyan)'}}>{r.fileName}</span></td>
+                      <td style={{color:'var(--text2)',fontSize:'0.76rem'}}>{r.portName||'—'}</td>
+                      <td style={{fontSize:'0.72rem',color:'var(--green)'}}>{r.type||'—'}</td>
+                      <td>{r.fileUrl?<a href={r.fileUrl} target="_blank" rel="noreferrer" style={{color:'var(--green)',fontSize:'0.72rem'}}>✅ Active</a>:<span style={{color:'var(--red)',fontSize:'0.72rem'}}>❌ Missing</span>}</td>
+                      <td><button className="btn btn-danger" style={{padding:'4px 8px',fontSize:'0.7rem'}} onClick={()=>deleteRoute(r.id)}>🗑</button></td>
+                    </tr>
+                  ))}</tbody>
+                </table>
+              </div>
+            </>
+          )}
+
+          {section==='charts'&&(
+            <>
+              <div className="a-hdr"><div className="a-title">🗂 Manage Charts</div><span className="badge badge-gold">{charts.length}</span></div>
+              <div className="tw">
+                <table className="tbl">
+                  <thead><tr><th>File Name</th><th>Port</th><th>Brand</th><th>Link</th><th>Del</th></tr></thead>
+                  <tbody>{charts.length===0
+                    ?<tr><td colSpan={5} style={{textAlign:'center',color:'var(--text3)',padding:'2rem'}}>No charts added yet</td></tr>
+                    :charts.map(c=>(
+                    <tr key={c.id}>
+                      <td><span style={{fontFamily:'Orbitron,monospace',fontSize:'0.68rem',color:'var(--gold)'}}>{c.fileName}</span></td>
+                      <td style={{color:'var(--text2)',fontSize:'0.76rem'}}>{c.portName||'—'}</td>
+                      <td style={{fontSize:'0.72rem',color:'#A78BFA'}}>{c.brand||'—'}</td>
+                      <td>{c.fileUrl?<a href={c.fileUrl} target="_blank" rel="noreferrer" style={{color:'var(--green)',fontSize:'0.72rem'}}>✅ Active</a>:<span style={{color:'var(--red)',fontSize:'0.72rem'}}>❌ Missing</span>}</td>
+                      <td><button className="btn btn-danger" style={{padding:'4px 8px',fontSize:'0.7rem'}} onClick={()=>deleteChart(c.id)}>🗑</button></td>
+                    </tr>
+                  ))}</tbody>
+                </table>
+              </div>
+            </>
+          )}
+
+          {section==='users'&&(
+            <>
+              <div className="a-hdr">
+                <div className="a-title">👥 User Database</div>
+                <div style={{display:'flex',gap:8}}>
+                  <span className="badge badge-green">{users.length} registered</span>
+                  <button className="btn btn-secondary" style={{padding:'5px 10px',fontSize:'0.72rem'}} onClick={loadUsers}>🔄 Refresh</button>
+                </div>
+              </div>
+              <div className="info-box">All users who create a free account appear here. Use this to track your audience and for future marketing.</div>
+              {users.length===0
+                ?<div className="empty"><div className="empty-icon">👥</div><div className="empty-t">No Users Yet</div><div className="empty-d">Users appear here after they register</div></div>
+                :<div className="tw">
+                  <table className="tbl">
+                    <thead><tr><th>#</th><th>Name</th><th>Email</th><th>Joined</th><th>Role</th></tr></thead>
+                    <tbody>{users.map((u,i)=>(
+                      <tr key={u.id}>
+                        <td style={{color:'var(--text3)'}}>{i+1}</td>
+                        <td>{u.name||'—'}</td>
+                        <td style={{color:'var(--cyan)',fontSize:'0.78rem'}}>{u.email}</td>
+                        <td style={{color:'var(--text2)',fontSize:'0.72rem'}}>{u.createdAt?.toDate?.()?.toLocaleDateString()||'—'}</td>
+                        <td><span className="badge">{u.role||'user'}</span></td>
+                      </tr>
+                    ))}</tbody>
+                  </table>
+                </div>
+              }
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── MAIN APP ─────────────────────────────────────────────────────────────────
+export default function App(){
+  const [tab,setTab]=useState('home');
+  const [searchQ,setSearchQ]=useState('');
+  const [notif,setNotif]=useState(null);
+  const [menuOpen,setMenuOpen]=useState(false);
+  const [user,setUser]=useState(null);
+  const [routes,setRoutes]=useState([]);
+  const [charts,setCharts]=useState([]);
+  const [loading,setLoading]=useState(true);
+
+  const notify=(msg,type='success')=>setNotif({msg,type,key:Date.now()});
+
+  useEffect(()=>{const u=onAuthStateChanged(auth,u=>setUser(u));return()=>u();},[]);
+  useEffect(()=>{
+    const load=async()=>{
+      try{
+        const[rs,cs]=await Promise.all([getDocs(collection(db,'routes')),getDocs(collection(db,'charts'))]);
+        setRoutes(rs.docs.map(d=>({id:d.id,...d.data()})));
+        setCharts(cs.docs.map(d=>({id:d.id,...d.data()})));
+      }catch(e){console.log('Load error',e);}
+      setLoading(false);
+    };
+    load();
+  },[]);
+
+  const TABS=[
+    {k:'home',    i:'🏠', l:'Home'},
+    {k:'routes',  i:'🗺', l:'Routes'},
+    {k:'charts',  i:'📊', l:'Charts',  cls:'gold'},
+    {k:'planner', i:'✏️', l:'Planner', cls:'green'},
+    {k:'admin',   i:'🛡', l:'Admin'},
+  ];
+
+  const handleSearch=(q)=>{setSearchQ(q);setTab('routes');setMenuOpen(false);};
+  const switchTab=k=>{setTab(k);setMenuOpen(false);};
+
+  // Planner needs full height
+  const isPlannerFull=tab==='planner';
+
+  return(
+    <>
+      <style>{S}</style>
+      <div className="grid-bg"/>
+      <div className="app">
+        {/* NAV */}
+        <nav className="nav">
+          <div className="nav-brand">
+            <div className="nav-logo">🧭</div>
+            <div>
+              <div className="nav-title">ECDIS Route Finder</div>
+              <div className="nav-sub">Maritime Navigation System</div>
+            </div>
+          </div>
+          <div className="nav-tabs">
+            {TABS.map(t=>(
+              <button key={t.k} className={`ntab ${t.cls||''} ${tab===t.k?'active':''}`} onClick={()=>switchTab(t.k)}>
+                {t.i} {t.l}
+              </button>
+            ))}
+            {user
+              ?<div className="uc" onClick={()=>{signOut(auth);notify('Logged out','info');}}>👤 {user.email.split('@')[0]} · Logout</div>
+              :<button className="ntab" onClick={()=>switchTab('login')}>🔐 Login</button>
+            }
+          </div>
+          <div style={{display:'flex',alignItems:'center',gap:8}}>
+            <div className="sd"/>
+            <button className="burger" onClick={()=>setMenuOpen(o=>!o)}><span/><span/><span/></button>
+          </div>
+        </nav>
+
+        {/* MOBILE MENU */}
+        <div className={`mob-menu ${menuOpen?'open':''}`}>
+          {TABS.map(t=><button key={t.k} className={`mtab ${tab===t.k?'active':''}`} onClick={()=>switchTab(t.k)}>{t.i} {t.l}</button>)}
+          {user
+            ?<button className="mtab" onClick={()=>{signOut(auth);notify('Logged out','info');setMenuOpen(false);}}>🚪 Logout ({user.email.split('@')[0]})</button>
+            :<button className="mtab" onClick={()=>switchTab('login')}>🔐 Login / Register</button>
+          }
+        </div>
+
+        {/* MAIN CONTENT */}
+        <div style={{flex:1,display:'flex',flexDirection:'column',minHeight:0,overflow:isPlannerFull?'hidden':'auto'}}>
+          {loading&&<div className="loading"><div className="spin"/><span>Connecting to Firebase…</span></div>}
+          {!loading&&tab==='home'    &&<HomePage routes={routes} charts={charts} onSearch={handleSearch} setTab={switchTab} user={user}/>}
+          {!loading&&tab==='routes'  &&<RoutesPage routes={routes} searchQuery={searchQ} notify={notify} user={user} setTab={switchTab}/>}
+          {!loading&&tab==='charts'  &&<ChartsPage charts={charts} notify={notify} user={user} setTab={switchTab}/>}
+          {!loading&&tab==='planner' &&<RoutePlannerPage notify={notify}/>}
+          {!loading&&tab==='login'   &&<LoginPage notify={notify} onLogin={u=>{setUser(u);setTab('home');}}/>}
+          {!loading&&tab==='admin'   &&<AdminPage notify={notify} routes={routes} setRoutes={setRoutes} charts={charts} setCharts={setCharts}/>}
+        </div>
+
+        {/* FOOTER */}
+        {tab!=='planner'&&<Footer/>}
+
+        {/* NOTIFICATION */}
+        {notif&&<Notif key={notif.key} msg={notif.msg} type={notif.type} onClose={()=>setNotif(null)}/>}
+      </div>
+    </>
   );
 }
