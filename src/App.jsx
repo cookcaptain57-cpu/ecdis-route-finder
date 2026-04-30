@@ -1,5 +1,11 @@
 /* eslint-disable */
 import { useState, useEffect, useRef, useMemo } from "react";
+// ─── GOOGLE SHEET APIs ─────────────────────────────────
+const API_1 =
+  "https://opensheet.elk.sh/1ILzyQODb4Ig2mdq9auZ7aJOfdKBBM01t192VE59WbCE/Routes";
+
+const API_2 =
+  "https://opensheet.elk.sh/1zuZxqUSFtxzg-E8CkTGj01YehhXCZIPodCisCicpxRA/Routes";
 import { auth, db } from "./firebase";
 import {
   signInWithEmailAndPassword, createUserWithEmailAndPassword,
@@ -1785,6 +1791,14 @@ function AdminPage({notify,routes,setRoutes,charts,setCharts}){
 
 // ─── MAIN APP ─────────────────────────────────────────────────────────────────
 export default function App(){
+  const [sheetRoutes, setSheetRoutes] = useState([]);export default function App() {
+  const [tab, setTab] = useState('home');
+  const [searchQ, setSearchQ] = useState('');
+  const [notif, setNotif] = useState(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [user, setUser] = useState(null);
+  const [routes, setRoutes] = useState([]);
+  const [sheetRoutes, setSheetRoutes] = useState([]);
   const [tab,setTab]=useState('home');
   const [searchQ,setSearchQ]=useState('');
   const [notif,setNotif]=useState(null);
@@ -1795,7 +1809,16 @@ export default function App(){
   const [loading,setLoading]=useState(true);
 
   const notify=(msg,type='success')=>setNotif({msg,type,key:Date.now()});
-
+useEffect(() => {
+  Promise.all([
+    fetch(API_1).then(r => r.json()),
+    fetch(API_2).then(r => r.json())
+  ])
+  .then(([d1, d2]) => {
+    setSheetRoutes([...d1, ...d2]);
+  })
+  .catch(err => console.log(err));
+}, []);
   useEffect(()=>{const u=onAuthStateChanged(auth,u=>setUser(u));return()=>u();},[]);
   useEffect(()=>{
     const load=async()=>{
