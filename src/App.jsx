@@ -2,10 +2,21 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 // ─── GOOGLE SHEET APIs ─────────────────────────────────
 const API_1 =
-  "https://opensheet.elk.sh/1ILzyQODb4Ig2mdq9auZ7aJOfdKBBM01t192VE59WbCE/Routes";
+  "https://opensheet.elk.sh/1ILzyQODb4Ig2mdq9auZ7aJOfdKBBM01t192VE59WbCE/Sheet1";
 
-const API_2 =
-  "https://opensheet.elk.sh/1zuZxqUSFtxzg-E8CkTGj01YehhXCZIPodCisCicpxRA/Routes";
+// Chart sheet — try multiple likely tab names
+const CHART_SHEET_ID = "1zuZxqUSFtxzg-E8CkTGj01YehhXCZIPodCisCicpxRA";
+const CHART_TABS = ["Sheet1","Charts","ECDIS Charts","Routes","Chart","Data","Sheet2"];
+const fetchChartSheet = () =>
+  CHART_TABS.reduce(
+    (chain, tab) =>
+      chain.catch(() =>
+        fetch(`https://opensheet.elk.sh/${CHART_SHEET_ID}/${tab}`)
+          .then(r => { if (!r.ok) throw new Error(); return r.json(); })
+          .then(d => { if (!Array.isArray(d) || d.length === 0) throw new Error(); return d; })
+      ),
+    Promise.reject()
+  ).catch(() => []);
 import { auth, db } from "./firebase";
 import {
   signInWithEmailAndPassword, createUserWithEmailAndPassword,
@@ -1466,12 +1477,45 @@ function ChartsPage({charts,sheetCharts,notify,user,setTab}){
     return[...charts,...extra];
   },[charts,normalizedSheet]);
 
+  // Model-number → brand aliases extracted from ECDIS_BRANDS.models
+  const MODEL_ALIASES = useMemo(()=>{
+    const map=[];
+    ECDIS_BRANDS.forEach(b=>{
+      // e.g. "FMD-3200 / FMD-3300" → ["fmd3200","fmd3300","fmd-3200","fmd-3300"]
+      const tokens=(b.models||'').split(/[\s/,]+/).map(t=>t.trim().toLowerCase()).filter(Boolean);
+      tokens.forEach(t=>{ if(t.length>2) map.push({token:t,id:b.id}); });
+      // Also add id and name
+      map.push({token:b.name.toLowerCase(),id:b.id});
+      map.push({token:b.id,id:b.id});
+      // Extra common abbreviations
+      if(b.id==='jrc')    map.push({token:'jan',id:'jrc'});
+      if(b.id==='furuno') map.push({token:'fmd',id:'furuno'},{token:'furuno',id:'furuno'});
+      if(b.id==='transas'||b.id==='wartsila') map.push({token:'navisailor',id:'transas'},{token:'navi-sailor',id:'transas'},{token:'wartsila',id:'transas'},{token:'wärtsilä',id:'transas'});
+      if(b.id==='sperry') map.push({token:'visionmaster',id:'sperry'},{token:'vision master',id:'sperry'});
+      if(b.id==='tokimec'||b.id==='jmr') map.push({token:'jmr',id:'tokimec'});
+      if(b.id==='danelec') map.push({token:'dm800',id:'danelec'},{token:'dm-800',id:'danelec'});
+      if(b.id==='kongsberg') map.push({token:'kbridge',id:'kongsberg'},{token:'k-bridge',id:'kongsberg'});
+      if(b.id==='raytheon') map.push({token:'anschutz',id:'raytheon'},{token:'anschütz',id:'raytheon'});
+    });
+    return map;
+  },[]);
+
   // Detect brand for a chart (works for both Firebase and sheet data)
   const detectBrand=(c)=>{
-    const hay=[c.brand,c.brandId,c.model,c.keywords,c.fileName].join(' ').toLowerCase();
-    return ECDIS_BRANDS.find(b=>
-      hay.includes(b.name.toLowerCase())||hay.includes(b.id)
-    )||null;
+    const hay=[c.brand,c.brandId,c.model,c.keywords,c.fileName,c.portName]
+      .filter(Boolean).join(' ').toLowerCase().replace(/[\s_]/g,'');
+    // First try direct brand name / id match
+    const direct=ECDIS_BRANDS.find(b=>
+      hay.includes(b.name.toLowerCase().replace(/[\s_]/g,''))||hay.includes(b.id)
+    );
+    if(direct) return direct;
+    // Then try model-number / alias match
+    for(const {token,id} of MODEL_ALIASES){
+      if(hay.includes(token.replace(/[\s_-]/g,''))){
+        return ECDIS_BRANDS.find(b=>b.id===id)||null;
+      }
+    }
+    return null;
   };
 
   const brandCount=id=>{
@@ -1485,15 +1529,17 @@ function ChartsPage({charts,sheetCharts,notify,user,setTab}){
 
   const sb=ECDIS_BRANDS.find(b=>b.id===selBrand);
 
-  // Charts that belong to selected brand
+  // Charts that belong to selected brand (or ALL sheet charts if 'all-sheet' selected)
   const brandCharts=useMemo(()=>{
     if(!selBrand) return[];
+    if(selBrand==='all-sheet') return normalizedSheet;
     const b=ECDIS_BRANDS.find(x=>x.id===selBrand);
     return allCharts.filter(c=>{
       const d=detectBrand(c);
       return d?.id===selBrand||c.brandId===selBrand||c.brand===b?.name;
     });
-  },[selBrand,allCharts]);
+  // eslint-disable-next-line
+  },[selBrand,allCharts,normalizedSheet]);
 
   // Suggestions for chart search within brand
   const suggestions=useMemo(()=>{
@@ -1550,18 +1596,32 @@ function ChartsPage({charts,sheetCharts,notify,user,setTab}){
                 </div>
               );
             })}
+            {/* All Sheet Charts fallback */}
+            {normalizedSheet.length>0&&(
+              <div className="brand-card" style={{borderColor:'rgba(0,200,150,0.4)',gridColumn:'1/-1',display:'flex',flexDirection:'row',alignItems:'center',gap:14,padding:'12px 16px'}}
+                onClick={()=>{setSelBrand('all-sheet');setQ('');}}>
+                <div style={{fontSize:'1.6rem'}}>🔄</div>
+                <div style={{flex:1}}>
+                  <div style={{fontFamily:'Orbitron,monospace',fontSize:'0.78rem',fontWeight:700,color:'var(--green)'}}>All Google Sheet Charts</div>
+                  <div style={{fontSize:'0.68rem',color:'var(--text2)',marginTop:2}}>Browse all {normalizedSheet.length} charts from your live Google Sheet — regardless of brand</div>
+                </div>
+                <span className="badge" style={{background:'rgba(0,200,150,0.15)',color:'var(--green)',border:'1px solid rgba(0,200,150,0.3)'}}>{normalizedSheet.length} charts ✅</span>
+              </div>
+            )}
           </div>
         </>
       ):(
         <>
           <div style={{display:'flex',alignItems:'center',gap:12,marginBottom:'1.2rem',flexWrap:'wrap'}}>
             <button className="btn btn-secondary" onClick={()=>{setSelBrand(null);setQ('');}}>← Back</button>
-            <span style={{fontSize:'1.4rem'}}>{sb?.emoji}</span>
+            <span style={{fontSize:'1.4rem'}}>{selBrand==='all-sheet'?'🔄':sb?.emoji}</span>
             <div>
-              <div style={{fontFamily:'Orbitron,monospace',fontSize:'0.88rem',fontWeight:700,color:sb?.color}}>{sb?.name}</div>
-              <div style={{fontSize:'0.7rem',color:'var(--text2)'}}>{sb?.models}</div>
+              <div style={{fontFamily:'Orbitron,monospace',fontSize:'0.88rem',fontWeight:700,color:selBrand==='all-sheet'?'var(--green)':sb?.color}}>
+                {selBrand==='all-sheet'?'All Google Sheet Charts':sb?.name}
+              </div>
+              <div style={{fontSize:'0.7rem',color:'var(--text2)'}}>{selBrand==='all-sheet'?'All charts from your live sheet':sb?.models}</div>
             </div>
-            <span className="badge badge-gold">{brandCount(selBrand)} chart files</span>
+            <span className="badge badge-gold">{brandCharts.length} chart files</span>
           </div>
           {!user&&<div className="warn-box">🔐 Login required. <span style={{cursor:'pointer',textDecoration:'underline'}} onClick={()=>setTab('login')}>Login / Register →</span></div>}
 
@@ -1604,9 +1664,9 @@ function ChartsPage({charts,sheetCharts,notify,user,setTab}){
 
           {filtered.length===0
             ?<div className="empty">
-              <div className="empty-icon">{sb?.emoji}</div>
-              <div className="empty-t">{brandCount(selBrand)===0?'No Charts Uploaded Yet':'No Results'}</div>
-              <div className="empty-d">{brandCount(selBrand)===0?'Admin will upload charts for this brand soon.':'Try a different port name or keyword.'}</div>
+              <div className="empty-icon">{selBrand==='all-sheet'?'🔄':sb?.emoji}</div>
+              <div className="empty-t">{brandCharts.length===0?'No Charts Available':'No Results'}</div>
+              <div className="empty-d">{brandCharts.length===0?'Admin will upload charts soon.':'Try a different port name or keyword.'}</div>
             </div>
             :<div className="files-grid">{filtered.map(c=>{
               const brand=detectBrand(c)||sb;
@@ -2149,14 +2209,22 @@ export default function App(){
 
   const fetchSheets=()=>{
     setSheetLoading(true);
-    Promise.all([
-      fetch(API_1).then(r=>r.json()).catch(()=>[]),
-      fetch(API_2).then(r=>r.json()).catch(()=>[]),
-    ]).then(([d1,d2])=>{
-      setSheetRoutes(Array.isArray(d1)?d1:[]);
-      setSheetCharts(Array.isArray(d2)?d2:[]);
-    }).catch(e=>console.log('Sheet fetch error',e))
-    .finally(()=>setSheetLoading(false));
+    const ROUTE_TABS=["Sheet1","Routes","Route","Data","Sheet2"];
+    const fetchRouteSheet=()=>
+      ROUTE_TABS.reduce(
+        (chain,tab)=>chain.catch(()=>
+          fetch(`https://opensheet.elk.sh/1ILzyQODb4Ig2mdq9auZ7aJOfdKBBM01t192VE59WbCE/${tab}`)
+            .then(r=>{if(!r.ok)throw new Error();return r.json();})
+            .then(d=>{if(!Array.isArray(d)||d.length===0)throw new Error();return d;})
+        ),
+        Promise.reject()
+      ).catch(()=>[]);
+    Promise.all([fetchRouteSheet(),fetchChartSheet()])
+      .then(([d1,d2])=>{
+        setSheetRoutes(Array.isArray(d1)?d1:[]);
+        setSheetCharts(Array.isArray(d2)?d2:[]);
+      }).catch(e=>console.log('Sheet fetch error',e))
+      .finally(()=>setSheetLoading(false));
   };
 
   useEffect(()=>{fetchSheets();},[]);
