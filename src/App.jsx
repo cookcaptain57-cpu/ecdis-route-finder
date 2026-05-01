@@ -1491,7 +1491,7 @@ function LoginPage({notify,onLogin}){
 }
 
 // ─── ADMIN PAGE ───────────────────────────────────────────────────────────────
-function AdminPage({notify,routes,setRoutes,charts,setCharts}){
+function AdminPage({notify,routes,setRoutes,charts,setCharts,sheetRoutes,sheetCharts,refreshSheets,sheetLoading}){
   const [user,setUser]=useState(null);
   const [email,setEmail]=useState('');const [pass,setPass]=useState('');
   const [err,setErr]=useState('');const [loading,setLoading]=useState(false);
@@ -1560,12 +1560,14 @@ function AdminPage({notify,routes,setRoutes,charts,setCharts}){
   );
 
   const sides=[
-    {k:'dashboard',i:'📊',l:'Dashboard'},
-    {k:'add-route',i:'🗺',l:'Add Route'},
-    {k:'add-chart',i:'📊',l:'Add Chart'},
-    {k:'routes',i:'📋',l:'Manage Routes'},
-    {k:'charts',i:'🗂',l:'Manage Charts'},
-    {k:'users',i:'👥',l:'User Database'},
+    {k:'dashboard',   i:'📊', l:'Dashboard'},
+    {k:'add-route',   i:'🗺', l:'Add Route'},
+    {k:'add-chart',   i:'📊', l:'Add Chart'},
+    {k:'routes',      i:'📋', l:'Manage Routes'},
+    {k:'charts',      i:'🗂', l:'Manage Charts'},
+    {k:'sheet-routes',i:'🔄', l:'Sheet Routes'},
+    {k:'sheet-charts',i:'🔄', l:'Sheet Charts'},
+    {k:'users',       i:'👥', l:'User Database'},
   ];
 
   const GDriveHelp=()=>(
@@ -1604,10 +1606,12 @@ function AdminPage({notify,routes,setRoutes,charts,setCharts}){
               <div className="a-hdr"><div className="a-title">📊 Dashboard</div><span style={{fontSize:'0.72rem',color:'var(--green)'}}>🔥 Firebase + Google Drive</span></div>
               <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(145px,1fr))',gap:'0.8rem',marginBottom:'1.4rem'}}>
                 {[
-                  {l:'RTZ Routes',v:routes.length,i:'🗺',c:'var(--cyan)'},
-                  {l:'Chart Files',v:charts.length,i:'📊',c:'var(--gold)'},
-                  {l:'Links Active',v:[...routes,...charts].filter(f=>f.fileUrl).length,i:'✅',c:'var(--green)'},
-                  {l:'ECDIS Brands',v:ECDIS_BRANDS.length,i:'🖥',c:'var(--text2)'},
+                  {l:'RTZ Routes (DB)',  v:routes.length,    i:'🗺', c:'var(--cyan)'},
+                  {l:'Chart Files (DB)', v:charts.length,    i:'📊', c:'var(--gold)'},
+                  {l:'Sheet Routes',     v:sheetRoutes.length,i:'🔄',c:'var(--green)'},
+                  {l:'Sheet Charts',     v:sheetCharts.length,i:'🔄',c:'#A78BFA'},
+                  {l:'Links Active',     v:[...routes,...charts].filter(f=>f.fileUrl).length,i:'✅',c:'var(--green)'},
+                  {l:'ECDIS Brands',     v:ECDIS_BRANDS.length,i:'🖥',c:'var(--text2)'},
                 ].map(s=>(
                   <div key={s.l} className="file-card" style={{padding:'1rem'}}>
                     <div style={{fontSize:'1.5rem',marginBottom:4}}>{s.i}</div>
@@ -1619,12 +1623,11 @@ function AdminPage({notify,routes,setRoutes,charts,setCharts}){
               <div style={{background:'var(--card)',border:'1px solid var(--border)',borderRadius:12,padding:'1rem'}}>
                 <div style={{fontFamily:'Orbitron,monospace',fontSize:'0.78rem',marginBottom:'0.8rem',color:'var(--gold)'}}>📋 How to Add Files</div>
                 {[
-                  '1. Upload your .rtz or chart file to Google Drive (ecdisroutes@gmail.com)',
-                  '2. Set sharing to "Anyone with link"',
-                  '3. Convert the link to direct download format',
-                  '4. Go to Add Route or Add Chart and paste the link',
-                  '5. Files appear in user search instantly',
-                  '6. Users must login to download — see User Database tab',
+                  '1. FIREBASE (manual): Upload .rtz or chart to Google Drive, get direct link → use Add Route / Add Chart',
+                  '2. GOOGLE SHEET (auto): Add rows to your Google Sheet → App Script syncs → click Sheet Routes or Sheet Charts',
+                  '3. Sheet data updates live — click Sync Now in Sheet sections to pull latest',
+                  '4. Firebase routes/charts need login to download — see User Database tab',
+                  '5. Google Sheet rows are shown as-is from the sheet data',
                 ].map((t,i)=><div key={i} style={{padding:'7px 0',borderBottom:'1px solid var(--border)',fontSize:'0.79rem',color:'var(--text2)'}}>{t}</div>)}
               </div>
             </>
@@ -1754,6 +1757,135 @@ function AdminPage({notify,routes,setRoutes,charts,setCharts}){
             </>
           )}
 
+          {section==='sheet-routes'&&(
+            <>
+              <div className="a-hdr">
+                <div className="a-title">🔄 Google Sheet — ECDIS Routes</div>
+                <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
+                  <span className="badge">{sheetRoutes.length} rows</span>
+                  <button className="btn btn-primary" style={{padding:'5px 12px',fontSize:'0.72rem'}} onClick={refreshSheets} disabled={sheetLoading}>
+                    {sheetLoading?'⏳ Syncing…':'🔄 Sync Now'}
+                  </button>
+                </div>
+              </div>
+              <div className="info-box" style={{fontSize:'0.74rem'}}>
+                📡 <strong style={{color:'var(--text)'}}>Live Google Sheet Database</strong> — auto-refreshes from your Google Sheet via App Script. Click <strong>Sync Now</strong> to pull the latest data. Rows appear here as soon as you add them to the sheet.<br/>
+                <span style={{color:'var(--cyan)'}}>Sheet ID: 1ILzyQODb4Ig2mdq9auZ7aJOfdKBBM01t192VE59WbCE</span>
+              </div>
+              {sheetLoading
+                ?<div className="loading"><div className="spin"/><span>Fetching from Google Sheet…</span></div>
+                :sheetRoutes.length===0
+                  ?<div className="empty"><div className="empty-icon">🗺</div><div className="empty-t">No Rows Found</div><div className="empty-d">Add rows to your Google Sheet and click Sync Now</div></div>
+                  :<div className="tw">
+                    <table className="tbl">
+                      <thead>
+                        <tr>
+                          <th>#</th>
+                          {Object.keys(sheetRoutes[0]||{}).map(col=><th key={col}>{col}</th>)}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {sheetRoutes.map((row,i)=>(
+                          <tr key={i}>
+                            <td style={{color:'var(--text3)',fontSize:'0.7rem'}}>{i+1}</td>
+                            {Object.keys(sheetRoutes[0]||{}).map(col=>(
+                              <td key={col} style={{fontSize:'0.76rem',maxWidth:200,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+                                {col.toLowerCase().includes('url')||col.toLowerCase().includes('link')
+                                  ?row[col]
+                                    ?<a href={row[col]} target="_blank" rel="noreferrer" style={{color:'var(--green)',fontSize:'0.7rem'}}>✅ Link</a>
+                                    :<span style={{color:'var(--red)',fontSize:'0.7rem'}}>❌</span>
+                                  :<span style={{color:col.toLowerCase().includes('name')||col.toLowerCase().includes('file')?'var(--cyan)':'var(--text2)'}}>{row[col]||'—'}</span>
+                                }
+                              </td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+              }
+              <div style={{marginTop:'1rem',padding:'0.9rem',background:'var(--card)',border:'1px solid var(--border)',borderRadius:10,fontSize:'0.76rem',color:'var(--text2)'}}>
+                💡 <strong style={{color:'var(--gold)'}}>How to add routes:</strong> Open your Google Sheet → Add a new row with file name, Google Drive link, port name, type, keywords → The sheet auto-updates via App Script → Click <strong>Sync Now</strong> to reflect here.
+              </div>
+            </>
+          )}
+
+          {section==='sheet-charts'&&(
+            <>
+              <div className="a-hdr">
+                <div className="a-title">🔄 Google Sheet — ECDIS Charts</div>
+                <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
+                  <span className="badge badge-gold">{sheetCharts.length} rows</span>
+                  <button className="btn btn-gold" style={{padding:'5px 12px',fontSize:'0.72rem'}} onClick={refreshSheets} disabled={sheetLoading}>
+                    {sheetLoading?'⏳ Syncing…':'🔄 Sync Now'}
+                  </button>
+                </div>
+              </div>
+              <div className="info-box" style={{fontSize:'0.74rem'}}>
+                📡 <strong style={{color:'var(--text)'}}>Live Google Sheet Database</strong> — includes ECDIS model info. Auto-refreshes from your Google Drive / App Script pipeline.<br/>
+                <span style={{color:'var(--gold)'}}>Sheet ID: 1zuZxqUSFtxzg-E8CkTGj01YehhXCZIPodCisCicpxRA</span>
+              </div>
+              {sheetLoading
+                ?<div className="loading"><div className="spin"/><span>Fetching from Google Sheet…</span></div>
+                :sheetCharts.length===0
+                  ?<div className="empty"><div className="empty-icon">📊</div><div className="empty-t">No Rows Found</div><div className="empty-d">Add rows to your ECDIS Charts Google Sheet and click Sync Now</div></div>
+                  :<>
+                    {/* Brand summary cards */}
+                    <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(120px,1fr))',gap:6,marginBottom:'1rem'}}>
+                      {ECDIS_BRANDS.map(b=>{
+                        const brandCol=Object.keys(sheetCharts[0]||{}).find(k=>k.toLowerCase().includes('brand')||k.toLowerCase().includes('ecdis'));
+                        const cnt=brandCol?sheetCharts.filter(r=>r[brandCol]?.toLowerCase().includes(b.name.toLowerCase())||r[brandCol]?.toLowerCase().includes(b.id)).length:0;
+                        if(cnt===0)return null;
+                        return(
+                          <div key={b.id} style={{padding:'8px',borderRadius:9,border:`1px solid ${b.color}55`,background:`${b.color}11`,textAlign:'center'}}>
+                            <div style={{fontSize:'1.1rem'}}>{b.emoji}</div>
+                            <div style={{fontSize:'0.58rem',fontFamily:'Orbitron,monospace',fontWeight:700,color:b.color}}>{b.name}</div>
+                            <div style={{fontSize:'0.65rem',color:'var(--green)',fontWeight:700}}>{cnt} chart{cnt>1?'s':''}</div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <div className="tw">
+                      <table className="tbl">
+                        <thead>
+                          <tr>
+                            <th>#</th>
+                            {Object.keys(sheetCharts[0]||{}).map(col=><th key={col}>{col}</th>)}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {sheetCharts.map((row,i)=>{
+                            const brandCol=Object.keys(row).find(k=>k.toLowerCase().includes('brand')||k.toLowerCase().includes('ecdis'));
+                            const brand=brandCol?ECDIS_BRANDS.find(b=>row[brandCol]?.toLowerCase().includes(b.name.toLowerCase())||row[brandCol]?.toLowerCase().includes(b.id)):null;
+                            return(
+                              <tr key={i}>
+                                <td style={{color:'var(--text3)',fontSize:'0.7rem'}}>{i+1}</td>
+                                {Object.keys(sheetCharts[0]||{}).map(col=>(
+                                  <td key={col} style={{fontSize:'0.76rem',maxWidth:180,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+                                    {col.toLowerCase().includes('url')||col.toLowerCase().includes('link')
+                                      ?row[col]
+                                        ?<a href={row[col]} target="_blank" rel="noreferrer" style={{color:'var(--green)',fontSize:'0.7rem'}}>✅ Link</a>
+                                        :<span style={{color:'var(--red)',fontSize:'0.7rem'}}>❌</span>
+                                      :col===brandCol&&brand
+                                        ?<span style={{color:brand.color,fontWeight:600}}>{brand.emoji} {row[col]}</span>
+                                        :<span style={{color:col.toLowerCase().includes('model')?'#A78BFA':col.toLowerCase().includes('name')||col.toLowerCase().includes('file')?'var(--gold)':'var(--text2)'}}>{row[col]||'—'}</span>
+                                    }
+                                  </td>
+                                ))}
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </>
+              }
+              <div style={{marginTop:'1rem',padding:'0.9rem',background:'var(--card)',border:'1px solid var(--border)',borderRadius:10,fontSize:'0.76rem',color:'var(--text2)'}}>
+                💡 <strong style={{color:'var(--gold)'}}>How to add charts:</strong> Open your ECDIS Charts Google Sheet → Add a row with file name, brand, ECDIS model, port, Google Drive link → App Script updates the sheet → Click <strong>Sync Now</strong> here.
+              </div>
+            </>
+          )}
+
           {section==='users'&&(
             <>
               <div className="a-hdr">
@@ -1791,14 +1923,6 @@ function AdminPage({notify,routes,setRoutes,charts,setCharts}){
 
 // ─── MAIN APP ─────────────────────────────────────────────────────────────────
 export default function App(){
-  const [sheetRoutes, setSheetRoutes] = useState([]);export default function App() {
-  const [tab, setTab] = useState('home');
-  const [searchQ, setSearchQ] = useState('');
-  const [notif, setNotif] = useState(null);
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [user, setUser] = useState(null);
-  const [routes, setRoutes] = useState([]);
-  const [sheetRoutes, setSheetRoutes] = useState([]);
   const [tab,setTab]=useState('home');
   const [searchQ,setSearchQ]=useState('');
   const [notif,setNotif]=useState(null);
@@ -1807,18 +1931,26 @@ export default function App(){
   const [routes,setRoutes]=useState([]);
   const [charts,setCharts]=useState([]);
   const [loading,setLoading]=useState(true);
+  // Google Sheet live data (separate)
+  const [sheetRoutes,setSheetRoutes]=useState([]);
+  const [sheetCharts,setSheetCharts]=useState([]);
+  const [sheetLoading,setSheetLoading]=useState(false);
 
   const notify=(msg,type='success')=>setNotif({msg,type,key:Date.now()});
-useEffect(() => {
-  Promise.all([
-    fetch(API_1).then(r => r.json()),
-    fetch(API_2).then(r => r.json())
-  ])
-  .then(([d1, d2]) => {
-    setSheetRoutes([...d1, ...d2]);
-  })
-  .catch(err => console.log(err));
-}, []);
+
+  const fetchSheets=()=>{
+    setSheetLoading(true);
+    Promise.all([
+      fetch(API_1).then(r=>r.json()).catch(()=>[]),
+      fetch(API_2).then(r=>r.json()).catch(()=>[]),
+    ]).then(([d1,d2])=>{
+      setSheetRoutes(Array.isArray(d1)?d1:[]);
+      setSheetCharts(Array.isArray(d2)?d2:[]);
+    }).catch(e=>console.log('Sheet fetch error',e))
+    .finally(()=>setSheetLoading(false));
+  };
+
+  useEffect(()=>{fetchSheets();},[]);
   useEffect(()=>{const u=onAuthStateChanged(auth,u=>setUser(u));return()=>u();},[]);
   useEffect(()=>{
     const load=async()=>{
@@ -1894,7 +2026,7 @@ useEffect(() => {
           {!loading&&tab==='charts'  &&<ChartsPage charts={charts} notify={notify} user={user} setTab={switchTab}/>}
           {!loading&&tab==='planner' &&<RoutePlannerPage notify={notify}/>}
           {!loading&&tab==='login'   &&<LoginPage notify={notify} onLogin={u=>{setUser(u);setTab('home');}}/>}
-          {!loading&&tab==='admin'   &&<AdminPage notify={notify} routes={routes} setRoutes={setRoutes} charts={charts} setCharts={setCharts}/>}
+          {!loading&&tab==='admin'   &&<AdminPage notify={notify} routes={routes} setRoutes={setRoutes} charts={charts} setCharts={setCharts} sheetRoutes={sheetRoutes} sheetCharts={sheetCharts} refreshSheets={fetchSheets} sheetLoading={sheetLoading}/>}
         </div>
 
         {/* FOOTER */}
