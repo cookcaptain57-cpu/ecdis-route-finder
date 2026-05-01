@@ -684,6 +684,27 @@ function smartMatch(file,q){
     .filter(Boolean).map(s=>s.toLowerCase()).some(t=>t.includes(ql));
 }
 
+// ─── NORMALIZE GOOGLE SHEET ROW → STANDARD FILE OBJECT ───────────────────────
+function normalizeSheetRow(row, idx, tag){
+  const pick=(...keys)=>{
+    for(const k of keys){
+      const col=Object.keys(row).find(c=>c.toLowerCase().replace(/[\s_\-]/g,'').includes(k.toLowerCase().replace(/[\s_\-]/g,'')));
+      if(col&&row[col]?.trim()) return row[col].trim();
+    }
+    return '';
+  };
+  const fileName   = pick('filename','name','routename','file','title')   || Object.values(row)[0]||'';
+  const fileUrl    = pick('fileurl','downloadurl','drivelink','googlelink','link','url','download') || '';
+  const portName   = pick('portname','port','route','routedesc','description','from','departure','ports') || '';
+  const keywords   = pick('keywords','keyword','tags','search')            || '';
+  const type       = pick('type','routetype','category')                  || '';
+  const brand      = pick('brand','ecdisbrand','manufacturer','make')     || '';
+  const model      = pick('model','ecdismodel','version','series')        || '';
+  const region     = pick('region','area','sea','ocean','zone')           || '';
+  const allKw=[fileName,portName,keywords,type,brand,model,region].filter(Boolean).join(' ').toLowerCase();
+  return{id:`${tag}-${idx}`,fileName,fileUrl,portName,keywords:allKw,type,brand,model,region,source:'sheet'};
+}
+
 // ─── MAP VIEW ─────────────────────────────────────────────────────────────────
 function MapView({waypoints,setWaypoints,overlays,playing,setPlaying,speed,onMapClick}){
   const containerRef=useRef(null);
@@ -1285,11 +1306,46 @@ function HomePage({routes,charts,onSearch,setTab,user}){
 }
 
 // ─── ROUTES PAGE ──────────────────────────────────────────────────────────────
-function RoutesPage({routes,searchQuery,notify,user,setTab}){
+function RoutesPage({routes,sheetRoutes,searchQuery,notify,user,setTab}){
   const [q,setQ]=useState(searchQuery||'');
   const [typeF,setTypeF]=useState('all');
+  const [showSugg,setShowSugg]=useState(false);
+  const inputRef=useRef(null);
+
   useEffect(()=>{if(searchQuery)setQ(searchQuery);},[searchQuery]);
-  const filtered=routes.filter(r=>(typeF==='all'||r.type?.toLowerCase()===typeF)&&smartMatch(r,q));
+
+  // Normalize sheet rows once
+  const normalizedSheet=useMemo(()=>
+    (sheetRoutes||[]).map((r,i)=>normalizeSheetRow(r,i,'sr'))
+  ,[sheetRoutes]);
+
+  // Merge Firebase + Sheet — sheet rows de-duped by fileName
+  const allRoutes=useMemo(()=>{
+    const fbNames=new Set(routes.map(r=>r.fileName?.toLowerCase()));
+    const extra=normalizedSheet.filter(r=>r.fileName&&!fbNames.has(r.fileName.toLowerCase()));
+    return[...routes,...extra];
+  },[routes,normalizedSheet]);
+
+  // Build suggestion list from all route names + port names
+  const suggestions=useMemo(()=>{
+    if(!q.trim()||q.length<2) return[];
+    const ql=q.toLowerCase();
+    const seen=new Set();
+    const hits=[];
+    allRoutes.forEach(r=>{
+      [r.fileName,r.portName].filter(Boolean).forEach(s=>{
+        if(s.toLowerCase().includes(ql)&&!seen.has(s.toLowerCase())){
+          seen.add(s.toLowerCase());
+          hits.push(s);
+        }
+      });
+    });
+    return hits.slice(0,8);
+  },[q,allRoutes]);
+
+  const filtered=allRoutes.filter(r=>
+    (typeF==='all'||r.type?.toLowerCase()===typeF.toLowerCase())&&smartMatch(r,q)
+  );
 
   const handleDL=(r)=>{
     if(!user){notify('🔐 Login required to download files','error');setTab('login');return;}
@@ -1297,40 +1353,92 @@ function RoutesPage({routes,searchQuery,notify,user,setTab}){
     else notify('File link not set. Contact admin.','error');
   };
 
+  const pickSugg=(s)=>{setQ(s);setShowSugg(false);};
+
   return(
     <div className="section">
       <div className="sec-hdr">
         <div className="sec-title">🗺 RTZ Route Files</div>
-        <span className="badge">{filtered.length} files</span>
+        <span className="badge">{filtered.length} / {allRoutes.length} files</span>
       </div>
       {!user&&<div className="warn-box">🔐 <strong>Login required to download.</strong> <span style={{cursor:'pointer',textDecoration:'underline'}} onClick={()=>setTab('login')}>Create free account →</span></div>}
-      <div style={{display:'flex',gap:8,marginBottom:'0.9rem'}}>
-        <div className="siw" style={{flex:1}}>
-          <span className="si-ic">🔍</span>
-          <input className="si" style={{paddingLeft:40}} placeholder="Search route, port, file name…" value={q} onChange={e=>setQ(e.target.value)}/>
+
+      {/* SEARCH WITH SUGGESTIONS */}
+      <div style={{position:'relative',marginBottom:'0.9rem'}}>
+        <div style={{display:'flex',gap:8}}>
+          <div className="siw" style={{flex:1}}>
+            <span className="si-ic">🔍</span>
+            <input
+              ref={inputRef}
+              className="si"
+              style={{paddingLeft:40}}
+              placeholder="Search by port, route name, file name, keyword…"
+              value={q}
+              onChange={e=>{setQ(e.target.value);setShowSugg(true);}}
+              onFocus={()=>setShowSugg(true)}
+              onBlur={()=>setTimeout(()=>setShowSugg(false),180)}
+            />
+          </div>
+          {q&&<button className="btn btn-secondary" onClick={()=>{setQ('');setShowSugg(false);}}>✕</button>}
         </div>
+        {/* SUGGESTIONS DROPDOWN */}
+        {showSugg&&suggestions.length>0&&(
+          <div style={{position:'absolute',top:'100%',left:0,right:0,zIndex:300,
+            background:'var(--card)',border:'1px solid var(--border)',borderRadius:10,
+            boxShadow:'0 8px 28px rgba(0,0,0,0.5)',marginTop:4,overflow:'hidden'}}>
+            {suggestions.map((s,i)=>(
+              <div key={i}
+                onMouseDown={()=>pickSugg(s)}
+                style={{padding:'10px 14px',cursor:'pointer',display:'flex',alignItems:'center',gap:10,
+                  borderBottom:'1px solid rgba(255,255,255,0.04)',transition:'background 0.15s'}}
+                onMouseEnter={e=>e.currentTarget.style.background='rgba(0,180,216,0.08)'}
+                onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
+                <span style={{color:'var(--cyan)',fontSize:'0.85rem'}}>🔎</span>
+                <span style={{fontSize:'0.84rem'}}>{s}</span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
+
+      {/* Quick-search chips */}
+      <div className="fbar" style={{marginBottom:'0.7rem'}}>
+        {['Mumbai','Singapore','Dubai','Rotterdam','Colombo','Karachi','Fujairah'].map(p=>(
+          <button key={p} className={`fbtn ${q.toLowerCase()===p.toLowerCase()?'active':''}`}
+            onClick={()=>setQ(p)}>{p}</button>
+        ))}
+      </div>
+
+      {/* Type filter */}
       <div className="fbar">
         {['all',...ROUTE_TYPES].map(t=>(
-          <button key={t} className={`fbtn ${typeF===(t==='all'?'all':t.toLowerCase())?'active':''}`}
-            onClick={()=>setTypeF(t==='all'?'all':t.toLowerCase())}>
+          <button key={t} className={`fbtn ${typeF===(t==='all'?'all':t)?'active':''}`}
+            onClick={()=>setTypeF(t==='all'?'all':t)}>
             {t==='all'?'🌐 All':t}
           </button>
         ))}
       </div>
+
       {filtered.length===0
-        ?<div className="empty"><div className="empty-icon">🧭</div><div className="empty-t">No Routes Found</div><div className="empty-d">Try "Mumbai", "MUM" or "mumbaitosingapore"</div></div>
+        ?<div className="empty">
+          <div className="empty-icon">🧭</div>
+          <div className="empty-t">No Routes Found</div>
+          <div className="empty-d">Try "Mumbai", "MUM", "Singapore" or "mumbaitosingapore"</div>
+        </div>
         :<div className="files-grid">{filtered.map(r=>(
           <div key={r.id} className="file-card">
-            <div className="file-icon">🗺</div>
+            <div className="file-icon">{r.source==='sheet'?'🔄':'🗺'}</div>
             <div className="file-name">{r.fileName}</div>
             {r.portName&&<div className="file-port">📍 {r.portName}</div>}
             <div className="file-tags">
               <span className="ftag tag-rtz">RTZ File</span>
               {r.type&&<span className="ftag tag-rtz">{r.type}</span>}
+              {r.source==='sheet'&&<span className="ftag" style={{background:'rgba(0,200,150,0.1)',color:'var(--green)',border:'1px solid rgba(0,200,150,0.2)'}}>Live Sheet</span>}
             </div>
             {user
-              ?<button className="dl-btn" onClick={()=>handleDL(r)} disabled={!r.fileUrl}>{r.fileUrl?'⬇ Download RTZ File':'❌ Link Not Set'}</button>
+              ?<button className="dl-btn" onClick={()=>handleDL(r)} disabled={!r.fileUrl}>
+                {r.fileUrl?'⬇ Download RTZ File':'❌ Link Not Set'}
+              </button>
               :<button className="login-req" onClick={()=>setTab('login')}>🔐 Login to Download</button>
             }
           </div>
@@ -1341,12 +1449,69 @@ function RoutesPage({routes,searchQuery,notify,user,setTab}){
 }
 
 // ─── CHARTS PAGE ──────────────────────────────────────────────────────────────
-function ChartsPage({charts,notify,user,setTab}){
+function ChartsPage({charts,sheetCharts,notify,user,setTab}){
   const [selBrand,setSelBrand]=useState(null);
   const [q,setQ]=useState('');
-  const brandCount=id=>charts.filter(c=>c.brandId===id||c.brand===ECDIS_BRANDS.find(b=>b.id===id)?.name).length;
-  const filtered=selBrand?charts.filter(c=>(c.brandId===selBrand||c.brand===ECDIS_BRANDS.find(b=>b.id===selBrand)?.name)&&smartMatch(c,q)):[];
+  const [showSugg,setShowSugg]=useState(false);
+
+  // Normalize sheet chart rows once
+  const normalizedSheet=useMemo(()=>
+    (sheetCharts||[]).map((r,i)=>normalizeSheetRow(r,i,'sc'))
+  ,[sheetCharts]);
+
+  // Merge Firebase + Sheet (de-dupe by fileName)
+  const allCharts=useMemo(()=>{
+    const fbNames=new Set(charts.map(c=>c.fileName?.toLowerCase()));
+    const extra=normalizedSheet.filter(c=>c.fileName&&!fbNames.has(c.fileName.toLowerCase()));
+    return[...charts,...extra];
+  },[charts,normalizedSheet]);
+
+  // Detect brand for a chart (works for both Firebase and sheet data)
+  const detectBrand=(c)=>{
+    const hay=[c.brand,c.brandId,c.model,c.keywords,c.fileName].join(' ').toLowerCase();
+    return ECDIS_BRANDS.find(b=>
+      hay.includes(b.name.toLowerCase())||hay.includes(b.id)
+    )||null;
+  };
+
+  const brandCount=id=>{
+    const b=ECDIS_BRANDS.find(x=>x.id===id);
+    if(!b) return 0;
+    return allCharts.filter(c=>{
+      const d=detectBrand(c);
+      return d?.id===id||c.brandId===id||c.brand===b.name;
+    }).length;
+  };
+
   const sb=ECDIS_BRANDS.find(b=>b.id===selBrand);
+
+  // Charts that belong to selected brand
+  const brandCharts=useMemo(()=>{
+    if(!selBrand) return[];
+    const b=ECDIS_BRANDS.find(x=>x.id===selBrand);
+    return allCharts.filter(c=>{
+      const d=detectBrand(c);
+      return d?.id===selBrand||c.brandId===selBrand||c.brand===b?.name;
+    });
+  },[selBrand,allCharts]);
+
+  // Suggestions for chart search within brand
+  const suggestions=useMemo(()=>{
+    if(!q.trim()||q.length<2) return[];
+    const ql=q.toLowerCase();
+    const seen=new Set();
+    const hits=[];
+    brandCharts.forEach(c=>{
+      [c.fileName,c.portName,c.region].filter(Boolean).forEach(s=>{
+        if(s.toLowerCase().includes(ql)&&!seen.has(s.toLowerCase())){
+          seen.add(s.toLowerCase());hits.push(s);
+        }
+      });
+    });
+    return hits.slice(0,8);
+  },[q,brandCharts]);
+
+  const filtered=brandCharts.filter(c=>smartMatch(c,q));
 
   const handleDL=(c)=>{
     if(!user){notify('🔐 Login required','error');setTab('login');return;}
@@ -1354,17 +1519,19 @@ function ChartsPage({charts,notify,user,setTab}){
     else notify('File link not set. Contact admin.','error');
   };
 
+  const pickSugg=(s)=>{setQ(s);setShowSugg(false);};
+
   return(
     <div className="section">
       {!selBrand?(
         <>
           <div className="sec-hdr">
-            <div className="sec-title">📊 User Chart Files</div>
-            <span className="badge badge-gold">{ECDIS_BRANDS.length} ECDIS Brands</span>
+            <div className="sec-title">📊 ECDIS Chart Files</div>
+            <span className="badge badge-gold">{ECDIS_BRANDS.length} Brands · {allCharts.length} charts</span>
           </div>
           <div className="info-box">
             <strong style={{color:'var(--cyan)'}}>Step 1:</strong> Select your ECDIS brand →&nbsp;
-            <strong style={{color:'var(--cyan)'}}>Step 2:</strong> Search by port name →&nbsp;
+            <strong style={{color:'var(--cyan)'}}>Step 2:</strong> Search by port or region →&nbsp;
             <strong style={{color:'var(--cyan)'}}>Step 3:</strong> Download chart file
           </div>
           {!user&&<div className="warn-box">🔐 Login required to download. <span style={{cursor:'pointer',textDecoration:'underline'}} onClick={()=>setTab('login')}>Register free →</span></div>}
@@ -1373,7 +1540,7 @@ function ChartsPage({charts,notify,user,setTab}){
               const cnt=brandCount(b.id);
               return(
                 <div key={b.id} className={`brand-card ${selBrand===b.id?'sel':''}`}
-                  style={{borderColor:cnt>0?b.color+'66':'var(--border)'}} onClick={()=>setSelBrand(b.id)}>
+                  style={{borderColor:cnt>0?b.color+'66':'var(--border)'}} onClick={()=>{setSelBrand(b.id);setQ('');}}>
                   <div className="brand-emoji">{b.emoji}</div>
                   <div className="brand-name" style={{color:cnt>0?b.color:'var(--text2)'}}>{b.name}</div>
                   <div className="brand-models">{b.models}</div>
@@ -1397,31 +1564,73 @@ function ChartsPage({charts,notify,user,setTab}){
             <span className="badge badge-gold">{brandCount(selBrand)} chart files</span>
           </div>
           {!user&&<div className="warn-box">🔐 Login required. <span style={{cursor:'pointer',textDecoration:'underline'}} onClick={()=>setTab('login')}>Login / Register →</span></div>}
-          <div style={{display:'flex',gap:8,marginBottom:'1rem'}}>
-            <div className="siw" style={{flex:1}}>
-              <span className="si-ic">🔍</span>
-              <input className="si" style={{paddingLeft:40}} placeholder={`Search port name for ${sb?.name}…`} value={q} onChange={e=>setQ(e.target.value)} autoFocus/>
-            </div>
-            {q&&<button className="btn btn-secondary" onClick={()=>setQ('')}>✕</button>}
-          </div>
-          {filtered.length===0
-            ?<div className="empty"><div className="empty-icon">{sb?.emoji}</div><div className="empty-t">{brandCount(selBrand)===0?'No Charts Uploaded Yet':'No Results'}</div><div className="empty-d">{brandCount(selBrand)===0?'Admin will upload charts for this brand soon.':'Try a different keyword.'}</div></div>
-            :<div className="files-grid">{filtered.map(c=>(
-              <div key={c.id} className="file-card">
-                <div className="file-icon">📊</div>
-                <div className="file-name">{c.fileName}</div>
-                {c.portName&&<div className="file-port">⚓ {c.portName}</div>}
-                <div className="file-tags">
-                  <span className="ftag tag-chart">Chart File</span>
-                  <span className="ftag tag-brand">{c.brand}</span>
-                  {c.region&&<span className="ftag tag-rtz">{c.region}</span>}
-                </div>
-                {user
-                  ?<button className="dl-btn" onClick={()=>handleDL(c)} disabled={!c.fileUrl}>{c.fileUrl?'⬇ Download Chart File':'❌ Link Not Set'}</button>
-                  :<button className="login-req" onClick={()=>setTab('login')}>🔐 Login to Download</button>
-                }
+
+          {/* SEARCH WITH SUGGESTIONS */}
+          <div style={{position:'relative',marginBottom:'1rem'}}>
+            <div style={{display:'flex',gap:8}}>
+              <div className="siw" style={{flex:1}}>
+                <span className="si-ic">🔍</span>
+                <input
+                  className="si"
+                  style={{paddingLeft:40}}
+                  placeholder={`Search port, region, file name for ${sb?.name}…`}
+                  value={q}
+                  autoFocus
+                  onChange={e=>{setQ(e.target.value);setShowSugg(true);}}
+                  onFocus={()=>setShowSugg(true)}
+                  onBlur={()=>setTimeout(()=>setShowSugg(false),180)}
+                />
               </div>
-            ))}</div>
+              {q&&<button className="btn btn-secondary" onClick={()=>{setQ('');setShowSugg(false);}}>✕</button>}
+            </div>
+            {showSugg&&suggestions.length>0&&(
+              <div style={{position:'absolute',top:'100%',left:0,right:0,zIndex:300,
+                background:'var(--card)',border:'1px solid var(--border)',borderRadius:10,
+                boxShadow:'0 8px 28px rgba(0,0,0,0.5)',marginTop:4,overflow:'hidden'}}>
+                {suggestions.map((s,i)=>(
+                  <div key={i}
+                    onMouseDown={()=>pickSugg(s)}
+                    style={{padding:'10px 14px',cursor:'pointer',display:'flex',alignItems:'center',gap:10,
+                      borderBottom:'1px solid rgba(255,255,255,0.04)',transition:'background 0.15s'}}
+                    onMouseEnter={e=>e.currentTarget.style.background='rgba(240,165,0,0.08)'}
+                    onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
+                    <span style={{color:'var(--gold)',fontSize:'0.85rem'}}>🔎</span>
+                    <span style={{fontSize:'0.84rem'}}>{s}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {filtered.length===0
+            ?<div className="empty">
+              <div className="empty-icon">{sb?.emoji}</div>
+              <div className="empty-t">{brandCount(selBrand)===0?'No Charts Uploaded Yet':'No Results'}</div>
+              <div className="empty-d">{brandCount(selBrand)===0?'Admin will upload charts for this brand soon.':'Try a different port name or keyword.'}</div>
+            </div>
+            :<div className="files-grid">{filtered.map(c=>{
+              const brand=detectBrand(c)||sb;
+              return(
+                <div key={c.id} className="file-card">
+                  <div className="file-icon">📊</div>
+                  <div className="file-name">{c.fileName}</div>
+                  {c.portName&&<div className="file-port">⚓ {c.portName}</div>}
+                  {c.model&&<div style={{fontSize:'0.72rem',color:'#A78BFA',marginBottom:6}}>🖥 Model: {c.model}</div>}
+                  <div className="file-tags">
+                    <span className="ftag tag-chart">Chart File</span>
+                    <span className="ftag tag-brand" style={{color:brand?.color}}>{brand?.emoji} {c.brand||brand?.name}</span>
+                    {c.region&&<span className="ftag tag-rtz">{c.region}</span>}
+                    {c.source==='sheet'&&<span className="ftag" style={{background:'rgba(0,200,150,0.1)',color:'var(--green)',border:'1px solid rgba(0,200,150,0.2)'}}>Live Sheet</span>}
+                  </div>
+                  {user
+                    ?<button className="dl-btn" onClick={()=>handleDL(c)} disabled={!c.fileUrl}>
+                      {c.fileUrl?'⬇ Download Chart File':'❌ Link Not Set'}
+                    </button>
+                    :<button className="login-req" onClick={()=>setTab('login')}>🔐 Login to Download</button>
+                  }
+                </div>
+              );
+            })}</div>
           }
         </>
       )}
@@ -2022,8 +2231,8 @@ export default function App(){
         <div style={{flex:1,display:'flex',flexDirection:'column',minHeight:0,overflow:isPlannerFull?'hidden':'auto'}}>
           {loading&&<div className="loading"><div className="spin"/><span>Connecting to Firebase…</span></div>}
           {!loading&&tab==='home'    &&<HomePage routes={routes} charts={charts} onSearch={handleSearch} setTab={switchTab} user={user}/>}
-          {!loading&&tab==='routes'  &&<RoutesPage routes={routes} searchQuery={searchQ} notify={notify} user={user} setTab={switchTab}/>}
-          {!loading&&tab==='charts'  &&<ChartsPage charts={charts} notify={notify} user={user} setTab={switchTab}/>}
+          {!loading&&tab==='routes'  &&<RoutesPage routes={routes} sheetRoutes={sheetRoutes} searchQuery={searchQ} notify={notify} user={user} setTab={switchTab}/>}
+          {!loading&&tab==='charts'  &&<ChartsPage charts={charts} sheetCharts={sheetCharts} notify={notify} user={user} setTab={switchTab}/>}
           {!loading&&tab==='planner' &&<RoutePlannerPage notify={notify}/>}
           {!loading&&tab==='login'   &&<LoginPage notify={notify} onLogin={u=>{setUser(u);setTab('home');}}/>}
           {!loading&&tab==='admin'   &&<AdminPage notify={notify} routes={routes} setRoutes={setRoutes} charts={charts} setCharts={setCharts} sheetRoutes={sheetRoutes} sheetCharts={sheetCharts} refreshSheets={fetchSheets} sheetLoading={sheetLoading}/>}
