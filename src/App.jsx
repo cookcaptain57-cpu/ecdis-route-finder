@@ -44,6 +44,9 @@ const ECDIS_BRANDS = [
 
 const ROUTE_TYPES = ["Ocean","Coastal","Deep Sea","Strait","River","Port Approach","Anchorage"];
 
+// ─── ADMIN CONFIG — change this to your real admin email ──────────────────────
+const ADMIN_EMAIL = 'ecdisroutes@gmail.com';
+
 // ─── PORTS DATABASE ───────────────────────────────────────────────────────────
 const PORTS_DB = [
   { id:"MUM", name:"Mumbai",          country:"India",       lat:18.93,  lon:72.83,  keywords:"mum mumbai bombay india" },
@@ -1460,7 +1463,7 @@ function RoutesPage({routes,sheetRoutes,searchQuery,notify,user,setTab}){
 }
 
 // ─── CHARTS PAGE ──────────────────────────────────────────────────────────────
-function ChartsPage({charts,sheetCharts,notify,user,setTab}){
+function ChartsPage({charts,sheetCharts,notify,user,setTab,isAdmin}){
   const [selBrand,setSelBrand]=useState(null);
   const [q,setQ]=useState('');
   const [showSugg,setShowSugg]=useState(false);
@@ -1596,8 +1599,8 @@ function ChartsPage({charts,sheetCharts,notify,user,setTab}){
                 </div>
               );
             })}
-            {/* All Sheet Charts fallback */}
-            {normalizedSheet.length>0&&(
+            {/* All Sheet Charts — admin only */}
+            {isAdmin&&normalizedSheet.length>0&&(
               <div className="brand-card" style={{borderColor:'rgba(0,200,150,0.4)',gridColumn:'1/-1',display:'flex',flexDirection:'row',alignItems:'center',gap:14,padding:'12px 16px'}}
                 onClick={()=>{setSelBrand('all-sheet');setQ('');}}>
                 <div style={{fontSize:'1.6rem'}}>🔄</div>
@@ -1701,7 +1704,8 @@ function ChartsPage({charts,sheetCharts,notify,user,setTab}){
 // ─── LOGIN PAGE ───────────────────────────────────────────────────────────────
 function LoginPage({notify,onLogin}){
   const [mode,setMode]=useState('login');
-  const [email,setEmail]=useState('');const [pass,setPass]=useState('');const [name,setName]=useState('');
+  const [email,setEmail]=useState('');const [pass,setPass]=useState('');
+  const [name,setName]=useState('');const [phone,setPhone]=useState('');
   const [loading,setLoading]=useState(false);const [err,setErr]=useState('');const [ok,setOk]=useState('');
 
   const doLogin=async()=>{
@@ -1711,12 +1715,20 @@ function LoginPage({notify,onLogin}){
     setLoading(false);
   };
   const doSignup=async()=>{
+    if(!name.trim()){setErr('Please enter your full name.');return;}
+    if(!phone.trim()){setErr('Please enter your phone number.');return;}
     if(!email||!pass){setErr('Fill all fields.');return;}
     if(pass.length<6){setErr('Password min 6 characters.');return;}
     setLoading(true);setErr('');
     try{
       const c=await createUserWithEmailAndPassword(auth,email,pass);
-      await setDoc(doc(db,'users',c.user.uid),{email,name:name||email.split('@')[0],createdAt:serverTimestamp(),role:'user'});
+      await setDoc(doc(db,'users',c.user.uid),{
+        email,
+        name:name.trim(),
+        phone:phone.trim(),
+        createdAt:serverTimestamp(),
+        role:'user'
+      });
       notify('Account created! 🎉','success');onLogin(c.user);
     }catch(e){setErr(e.code==='auth/email-already-in-use'?'Email already registered. Login instead.':'Error: '+e.message);}
     setLoading(false);
@@ -1744,7 +1756,10 @@ function LoginPage({notify,onLogin}){
           </div>
         )}
         <div className="info-box" style={{fontSize:'0.74rem'}}>🆓 Free account · Access all RTZ routes &amp; ECDIS charts</div>
-        {mode==='signup'&&<div className="ff"><label className="fl">Your Name</label><input className="fi" placeholder="Captain Ahmed" value={name} onChange={e=>setName(e.target.value)}/></div>}
+        {mode==='signup'&&<>
+          <div className="ff"><label className="fl">Full Name *</label><input className="fi" placeholder="Capt. Ahmed Khan" value={name} onChange={e=>setName(e.target.value)}/></div>
+          <div className="ff"><label className="fl">Phone Number *</label><input className="fi" type="tel" placeholder="+91 9876543210" value={phone} onChange={e=>setPhone(e.target.value)}/></div>
+        </>}
         <div className="ff"><label className="fl">Email</label><input className="fi" type="email" placeholder="officer@ship.com" value={email} onChange={e=>setEmail(e.target.value)} onKeyDown={e=>e.key==='Enter'&&(mode==='login'?doLogin():mode==='signup'?doSignup():doReset())}/></div>
         {mode!=='reset'&&<div className="ff"><label className="fl">Password</label><input className="fi" type="password" placeholder="Min 6 characters" value={pass} onChange={e=>setPass(e.target.value)} onKeyDown={e=>e.key==='Enter'&&(mode==='login'?doLogin():doSignup())}/></div>}
         {err&&<div className="err-box">{err}</div>}
@@ -1776,7 +1791,14 @@ function AdminPage({notify,routes,setRoutes,charts,setCharts,sheetRoutes,sheetCh
 
   const login=async()=>{
     setLoading(true);setErr('');
-    try{await signInWithEmailAndPassword(auth,email,pass);}
+    try{
+      const c=await signInWithEmailAndPassword(auth,email,pass);
+      if(c.user.email!==ADMIN_EMAIL){
+        await signOut(auth);
+        setErr('❌ Access denied. This portal is for admins only.');
+        setLoading(false);return;
+      }
+    }
     catch{setErr('Invalid credentials.');}
     setLoading(false);
   };
@@ -2169,12 +2191,13 @@ function AdminPage({notify,routes,setRoutes,charts,setCharts,sheetRoutes,sheetCh
                 ?<div className="empty"><div className="empty-icon">👥</div><div className="empty-t">No Users Yet</div><div className="empty-d">Users appear here after they register</div></div>
                 :<div className="tw">
                   <table className="tbl">
-                    <thead><tr><th>#</th><th>Name</th><th>Email</th><th>Joined</th><th>Role</th></tr></thead>
+                    <thead><tr><th>#</th><th>Name</th><th>Email</th><th>Phone</th><th>Joined</th><th>Role</th></tr></thead>
                     <tbody>{users.map((u,i)=>(
                       <tr key={u.id}>
                         <td style={{color:'var(--text3)'}}>{i+1}</td>
-                        <td>{u.name||'—'}</td>
-                        <td style={{color:'var(--cyan)',fontSize:'0.78rem'}}>{u.email}</td>
+                        <td style={{color:'var(--cyan)',fontWeight:600}}>{u.name||'—'}</td>
+                        <td style={{color:'var(--text2)',fontSize:'0.78rem'}}>{u.email}</td>
+                        <td style={{color:'var(--gold)',fontSize:'0.78rem'}}>{u.phone||'—'}</td>
                         <td style={{color:'var(--text2)',fontSize:'0.72rem'}}>{u.createdAt?.toDate?.()?.toLocaleDateString()||'—'}</td>
                         <td><span className="badge">{u.role||'user'}</span></td>
                       </tr>
@@ -2197,6 +2220,7 @@ export default function App(){
   const [notif,setNotif]=useState(null);
   const [menuOpen,setMenuOpen]=useState(false);
   const [user,setUser]=useState(null);
+  const [userProfile,setUserProfile]=useState(null); // Firestore profile {name,phone,...}
   const [routes,setRoutes]=useState([]);
   const [charts,setCharts]=useState([]);
   const [loading,setLoading]=useState(true);
@@ -2204,6 +2228,8 @@ export default function App(){
   const [sheetRoutes,setSheetRoutes]=useState([]);
   const [sheetCharts,setSheetCharts]=useState([]);
   const [sheetLoading,setSheetLoading]=useState(false);
+
+  const isAdmin = user?.email===ADMIN_EMAIL;
 
   const notify=(msg,type='success')=>setNotif({msg,type,key:Date.now()});
 
@@ -2228,7 +2254,21 @@ export default function App(){
   };
 
   useEffect(()=>{fetchSheets();},[]);
-  useEffect(()=>{const u=onAuthStateChanged(auth,u=>setUser(u));return()=>u();},[]);
+  useEffect(()=>{
+    const unsub=onAuthStateChanged(auth,async u=>{
+      setUser(u);
+      if(u){
+        try{
+          const {getDoc,doc:firestoreDoc}=await import('firebase/firestore');
+          const snap=await getDoc(firestoreDoc(db,'users',u.uid));
+          setUserProfile(snap.exists()?{id:snap.id,...snap.data()}:null);
+        }catch{setUserProfile(null);}
+      }else{
+        setUserProfile(null);
+      }
+    });
+    return()=>unsub();
+  },[]);
   useEffect(()=>{
     const load=async()=>{
       try{
@@ -2246,7 +2286,8 @@ export default function App(){
     {k:'routes',  i:'🗺', l:'Routes'},
     {k:'charts',  i:'📊', l:'Charts',  cls:'gold'},
     {k:'planner', i:'✏️', l:'Planner', cls:'green'},
-    {k:'admin',   i:'🛡', l:'Admin'},
+    // Admin tab ONLY when logged in with admin email
+    ...(isAdmin?[{k:'admin',i:'🛡',l:'Admin'}]:[]),
   ];
 
   const handleSearch=(q)=>{setSearchQ(q);setTab('routes');setMenuOpen(false);};
@@ -2276,7 +2317,9 @@ export default function App(){
               </button>
             ))}
             {user
-              ?<div className="uc" onClick={()=>{signOut(auth);notify('Logged out','info');}}>👤 {user.email.split('@')[0]} · Logout</div>
+              ?<div className="uc" onClick={()=>{signOut(auth);notify('Logged out','info');}}>
+                👤 {userProfile?.name?.split(' ')[0]||user.email.split('@')[0]}{isAdmin?' 🛡':''} · Logout
+              </div>
               :<button className="ntab" onClick={()=>switchTab('login')}>🔐 Login</button>
             }
           </div>
@@ -2290,7 +2333,9 @@ export default function App(){
         <div className={`mob-menu ${menuOpen?'open':''}`}>
           {TABS.map(t=><button key={t.k} className={`mtab ${tab===t.k?'active':''}`} onClick={()=>switchTab(t.k)}>{t.i} {t.l}</button>)}
           {user
-            ?<button className="mtab" onClick={()=>{signOut(auth);notify('Logged out','info');setMenuOpen(false);}}>🚪 Logout ({user.email.split('@')[0]})</button>
+            ?<button className="mtab" onClick={()=>{signOut(auth);notify('Logged out','info');setMenuOpen(false);}}>
+              🚪 Logout ({userProfile?.name?.split(' ')[0]||user.email.split('@')[0]})
+            </button>
             :<button className="mtab" onClick={()=>switchTab('login')}>🔐 Login / Register</button>
           }
         </div>
@@ -2300,10 +2345,13 @@ export default function App(){
           {loading&&<div className="loading"><div className="spin"/><span>Connecting to Firebase…</span></div>}
           {!loading&&tab==='home'    &&<HomePage routes={routes} charts={charts} onSearch={handleSearch} setTab={switchTab} user={user}/>}
           {!loading&&tab==='routes'  &&<RoutesPage routes={routes} sheetRoutes={sheetRoutes} searchQuery={searchQ} notify={notify} user={user} setTab={switchTab}/>}
-          {!loading&&tab==='charts'  &&<ChartsPage charts={charts} sheetCharts={sheetCharts} notify={notify} user={user} setTab={switchTab}/>}
+          {!loading&&tab==='charts'  &&<ChartsPage charts={charts} sheetCharts={sheetCharts} notify={notify} user={user} setTab={switchTab} isAdmin={isAdmin}/>}
           {!loading&&tab==='planner' &&<RoutePlannerPage notify={notify}/>}
           {!loading&&tab==='login'   &&<LoginPage notify={notify} onLogin={u=>{setUser(u);setTab('home');}}/>}
-          {!loading&&tab==='admin'   &&<AdminPage notify={notify} routes={routes} setRoutes={setRoutes} charts={charts} setCharts={setCharts} sheetRoutes={sheetRoutes} sheetCharts={sheetCharts} refreshSheets={fetchSheets} sheetLoading={sheetLoading}/>}
+          {!loading&&tab==='admin'   &&(isAdmin
+            ?<AdminPage notify={notify} routes={routes} setRoutes={setRoutes} charts={charts} setCharts={setCharts} sheetRoutes={sheetRoutes} sheetCharts={sheetCharts} refreshSheets={fetchSheets} sheetLoading={sheetLoading}/>
+            :<div className="section"><div className="empty"><div className="empty-icon">🔒</div><div className="empty-t">Admin Access Only</div><div className="empty-d">Please login with admin credentials to access this panel.</div></div></div>
+          )}
         </div>
 
         {/* FOOTER */}
