@@ -273,12 +273,15 @@ const SEA_WP = {
   // ── Malacca Strait — CENTERLINE coordinates (all in open water) ──────────────
   // Strait runs between Sumatra (W) and Malay Peninsula (E), NW→SE
   // Width ~40-300km. Ship lane on Sumatra side at ~99-103°E
-  MALACCA_NW:  {lat:6.20,   lon:98.20,  name:"Malacca NW Approach"},  // Andaman Sea, entering strait
-  MALACCA_N:   {lat:5.00,   lon:99.20,  name:"N.Malacca Strait"},      // North strait, clear of One Fathom Bank
-  MALACCA_C1:  {lat:4.00,   lon:99.80,  name:"Malacca Strait Central"},// Mid-north strait
-  MALACCA_C:   {lat:2.80,   lon:100.80, name:"C.Malacca Strait"},      // Central strait off Port Klang
-  MALACCA_S1:  {lat:1.80,   lon:102.00, name:"S.Malacca Approach"},    // South strait off Malacca city
-  MALACCA_S:   {lat:1.15,   lon:103.40, name:"Singapore Strait W"},    // Western Singapore Strait entrance
+  // ── Malacca Strait — coordinates from PortToPort.exe IMO TSS SHP data ────────
+  MALACCA_NW:  {lat:5.90,   lon:98.50,  name:"Malacca NW Approach"},
+  MALACCA_N:   {lat:3.09,   lon:101.02, name:"N.Malacca (One Fathom Bank)"},
+  MALACCA_C1:  {lat:2.90,   lon:100.67, name:"Malacca Strait Central-N"},
+  MALACCA_C:   {lat:2.33,   lon:101.35, name:"C.Malacca Strait"},
+  MALACCA_S1:  {lat:1.83,   lon:101.80, name:"S.Malacca Strait"},
+  MALACCA_S2:  {lat:1.56,   lon:102.39, name:"Malacca S (Durian Strait)"},
+  MALACCA_S3:  {lat:1.15,   lon:103.41, name:"Singapore Strait West"},
+  MALACCA_S:   {lat:1.18,   lon:103.82, name:"Singapore Strait East"},
   LOMBOK:      {lat:-8.50,  lon:115.80, name:"Lombok Strait"},
   SUNDA:       {lat:-6.10,  lon:105.70, name:"Sunda Strait"},
   PANAMA_P:    {lat:8.90,   lon:-79.50, name:"Panama Canal Pacific"},
@@ -392,9 +395,9 @@ const PORT_EXIT = {
   BND:  ['HORMUZ'],
   // SE Asia
   SIN:  [],
-  LEM:  ['MALACCA_S','MALACCA_S1','MALACCA_C','MALACCA_C1'],
-  BKK:  ['MALACCA_S','MALACCA_S1','MALACCA_C','MALACCA_C1'],
-  PKL:  ['MALACCA_S','MALACCA_S1','MALACCA_C','MALACCA_C1'],
+  LEM:  ['MALACCA_S','MALACCA_S3','MALACCA_S2','MALACCA_S1'],
+  BKK:  ['MALACCA_S','MALACCA_S3','MALACCA_S2','MALACCA_S1'],
+  PKL:  ['MALACCA_S','MALACCA_S3','MALACCA_S2','MALACCA_S1'],
   JHB:  [],
   PGU:  ['MALACCA_N','MALACCA_C1','MALACCA_C'],
   // Bay of Bengal
@@ -490,10 +493,10 @@ function buildAutoRoute(fromPort, toPort) {
       // Coming from west/Indian Ocean — MUST go around Sri Lanka before Andaman
       // IND_TIP already added by PORT_EXIT for west India ports
       // Add Sri Lanka bypass: go south of Sri Lanka then northeast
-      add('PALK_W','LANKA_SW','LANKA_S','LANKA_SE','IND_NE','ANDAMAN_W','ANDAMAN_S','MALACCA_NW','MALACCA_N','MALACCA_C1','MALACCA_C','MALACCA_S1','MALACCA_S');
+      add('PALK_W','LANKA_SW','LANKA_S','LANKA_SE','IND_NE','ANDAMAN_W','ANDAMAN_S','MALACCA_NW','MALACCA_N','MALACCA_C1','MALACCA_C','MALACCA_S1','MALACCA_S2','MALACCA_S3','MALACCA_S');
     } else {
       // Bay of Bengal / East India — already east of Sri Lanka
-      add('ANDAMAN_W','ANDAMAN_S','MALACCA_NW','MALACCA_N','MALACCA_C1','MALACCA_C','MALACCA_S1','MALACCA_S');
+      add('ANDAMAN_W','ANDAMAN_S','MALACCA_NW','MALACCA_N','MALACCA_C1','MALACCA_C','MALACCA_S1','MALACCA_S2','MALACCA_S3','MALACCA_S');
     }
   }
   if(needsMalaccaRev) {
@@ -521,7 +524,7 @@ function buildAutoRoute(fromPort, toPort) {
     else if(isWestIndia(to)||isIndianOcn(to)) add('IND_W');
     else if(isBayBengal(to)||isSriLanka(to))  add('IND_W','PALK_W','LANKA_SW','LANKA_S','LANKA_SE','IND_NE');
     else if(isEastIndia(to)) add('IND_W','PALK_W','LANKA_SW','LANKA_S','LANKA_SE','IND_NE','IND_E_COAST');
-    else if(isSeAsia(to)||isFarEast(to)) add('IND_W','PALK_W','LANKA_SW','LANKA_S','LANKA_SE','IND_NE','ANDAMAN_S','MALACCA_NW','MALACCA_N','MALACCA_C1','MALACCA_C','MALACCA_S1','MALACCA_S');
+    else if(isSeAsia(to)||isFarEast(to)) add('IND_W','PALK_W','LANKA_SW','LANKA_S','LANKA_SE','IND_NE','ANDAMAN_S','MALACCA_NW','MALACCA_N','MALACCA_C1','MALACCA_C','MALACCA_S1','MALACCA_S2','MALACCA_S3','MALACCA_S');
   }
   if(needsSuezRev){
     if(isPersGulf(from))     add('HORMUZ','HORMUZ_E');
