@@ -492,289 +492,381 @@ function totalRouteNM(wps) {
 
 // ─── SEA CORRIDORS — named open-ocean waypoints ships actually use ────────────
 const SEA_WP = {
-  // Straits & Canals
-  SUEZ_N:     {lat:31.27, lon:32.33, name:"Suez Canal North"},
-  SUEZ_S:     {lat:29.92, lon:32.55, name:"Suez Canal South"},
-  BAB:        {lat:12.58, lon:43.38, name:"Bab-el-Mandeb"},
-  ADEN_G:     {lat:11.80, lon:45.50, name:"Gulf of Aden"},
-  HORMUZ:     {lat:26.35, lon:56.50, name:"Strait of Hormuz"},
-  HORMUZ_E:   {lat:24.00, lon:58.50, name:"Gulf of Oman East"},
-  MALACCA_N:  {lat:5.60,  lon:100.30,name:"N.Malacca Strait"},
-  MALACCA_S:  {lat:1.20,  lon:103.80,name:"S.Malacca/Singapore"},
-  LOMBOK:     {lat:-8.50, lon:115.80,name:"Lombok Strait"},
-  SUNDA:      {lat:-6.10, lon:105.70,name:"Sunda Strait"},
-  PANAMA_P:   {lat:8.90,  lon:-79.50,name:"Panama Canal Pacific"},
-  PANAMA_A:   {lat:9.38,  lon:-79.90,name:"Panama Canal Atlantic"},
-  GIBRALTAR:  {lat:35.98, lon:-5.50, name:"Strait of Gibraltar"},
-  DOVER:      {lat:51.05, lon:1.50,  name:"Dover Strait"},
-  CAPE_GH:    {lat:-34.50,lon:18.00, name:"Cape of Good Hope"},
-  CAPE_HORN:  {lat:-56.00,lon:-67.50,name:"Cape Horn"},
-  // Open ocean corridor waypoints
-  MED_W:      {lat:37.50, lon:5.00,  name:"W.Mediterranean"},
-  MED_E:      {lat:34.50, lon:24.00, name:"E.Mediterranean"},
-  RED_N:      {lat:27.50, lon:34.00, name:"N.Red Sea"},
-  RED_S:      {lat:15.00, lon:41.50, name:"S.Red Sea"},
-  IND_W:      {lat:10.00, lon:65.00, name:"W.Indian Ocean"},
-  IND_C:      {lat:5.00,  lon:73.00, name:"C.Indian Ocean"},
-  IND_NE:     {lat:8.00,  lon:83.00, name:"NE.Indian Ocean"},
-  IND_SE:     {lat:-15.0, lon:80.00, name:"SE.Indian Ocean"},
-  IND_S:      {lat:-30.0, lon:65.00, name:"S.Indian Ocean"},
-  IND_SW:     {lat:-25.0, lon:40.00, name:"SW.Indian Ocean"},
-  AFR_E:      {lat:-10.0, lon:42.00, name:"E.Africa Offshore"},
-  SOCOTRA:    {lat:12.50, lon:54.00, name:"Socotra Passage"},
-  LAKSHADWEEP:{lat:10.00, lon:72.50, name:"Lakshadweep Sea"},
-  ANDAMAN:    {lat:10.50, lon:93.00, name:"Andaman Sea"},
-  S_CHINA_N:  {lat:14.00, lon:112.00,name:"N.South China Sea"},
-  S_CHINA_S:  {lat:3.00,  lon:108.00,name:"S.South China Sea"},
-  PHILIP:     {lat:10.00, lon:122.00,name:"Philippine Sea"},
-  EAST_CHINA: {lat:27.00, lon:124.00,name:"E.China Sea"},
-  JAPAN_SEA:  {lat:37.00, lon:132.00,name:"Sea of Japan"},
-  PAC_NW:     {lat:48.00, lon:160.00,name:"NW.Pacific"},
-  PAC_NE:     {lat:40.00, lon:-150.0,name:"NE.Pacific"},
-  PAC_C:      {lat:5.00,  lon:-140.0,name:"C.Pacific"},
-  PAC_SW:     {lat:-20.0, lon:170.00,name:"SW.Pacific"},
-  PAC_SE:     {lat:-20.0, lon:-90.00,name:"SE.Pacific"},
-  ATLANTIC_N: {lat:45.00, lon:-30.00,name:"N.Atlantic"},
-  ATLANTIC_C: {lat:20.00, lon:-35.00,name:"C.Atlantic"},
-  ATLANTIC_S: {lat:-15.0, lon:-20.00,name:"S.Atlantic"},
-  ATLANTIC_SW:{lat:-40.0, lon:-40.00,name:"SW.Atlantic"},
-  CARIB:      {lat:15.00, lon:-75.00,name:"Caribbean Sea"},
-  GULF_MEX:   {lat:25.00, lon:-90.00,name:"Gulf of Mexico"},
-  AUS_S:      {lat:-38.0, lon:130.00,name:"S.Australia"},
-  AUS_W:      {lat:-25.0, lon:108.00,name:"W.Australia"},
-  AUS_N:      {lat:-12.0, lon:127.00,name:"N.Australia"},
-  TIMOR:      {lat:-9.50, lon:127.00,name:"Timor Sea"},
-  ARAFURA:    {lat:-12.0, lon:136.00,name:"Arafura Sea"},
-  TORRES:     {lat:-10.5, lon:142.50,name:"Torres Strait"},
-  CORAL:      {lat:-18.0, lon:152.00,name:"Coral Sea"},
-  TASMAN:     {lat:-38.0, lon:157.00,name:"Tasman Sea"},
-  BLACK_W:    {lat:43.00, lon:29.00, name:"W.Black Sea"},
-  BASC:       {lat:47.00, lon:-5.00, name:"Bay of Biscay"},
-  NORW:       {lat:62.00, lon:4.00,  name:"Norwegian Sea"},
-  NORTH_SEA:  {lat:56.00, lon:3.00,  name:"North Sea"},
+  // ── Straits & Canals ──────────────────────────────────────────────────────
+  SUEZ_N:      {lat:31.27,  lon:32.33,  name:"Suez Canal North"},
+  SUEZ_S:      {lat:29.92,  lon:32.55,  name:"Suez Canal South"},
+  BAB:         {lat:12.58,  lon:43.38,  name:"Bab-el-Mandeb"},
+  ADEN_G:      {lat:11.80,  lon:45.50,  name:"Gulf of Aden"},
+  HORMUZ:      {lat:26.35,  lon:56.50,  name:"Strait of Hormuz"},
+  HORMUZ_E:    {lat:23.50,  lon:59.00,  name:"Gulf of Oman East"},
+  MALACCA_NW:  {lat:6.50,   lon:99.00,  name:"NW Malacca Approach"},
+  MALACCA_N:   {lat:5.20,   lon:100.60, name:"N.Malacca Strait"},
+  MALACCA_C:   {lat:2.80,   lon:101.80, name:"C.Malacca Strait"},
+  MALACCA_S:   {lat:1.15,   lon:103.50, name:"S.Malacca/Singapore"},
+  LOMBOK:      {lat:-8.50,  lon:115.80, name:"Lombok Strait"},
+  SUNDA:       {lat:-6.10,  lon:105.70, name:"Sunda Strait"},
+  PANAMA_P:    {lat:8.90,   lon:-79.50, name:"Panama Canal Pacific"},
+  PANAMA_A:    {lat:9.38,   lon:-79.90, name:"Panama Canal Atlantic"},
+  GIBRALTAR:   {lat:35.98,  lon:-5.50,  name:"Strait of Gibraltar"},
+  DOVER:       {lat:51.05,  lon:1.50,   name:"Dover Strait"},
+  CAPE_GH:     {lat:-34.50, lon:18.00,  name:"Cape of Good Hope"},
+  CAPE_HORN:   {lat:-56.00, lon:-67.50, name:"Cape Horn"},
+
+  // ── INDIA COASTAL AVOIDANCE (critical — stops routes crossing land) ────────
+  // West India coast corridor going south
+  IND_W_COAST: {lat:14.00,  lon:73.00,  name:"W.India Offshore"},   // off Goa/Mangalore
+  IND_SW:      {lat:10.00,  lon:74.80,  name:"SW India Offshore"},  // off Kochi, clear of coast
+  IND_TIP_W:   {lat:7.50,   lon:76.50,  name:"India SW Tip"},       // west of Kanyakumari
+  IND_TIP:     {lat:6.00,   lon:77.50,  name:"India Southern Tip"}, // south of Kanyakumari, open water
+  IND_TIP_E:   {lat:7.00,   lon:79.00,  name:"India SE Tip"},       // east of tip, west of Sri Lanka
+  IND_SE:      {lat:9.00,   lon:80.50,  name:"SE India / Sri Lanka"},// between India & Sri Lanka
+  LANKA_S:     {lat:5.50,   lon:80.80,  name:"S.Sri Lanka Offshore"},// south of Sri Lanka
+  IND_NE:      {lat:8.50,   lon:84.00,  name:"NE.Indian Ocean"},    // open sea off Andhra
+  IND_E_COAST: {lat:11.00,  lon:81.50,  name:"E.India Offshore"},   // off Chennai/Vizag corridor
+  // Bay of Bengal corridor
+  BAY_SW:      {lat:10.00,  lon:82.50,  name:"SW Bay of Bengal"},
+  BAY_C:       {lat:13.50,  lon:87.00,  name:"C.Bay of Bengal"},
+  BAY_N:       {lat:18.00,  lon:90.00,  name:"N.Bay of Bengal"},
+  ANDAMAN_W:   {lat:11.00,  lon:92.00,  name:"W.Andaman Sea"},
+  ANDAMAN:     {lat:10.50,  lon:94.00,  name:"Andaman Sea"},
+  ANDAMAN_S:   {lat:6.50,   lon:95.00,  name:"S.Andaman/Nicobar"},
+
+  // ── Open ocean corridors ──────────────────────────────────────────────────
+  RED_N:       {lat:27.50,  lon:34.00,  name:"N.Red Sea"},
+  RED_S:       {lat:15.00,  lon:41.50,  name:"S.Red Sea"},
+  IND_W:       {lat:12.00,  lon:62.00,  name:"W.Indian Ocean"},
+  IND_C:       {lat:4.00,   lon:73.00,  name:"C.Indian Ocean"},
+  IND_SE:      {lat:-15.00, lon:80.00,  name:"SE.Indian Ocean"},
+  IND_S:       {lat:-30.00, lon:65.00,  name:"S.Indian Ocean"},
+  IND_SW2:     {lat:-25.00, lon:40.00,  name:"SW.Indian Ocean"},
+  AFR_E:       {lat:-10.00, lon:43.00,  name:"E.Africa Offshore"},
+  SOCOTRA:     {lat:12.00,  lon:54.00,  name:"Socotra Passage"},
+  LAKSHADWEEP: {lat:10.00,  lon:71.00,  name:"Lakshadweep Sea"},
+  S_CHINA_N:   {lat:14.00,  lon:112.00, name:"N.South China Sea"},
+  S_CHINA_S:   {lat:3.00,   lon:108.00, name:"S.South China Sea"},
+  PHILIP:      {lat:10.00,  lon:122.00, name:"Philippine Sea"},
+  EAST_CHINA:  {lat:27.00,  lon:124.00, name:"E.China Sea"},
+  JAPAN_SEA:   {lat:37.00,  lon:132.00, name:"Sea of Japan"},
+  PAC_NW:      {lat:48.00,  lon:160.00, name:"NW.Pacific"},
+  PAC_NE:      {lat:40.00,  lon:-150.0, name:"NE.Pacific"},
+  PAC_C:       {lat:5.00,   lon:-140.0, name:"C.Pacific"},
+  PAC_SW:      {lat:-20.00, lon:170.00, name:"SW.Pacific"},
+  PAC_SE:      {lat:-20.00, lon:-90.00, name:"SE.Pacific"},
+  ATLANTIC_N:  {lat:45.00,  lon:-30.00, name:"N.Atlantic"},
+  ATLANTIC_C:  {lat:20.00,  lon:-35.00, name:"C.Atlantic"},
+  ATLANTIC_S:  {lat:-15.00, lon:-20.00, name:"S.Atlantic"},
+  ATLANTIC_SW: {lat:-40.00, lon:-40.00, name:"SW.Atlantic"},
+  CARIB:       {lat:15.00,  lon:-75.00, name:"Caribbean Sea"},
+  GULF_MEX:    {lat:25.00,  lon:-90.00, name:"Gulf of Mexico"},
+  AUS_W:       {lat:-25.00, lon:108.00, name:"W.Australia"},
+  AUS_N:       {lat:-12.00, lon:127.00, name:"N.Australia"},
+  TIMOR:       {lat:-9.50,  lon:127.00, name:"Timor Sea"},
+  ARAFURA:     {lat:-12.00, lon:136.00, name:"Arafura Sea"},
+  TORRES:      {lat:-10.50, lon:142.50, name:"Torres Strait"},
+  CORAL:       {lat:-18.00, lon:152.00, name:"Coral Sea"},
+  TASMAN:      {lat:-38.00, lon:157.00, name:"Tasman Sea"},
+  BLACK_W:     {lat:43.00,  lon:29.00,  name:"W.Black Sea"},
+  BASC:        {lat:47.00,  lon:-5.00,  name:"Bay of Biscay"},
+  NORTH_SEA:   {lat:56.00,  lon:3.00,   name:"North Sea"},
+  MED_W:       {lat:37.50,  lon:5.00,   name:"W.Mediterranean"},
+  MED_E:       {lat:34.50,  lon:24.00,  name:"E.Mediterranean"},
 };
 
-// ─── AUTO ROUTE — proper sea-lane based routing ───────────────────────────────
+// ─── PORT EXIT CORRIDORS — tells the router how to leave each port safely ─────
+// Each entry: array of SEA_WP keys to insert right after departure
+const PORT_EXIT = {
+  // India West Coast — must go SW then around southern tip before heading east
+  MUM:  ['IND_W_COAST','IND_SW','IND_TIP_W','IND_TIP'],
+  KAN:  ['LAKSHADWEEP','IND_SW','IND_TIP_W','IND_TIP'],
+  KOC:  ['IND_SW','IND_TIP_W','IND_TIP'],
+  MOR:  ['IND_W_COAST','IND_SW','IND_TIP_W','IND_TIP'],
+  NEW:  ['IND_W_COAST','IND_SW','IND_TIP_W','IND_TIP'],
+  // India East Coast — exit east/southeast, no need to go around tip
+  CHE:  ['IND_E_COAST'],
+  VIS:  ['IND_E_COAST'],
+  PAR:  ['BAY_SW'],
+  HAL:  ['BAY_N','BAY_C'],
+  ENN:  ['IND_E_COAST'],
+  // Sri Lanka — go south of island
+  COL:  ['IND_TIP_E','LANKA_S'],
+  TRI:  ['IND_SE','LANKA_S'],
+  HAM2: ['LANKA_S'],
+  // Pakistan — through Arabian Sea
+  KAR:  ['IND_W'],
+  QPQ:  ['IND_W'],
+  GWD:  ['HORMUZ_E','IND_W'],
+  // Gulf ports — must exit through Hormuz
+  DXB:  ['HORMUZ'],
+  AUH:  ['HORMUZ'],
+  FUJ:  [],  // Fujairah is already outside Hormuz
+  SHJ:  ['HORMUZ'],
+  MCT:  [],  // Muscat is outside Gulf
+  DOH:  ['HORMUZ'],
+  RKH:  ['HORMUZ'],
+  BAH:  ['HORMUZ'],
+  KWI:  ['HORMUZ'],
+  JED:  ['RED_S'],
+  YAN:  ['RED_N'],
+  JUB:  ['HORMUZ'],
+  BAS:  ['HORMUZ'],
+  UMQ:  ['HORMUZ'],
+  BND:  ['HORMUZ'],
+  // SE Asia
+  SIN:  [],
+  LEM:  ['MALACCA_S','MALACCA_C'],
+  BKK:  ['MALACCA_S','MALACCA_C'],
+  PKL:  ['MALACCA_S','MALACCA_C'],
+  JHB:  [],
+  PGU:  ['MALACCA_N','MALACCA_C'],
+  // Bay of Bengal
+  CTG:  ['BAY_N'],
+  MGL:  ['BAY_N'],
+  RGN:  ['BAY_C','ANDAMAN_W'],
+  // China / Far East — exit through SCS
+  SHA:  ['EAST_CHINA'],
+  HKG:  ['S_CHINA_N'],
+  SZX:  ['S_CHINA_N'],
+  GZH:  ['S_CHINA_N'],
+  NGB:  ['EAST_CHINA'],
+  TJN:  ['EAST_CHINA','S_CHINA_N'],
+  QIN:  ['EAST_CHINA'],
+  DAL:  ['EAST_CHINA'],
+};
+
+// ─── AUTO ROUTE — sea-lane routing with coastal avoidance ─────────────────────
 function buildAutoRoute(fromPort, toPort) {
   const from = PORTS_DB.find(p => p.id === fromPort);
   const to   = PORTS_DB.find(p => p.id === toPort);
   if (!from || !to) return [];
 
-  // Region classifiers
-  const R = {
-    persGulf: p => p.lon>=48&&p.lon<58&&p.lat>22,
-    gulfOman: p => p.lon>=56&&p.lon<62&&p.lat>=21&&p.lat<26,
-    redSea:   p => p.lon>=32&&p.lon<44&&p.lat>=11&&p.lat<31,
-    indW:     p => p.lon>=44&&p.lon<80&&p.lat>=-10&&p.lat<25,
-    indSW:    p => p.lon>=30&&p.lon<80&&p.lat>=-35&&p.lat<-10,
-    sriLanka: p => p.lon>=79&&p.lon<82&&p.lat>=5&&p.lat<10,
-    bayBengal:p => p.lon>=80&&p.lon<97&&p.lat>=5&&p.lat<23,
-    seAsia:   p => p.lon>=97&&p.lon<120&&p.lat>=-10&&p.lat<20,
-    farEast:  p => p.lon>=120&&p.lat>=-5&&p.lat<45,
-    china:    p => p.lon>=108&&p.lon<130&&p.lat>=18&&p.lat<42,
-    japan:    p => p.lon>=129&&p.lat>=28&&p.lat<46,
-    korea:    p => p.lon>=125&&p.lon<132&&p.lat>=33&&p.lat<38,
-    med:      p => p.lon>-6&&p.lon<37&&p.lat>30&&p.lat<47,
-    europe:   p => (p.lon<20&&p.lat>40)||(p.lon>=-10&&p.lon<25&&p.lat>50),
-    ukNorth:  p => p.lon>=-10&&p.lon<5&&p.lat>=55&&p.lat<62,
-    baltic:   p => p.lon>9&&p.lon<32&&p.lat>53&&p.lat<66,
-    blackSea: p => p.lon>27&&p.lon<42&&p.lat>40&&p.lat<48,
-    wAfrica:  p => p.lon>=-20&&p.lon<10&&p.lat>=-10&&p.lat<20,
-    sAfrica:  p => p.lat<-20&&p.lon>10&&p.lon<40,
-    eAfrica:  p => p.lon>=36&&p.lon<50&&p.lat>=-30&&p.lat<15,
-    wAtl:     p => p.lon<-60&&p.lat>0&&p.lat<50,
-    eastUS:   p => p.lon>=-82&&p.lon<-65&&p.lat>=24&&p.lat<47,
-    gulfMex:  p => p.lon>=-100&&p.lon<-80&&p.lat>=18&&p.lat<32,
-    carib:    p => p.lon>=-88&&p.lon<-60&&p.lat>=8&&p.lat<24,
-    wCoast:   p => p.lon<=-100&&p.lat>=10&&p.lat<62,
-    sPac:     p => p.lon>150||p.lon<-130&&p.lat<-10,
-    australia:p => p.lon>=113&&p.lon<155&&p.lat>=-45&&p.lat<-10,
-    sAtl:     p => p.lon>=-55&&p.lon<20&&p.lat<-10,
-    sAmer:    p => p.lon>=-85&&p.lon<-30&&p.lat<10,
-    canal:    p => p.lon>=-82&&p.lon<-75&&p.lat>6&&p.lat<12,
-  };
-
-  const via = (...pts) => pts; // chain of SEA_WP keys
-
-  // Determine route chain between regions
   const wps = [];
+  const add = (...keys) => keys.forEach(k => { if(SEA_WP[k]) wps.push({...SEA_WP[k]}); });
 
-  const addVia = (...keys) => keys.forEach(k => { if(SEA_WP[k]) wps.push(SEA_WP[k]); });
+  // ── Helper region tests ────────────────────────────────────────────────────
+  const isWestIndia  = p => p.lon>=69 && p.lon<77  && p.lat>=8  && p.lat<24;
+  const isEastIndia  = p => p.lon>=77 && p.lon<88  && p.lat>=8  && p.lat<22;
+  const isBayBengal  = p => p.lon>=79 && p.lon<99  && p.lat>=5  && p.lat<24;
+  const isSriLanka   = p => p.lon>=79 && p.lon<82  && p.lat>=5  && p.lat<10;
+  const isIndianOcn  = p => p.lon>=44 && p.lon<80  && p.lat>=-10&& p.lat<25;
+  const isPersGulf   = p => p.lon>=48 && p.lon<58  && p.lat>22;
+  const isRedSea     = p => p.lon>=32 && p.lon<44  && p.lat>=11 && p.lat<31;
+  const isMalacca    = p => p.lon>=98 && p.lon<105 && p.lat>=1  && p.lat<8;
+  const isSeAsia     = p => p.lon>=98 && p.lon<120 && p.lat>=-10&& p.lat<22;
+  const isFarEast    = p => p.lon>=108&& p.lat>=-5 && p.lat<45;
+  const isJapanKorea = p => p.lon>=120&& p.lat>=28 && p.lat<46;
+  const isMed        = p => p.lon>-6  && p.lon<37  && p.lat>30  && p.lat<47;
+  const isEurope     = p => (p.lon<20 && p.lat>40) || (p.lon>=-10&&p.lon<25&&p.lat>50);
+  const isUKNorth    = p => p.lon>=-10&& p.lon<5   && p.lat>=55 && p.lat<62;
+  const isBaltic     = p => p.lon>9   && p.lon<32  && p.lat>53  && p.lat<66;
+  const isBlackSea   = p => p.lon>27  && p.lon<42  && p.lat>40  && p.lat<48;
+  const isEAfrica    = p => p.lon>=36 && p.lon<52  && p.lat>=-30&& p.lat<15;
+  const isWAfrica    = p => p.lon>=-20&& p.lon<10  && p.lat>=-10&& p.lat<20;
+  const isEastUS     = p => p.lon>=-82&& p.lon<-65 && p.lat>=24 && p.lat<47;
+  const isWestUS     = p => p.lon<=-100&&p.lat>=10 && p.lat<62;
+  const isCarib      = p => p.lon>=-88&& p.lon<-60 && p.lat>=8  && p.lat<24;
+  const isGulfMex    = p => p.lon>=-100&&p.lon<-80 && p.lat>=18 && p.lat<32;
+  const isSAmer      = p => p.lon>=-85&& p.lon<-30 && p.lat<12;
+  const isSAtl       = p => p.lon>=-55&& p.lon<20  && p.lat<-10;
+  const isAustralia  = p => p.lon>=113&& p.lon<155 && p.lat>=-45&& p.lat<-10;
+  const isPacific    = p => p.lon>155 || (p.lon<-130&& p.lat<-10);
 
-  const fR = Object.keys(R).find(k => R[k](from));
-  const tR = Object.keys(R).find(k => R[k](to));
+  // ── Apply port departure corridor ──────────────────────────────────────────
+  const fromExit = PORT_EXIT[from.id] || [];
+  fromExit.forEach(k => { if(SEA_WP[k]) wps.push({...SEA_WP[k]}); });
 
-  // ── SAME-REGION SHORTCUTS ──────────────────────────────────────────────────
-  // Persian Gulf <-> Gulf of Oman / Indian Ocean West
-  if(R.persGulf(from)&&!R.persGulf(to)){addVia('HORMUZ','HORMUZ_E');}
-  if(R.persGulf(to)&&!R.persGulf(from)){addVia('HORMUZ_E','HORMUZ');}
+  // ── After exit, determine the ocean-crossing waypoints ───────────────────
+  // Key concept: once we know the "cleared" position (after exit corridor),
+  // determine if we need Suez, Malacca, Cape etc.
 
-  // Red Sea / Gulf of Aden
-  if(R.redSea(from)&&!R.redSea(to)){addVia('RED_S','BAB','ADEN_G','SOCOTRA');}
-  if(R.redSea(to)&&!R.redSea(from)){addVia('SOCOTRA','ADEN_G','BAB','RED_S');}
+  const fromCleared = wps.length > 0 ? wps[wps.length-1] : from;
 
-  // Suez Canal needed when crossing between Mediterranean/Europe and Indian Ocean
-  const needsSuez = (R.med(from)||R.europe(from)||R.blackSea(from)) &&
-    (R.indW(to)||R.persGulf(to)||R.redSea(to)||R.eAfrica(to)||R.seAsia(to)||R.farEast(to)||R.bayBengal(to)||R.sriLanka(to));
-  const needsSuezRev = (R.med(to)||R.europe(to)||R.blackSea(to)) &&
-    (R.indW(from)||R.persGulf(from)||R.redSea(from)||R.eAfrica(from)||R.seAsia(from)||R.farEast(from)||R.bayBengal(from)||R.sriLanka(from));
+  // Determine if we need to go around India tip (from west to east or vice versa)
+  const fromWestIndia = isWestIndia(from) || (isPersGulf(from)&&!isSeAsia(to)&&!isFarEast(to));
+  const toEastOfIndia = isEastIndia(to)||isBayBengal(to)||isSeAsia(to)||isFarEast(to)||isJapanKorea(to);
+  const fromEastOfIndia = isEastIndia(from)||isBayBengal(from)||isSeAsia(from)||isFarEast(from);
+  const toWestOfIndia = isWestIndia(to)||isIndianOcn(to)||isPersGulf(to)||isRedSea(to)||isEAfrica(to);
+
+  // Did we already go around India tip in the exit corridor?
+  const alreadyRoundedTip = fromExit.includes('IND_TIP') || fromExit.includes('IND_TIP_W');
+
+  // ── India subcontinent bypass ──────────────────────────────────────────────
+  // West→East: need to go around southern tip of India
+  if(fromWestIndia && toEastOfIndia && !alreadyRoundedTip) {
+    add('IND_TIP_E','LANKA_S');
+  }
+  // East→West: around the southern tip going west
+  if(fromEastOfIndia && toWestOfIndia && !fromExit.includes('IND_TIP')) {
+    // Insert tip waypoints before any west-India destination
+    add('LANKA_S','IND_TIP','IND_TIP_W');
+  }
+
+  // ── Connecting to Malacca ──────────────────────────────────────────────────
+  const needsMalacca = (isIndianOcn(from)||isWestIndia(from)||isBayBengal(from)||isSriLanka(from)||isPersGulf(from)||isRedSea(from)||isEAfrica(from)||isMed(from)||isEurope(from)) &&
+    (isSeAsia(to)||isFarEast(to)||isJapanKorea(to));
+  const needsMalaccaRev = (isSeAsia(from)||isFarEast(from)||isJapanKorea(from)) &&
+    (isIndianOcn(to)||isWestIndia(to)||isBayBengal(to)||isSriLanka(to)||isPersGulf(to)||isRedSea(to)||isEAfrica(to)||isMed(to)||isEurope(to));
+
+  if(needsMalacca && !fromExit.some(k=>['MALACCA_N','MALACCA_C','MALACCA_S'].includes(k))) {
+    // Route through Andaman if coming from west/Indian Ocean
+    if(!isBayBengal(from)&&!isEastIndia(from)) {
+      add('IND_NE','ANDAMAN_W','ANDAMAN_S','MALACCA_NW','MALACCA_N','MALACCA_C','MALACCA_S');
+    } else {
+      add('ANDAMAN_W','ANDAMAN_S','MALACCA_NW','MALACCA_N','MALACCA_C','MALACCA_S');
+    }
+  }
+  if(needsMalaccaRev) {
+    add('MALACCA_S','MALACCA_C','MALACCA_N','MALACCA_NW','ANDAMAN_S','ANDAMAN_W','IND_NE');
+  }
+
+  // ── Suez Canal ────────────────────────────────────────────────────────────
+  const needsSuez = (isMed(from)||isEurope(from)||isBaltic(from)||isUKNorth(from)||isBlackSea(from)) &&
+    (isIndianOcn(to)||isPersGulf(to)||isEAfrica(to)||isBayBengal(to)||isSeAsia(to)||isFarEast(to)||isWestIndia(to)||isSriLanka(to));
+  const needsSuezRev = (isMed(to)||isEurope(to)||isBaltic(to)||isUKNorth(to)||isBlackSea(to)) &&
+    (isIndianOcn(from)||isPersGulf(from)||isEAfrica(from)||isBayBengal(from)||isSeAsia(from)||isFarEast(from)||isWestIndia(from)||isSriLanka(from));
 
   if(needsSuez){
-    if(R.blackSea(from)) addVia('BLACK_W');
-    if(R.europe(from)&&!R.med(from)) addVia('BASC','GIBRALTAR');
-    if(R.ukNorth(from)) addVia('NORTH_SEA','DOVER','BASC','GIBRALTAR');
-    if(R.baltic(from)) addVia('NORTH_SEA','DOVER','BASC','GIBRALTAR');
-    addVia('MED_W','MED_E','SUEZ_N','SUEZ_S','RED_N','RED_S','BAB','ADEN_G','SOCOTRA');
-    if(R.persGulf(to)){addVia('HORMUZ_E','HORMUZ');}
-    else if(R.indW(to)){addVia('IND_W');}
-    else if(R.eAfrica(to)){addVia('AFR_E');}
-    else if(R.bayBengal(to)||R.sriLanka(to)){addVia('IND_C','IND_NE');}
-    else if(R.seAsia(to)){addVia('IND_C','LAKSHADWEEP','IND_NE','ANDAMAN','MALACCA_N','MALACCA_S');}
-    else if(R.farEast(to)||R.china(to)||R.japan(to)){addVia('IND_C','IND_NE','ANDAMAN','MALACCA_N','MALACCA_S','S_CHINA_N');}
+    if(isBlackSea(from)) add('BLACK_W');
+    if(isBaltic(from))   add('NORTH_SEA','DOVER','BASC','GIBRALTAR');
+    if(isUKNorth(from))  add('NORTH_SEA','DOVER','BASC','GIBRALTAR');
+    if(isEurope(from)&&!isMed(from)&&!isUKNorth(from)&&!isBaltic(from)) add('BASC','GIBRALTAR');
+    add('MED_W','MED_E','SUEZ_N','SUEZ_S','RED_N','RED_S','BAB','ADEN_G','SOCOTRA');
+    if(isPersGulf(to))  add('HORMUZ_E','HORMUZ');
+    else if(isEAfrica(to)) add('AFR_E');
+    else if(isWestIndia(to)||isIndianOcn(to)) add('IND_W');
+    else if(isBayBengal(to)||isSriLanka(to))  add('IND_W','IND_TIP','IND_TIP_E','LANKA_S','IND_NE');
+    else if(isSeAsia(to)||isFarEast(to))      add('IND_W','IND_TIP','LANKA_S','IND_NE','ANDAMAN_S','MALACCA_NW','MALACCA_N','MALACCA_C','MALACCA_S');
   }
   if(needsSuezRev){
-    if(R.persGulf(from)){addVia('HORMUZ','HORMUZ_E');}
-    else if(R.seAsia(from)||R.farEast(from)){addVia('S_CHINA_N','MALACCA_S','MALACCA_N','ANDAMAN','IND_NE','IND_C');}
-    else if(R.bayBengal(from)){addVia('IND_NE','IND_C');}
-    else if(R.eAfrica(from)){addVia('AFR_E','IND_W');}
-    addVia('SOCOTRA','ADEN_G','BAB','RED_S','RED_N','SUEZ_S','SUEZ_N','MED_E','MED_W');
-    if(R.blackSea(to)) addVia('BLACK_W');
-    if(R.europe(to)&&!R.med(to)) addVia('GIBRALTAR','BASC');
-    if(R.ukNorth(to)) addVia('GIBRALTAR','BASC','DOVER','NORTH_SEA');
-    if(R.baltic(to)) addVia('GIBRALTAR','BASC','DOVER','NORTH_SEA');
+    if(isPersGulf(from))    add('HORMUZ','HORMUZ_E');
+    else if(isEAfrica(from))add('AFR_E','IND_W');
+    else if(needsMalaccaRev){/*already added*/}
+    else if(isSeAsia(from)||isFarEast(from)) add('MALACCA_S','MALACCA_C','MALACCA_N','MALACCA_NW','ANDAMAN_S','IND_NE','LANKA_S','IND_TIP','IND_W');
+    else if(isBayBengal(from))add('IND_NE','LANKA_S','IND_TIP','IND_W');
+    add('SOCOTRA','ADEN_G','BAB','RED_S','RED_N','SUEZ_S','SUEZ_N','MED_E','MED_W');
+    if(isBlackSea(to)) add('BLACK_W');
+    if(isBaltic(to))   add('GIBRALTAR','BASC','DOVER','NORTH_SEA');
+    if(isUKNorth(to))  add('GIBRALTAR','BASC','DOVER','NORTH_SEA');
+    if(isEurope(to)&&!isMed(to)&&!isUKNorth(to)&&!isBaltic(to)) add('GIBRALTAR','BASC');
   }
 
-  // ── CAPE OF GOOD HOPE (when Suez is not used, going between oceans) ─────────
-  const needsCape = !needsSuez && !needsSuezRev &&
-    ((R.sAtl(from)||R.wAfrica(from)||R.sAmer(from)) && (R.indW(to)||R.eAfrica(to)||R.seAsia(to)||R.farEast(to)||R.australia(to))) ||
-    ((R.sAtl(to)||R.wAfrica(to)||R.sAmer(to)) && (R.indW(from)||R.eAfrica(from)||R.seAsia(from)||R.farEast(from)||R.australia(from)));
-
+  // ── Cape of Good Hope ─────────────────────────────────────────────────────
+  const needsCape = !needsSuez && !needsSuezRev && (
+    ((isSAtl(from)||isWAfrica(from)||isSAmer(from))&&(isIndianOcn(to)||isEAfrica(to)||isSeAsia(to)||isFarEast(to)||isAustralia(to)))||
+    ((isSAtl(to)||isWAfrica(to)||isSAmer(to))&&(isIndianOcn(from)||isEAfrica(from)||isSeAsia(from)||isFarEast(from)||isAustralia(from)))
+  );
   if(needsCape){
-    const toIndian = R.indW(to)||R.eAfrica(to)||R.seAsia(to)||R.farEast(to)||R.australia(to);
-    if(toIndian){ addVia('ATLANTIC_S','CAPE_GH','IND_S','IND_SW'); }
-    else { addVia('IND_SW','IND_S','CAPE_GH','ATLANTIC_S'); }
+    if(isIndianOcn(to)||isEAfrica(to)||isSeAsia(to)||isFarEast(to)||isAustralia(to)){
+      add('ATLANTIC_S','CAPE_GH','IND_S','IND_SW2');
+    } else {
+      add('IND_SW2','IND_S','CAPE_GH','ATLANTIC_S');
+    }
   }
 
-  // ── MALACCA STRAIT ──────────────────────────────────────────────────────────
-  const needsMalacca = !needsSuez && !needsSuezRev && !needsCape && (
-    ((R.indW(from)||R.bayBengal(from)||R.sriLanka(from))&&(R.seAsia(to)||R.farEast(to)||R.china(to)||R.japan(to)||R.korea(to))) ||
-    ((R.seAsia(from)||R.farEast(from)||R.china(from)||R.japan(from)||R.korea(from))&&(R.indW(to)||R.bayBengal(to)||R.sriLanka(to)))
-  );
-  if(needsMalacca){
-    const toEast=R.seAsia(to)||R.farEast(to)||R.china(to)||R.japan(to)||R.korea(to);
-    if(toEast){ addVia('IND_NE','ANDAMAN','MALACCA_N','MALACCA_S'); }
-    else { addVia('MALACCA_S','MALACCA_N','ANDAMAN','IND_NE'); }
-  }
-
-  // ── SOUTH CHINA SEA routing ──────────────────────────────────────────────────
-  const needsSCS = !needsSuez && !needsSuezRev && !needsMalacca && (
-    (R.seAsia(from)&&(R.farEast(to)||R.china(to)||R.japan(to)||R.korea(to))) ||
-    ((R.farEast(from)||R.china(from)||R.japan(from)||R.korea(from))&&R.seAsia(to))
-  );
-  if(needsSCS){
-    const toNorth=R.farEast(to)||R.china(to)||R.japan(to)||R.korea(to);
-    if(toNorth){ addVia('S_CHINA_S','S_CHINA_N'); }
-    else { addVia('S_CHINA_N','S_CHINA_S'); }
-  }
-
-  // ── FAR EAST internal routing ────────────────────────────────────────────────
-  if(!needsSuez&&!needsSuezRev&&!needsMalacca&&!needsSCS){
-    if((R.japan(from)||R.korea(from))&&R.china(to)){ addVia('EAST_CHINA'); }
-    if((R.japan(to)||R.korea(to))&&R.china(from)){ addVia('EAST_CHINA'); }
-    if(R.japan(from)&&R.korea(to)){ addVia('JAPAN_SEA'); }
-    if(R.japan(to)&&R.korea(from)){ addVia('JAPAN_SEA'); }
-  }
-
-  // ── PACIFIC ROUTES ────────────────────────────────────────────────────────
-  const needsPacific = (R.farEast(from)||R.japan(from)||R.korea(from)||R.china(from)) &&
-    (R.wCoast(to)||R.eastUS(to));
-  const needsPacificRev = (R.farEast(to)||R.japan(to)||R.korea(to)||R.china(to)) &&
-    (R.wCoast(from)||R.eastUS(from));
-  if(needsPacific){ addVia('PAC_NW','PAC_NE'); }
-  if(needsPacificRev){ addVia('PAC_NE','PAC_NW'); }
-
-  // ── PANAMA CANAL ─────────────────────────────────────────────────────────
+  // ── Panama Canal ──────────────────────────────────────────────────────────
   const needsPanama = !needsSuez && !needsSuezRev && (
-    (R.wCoast(from)&&(R.eastUS(to)||R.carib(to)||R.sAtl(to)||R.europe(to)||R.wAfrica(to))) ||
-    ((R.eastUS(from)||R.carib(from)||R.sAtl(from))&&R.wCoast(to))
+    (isWestUS(from)&&(isEastUS(to)||isCarib(to)||isSAtl(to)||isEurope(to)||isWAfrica(to)))||
+    ((isEastUS(from)||isCarib(from)||isSAtl(from))&&isWestUS(to))
   );
   if(needsPanama){
-    const toPac=R.wCoast(to);
-    if(toPac){ addVia('CARIB','PANAMA_A','PANAMA_P'); }
-    else { addVia('PANAMA_P','PANAMA_A','CARIB'); }
+    if(isWestUS(to)){ add('CARIB','PANAMA_A','PANAMA_P'); }
+    else             { add('PANAMA_P','PANAMA_A','CARIB'); }
   }
 
-  // ── ATLANTIC ROUTES ────────────────────────────────────────────────────────
+  // ── Pacific crossing ──────────────────────────────────────────────────────
+  const needsPacific    = (isFarEast(from)||isJapanKorea(from))&&(isWestUS(to)||isEastUS(to));
+  const needsPacificRev = (isFarEast(to)||isJapanKorea(to))&&(isWestUS(from)||isEastUS(from));
+  if(needsPacific)    add('PAC_NW','PAC_NE');
+  if(needsPacificRev) add('PAC_NE','PAC_NW');
+
+  // ── Atlantic crossing ─────────────────────────────────────────────────────
   const crossAtl = !needsPanama && !needsSuez && !needsSuezRev && !needsCape && (
-    (R.europe(from)&&(R.eastUS(to)||R.carib(to)||R.sAmer(to))) ||
-    ((R.eastUS(from)||R.carib(from)||R.sAmer(from))&&R.europe(to)) ||
-    (R.europe(from)&&R.wAfrica(to)) ||
-    (R.wAfrica(from)&&R.europe(to)) ||
-    (R.wAfrica(from)&&(R.eastUS(to)||R.carib(to))) ||
-    ((R.eastUS(from)||R.carib(from))&&R.wAfrica(to))
+    (isEurope(from)||(isEastUS(from)||isCarib(from))) && (isEurope(to)||isEastUS(to)||isCarib(to)||isWAfrica(to)||isSAmer(to))
   );
   if(crossAtl){
-    const toUS=R.eastUS(to)||R.carib(to);
-    if(toUS&&R.europe(from)){ addVia('BASC','ATLANTIC_N'); }
-    else if(R.europe(to)&&(R.eastUS(from)||R.carib(from))){ addVia('ATLANTIC_N','BASC'); }
-    else if(R.sAmer(to)||R.sAtl(to)){ addVia('ATLANTIC_C','ATLANTIC_S'); }
-    else if(R.sAmer(from)||R.sAtl(from)){ addVia('ATLANTIC_S','ATLANTIC_C'); }
-    else if(R.wAfrica(from)||R.wAfrica(to)){ addVia('ATLANTIC_C'); }
+    if(isEurope(from)&&(isEastUS(to)||isCarib(to)))     add('BASC','ATLANTIC_N');
+    else if((isEastUS(from)||isCarib(from))&&isEurope(to)) add('ATLANTIC_N','BASC');
+    else if(isSAmer(to)||isSAtl(to))                    add('ATLANTIC_C','ATLANTIC_S');
+    else if(isSAmer(from)||isSAtl(from))                add('ATLANTIC_S','ATLANTIC_C');
+    else                                                 add('ATLANTIC_C');
   }
 
-  // ── AUSTRALIA ROUTING ────────────────────────────────────────────────────
-  if(!needsCape && !needsSuez && !needsSuezRev){
-    if(R.australia(from)&&(R.seAsia(to)||R.farEast(to)||R.china(to))){
-      if(from.lon>140){ addVia('TORRES','ARAFURA','TIMOR','LOMBOK','S_CHINA_S'); }
-      else if(from.lat< -25){ addVia('AUS_W','IND_SE','LOMBOK','S_CHINA_S'); }
-      else { addVia('AUS_N','TIMOR','LOMBOK','S_CHINA_S'); }
+  // ── Australia routing ─────────────────────────────────────────────────────
+  if(!needsCape&&!needsSuez&&!needsSuezRev){
+    if(isAustralia(from)&&(isSeAsia(to)||isFarEast(to))){
+      if(from.lon>140)       add('TORRES','ARAFURA','TIMOR','LOMBOK','S_CHINA_S');
+      else if(from.lat< -25) add('AUS_W','LOMBOK','S_CHINA_S');
+      else                   add('AUS_N','TIMOR','LOMBOK','S_CHINA_S');
     }
-    if(R.australia(to)&&(R.seAsia(from)||R.farEast(from)||R.china(from))){
-      if(to.lon>140){ addVia('S_CHINA_S','LOMBOK','TIMOR','ARAFURA','TORRES'); }
-      else if(to.lat< -25){ addVia('S_CHINA_S','LOMBOK','IND_SE','AUS_W'); }
-      else { addVia('S_CHINA_S','LOMBOK','TIMOR','AUS_N'); }
+    if(isAustralia(to)&&(isSeAsia(from)||isFarEast(from))){
+      if(to.lon>140)         add('S_CHINA_S','LOMBOK','TIMOR','ARAFURA','TORRES');
+      else if(to.lat< -25)   add('S_CHINA_S','LOMBOK','AUS_W');
+      else                   add('S_CHINA_S','LOMBOK','TIMOR','AUS_N');
     }
-    if(R.australia(from)&&R.eAfrica(to)){ addVia('IND_S','IND_SW','AFR_E'); }
-    if(R.eAfrica(from)&&R.australia(to)){ addVia('AFR_E','IND_SW','IND_S'); }
-    if(R.australia(from)&&(R.sPac(to)||to.lon>150)){ addVia('CORAL','TASMAN','PAC_SW'); }
-    if((R.sPac(from)||from.lon>150)&&R.australia(to)){ addVia('PAC_SW','TASMAN','CORAL'); }
+    if(isAustralia(from)&&isEAfrica(to))   add('IND_S','IND_SW2','AFR_E');
+    if(isEAfrica(from)&&isAustralia(to))   add('AFR_E','IND_SW2','IND_S');
+    if(isAustralia(from)&&isPacific(to))   add('CORAL','TASMAN','PAC_SW');
+    if(isPacific(from)&&isAustralia(to))   add('PAC_SW','TASMAN','CORAL');
   }
 
-  // ── EUROPE / UK / BALTIC internal routing ────────────────────────────────
-  if(!needsSuez&&!needsSuezRev&&!crossAtl){
-    if(R.baltic(from)&&!R.baltic(to)){ addVia('NORTH_SEA'); }
-    if(R.baltic(to)&&!R.baltic(from)){ addVia('NORTH_SEA'); }
-    if((R.ukNorth(from)||R.ukNorth(to))&&(R.europe(from)||R.europe(to))){ addVia('NORTH_SEA'); }
-    if(R.blackSea(from)&&!R.blackSea(to)){ addVia('BLACK_W'); }
-    if(R.blackSea(to)&&!R.blackSea(from)){ addVia('BLACK_W'); }
+  // ── Far East internal routing ─────────────────────────────────────────────
+  if(!needsSuez&&!needsSuezRev&&!needsMalacca&&!needsMalaccaRev){
+    if((isJapanKorea(from))&&isFarEast(to)&&!isJapanKorea(to)) add('EAST_CHINA');
+    if((isJapanKorea(to))&&isFarEast(from)&&!isJapanKorea(from)) add('EAST_CHINA');
+    const scsNeeded = (isSeAsia(from)&&(isFarEast(to)||isJapanKorea(to)))||
+                      ((isFarEast(from)||isJapanKorea(from))&&isSeAsia(to));
+    if(scsNeeded){
+      if(isFarEast(to)||isJapanKorea(to)) add('S_CHINA_S','S_CHINA_N');
+      else                                add('S_CHINA_N','S_CHINA_S');
+    }
   }
 
-  // ── BUILD FINAL WAYPOINT ARRAY ────────────────────────────────────────────
+  // ── Apply destination approach corridor ───────────────────────────────────
+  // For destinations on India west coast coming from east, ensure route goes around tip
+  const toExit = PORT_EXIT[to.id] || [];
+  const approachFromEast = isSeAsia(from)||isFarEast(from)||isBayBengal(from)||isEastIndia(from);
+  if(isWestIndia(to) && approachFromEast) {
+    // Approach from south around India tip
+    const tipWps = ['LANKA_S','IND_TIP','IND_TIP_W','IND_SW'];
+    const already = wps.some(w => w.name && (w.name.includes('Tip')||w.name.includes('Sri Lanka')));
+    if(!already) tipWps.forEach(k => { if(SEA_WP[k]) wps.push({...SEA_WP[k]}); });
+  }
+
+  // ── Build final point list with great-circle interpolation ────────────────
   const rawPoints = [
-    {lat:from.lat,lon:from.lon,name:from.name},
+    {lat:from.lat, lon:from.lon, name:from.name},
     ...wps,
-    {lat:to.lat,  lon:to.lon,  name:to.name},
+    {lat:to.lat,   lon:to.lon,   name:to.name},
   ];
 
-  // Interpolate each sea-corridor segment with great-circle arcs
+  // Deduplicate consecutive near-identical points
+  const deduped = rawPoints.filter((p,i) => {
+    if(i===0) return true;
+    const prev = rawPoints[i-1];
+    return !(Math.abs(p.lat-prev.lat)<0.2 && Math.abs(p.lon-prev.lon)<0.2);
+  });
+
   const allWPs = [];
-  for(let i=0;i<rawPoints.length-1;i++){
-    const a=rawPoints[i],b=rawPoints[i+1];
+  for(let i=0; i<deduped.length-1; i++){
+    const a=deduped[i], b=deduped[i+1];
     const dist=haversine(a.lat,a.lon,b.lat,b.lon);
-    const nPts=Math.max(2,Math.min(10,Math.floor(dist/250)));
+    // Finer interpolation for short segments to stay close to coast path
+    const nPts=Math.max(2,Math.min(12,Math.floor(dist/200)));
     const seg=greatCircle(a.lat,a.lon,b.lat,b.lon,nPts);
-    seg.forEach((pt,j)=>{
-      if(i>0&&j===0)return;
+    seg.forEach((pt,j) => {
+      if(i>0&&j===0) return;
       allWPs.push({
         lat:Math.round(pt[0]*10000)/10000,
         lon:Math.round(pt[1]*10000)/10000,
-        name:(j===0&&rawPoints[i].name)?rawPoints[i].name:undefined,
+        name:(j===0&&deduped[i].name)?deduped[i].name:undefined,
       });
     });
   }
   if(allWPs.length>0) allWPs[allWPs.length-1].name=to.name;
   return recalcWaypoints(allWPs);
 }
+  const from = PORTS_DB.find(p => p.id === fromPort);
+  const to   = PORTS_DB.find(p => p.id === toPort);
+  if (!from || !to) return [];
 
 // ─── RTZ PARSE / EXPORT ───────────────────────────────────────────────────────
 function parseRTZ(xmlText) {
