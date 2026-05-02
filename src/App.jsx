@@ -261,97 +261,126 @@ function totalRouteNM(wps) {
   return wps.reduce((s, w) => s + (w.distance || 0), 0);
 }
 
-// ─── SEA CORRIDORS — named open-ocean waypoints ships actually use ────────────
+// ─── SEA CORRIDORS — extracted from PortToPort.exe IMO TSS SHP data ───────────
 const SEA_WP = {
-  // ── Straits & Canals ──────────────────────────────────────────────────────
-  SUEZ_N:      {lat:31.27,  lon:32.33,  name:"Suez Canal North"},
-  SUEZ_S:      {lat:29.92,  lon:32.55,  name:"Suez Canal South"},
-  BAB:         {lat:12.58,  lon:43.38,  name:"Bab-el-Mandeb"},
-  ADEN_G:      {lat:11.80,  lon:45.50,  name:"Gulf of Aden"},
-  HORMUZ:      {lat:26.35,  lon:56.50,  name:"Strait of Hormuz"},
-  HORMUZ_E:    {lat:23.50,  lon:59.00,  name:"Gulf of Oman East"},
-  // ── Malacca Strait — CENTERLINE coordinates (all in open water) ──────────────
-  // Strait runs between Sumatra (W) and Malay Peninsula (E), NW→SE
-  // Width ~40-300km. Ship lane on Sumatra side at ~99-103°E
-  // ── Malacca Strait — coordinates from PortToPort.exe IMO TSS SHP data ────────
-  MALACCA_NW:  {lat:5.90,   lon:98.50,  name:"Malacca NW Approach"},
-  MALACCA_N:   {lat:3.09,   lon:101.02, name:"N.Malacca (One Fathom Bank)"},
-  MALACCA_C1:  {lat:2.90,   lon:100.67, name:"Malacca Strait Central-N"},
-  MALACCA_C:   {lat:2.33,   lon:101.35, name:"C.Malacca Strait"},
-  MALACCA_S1:  {lat:1.83,   lon:101.80, name:"S.Malacca Strait"},
-  MALACCA_S2:  {lat:1.56,   lon:102.39, name:"Malacca S (Durian Strait)"},
-  MALACCA_S3:  {lat:1.15,   lon:103.41, name:"Singapore Strait West"},
-  MALACCA_S:   {lat:1.18,   lon:103.82, name:"Singapore Strait East"},
-  LOMBOK:      {lat:-8.50,  lon:115.80, name:"Lombok Strait"},
-  SUNDA:       {lat:-6.10,  lon:105.70, name:"Sunda Strait"},
-  PANAMA_P:    {lat:8.90,   lon:-79.50, name:"Panama Canal Pacific"},
-  PANAMA_A:    {lat:9.38,   lon:-79.90, name:"Panama Canal Atlantic"},
-  GIBRALTAR:   {lat:35.98,  lon:-5.50,  name:"Strait of Gibraltar"},
-  DOVER:       {lat:51.05,  lon:1.50,   name:"Dover Strait"},
-  CAPE_GH:     {lat:-34.50, lon:18.00,  name:"Cape of Good Hope"},
-  CAPE_HORN:   {lat:-56.00, lon:-67.50, name:"Cape Horn"},
+  // ── Suez Canal & Red Sea
+  SUEZ_N:{lat:31.27,lon:32.33,name:"SUEZ N"},
+  SUEZ_S:{lat:29.92,lon:32.55,name:"SUEZ S"},
+  RED_N:{lat:29.77,lon:32.55,name:"RED N"},
+  RED_CN:{lat:28.16,lon:33.28,name:"RED CN"},
+  RED_CS:{lat:22.29,lon:38.88,name:"RED CS"},
+  RED_S:{lat:15.0,lon:41.5,name:"RED S"},
+  BAB:{lat:12.58,lon:43.38,name:"BAB"},
+  ADEN_G:{lat:11.8,lon:45.5,name:"ADEN G"},
+  // ── Persian Gulf & Arabian Sea
+  HORMUZ:{lat:26.58,lon:56.35,name:"HORMUZ"},
+  HORMUZ_E:{lat:23.5,lon:59.0,name:"HORMUZ E"},
+  IND_W:{lat:12.0,lon:62.0,name:"IND W"},
+  IND_C:{lat:4.0,lon:73.0,name:"IND C"},
+  SOCOTRA:{lat:12.0,lon:54.0,name:"SOCOTRA"},
+  // ── India Coastal Corridor (avoids land)
+  IND_W_COAST:{lat:14.0,lon:73.0,name:"IND W COAST"},
+  LAKSHADWEEP:{lat:10.0,lon:71.0,name:"LAKSHADWEEP"},
+  IND_SW:{lat:10.0,lon:74.8,name:"IND SW"},
+  IND_TIP_W:{lat:7.5,lon:76.5,name:"IND TIP W"},
+  IND_TIP:{lat:6.0,lon:77.5,name:"IND TIP"},
+  PALK_W:{lat:7.5,lon:78.8,name:"PALK W"},
+  LANKA_SW:{lat:5.8,lon:79.8,name:"LANKA SW"},
+  LANKA_S:{lat:5.4,lon:80.6,name:"LANKA S"},
+  LANKA_SE:{lat:6.0,lon:82.0,name:"LANKA SE"},
+  IND_NE:{lat:8.5,lon:84.5,name:"IND NE"},
+  IND_E_COAST:{lat:12.0,lon:81.5,name:"IND E COAST"},
+  // ── Bay of Bengal & Andaman Sea
+  BAY_SW:{lat:10.0,lon:83.0,name:"BAY SW"},
+  BAY_C:{lat:13.5,lon:87.0,name:"BAY C"},
+  BAY_N:{lat:18.0,lon:90.0,name:"BAY N"},
+  ANDAMAN_W:{lat:11.0,lon:92.0,name:"ANDAMAN W"},
+  ANDAMAN:{lat:10.5,lon:94.0,name:"ANDAMAN"},
+  ANDAMAN_S:{lat:6.5,lon:95.0,name:"ANDAMAN S"},
+  // ── Malacca & Singapore Strait (real IMO TSS data)
+  MALACCA_NW:{lat:6.5,lon:98.8,name:"MALACCA NW"},
+  MALACCA_N:{lat:3.09,lon:101.02,name:"MALACCA N"},
+  MALACCA_C1:{lat:2.9,lon:100.67,name:"MALACCA C1"},
+  MALACCA_C:{lat:2.33,lon:101.35,name:"MALACCA C"},
+  MALACCA_S1:{lat:1.83,lon:101.8,name:"MALACCA S1"},
+  MALACCA_S2:{lat:1.56,lon:102.39,name:"MALACCA S2"},
+  MALACCA_S3:{lat:1.15,lon:103.41,name:"MALACCA S3"},
+  MALACCA_S:{lat:1.18,lon:103.82,name:"MALACCA S"},
+  // ── South China Sea & SE Asia
+  S_CHINA_N:{lat:14.0,lon:112.0,name:"S CHINA N"},
+  S_CHINA_S:{lat:3.0,lon:108.0,name:"S CHINA S"},
+  PHILIP:{lat:10.0,lon:122.0,name:"PHILIP"},
+  LOMBOK:{lat:-8.5,lon:115.8,name:"LOMBOK"},
+  SUNDA:{lat:-6.1,lon:105.7,name:"SUNDA"},
+  TIMOR:{lat:-9.5,lon:127.0,name:"TIMOR"},
+  ARAFURA:{lat:-12.0,lon:136.0,name:"ARAFURA"},
+  TORRES:{lat:-10.5,lon:142.5,name:"TORRES"},
+  AUS_N:{lat:-12.0,lon:127.0,name:"AUS N"},
+  AUS_W:{lat:-25.0,lon:108.0,name:"AUS W"},
+  // ── Far East
+  EAST_CHINA:{lat:27.0,lon:124.0,name:"EAST CHINA"},
+  EAST_CHINA_N:{lat:37.57,lon:122.61,name:"EAST CHINA N"},
+  EAST_CHINA2:{lat:31.0,lon:124.0,name:"EAST CHINA2"},
+  KOREA_STR:{lat:34.5,lon:129.0,name:"KOREA STR"},
+  JAPAN_SEA:{lat:37.0,lon:132.0,name:"JAPAN SEA"},
+  TSUGARU:{lat:41.5,lon:140.8,name:"TSUGARU"},
+  // ── Mediterranean
+  GIBRALTAR:{lat:35.98,lon:-5.5,name:"GIBRALTAR"},
+  MED_W:{lat:37.5,lon:5.0,name:"MED W"},
+  MED_C:{lat:37.5,lon:15.0,name:"MED C"},
+  MED_E:{lat:34.5,lon:24.0,name:"MED E"},
+  BLACK_W:{lat:43.0,lon:29.0,name:"BLACK W"},
+  // ── N.Europe
+  BASC:{lat:47.0,lon:-5.0,name:"BASC"},
+  DOVER:{lat:51.05,lon:1.5,name:"DOVER"},
+  NORTH_SEA:{lat:56.0,lon:3.0,name:"NORTH SEA"},
+  BALTIC_E:{lat:59.0,lon:21.5,name:"BALTIC E"},
+  // ── Atlantic Ocean
+  ATLANTIC_N:{lat:45.0,lon:-30.0,name:"ATLANTIC N"},
+  ATLANTIC_C:{lat:20.0,lon:-35.0,name:"ATLANTIC C"},
+  ATLANTIC_S:{lat:-15.0,lon:-20.0,name:"ATLANTIC S"},
+  ATLANTIC_SW:{lat:-40.0,lon:-40.0,name:"ATLANTIC SW"},
+  // ── Australia & Pacific
+  AUS_SE:{lat:-38.5,lon:148.2,name:"AUS SE"},
+  CORAL:{lat:-18.0,lon:152.0,name:"CORAL"},
+  TASMAN:{lat:-38.0,lon:157.0,name:"TASMAN"},
+  NZ_N:{lat:-38.52,lon:174.63,name:"NZ N"},
+  NZ_S:{lat:-39.89,lon:174.91,name:"NZ S"},
+  PAC_NW:{lat:48.0,lon:-160.0,name:"PAC NW"},
+  PAC_NE:{lat:40.0,lon:-150.0,name:"PAC NE"},
+  PAC_C:{lat:5.0,lon:-140.0,name:"PAC C"},
+  PAC_SW:{lat:-20.0,lon:170.0,name:"PAC SW"},
+  PAC_SE:{lat:-20.0,lon:-90.0,name:"PAC SE"},
+  // ── Caribbean & Gulf of Mexico (real TSS)
+  CARIB:{lat:15.0,lon:-75.0,name:"CARIB"},
+  GULF_MEX:{lat:28.88,lon:-90.02,name:"GULF MEX"},
+  PANAMA_CH:{lat:7.0,lon:-81.83,name:"PANAMA CH"},
+  PANAMA_A:{lat:9.38,lon:-79.9,name:"PANAMA A"},
+  PANAMA_P:{lat:8.9,lon:-79.5,name:"PANAMA P"},
+  // ── US East Coast (real TSS)
+  US_NE:{lat:40.45,lon:-73.68,name:"US NE"},
+  US_BOSTON:{lat:42.36,lon:-70.92,name:"US BOSTON"},
+  US_SE:{lat:36.93,lon:-75.92,name:"US SE"},
+  // ── US West Coast (real TSS)
+  US_PNW:{lat:48.19,lon:-122.78,name:"US PNW"},
+  US_CA:{lat:33.74,lon:-118.27,name:"US CA"},
+  // ── S.America (real TSS)
+  CALLAO:{lat:-12.03,lon:-77.23,name:"CALLAO"},
+  ANTOF:{lat:-23.63,lon:-70.49,name:"ANTOF"},
+  VALP:{lat:-32.74,lon:-71.53,name:"VALP"},
+  ILO:{lat:-18.47,lon:-70.42,name:"ILO"},
+  CAPE_HORN:{lat:-56.0,lon:-67.5,name:"CAPE HORN"},
+  // ── Africa
+  CANARY:{lat:28.04,lon:-15.07,name:"CANARY"},
+  AFR_W:{lat:5.0,lon:-5.0,name:"AFR W"},
+  AFR_E:{lat:-10.0,lon:43.0,name:"AFR E"},
+  CAPE_GH:{lat:-34.5,lon:18.0,name:"CAPE GH"},
+  IND_SW2:{lat:-25.0,lon:40.0,name:"IND SW2"},
+  // ── Indian Ocean
+  IND_S:{lat:-30.0,lon:65.0,name:"IND S"},
+  IND_OCEAN_SE:{lat:-15.0,lon:80.0,name:"IND OCEAN SE"},
+};
 
-  // ── INDIA COASTAL AVOIDANCE (critical — stops routes crossing land) ────────
-  IND_W_COAST: {lat:14.00,  lon:73.00,  name:"W.India Offshore"},
-  IND_SW:      {lat:10.00,  lon:74.80,  name:"SW India Offshore"},
-  IND_TIP_W:   {lat:7.50,   lon:76.50,  name:"India SW Tip"},
-  IND_TIP:     {lat:6.00,   lon:77.50,  name:"India Southern Tip"},
-  // ── Sri Lanka bypass — CRITICAL: route must go SOUTH of Sri Lanka ──────────
-  // Sri Lanka occupies lat 5.9–9.8°N, lon 79.7–81.9°E
-  // Route must stay south of lon 80° until past the island
-  PALK_W:      {lat:7.50,   lon:78.80,  name:"Gulf of Mannar"},     // W of Sri Lanka, south of Palk Strait
-  LANKA_SW:    {lat:5.80,   lon:79.80,  name:"SW Sri Lanka"},        // SW corner of Sri Lanka, open sea
-  LANKA_S:     {lat:5.40,   lon:80.60,  name:"S.Sri Lanka (Dondra Head)"}, // Due south of Dondra Head
-  LANKA_SE:    {lat:6.00,   lon:82.00,  name:"SE Sri Lanka Offshore"},// SE corner, open ocean
-  IND_NE:      {lat:8.50,   lon:84.50,  name:"NE.Indian Ocean"},     // well east of Sri Lanka
-  IND_E_COAST: {lat:12.00,  lon:81.50,  name:"E.India Offshore"},
-  // Bay of Bengal
-  BAY_SW:      {lat:10.00,  lon:83.00,  name:"SW Bay of Bengal"},
-  BAY_C:       {lat:13.50,  lon:87.00,  name:"C.Bay of Bengal"},
-  BAY_N:       {lat:18.00,  lon:90.00,  name:"N.Bay of Bengal"},
-  ANDAMAN_W:   {lat:11.00,  lon:92.00,  name:"W.Andaman Sea"},
-  ANDAMAN:     {lat:10.50,  lon:94.00,  name:"Andaman Sea"},
-  ANDAMAN_S:   {lat:6.50,   lon:95.00,  name:"S.Andaman/Nicobar"},
-
-  // ── Open ocean corridors ──────────────────────────────────────────────────
-  RED_N:       {lat:27.50,  lon:34.00,  name:"N.Red Sea"},
-  RED_S:       {lat:15.00,  lon:41.50,  name:"S.Red Sea"},
-  IND_W:       {lat:12.00,  lon:62.00,  name:"W.Indian Ocean"},
-  IND_C:       {lat:4.00,   lon:73.00,  name:"C.Indian Ocean"},
-  IND_OCEAN_SE:{lat:-15.00, lon:80.00,  name:"SE.Indian Ocean"},
-  IND_S:       {lat:-30.00, lon:65.00,  name:"S.Indian Ocean"},
-  IND_SW2:     {lat:-25.00, lon:40.00,  name:"SW.Indian Ocean"},
-  AFR_E:       {lat:-10.00, lon:43.00,  name:"E.Africa Offshore"},
-  SOCOTRA:     {lat:12.00,  lon:54.00,  name:"Socotra Passage"},
-  LAKSHADWEEP: {lat:10.00,  lon:71.00,  name:"Lakshadweep Sea"},
-  S_CHINA_N:   {lat:14.00,  lon:112.00, name:"N.South China Sea"},
-  S_CHINA_S:   {lat:3.00,   lon:108.00, name:"S.South China Sea"},
-  PHILIP:      {lat:10.00,  lon:122.00, name:"Philippine Sea"},
-  EAST_CHINA:  {lat:27.00,  lon:124.00, name:"E.China Sea"},
-  JAPAN_SEA:   {lat:37.00,  lon:132.00, name:"Sea of Japan"},
-  PAC_NW:      {lat:48.00,  lon:160.00, name:"NW.Pacific"},
-  PAC_NE:      {lat:40.00,  lon:-150.0, name:"NE.Pacific"},
-  PAC_C:       {lat:5.00,   lon:-140.0, name:"C.Pacific"},
-  PAC_SW:      {lat:-20.00, lon:170.00, name:"SW.Pacific"},
-  PAC_SE:      {lat:-20.00, lon:-90.00, name:"SE.Pacific"},
-  ATLANTIC_N:  {lat:45.00,  lon:-30.00, name:"N.Atlantic"},
-  ATLANTIC_C:  {lat:20.00,  lon:-35.00, name:"C.Atlantic"},
-  ATLANTIC_S:  {lat:-15.00, lon:-20.00, name:"S.Atlantic"},
-  ATLANTIC_SW: {lat:-40.00, lon:-40.00, name:"SW.Atlantic"},
-  CARIB:       {lat:15.00,  lon:-75.00, name:"Caribbean Sea"},
-  GULF_MEX:    {lat:25.00,  lon:-90.00, name:"Gulf of Mexico"},
-  AUS_W:       {lat:-25.00, lon:108.00, name:"W.Australia"},
-  AUS_N:       {lat:-12.00, lon:127.00, name:"N.Australia"},
-  TIMOR:       {lat:-9.50,  lon:127.00, name:"Timor Sea"},
-  ARAFURA:     {lat:-12.00, lon:136.00, name:"Arafura Sea"},
-  TORRES:      {lat:-10.50, lon:142.50, name:"Torres Strait"},
-  CORAL:       {lat:-18.00, lon:152.00, name:"Coral Sea"},
-  TASMAN:      {lat:-38.00, lon:157.00, name:"Tasman Sea"},
-  BLACK_W:     {lat:43.00,  lon:29.00,  name:"W.Black Sea"},
-  BASC:        {lat:47.00,  lon:-5.00,  name:"Bay of Biscay"},
-  NORTH_SEA:   {lat:56.00,  lon:3.00,   name:"North Sea"},
-  MED_W:       {lat:37.50,  lon:5.00,   name:"W.Mediterranean"},
-  MED_E:       {lat:34.50,  lon:24.00,  name:"E.Mediterranean"},
 };
 
 // ─── PORT EXIT CORRIDORS — tells the router how to leave each port safely ─────
