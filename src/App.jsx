@@ -47,36 +47,362 @@ const ROUTE_TYPES = ["Ocean","Coastal","Deep Sea","Strait","River","Port Approac
 // ─── ADMIN CONFIG — change this to your real admin email ──────────────────────
 const ADMIN_EMAIL = 'ecdisroutes@gmail.com';
 
-// ─── PORTS DATABASE ───────────────────────────────────────────────────────────
+// ─── PORTS DATABASE (World Major Ports) ──────────────────────────────────────
 const PORTS_DB = [
-  { id:"MUM", name:"Mumbai",          country:"India",       lat:18.93,  lon:72.83,  keywords:"mum mumbai bombay india" },
-  { id:"SIN", name:"Singapore",       country:"Singapore",   lat:1.29,   lon:103.85, keywords:"sin singapore" },
-  { id:"DXB", name:"Dubai",           country:"UAE",         lat:25.05,  lon:55.13,  keywords:"dxb dubai jebel ali uae" },
-  { id:"SHA", name:"Shanghai",        country:"China",       lat:31.23,  lon:121.47, keywords:"sha shanghai china" },
-  { id:"ROT", name:"Rotterdam",       country:"Netherlands", lat:51.92,  lon:4.48,   keywords:"rot rotterdam netherlands europe" },
-  { id:"HKG", name:"Hong Kong",       country:"China",       lat:22.29,  lon:114.16, keywords:"hkg hong kong china" },
-  { id:"COL", name:"Colombo",         country:"Sri Lanka",   lat:6.94,   lon:79.85,  keywords:"col colombo srilanka" },
-  { id:"ADE", name:"Aden",            country:"Yemen",       lat:12.77,  lon:44.99,  keywords:"ade aden yemen gulf" },
-  { id:"KAR", name:"Karachi",         country:"Pakistan",    lat:24.86,  lon:67.01,  keywords:"kar karachi pakistan" },
-  { id:"FUJ", name:"Fujairah",        country:"UAE",         lat:25.12,  lon:56.34,  keywords:"fuj fujairah uae oman" },
-  { id:"CHE", name:"Chennai",         country:"India",       lat:13.08,  lon:80.29,  keywords:"che chennai madras india" },
-  { id:"KOC", name:"Kochi",           country:"India",       lat:9.97,   lon:76.27,  keywords:"koc kochi cochin india" },
-  { id:"BUS", name:"Busan",           country:"South Korea", lat:35.1,   lon:129.04, keywords:"bus busan korea" },
-  { id:"YOK", name:"Yokohama",        country:"Japan",       lat:35.45,  lon:139.65, keywords:"yok yokohama japan tokyo" },
-  { id:"PSD", name:"Port Said",       country:"Egypt",       lat:31.26,  lon:32.31,  keywords:"psd port said egypt suez" },
-  { id:"JAX", name:"Jacksonville",    country:"USA",         lat:30.33,  lon:-81.65, keywords:"jax jacksonville usa" },
-  { id:"LAX", name:"Los Angeles",     country:"USA",         lat:33.74,  lon:-118.27,keywords:"lax los angeles usa" },
-  { id:"HAM", name:"Hamburg",         country:"Germany",     lat:53.54,  lon:9.99,   keywords:"ham hamburg germany europe" },
-  { id:"ANT", name:"Antwerp",         country:"Belgium",     lat:51.23,  lon:4.42,   keywords:"ant antwerp belgium europe" },
-  { id:"BAS", name:"Basra",           country:"Iraq",        lat:30.52,  lon:47.83,  keywords:"bas basra iraq gulf" },
-  { id:"KWI", name:"Kuwait",          country:"Kuwait",      lat:29.37,  lon:47.99,  keywords:"kwi kuwait gulf" },
-  { id:"MAN", name:"Manila",          country:"Philippines", lat:14.59,  lon:120.98, keywords:"man manila philippines" },
-  { id:"DAR", name:"Dar es Salaam",   country:"Tanzania",    lat:-6.82,  lon:39.28,  keywords:"dar dar es salaam tanzania africa" },
-  { id:"MOM", name:"Mombasa",         country:"Kenya",       lat:-4.05,  lon:39.67,  keywords:"mom mombasa kenya africa" },
-  { id:"JAK", name:"Jakarta",         country:"Indonesia",   lat:-6.11,  lon:106.88, keywords:"jak jakarta indonesia" },
-  { id:"POR", name:"Port Klang",      country:"Malaysia",    lat:3.0,    lon:101.37, keywords:"por port klang malaysia" },
-  { id:"ABJ", name:"Abidjan",         country:"Ivory Coast", lat:5.35,   lon:-4.02,  keywords:"abj abidjan ivory coast africa" },
-  { id:"LAG", name:"Lagos",           country:"Nigeria",     lat:6.45,   lon:3.39,   keywords:"lag lagos nigeria africa" },
+  // ── INDIA ──
+  {id:"MUM",name:"Mumbai",city:"Mumbai",country:"India",lat:18.93,lon:72.83,keywords:"mum mumbai bombay nhava sheva jnpt india"},
+  {id:"CHE",name:"Chennai",city:"Chennai",country:"India",lat:13.08,lon:80.29,keywords:"che chennai madras india"},
+  {id:"KOC",name:"Kochi",city:"Kochi",country:"India",lat:9.97,lon:76.27,keywords:"koc kochi cochin india kerala"},
+  {id:"KAN",name:"Kandla",city:"Kandla",country:"India",lat:23.01,lon:70.22,keywords:"kan kandla deendayal india gujarat"},
+  {id:"VIS",name:"Visakhapatnam",city:"Visakhapatnam",country:"India",lat:17.69,lon:83.29,keywords:"vis visakhapatnam vizag india"},
+  {id:"PAR",name:"Paradip",city:"Paradip",country:"India",lat:20.32,lon:86.61,keywords:"par paradip india odisha"},
+  {id:"HAL",name:"Haldia",city:"Haldia",country:"India",lat:22.03,lon:88.07,keywords:"hal haldia kolkata india west bengal"},
+  {id:"TUT",name:"Tuticorin",city:"Tuticorin",country:"India",lat:8.80,lon:78.14,keywords:"tut tuticorin voc port india tamilnadu"},
+  {id:"NEW",name:"New Mangalore",city:"Mangalore",country:"India",lat:12.90,lon:74.82,keywords:"new mangalore india karnataka"},
+  {id:"MOR",name:"Mormugao",city:"Goa",country:"India",lat:15.41,lon:73.80,keywords:"mor mormugao goa india"},
+  {id:"ENN",name:"Ennore",city:"Chennai",country:"India",lat:13.22,lon:80.32,keywords:"enn ennore kamarajar india"},
+  {id:"POR",name:"Port Blair",city:"Andaman",country:"India",lat:11.67,lon:92.75,keywords:"por port blair andaman india"},
+  // ── PAKISTAN ──
+  {id:"KAR",name:"Karachi",city:"Karachi",country:"Pakistan",lat:24.86,lon:67.01,keywords:"kar karachi pakistan"},
+  {id:"QPQ",name:"Qasim",city:"Karachi",country:"Pakistan",lat:24.78,lon:67.32,keywords:"qpq qasim port karachi pakistan"},
+  {id:"GWD",name:"Gwadar",city:"Gwadar",country:"Pakistan",lat:25.12,lon:62.33,keywords:"gwd gwadar pakistan cpec"},
+  // ── SRI LANKA ──
+  {id:"COL",name:"Colombo",city:"Colombo",country:"Sri Lanka",lat:6.94,lon:79.85,keywords:"col colombo srilanka lanka"},
+  {id:"HAM2",name:"Hambantota",city:"Hambantota",country:"Sri Lanka",lat:6.12,lon:81.11,keywords:"ham hambantota srilanka"},
+  {id:"TRI",name:"Trincomalee",city:"Trincomalee",country:"Sri Lanka",lat:8.57,lon:81.23,keywords:"tri trincomalee srilanka"},
+  // ── BANGLADESH ──
+  {id:"CTG",name:"Chittagong",city:"Chittagong",country:"Bangladesh",lat:22.34,lon:91.82,keywords:"ctg chittagong bangladesh"},
+  {id:"MGL",name:"Mongla",city:"Mongla",country:"Bangladesh",lat:22.49,lon:89.59,keywords:"mgl mongla bangladesh"},
+  // ── MYANMAR ──
+  {id:"RGN",name:"Rangoon",city:"Yangon",country:"Myanmar",lat:16.78,lon:96.17,keywords:"rgn yangon rangoon myanmar burma"},
+  {id:"SIT",name:"Sittwe",city:"Sittwe",country:"Myanmar",lat:20.15,lon:92.90,keywords:"sit sittwe myanmar"},
+  // ── THAILAND ──
+  {id:"LEM",name:"Laem Chabang",city:"Laem Chabang",country:"Thailand",lat:13.08,lon:100.88,keywords:"lem laem chabang thailand bangkok"},
+  {id:"BKK",name:"Bangkok",city:"Bangkok",country:"Thailand",lat:13.59,lon:100.60,keywords:"bkk bangkok thailand"},
+  {id:"MAP",name:"Map Ta Phut",city:"Rayong",country:"Thailand",lat:12.67,lon:101.15,keywords:"map ta phut rayong thailand"},
+  {id:"PKT",name:"Phuket",city:"Phuket",country:"Thailand",lat:7.88,lon:98.40,keywords:"pkt phuket thailand"},
+  // ── MALAYSIA ──
+  {id:"PKL",name:"Port Klang",city:"Klang",country:"Malaysia",lat:3.00,lon:101.37,keywords:"pkl port klang klang malaysia"},
+  {id:"JHB",name:"Johor",city:"Johor Bahru",country:"Malaysia",lat:1.46,lon:103.89,keywords:"jhb johor bahru pasir gudang malaysia"},
+  {id:"PGU",name:"Penang",city:"Penang",country:"Malaysia",lat:5.41,lon:100.34,keywords:"pgu penang george town malaysia"},
+  {id:"MYY",name:"Miri",city:"Miri",country:"Malaysia",lat:4.39,lon:113.99,keywords:"myy miri sarawak malaysia borneo"},
+  {id:"KCH",name:"Kuching",city:"Kuching",country:"Malaysia",lat:1.56,lon:110.34,keywords:"kch kuching sarawak malaysia"},
+  {id:"BKI",name:"Kota Kinabalu",city:"Kota Kinabalu",country:"Malaysia",lat:5.98,lon:116.07,keywords:"bki kota kinabalu sabah malaysia"},
+  // ── SINGAPORE ──
+  {id:"SIN",name:"Singapore",city:"Singapore",country:"Singapore",lat:1.29,lon:103.85,keywords:"sin singapore jurong tuas"},
+  // ── INDONESIA ──
+  {id:"JAK",name:"Jakarta",city:"Jakarta",country:"Indonesia",lat:-6.11,lon:106.88,keywords:"jak jakarta tanjung priok indonesia"},
+  {id:"SBY",name:"Surabaya",city:"Surabaya",country:"Indonesia",lat:-7.21,lon:112.73,keywords:"sby surabaya tanjung perak indonesia"},
+  {id:"MKS",name:"Makassar",city:"Makassar",country:"Indonesia",lat:-5.14,lon:119.41,keywords:"mks makassar indonesia sulawesi"},
+  {id:"BDO",name:"Belawan",city:"Medan",country:"Indonesia",lat:3.78,lon:98.70,keywords:"bdo belawan medan indonesia sumatra"},
+  {id:"BTH",name:"Batam",city:"Batam",country:"Indonesia",lat:1.13,lon:104.02,keywords:"bth batam indonesia"},
+  {id:"PLM",name:"Palembang",city:"Palembang",country:"Indonesia",lat:-2.99,lon:104.76,keywords:"plm palembang indonesia sumatra"},
+  {id:"BPN",name:"Balikpapan",city:"Balikpapan",country:"Indonesia",lat:-1.27,lon:116.83,keywords:"bpn balikpapan indonesia kalimantan borneo"},
+  {id:"AMQ",name:"Ambon",city:"Ambon",country:"Indonesia",lat:-3.68,lon:128.18,keywords:"amq ambon indonesia maluku"},
+  // ── PHILIPPINES ──
+  {id:"MAN",name:"Manila",city:"Manila",country:"Philippines",lat:14.59,lon:120.98,keywords:"man manila philippines"},
+  {id:"CEB",name:"Cebu",city:"Cebu",country:"Philippines",lat:10.29,lon:123.90,keywords:"ceb cebu philippines"},
+  {id:"DVO",name:"Davao",city:"Davao",country:"Philippines",lat:7.07,lon:125.61,keywords:"dvo davao philippines mindanao"},
+  {id:"SBT",name:"Subic Bay",city:"Olongapo",country:"Philippines",lat:14.80,lon:120.27,keywords:"sbt subic bay philippines"},
+  // ── VIETNAM ──
+  {id:"SGN",name:"Ho Chi Minh City",city:"Ho Chi Minh",country:"Vietnam",lat:10.78,lon:106.70,keywords:"sgn saigon ho chi minh city vietnam hcmc"},
+  {id:"HAN",name:"Haiphong",city:"Haiphong",country:"Vietnam",lat:20.86,lon:106.68,keywords:"han haiphong vietnam hanoi"},
+  {id:"DAD",name:"Da Nang",city:"Da Nang",country:"Vietnam",lat:16.10,lon:108.22,keywords:"dad da nang vietnam"},
+  {id:"QNH",name:"Quy Nhon",city:"Quy Nhon",country:"Vietnam",lat:13.76,lon:109.22,keywords:"qnh quy nhon vietnam"},
+  // ── CAMBODIA ──
+  {id:"PNH",name:"Phnom Penh",city:"Phnom Penh",country:"Cambodia",lat:11.57,lon:104.93,keywords:"pnh phnom penh cambodia"},
+  {id:"SHV",name:"Sihanoukville",city:"Sihanoukville",country:"Cambodia",lat:10.63,lon:103.52,keywords:"shv sihanoukville cambodia preah sihanouk"},
+  // ── CHINA ──
+  {id:"SHA",name:"Shanghai",city:"Shanghai",country:"China",lat:31.23,lon:121.47,keywords:"sha shanghai china yangshan"},
+  {id:"HKG",name:"Hong Kong",city:"Hong Kong",country:"China",lat:22.29,lon:114.16,keywords:"hkg hong kong china kwai chung"},
+  {id:"SZX",name:"Shenzhen",city:"Shenzhen",country:"China",lat:22.49,lon:113.90,keywords:"szx shenzhen yantian china"},
+  {id:"GZH",name:"Guangzhou",city:"Guangzhou",country:"China",lat:23.09,lon:113.26,keywords:"gzh guangzhou nansha china canton"},
+  {id:"NGB",name:"Ningbo",city:"Ningbo",country:"China",lat:29.87,lon:121.55,keywords:"ngb ningbo zhoushan china"},
+  {id:"TJN",name:"Tianjin",city:"Tianjin",country:"China",lat:39.01,lon:117.67,keywords:"tjn tianjin xingang china beijing"},
+  {id:"QIN",name:"Qingdao",city:"Qingdao",country:"China",lat:36.07,lon:120.38,keywords:"qin qingdao china"},
+  {id:"DAL",name:"Dalian",city:"Dalian",country:"China",lat:38.92,lon:121.63,keywords:"dal dalian china"},
+  {id:"XMN",name:"Xiamen",city:"Xiamen",country:"China",lat:24.45,lon:118.07,keywords:"xmn xiamen amoy china"},
+  {id:"FOC",name:"Fuzhou",city:"Fuzhou",country:"China",lat:26.05,lon:119.31,keywords:"foc fuzhou china"},
+  {id:"LZH",name:"Lianyungang",city:"Lianyungang",country:"China",lat:34.75,lon:119.44,keywords:"lzh lianyungang china"},
+  {id:"YTN",name:"Yantai",city:"Yantai",country:"China",lat:37.55,lon:121.39,keywords:"ytn yantai china"},
+  {id:"ZJG",name:"Zhanjiang",city:"Zhanjiang",country:"China",lat:21.19,lon:110.40,keywords:"zjg zhanjiang china"},
+  {id:"HUZ",name:"Huangpu",city:"Guangzhou",country:"China",lat:23.10,lon:113.42,keywords:"huz huangpu guangzhou china"},
+  // ── TAIWAN ──
+  {id:"KHH",name:"Kaohsiung",city:"Kaohsiung",country:"Taiwan",lat:22.62,lon:120.27,keywords:"khh kaohsiung taiwan"},
+  {id:"KEL",name:"Keelung",city:"Keelung",country:"Taiwan",lat:25.13,lon:121.74,keywords:"kel keelung taipei taiwan"},
+  {id:"TXG",name:"Taichung",city:"Taichung",country:"Taiwan",lat:24.27,lon:120.52,keywords:"txg taichung taiwan"},
+  // ── SOUTH KOREA ──
+  {id:"BUS",name:"Busan",city:"Busan",country:"South Korea",lat:35.10,lon:129.04,keywords:"bus busan korea"},
+  {id:"ICN",name:"Incheon",city:"Incheon",country:"South Korea",lat:37.47,lon:126.62,keywords:"icn incheon seoul korea"},
+  {id:"KWJ",name:"Gwangyang",city:"Gwangyang",country:"South Korea",lat:34.91,lon:127.70,keywords:"kwj gwangyang korea"},
+  {id:"USN",name:"Ulsan",city:"Ulsan",country:"South Korea",lat:35.54,lon:129.39,keywords:"usn ulsan korea"},
+  // ── JAPAN ──
+  {id:"YOK",name:"Yokohama",city:"Yokohama",country:"Japan",lat:35.45,lon:139.65,keywords:"yok yokohama tokyo japan"},
+  {id:"KOB",name:"Kobe",city:"Kobe",country:"Japan",lat:34.68,lon:135.19,keywords:"kob kobe japan osaka"},
+  {id:"NGY",name:"Nagoya",city:"Nagoya",country:"Japan",lat:35.06,lon:136.88,keywords:"ngy nagoya japan"},
+  {id:"OSA",name:"Osaka",city:"Osaka",country:"Japan",lat:34.65,lon:135.43,keywords:"osa osaka japan"},
+  {id:"TKY",name:"Tokyo",city:"Tokyo",country:"Japan",lat:35.65,lon:139.77,keywords:"tky tokyo japan"},
+  {id:"CHB",name:"Chiba",city:"Chiba",country:"Japan",lat:35.58,lon:140.11,keywords:"chb chiba japan"},
+  {id:"HKD",name:"Hakodate",city:"Hakodate",country:"Japan",lat:41.77,lon:140.73,keywords:"hkd hakodate hokkaido japan"},
+  {id:"KGS",name:"Kagoshima",city:"Kagoshima",country:"Japan",lat:31.60,lon:130.57,keywords:"kgs kagoshima japan"},
+  // ── UAE ──
+  {id:"DXB",name:"Dubai",city:"Dubai",country:"UAE",lat:25.05,lon:55.13,keywords:"dxb dubai jebel ali uae emirates"},
+  {id:"FUJ",name:"Fujairah",city:"Fujairah",country:"UAE",lat:25.12,lon:56.34,keywords:"fuj fujairah uae oman gulf"},
+  {id:"AUH",name:"Abu Dhabi",city:"Abu Dhabi",country:"UAE",lat:24.48,lon:54.37,keywords:"auh abu dhabi uae zayed"},
+  {id:"SHJ",name:"Sharjah",city:"Sharjah",country:"UAE",lat:25.37,lon:55.39,keywords:"shj sharjah uae khalid"},
+  // ── OMAN ──
+  {id:"MCT",name:"Muscat",city:"Muscat",country:"Oman",lat:23.62,lon:58.59,keywords:"mct muscat oman port sultan qaboos"},
+  {id:"SLL",name:"Salalah",city:"Salalah",country:"Oman",lat:16.94,lon:54.00,keywords:"sll salalah oman"},
+  {id:"SOH",name:"Sohar",city:"Sohar",country:"Oman",lat:24.35,lon:56.72,keywords:"soh sohar oman"},
+  // ── QATAR ──
+  {id:"DOH",name:"Doha",city:"Doha",country:"Qatar",lat:25.29,lon:51.55,keywords:"doh doha qatar hamad"},
+  {id:"RKH",name:"Ras Laffan",city:"Ras Laffan",country:"Qatar",lat:25.91,lon:51.55,keywords:"rkh ras laffan qatar lng"},
+  // ── BAHRAIN ──
+  {id:"BAH",name:"Bahrain",city:"Manama",country:"Bahrain",lat:26.24,lon:50.63,keywords:"bah bahrain manama mina salman"},
+  // ── KUWAIT ──
+  {id:"KWI",name:"Kuwait",city:"Kuwait City",country:"Kuwait",lat:29.37,lon:47.99,keywords:"kwi kuwait shuaiba"},
+  // ── SAUDI ARABIA ──
+  {id:"JED",name:"Jeddah",city:"Jeddah",country:"Saudi Arabia",lat:21.49,lon:39.18,keywords:"jed jeddah saudi arabia red sea islamic"},
+  {id:"DAM",name:"Dammam",city:"Dammam",country:"Saudi Arabia",lat:26.43,lon:50.10,keywords:"dam dammam king abdulaziz saudi arabia"},
+  {id:"YAN",name:"Yanbu",city:"Yanbu",country:"Saudi Arabia",lat:24.09,lon:38.06,keywords:"yan yanbu saudi arabia red sea"},
+  {id:"JUB",name:"Jubail",city:"Jubail",country:"Saudi Arabia",lat:27.01,lon:49.65,keywords:"jub jubail saudi arabia gulf"},
+  {id:"RAB",name:"Rabigh",city:"Rabigh",country:"Saudi Arabia",lat:22.80,lon:39.02,keywords:"rab rabigh saudi arabia"},
+  // ── IRAQ ──
+  {id:"BAS",name:"Basra",city:"Basra",country:"Iraq",lat:30.52,lon:47.83,keywords:"bas basra iraq gulf umm qasr"},
+  {id:"UMQ",name:"Umm Qasr",city:"Umm Qasr",country:"Iraq",lat:30.03,lon:47.92,keywords:"umq umm qasr iraq"},
+  // ── IRAN ──
+  {id:"BND",name:"Bandar Abbas",city:"Bandar Abbas",country:"Iran",lat:27.18,lon:56.27,keywords:"bnd bandar abbas iran hormuz"},
+  {id:"KHK",name:"Khark Island",city:"Khark",country:"Iran",lat:29.23,lon:50.32,keywords:"khk kharg khark island iran oil"},
+  {id:"BIK",name:"Bandar Imam",city:"Bandar Imam",country:"Iran",lat:30.44,lon:49.07,keywords:"bik bandar imam khomeini iran"},
+  // ── YEMEN ──
+  {id:"ADE",name:"Aden",city:"Aden",country:"Yemen",lat:12.77,lon:44.99,keywords:"ade aden yemen gulf"},
+  {id:"HOD",name:"Hodeidah",city:"Hodeidah",country:"Yemen",lat:14.80,lon:42.95,keywords:"hod hodeidah hodeida yemen red sea"},
+  // ── DJIBOUTI ──
+  {id:"JIB",name:"Djibouti",city:"Djibouti",country:"Djibouti",lat:11.59,lon:43.14,keywords:"jib djibouti horn africa"},
+  // ── ERITREA ──
+  {id:"MSW",name:"Massawa",city:"Massawa",country:"Eritrea",lat:15.61,lon:39.47,keywords:"msw massawa eritrea red sea"},
+  // ── EGYPT ──
+  {id:"PSD",name:"Port Said",city:"Port Said",country:"Egypt",lat:31.26,lon:32.31,keywords:"psd port said egypt suez canal"},
+  {id:"SUZ",name:"Suez",city:"Suez",country:"Egypt",lat:29.97,lon:32.55,keywords:"suz suez egypt canal"},
+  {id:"ALX",name:"Alexandria",city:"Alexandria",country:"Egypt",lat:31.20,lon:29.89,keywords:"alx alexandria egypt mediterranean"},
+  {id:"DKH",name:"Damietta",city:"Damietta",country:"Egypt",lat:31.45,lon:31.82,keywords:"dkh damietta egypt"},
+  {id:"SFK",name:"Safaga",city:"Safaga",country:"Egypt",lat:26.73,lon:33.93,keywords:"sfk safaga egypt red sea"},
+  // ── SUDAN ──
+  {id:"PSD2",name:"Port Sudan",city:"Port Sudan",country:"Sudan",lat:19.62,lon:37.22,keywords:"psd2 port sudan red sea africa"},
+  // ── KENYA ──
+  {id:"MOM",name:"Mombasa",city:"Mombasa",country:"Kenya",lat:-4.05,lon:39.67,keywords:"mom mombasa kenya africa"},
+  // ── TANZANIA ──
+  {id:"DAR",name:"Dar es Salaam",city:"Dar es Salaam",country:"Tanzania",lat:-6.82,lon:39.28,keywords:"dar dar es salaam tanzania africa"},
+  {id:"ZNZ",name:"Zanzibar",city:"Zanzibar",country:"Tanzania",lat:-6.16,lon:39.19,keywords:"znz zanzibar tanzania"},
+  // ── MOZAMBIQUE ──
+  {id:"MPM",name:"Maputo",city:"Maputo",country:"Mozambique",lat:-25.97,lon:32.58,keywords:"mpm maputo mozambique africa"},
+  {id:"BEW",name:"Beira",city:"Beira",country:"Mozambique",lat:-19.84,lon:34.84,keywords:"bew beira mozambique"},
+  {id:"NAC",name:"Nacala",city:"Nacala",country:"Mozambique",lat:-14.52,lon:40.68,keywords:"nac nacala mozambique"},
+  // ── MADAGASCAR ──
+  {id:"TNR",name:"Toamasina",city:"Toamasina",country:"Madagascar",lat:-18.16,lon:49.40,keywords:"tnr toamasina tamatave madagascar"},
+  // ── SOUTH AFRICA ──
+  {id:"DUR",name:"Durban",city:"Durban",country:"South Africa",lat:-29.87,lon:31.04,keywords:"dur durban south africa"},
+  {id:"CPT",name:"Cape Town",city:"Cape Town",country:"South Africa",lat:-33.91,lon:18.43,keywords:"cpt cape town south africa good hope"},
+  {id:"PLZ",name:"Port Elizabeth",city:"Port Elizabeth",country:"South Africa",lat:-33.96,lon:25.62,keywords:"plz port elizabeth gqeberha south africa"},
+  {id:"ELS",name:"East London",city:"East London",country:"South Africa",lat:-33.02,lon:27.91,keywords:"els east london south africa"},
+  {id:"RCB",name:"Richards Bay",city:"Richards Bay",country:"South Africa",lat:-28.80,lon:32.08,keywords:"rcb richards bay south africa"},
+  // ── NAMIBIA ──
+  {id:"WDH",name:"Walvis Bay",city:"Walvis Bay",country:"Namibia",lat:-22.96,lon:14.51,keywords:"wdh walvis bay namibia africa"},
+  // ── ANGOLA ──
+  {id:"LAD",name:"Luanda",city:"Luanda",country:"Angola",lat:-8.83,lon:13.23,keywords:"lad luanda angola africa"},
+  // ── NIGERIA ──
+  {id:"LAG",name:"Lagos",city:"Lagos",country:"Nigeria",lat:6.45,lon:3.39,keywords:"lag lagos apapa nigeria africa"},
+  {id:"PHC",name:"Port Harcourt",city:"Port Harcourt",country:"Nigeria",lat:4.77,lon:7.01,keywords:"phc port harcourt nigeria"},
+  {id:"WAR",name:"Warri",city:"Warri",country:"Nigeria",lat:5.52,lon:5.75,keywords:"war warri nigeria"},
+  // ── GHANA ──
+  {id:"TEM",name:"Tema",city:"Tema",country:"Ghana",lat:5.63,lon:0.01,keywords:"tem tema accra ghana africa"},
+  {id:"TAK",name:"Takoradi",city:"Takoradi",country:"Ghana",lat:4.88,lon:-1.75,keywords:"tak takoradi ghana africa"},
+  // ── IVORY COAST ──
+  {id:"ABJ",name:"Abidjan",city:"Abidjan",country:"Ivory Coast",lat:5.35,lon:-4.02,keywords:"abj abidjan ivory coast cote d ivoire africa"},
+  {id:"SAN",name:"San Pedro",city:"San Pedro",country:"Ivory Coast",lat:4.74,lon:-6.63,keywords:"san san pedro ivory coast"},
+  // ── SENEGAL ──
+  {id:"DKR",name:"Dakar",city:"Dakar",country:"Senegal",lat:14.69,lon:-17.44,keywords:"dkr dakar senegal west africa"},
+  // ── MOROCCO ──
+  {id:"TNG",name:"Tanger Med",city:"Tanger",country:"Morocco",lat:35.90,lon:-5.50,keywords:"tng tanger tangier med morocco mediterranean"},
+  {id:"CAS",name:"Casablanca",city:"Casablanca",country:"Morocco",lat:33.60,lon:-7.63,keywords:"cas casablanca morocco"},
+  // ── ALGERIA ──
+  {id:"ALG",name:"Algiers",city:"Algiers",country:"Algeria",lat:36.77,lon:3.04,keywords:"alg algiers algeria mediterranean"},
+  // ── TUNISIA ──
+  {id:"TUN",name:"Tunis",city:"Tunis",country:"Tunisia",lat:37.33,lon:10.23,keywords:"tun tunis tunisia mediterranean"},
+  // ── LIBYA ──
+  {id:"TRP",name:"Tripoli",city:"Tripoli",country:"Libya",lat:32.89,lon:13.18,keywords:"trp tripoli libya"},
+  // ── GREECE ──
+  {id:"PIR",name:"Piraeus",city:"Athens",country:"Greece",lat:37.95,lon:23.63,keywords:"pir piraeus athens greece mediterranean"},
+  {id:"THE",name:"Thessaloniki",city:"Thessaloniki",country:"Greece",lat:40.63,lon:22.95,keywords:"the thessaloniki greece"},
+  {id:"VOL",name:"Volos",city:"Volos",country:"Greece",lat:39.36,lon:22.95,keywords:"vol volos greece"},
+  // ── TURKEY ──
+  {id:"IST",name:"Istanbul",city:"Istanbul",country:"Turkey",lat:41.01,lon:28.97,keywords:"ist istanbul turkey haydarpasa ambarlı"},
+  {id:"IZM",name:"Izmir",city:"Izmir",country:"Turkey",lat:38.42,lon:27.14,keywords:"izm izmir turkey"},
+  {id:"MER",name:"Mersin",city:"Mersin",country:"Turkey",lat:36.79,lon:34.62,keywords:"mer mersin turkey"},
+  {id:"ISK",name:"Iskenderun",city:"Iskenderun",country:"Turkey",lat:36.59,lon:36.18,keywords:"isk iskenderun turkey"},
+  // ── ISRAEL ──
+  {id:"HAI",name:"Haifa",city:"Haifa",country:"Israel",lat:32.82,lon:35.00,keywords:"hai haifa israel"},
+  {id:"ASH",name:"Ashdod",city:"Ashdod",country:"Israel",lat:31.81,lon:34.64,keywords:"ash ashdod israel"},
+  // ── LEBANON ──
+  {id:"BEY",name:"Beirut",city:"Beirut",country:"Lebanon",lat:33.90,lon:35.51,keywords:"bey beirut lebanon"},
+  // ── SYRIA ──
+  {id:"LAT",name:"Latakia",city:"Latakia",country:"Syria",lat:35.52,lon:35.77,keywords:"lat latakia syria"},
+  // ── CYPRUS ──
+  {id:"LMS",name:"Limassol",city:"Limassol",country:"Cyprus",lat:34.67,lon:33.04,keywords:"lms limassol cyprus"},
+  // ── ITALY ──
+  {id:"GEN",name:"Genoa",city:"Genoa",country:"Italy",lat:44.41,lon:8.93,keywords:"gen genoa italy mediterranean"},
+  {id:"LIV",name:"Livorno",city:"Livorno",country:"Italy",lat:43.55,lon:10.31,keywords:"liv livorno leghorn italy"},
+  {id:"NAP",name:"Naples",city:"Naples",country:"Italy",lat:40.84,lon:14.27,keywords:"nap naples italy"},
+  {id:"TAR",name:"Taranto",city:"Taranto",country:"Italy",lat:40.47,lon:17.23,keywords:"tar taranto italy"},
+  {id:"ANC",name:"Ancona",city:"Ancona",country:"Italy",lat:43.62,lon:13.51,keywords:"anc ancona italy adriatic"},
+  {id:"VEN",name:"Venice",city:"Venice",country:"Italy",lat:45.44,lon:12.33,keywords:"ven venice venezia italy"},
+  {id:"TRS",name:"Trieste",city:"Trieste",country:"Italy",lat:45.65,lon:13.78,keywords:"trs trieste italy"},
+  // ── SPAIN ──
+  {id:"BCN",name:"Barcelona",city:"Barcelona",country:"Spain",lat:41.38,lon:2.18,keywords:"bcn barcelona spain mediterranean"},
+  {id:"VLC",name:"Valencia",city:"Valencia",country:"Spain",lat:39.46,lon:-0.32,keywords:"vlc valencia spain"},
+  {id:"ALG2",name:"Algeciras",city:"Algeciras",country:"Spain",lat:36.13,lon:-5.45,keywords:"alg2 algeciras spain gibraltar"},
+  {id:"BIL",name:"Bilbao",city:"Bilbao",country:"Spain",lat:43.36,lon:-3.04,keywords:"bil bilbao spain atlantic"},
+  {id:"LPA",name:"Las Palmas",city:"Gran Canaria",country:"Spain",lat:28.10,lon:-15.41,keywords:"lpa las palmas gran canaria spain canary islands"},
+  // ── PORTUGAL ──
+  {id:"LIS",name:"Lisbon",city:"Lisbon",country:"Portugal",lat:38.71,lon:-9.14,keywords:"lis lisbon portugal atlantic"},
+  {id:"SIN2",name:"Sines",city:"Sines",country:"Portugal",lat:37.96,lon:-8.87,keywords:"sin2 sines portugal"},
+  {id:"LIX",name:"Leixoes",city:"Porto",country:"Portugal",lat:41.18,lon:-8.70,keywords:"lix leixoes porto portugal"},
+  // ── FRANCE ──
+  {id:"MRS",name:"Marseille",city:"Marseille",country:"France",lat:43.30,lon:5.37,keywords:"mrs marseille france fos mediterranean"},
+  {id:"LEH",name:"Le Havre",city:"Le Havre",country:"France",lat:49.49,lon:0.11,keywords:"leh le havre france channel"},
+  {id:"DKK",name:"Dunkirk",city:"Dunkirk",country:"France",lat:51.04,lon:2.37,keywords:"dkk dunkirk france"},
+  {id:"NAN",name:"Nantes",city:"Nantes",country:"France",lat:47.21,lon:-1.55,keywords:"nan nantes saint nazaire france"},
+  // ── BELGIUM ──
+  {id:"ANT",name:"Antwerp",city:"Antwerp",country:"Belgium",lat:51.23,lon:4.42,keywords:"ant antwerp belgium europe"},
+  {id:"ZBR",name:"Zeebrugge",city:"Bruges",country:"Belgium",lat:51.33,lon:3.20,keywords:"zbr zeebrugge bruges belgium"},
+  // ── NETHERLANDS ──
+  {id:"ROT",name:"Rotterdam",city:"Rotterdam",country:"Netherlands",lat:51.92,lon:4.48,keywords:"rot rotterdam netherlands europe europoort"},
+  {id:"AMS",name:"Amsterdam",city:"Amsterdam",country:"Netherlands",lat:52.39,lon:4.90,keywords:"ams amsterdam netherlands"},
+  // ── GERMANY ──
+  {id:"HAM",name:"Hamburg",city:"Hamburg",country:"Germany",lat:53.54,lon:9.99,keywords:"ham hamburg germany europe"},
+  {id:"BRE",name:"Bremen",city:"Bremen",country:"Germany",lat:53.08,lon:8.80,keywords:"bre bremen bremerhaven germany"},
+  {id:"ROK",name:"Rostock",city:"Rostock",country:"Germany",lat:54.15,lon:12.10,keywords:"rok rostock germany baltic"},
+  // ── UK ──
+  {id:"FEL",name:"Felixstowe",city:"Felixstowe",country:"UK",lat:51.96,lon:1.35,keywords:"fel felixstowe uk england suffolk"},
+  {id:"LON",name:"London",city:"London",country:"UK",lat:51.51,lon:0.12,keywords:"lon london tilbury thamesport uk"},
+  {id:"LIV2",name:"Liverpool",city:"Liverpool",country:"UK",lat:53.40,lon:-3.00,keywords:"liv2 liverpool uk england"},
+  {id:"GLA",name:"Glasgow",city:"Glasgow",country:"UK",lat:55.86,lon:-4.24,keywords:"gla glasgow uk scotland"},
+  {id:"ABD",name:"Aberdeen",city:"Aberdeen",country:"UK",lat:57.15,lon:-2.07,keywords:"abd aberdeen uk scotland north sea"},
+  {id:"SOU",name:"Southampton",city:"Southampton",country:"UK",lat:50.90,lon:-1.40,keywords:"sou southampton uk"},
+  // ── IRELAND ──
+  {id:"DUB",name:"Dublin",city:"Dublin",country:"Ireland",lat:53.35,lon:-6.22,keywords:"dub dublin ireland"},
+  {id:"CRK",name:"Cork",city:"Cork",country:"Ireland",lat:51.90,lon:-8.47,keywords:"crk cork ireland"},
+  // ── DENMARK ──
+  {id:"CPH",name:"Copenhagen",city:"Copenhagen",country:"Denmark",lat:55.68,lon:12.57,keywords:"cph copenhagen denmark"},
+  {id:"AAL",name:"Aalborg",city:"Aalborg",country:"Denmark",lat:57.05,lon:9.93,keywords:"aal aalborg denmark"},
+  {id:"AAR",name:"Aarhus",city:"Aarhus",country:"Denmark",lat:56.15,lon:10.22,keywords:"aar aarhus denmark"},
+  // ── SWEDEN ──
+  {id:"GBG",name:"Gothenburg",city:"Gothenburg",country:"Sweden",lat:57.71,lon:11.97,keywords:"gbg gothenburg goteborg sweden"},
+  {id:"STO",name:"Stockholm",city:"Stockholm",country:"Sweden",lat:59.33,lon:18.07,keywords:"sto stockholm sweden baltic"},
+  // ── NORWAY ──
+  {id:"OSL",name:"Oslo",city:"Oslo",country:"Norway",lat:59.91,lon:10.75,keywords:"osl oslo norway"},
+  {id:"BGO",name:"Bergen",city:"Bergen",country:"Norway",lat:60.39,lon:5.32,keywords:"bgo bergen norway"},
+  {id:"SVG",name:"Stavanger",city:"Stavanger",country:"Norway",lat:58.97,lon:5.73,keywords:"svg stavanger norway north sea"},
+  // ── FINLAND ──
+  {id:"HEL",name:"Helsinki",city:"Helsinki",country:"Finland",lat:60.17,lon:24.95,keywords:"hel helsinki finland baltic"},
+  // ── ESTONIA ──
+  {id:"TLL",name:"Tallinn",city:"Tallinn",country:"Estonia",lat:59.43,lon:24.75,keywords:"tll tallinn estonia baltic"},
+  // ── LATVIA ──
+  {id:"RIX",name:"Riga",city:"Riga",country:"Latvia",lat:56.95,lon:24.11,keywords:"rix riga latvia baltic"},
+  // ── LITHUANIA ──
+  {id:"KLJ",name:"Klaipeda",city:"Klaipeda",country:"Lithuania",lat:55.71,lon:21.13,keywords:"klj klaipeda lithuania baltic"},
+  // ── POLAND ──
+  {id:"GDN",name:"Gdansk",city:"Gdansk",country:"Poland",lat:54.35,lon:18.65,keywords:"gdn gdansk gdynia poland baltic"},
+  // ── RUSSIA ──
+  {id:"SPB",name:"St. Petersburg",city:"St. Petersburg",country:"Russia",lat:59.95,lon:30.32,keywords:"spb st petersburg russia baltic"},
+  {id:"VVO",name:"Vladivostok",city:"Vladivostok",country:"Russia",lat:43.11,lon:131.88,keywords:"vvo vladivostok russia far east"},
+  {id:"MMK",name:"Murmansk",city:"Murmansk",country:"Russia",lat:68.98,lon:33.09,keywords:"mmk murmansk russia arctic"},
+  {id:"NKH",name:"Nakhodka",city:"Nakhodka",country:"Russia",lat:42.83,lon:132.90,keywords:"nkh nakhodka russia pacific"},
+  // ── UKRAINE ──
+  {id:"ODS",name:"Odessa",city:"Odessa",country:"Ukraine",lat:46.49,lon:30.73,keywords:"ods odessa ukraine black sea"},
+  {id:"MKP",name:"Mykolaiv",city:"Mykolaiv",country:"Ukraine",lat:46.97,lon:31.98,keywords:"mkp mykolaiv ukraine black sea"},
+  // ── ROMANIA ──
+  {id:"CND",name:"Constanta",city:"Constanta",country:"Romania",lat:44.18,lon:28.65,keywords:"cnd constanta romania black sea"},
+  // ── BULGARIA ──
+  {id:"VAR",name:"Varna",city:"Varna",country:"Bulgaria",lat:43.20,lon:27.92,keywords:"var varna bulgaria black sea"},
+  // ── GEORGIA ──
+  {id:"BUS2",name:"Batumi",city:"Batumi",country:"Georgia",lat:41.64,lon:41.64,keywords:"bus2 batumi georgia black sea"},
+  // ── USA (EAST COAST) ──
+  {id:"NYK",name:"New York",city:"New York",country:"USA",lat:40.65,lon:-74.07,keywords:"nyk new york new jersey usa east coast"},
+  {id:"BAL",name:"Baltimore",city:"Baltimore",country:"USA",lat:39.27,lon:-76.59,keywords:"bal baltimore usa east coast"},
+  {id:"SAV",name:"Savannah",city:"Savannah",country:"USA",lat:32.08,lon:-81.09,keywords:"sav savannah usa east coast georgia"},
+  {id:"CHS",name:"Charleston",city:"Charleston",country:"USA",lat:32.77,lon:-79.93,keywords:"chs charleston usa south carolina"},
+  {id:"NOR",name:"Norfolk",city:"Norfolk",country:"USA",lat:36.85,lon:-76.30,keywords:"nor norfolk virginia usa"},
+  {id:"MIA",name:"Miami",city:"Miami",country:"USA",lat:25.77,lon:-80.19,keywords:"mia miami florida usa"},
+  {id:"JAX2",name:"Jacksonville",city:"Jacksonville",country:"USA",lat:30.33,lon:-81.65,keywords:"jax jacksonville florida usa"},
+  {id:"HOU",name:"Houston",city:"Houston",country:"USA",lat:29.76,lon:-95.37,keywords:"hou houston texas usa gulf of mexico"},
+  {id:"NOR2",name:"New Orleans",city:"New Orleans",country:"USA",lat:29.95,lon:-90.07,keywords:"nor2 new orleans louisiana usa"},
+  // ── USA (WEST COAST) ──
+  {id:"LAX",name:"Los Angeles",city:"Los Angeles",country:"USA",lat:33.74,lon:-118.27,keywords:"lax los angeles long beach usa west coast"},
+  {id:"SEA",name:"Seattle",city:"Seattle",country:"USA",lat:47.60,lon:-122.33,keywords:"sea seattle tacoma usa west coast"},
+  {id:"SFO",name:"San Francisco",city:"San Francisco",country:"USA",lat:37.79,lon:-122.39,keywords:"sfo san francisco oakland usa"},
+  {id:"ANC2",name:"Anchorage",city:"Anchorage",country:"USA",lat:61.22,lon:-149.90,keywords:"anc2 anchorage alaska usa"},
+  // ── CANADA ──
+  {id:"VAN",name:"Vancouver",city:"Vancouver",country:"Canada",lat:49.29,lon:-123.11,keywords:"van vancouver canada west coast"},
+  {id:"PRI",name:"Prince Rupert",city:"Prince Rupert",country:"Canada",lat:54.32,lon:-130.32,keywords:"pri prince rupert canada bc"},
+  {id:"MON",name:"Montreal",city:"Montreal",country:"Canada",lat:45.50,lon:-73.57,keywords:"mon montreal canada"},
+  {id:"HAL2",name:"Halifax",city:"Halifax",country:"Canada",lat:44.65,lon:-63.60,keywords:"hal2 halifax nova scotia canada"},
+  // ── MEXICO ──
+  {id:"LAZ",name:"Lazaro Cardenas",city:"Lazaro Cardenas",country:"Mexico",lat:17.95,lon:-102.19,keywords:"laz lazaro cardenas mexico pacific"},
+  {id:"MZT",name:"Manzanillo",city:"Manzanillo",country:"Mexico",lat:19.05,lon:-104.32,keywords:"mzt manzanillo mexico pacific"},
+  {id:"VER",name:"Veracruz",city:"Veracruz",country:"Mexico",lat:19.18,lon:-96.13,keywords:"ver veracruz mexico gulf"},
+  {id:"ACA",name:"Acapulco",city:"Acapulco",country:"Mexico",lat:16.86,lon:-99.90,keywords:"aca acapulco mexico pacific"},
+  // ── PANAMA ──
+  {id:"BAL2",name:"Balboa",city:"Panama City",country:"Panama",lat:8.96,lon:-79.57,keywords:"bal2 balboa panama canal pacific"},
+  {id:"CLN",name:"Colon",city:"Colon",country:"Panama",lat:9.36,lon:-79.90,keywords:"cln colon cristobal panama canal atlantic"},
+  // ── COLOMBIA ──
+  {id:"CTG2",name:"Cartagena",city:"Cartagena",country:"Colombia",lat:10.40,lon:-75.51,keywords:"ctg2 cartagena colombia caribbean"},
+  {id:"BAQ",name:"Barranquilla",city:"Barranquilla",country:"Colombia",lat:10.97,lon:-74.80,keywords:"baq barranquilla colombia"},
+  // ── VENEZUELA ──
+  {id:"CCS",name:"La Guaira",city:"Caracas",country:"Venezuela",lat:10.60,lon:-66.93,keywords:"ccs la guaira caracas venezuela"},
+  {id:"PBL",name:"Puerto Cabello",city:"Puerto Cabello",country:"Venezuela",lat:10.47,lon:-68.01,keywords:"pbl puerto cabello venezuela"},
+  // ── BRAZIL ──
+  {id:"SSL",name:"Santos",city:"Santos",country:"Brazil",lat:-23.96,lon:-46.33,keywords:"ssl santos sao paulo brazil"},
+  {id:"RIO",name:"Rio de Janeiro",city:"Rio de Janeiro",country:"Brazil",lat:-22.90,lon:-43.17,keywords:"rio rio de janeiro brazil"},
+  {id:"SSZ",name:"Paranagua",city:"Paranagua",country:"Brazil",lat:-25.52,lon:-48.51,keywords:"ssz paranagua brazil"},
+  {id:"POA",name:"Porto Alegre",city:"Porto Alegre",country:"Brazil",lat:-30.03,lon:-51.24,keywords:"poa porto alegre brazil"},
+  {id:"FOR",name:"Fortaleza",city:"Fortaleza",country:"Brazil",lat:-3.72,lon:-38.52,keywords:"for fortaleza brazil"},
+  {id:"SLZ",name:"Sao Luis",city:"Sao Luis",country:"Brazil",lat:-2.52,lon:-44.28,keywords:"slz sao luis itaqui brazil"},
+  {id:"MCZ",name:"Maceio",city:"Maceio",country:"Brazil",lat:-9.66,lon:-35.73,keywords:"mcz maceio brazil"},
+  {id:"REC",name:"Recife",city:"Recife",country:"Brazil",lat:-8.05,lon:-34.88,keywords:"rec recife brazil"},
+  {id:"SSA",name:"Salvador",city:"Salvador",country:"Brazil",lat:-12.97,lon:-38.50,keywords:"ssa salvador bahia brazil"},
+  {id:"VIT",name:"Vitoria",city:"Vitoria",country:"Brazil",lat:-20.31,lon:-40.34,keywords:"vit vitoria brazil"},
+  {id:"BEL",name:"Belem",city:"Belem",country:"Brazil",lat:-1.46,lon:-48.50,keywords:"bel belem para brazil amazon"},
+  {id:"MNS",name:"Manaus",city:"Manaus",country:"Brazil",lat:-3.10,lon:-60.02,keywords:"mns manaus amazon brazil"},
+  // ── ARGENTINA ──
+  {id:"BUE",name:"Buenos Aires",city:"Buenos Aires",country:"Argentina",lat:-34.61,lon:-58.37,keywords:"bue buenos aires argentina exobra"},
+  {id:"ROS",name:"Rosario",city:"Rosario",country:"Argentina",lat:-32.95,lon:-60.65,keywords:"ros rosario argentina"},
+  {id:"BBQ",name:"Bahia Blanca",city:"Bahia Blanca",country:"Argentina",lat:-38.72,lon:-62.27,keywords:"bbq bahia blanca argentina"},
+  // ── CHILE ──
+  {id:"IQQ",name:"Iquique",city:"Iquique",country:"Chile",lat:-20.22,lon:-70.13,keywords:"iqq iquique chile pacific"},
+  {id:"ANF",name:"Antofagasta",city:"Antofagasta",country:"Chile",lat:-23.65,lon:-70.40,keywords:"anf antofagasta chile"},
+  {id:"VAP",name:"Valparaiso",city:"Valparaiso",country:"Chile",lat:-33.04,lon:-71.62,keywords:"vap valparaiso chile"},
+  // ── PERU ──
+  {id:"CAL",name:"Callao",city:"Lima",country:"Peru",lat:-12.05,lon:-77.14,keywords:"cal callao lima peru"},
+  // ── ECUADOR ──
+  {id:"GYE",name:"Guayaquil",city:"Guayaquil",country:"Ecuador",lat:-2.18,lon:-79.90,keywords:"gye guayaquil ecuador"},
+  // ── AUSTRALIA ──
+  {id:"SYD",name:"Sydney",city:"Sydney",country:"Australia",lat:-33.86,lon:151.21,keywords:"syd sydney botany australia"},
+  {id:"MEL",name:"Melbourne",city:"Melbourne",country:"Australia",lat:-37.82,lon:144.97,keywords:"mel melbourne australia"},
+  {id:"BNE",name:"Brisbane",city:"Brisbane",country:"Australia",lat:-27.47,lon:153.02,keywords:"bne brisbane australia"},
+  {id:"ADL",name:"Adelaide",city:"Adelaide",country:"Australia",lat:-34.93,lon:138.60,keywords:"adl adelaide australia"},
+  {id:"PER",name:"Perth",city:"Perth",country:"Australia",lat:-31.95,lon:115.86,keywords:"per perth fremantle australia"},
+  {id:"DRW",name:"Darwin",city:"Darwin",country:"Australia",lat:-12.46,lon:130.84,keywords:"drw darwin australia"},
+  {id:"TSV",name:"Townsville",city:"Townsville",country:"Australia",lat:-19.26,lon:146.81,keywords:"tsv townsville australia"},
+  {id:"GLD",name:"Gladstone",city:"Gladstone",country:"Australia",lat:-23.84,lon:151.26,keywords:"gld gladstone australia"},
+  {id:"HAY",name:"Hay Point",city:"Mackay",country:"Australia",lat:-21.29,lon:149.30,keywords:"hay hay point mackay australia coal"},
+  {id:"DAM2",name:"Dampier",city:"Dampier",country:"Australia",lat:-20.66,lon:116.72,keywords:"dam2 dampier australia iron ore"},
+  {id:"POH",name:"Port Hedland",city:"Port Hedland",country:"Australia",lat:-20.31,lon:118.58,keywords:"poh port hedland australia iron ore"},
+  // ── NEW ZEALAND ──
+  {id:"AKL",name:"Auckland",city:"Auckland",country:"New Zealand",lat:-36.84,lon:174.77,keywords:"akl auckland new zealand"},
+  {id:"TRG",name:"Tauranga",city:"Tauranga",country:"New Zealand",lat:-37.69,lon:176.17,keywords:"trg tauranga new zealand"},
+  // ── PAPUA NEW GUINEA ──
+  {id:"POM",name:"Port Moresby",city:"Port Moresby",country:"Papua New Guinea",lat:-9.44,lon:147.18,keywords:"pom port moresby papua new guinea png"},
 ];
 
 // ─── MARITIME ZONES ───────────────────────────────────────────────────────────
@@ -115,23 +441,6 @@ const LAYOVER_ZONES = [
   { name:"Rotterdam Anchorage",    coords:[[51.8,4.0],[51.8,4.6],[52.0,4.6],[52.0,4.0]] },
   { name:"Colombo Anchorage",      coords:[[6.8,79.7],[6.8,80.0],[7.1,80.0],[7.1,79.7]] },
 ];
-
-// ─── ROUTING WAYPOINTS ────────────────────────────────────────────────────────
-const PASSAGES = {
-  SUEZ_N:     { lat:31.27, lon:32.33, name:"Suez Canal (N)" },
-  SUEZ_S:     { lat:29.93, lon:32.57, name:"Suez Canal (S)" },
-  RED_SEA_S:  { lat:12.5,  lon:43.5,  name:"Bab-el-Mandeb" },
-  ADEN:       { lat:11.8,  lon:45.5,  name:"Gulf of Aden" },
-  HORMUZ:     { lat:26.5,  lon:56.8,  name:"Strait of Hormuz" },
-  MALACCA_N:  { lat:5.6,   lon:100.3, name:"N Malacca Strait" },
-  MALACCA_S:  { lat:1.29,  lon:103.85,name:"S Malacca / Singapore" },
-  LOMBOK:     { lat:-8.5,  lon:115.7, name:"Lombok Strait" },
-  SUNDA:      { lat:-6.0,  lon:105.8, name:"Sunda Strait" },
-  CAPE_GH:    { lat:-34.4, lon:18.5,  name:"Cape of Good Hope" },
-  GIBRALTAR:  { lat:35.98, lon:-5.5,  name:"Strait of Gibraltar" },
-  DOVER:      { lat:51.1,  lon:1.8,   name:"Dover Strait" },
-  PORT_SAID:  { lat:31.26, lon:32.31, name:"Port Said" },
-};
 
 // ─── MATH HELPERS ─────────────────────────────────────────────────────────────
 const DEG = Math.PI / 180;
@@ -181,105 +490,289 @@ function totalRouteNM(wps) {
   return wps.reduce((s, w) => s + (w.distance || 0), 0);
 }
 
-// ─── AUTO ROUTE ───────────────────────────────────────────────────────────────
+// ─── SEA CORRIDORS — named open-ocean waypoints ships actually use ────────────
+const SEA_WP = {
+  // Straits & Canals
+  SUEZ_N:     {lat:31.27, lon:32.33, name:"Suez Canal North"},
+  SUEZ_S:     {lat:29.92, lon:32.55, name:"Suez Canal South"},
+  BAB:        {lat:12.58, lon:43.38, name:"Bab-el-Mandeb"},
+  ADEN_G:     {lat:11.80, lon:45.50, name:"Gulf of Aden"},
+  HORMUZ:     {lat:26.35, lon:56.50, name:"Strait of Hormuz"},
+  HORMUZ_E:   {lat:24.00, lon:58.50, name:"Gulf of Oman East"},
+  MALACCA_N:  {lat:5.60,  lon:100.30,name:"N.Malacca Strait"},
+  MALACCA_S:  {lat:1.20,  lon:103.80,name:"S.Malacca/Singapore"},
+  LOMBOK:     {lat:-8.50, lon:115.80,name:"Lombok Strait"},
+  SUNDA:      {lat:-6.10, lon:105.70,name:"Sunda Strait"},
+  PANAMA_P:   {lat:8.90,  lon:-79.50,name:"Panama Canal Pacific"},
+  PANAMA_A:   {lat:9.38,  lon:-79.90,name:"Panama Canal Atlantic"},
+  GIBRALTAR:  {lat:35.98, lon:-5.50, name:"Strait of Gibraltar"},
+  DOVER:      {lat:51.05, lon:1.50,  name:"Dover Strait"},
+  CAPE_GH:    {lat:-34.50,lon:18.00, name:"Cape of Good Hope"},
+  CAPE_HORN:  {lat:-56.00,lon:-67.50,name:"Cape Horn"},
+  // Open ocean corridor waypoints
+  MED_W:      {lat:37.50, lon:5.00,  name:"W.Mediterranean"},
+  MED_E:      {lat:34.50, lon:24.00, name:"E.Mediterranean"},
+  RED_N:      {lat:27.50, lon:34.00, name:"N.Red Sea"},
+  RED_S:      {lat:15.00, lon:41.50, name:"S.Red Sea"},
+  IND_W:      {lat:10.00, lon:65.00, name:"W.Indian Ocean"},
+  IND_C:      {lat:5.00,  lon:73.00, name:"C.Indian Ocean"},
+  IND_NE:     {lat:8.00,  lon:83.00, name:"NE.Indian Ocean"},
+  IND_SE:     {lat:-15.0, lon:80.00, name:"SE.Indian Ocean"},
+  IND_S:      {lat:-30.0, lon:65.00, name:"S.Indian Ocean"},
+  IND_SW:     {lat:-25.0, lon:40.00, name:"SW.Indian Ocean"},
+  AFR_E:      {lat:-10.0, lon:42.00, name:"E.Africa Offshore"},
+  SOCOTRA:    {lat:12.50, lon:54.00, name:"Socotra Passage"},
+  LAKSHADWEEP:{lat:10.00, lon:72.50, name:"Lakshadweep Sea"},
+  ANDAMAN:    {lat:10.50, lon:93.00, name:"Andaman Sea"},
+  S_CHINA_N:  {lat:14.00, lon:112.00,name:"N.South China Sea"},
+  S_CHINA_S:  {lat:3.00,  lon:108.00,name:"S.South China Sea"},
+  PHILIP:     {lat:10.00, lon:122.00,name:"Philippine Sea"},
+  EAST_CHINA: {lat:27.00, lon:124.00,name:"E.China Sea"},
+  JAPAN_SEA:  {lat:37.00, lon:132.00,name:"Sea of Japan"},
+  PAC_NW:     {lat:48.00, lon:160.00,name:"NW.Pacific"},
+  PAC_NE:     {lat:40.00, lon:-150.0,name:"NE.Pacific"},
+  PAC_C:      {lat:5.00,  lon:-140.0,name:"C.Pacific"},
+  PAC_SW:     {lat:-20.0, lon:170.00,name:"SW.Pacific"},
+  PAC_SE:     {lat:-20.0, lon:-90.00,name:"SE.Pacific"},
+  ATLANTIC_N: {lat:45.00, lon:-30.00,name:"N.Atlantic"},
+  ATLANTIC_C: {lat:20.00, lon:-35.00,name:"C.Atlantic"},
+  ATLANTIC_S: {lat:-15.0, lon:-20.00,name:"S.Atlantic"},
+  ATLANTIC_SW:{lat:-40.0, lon:-40.00,name:"SW.Atlantic"},
+  CARIB:      {lat:15.00, lon:-75.00,name:"Caribbean Sea"},
+  GULF_MEX:   {lat:25.00, lon:-90.00,name:"Gulf of Mexico"},
+  AUS_S:      {lat:-38.0, lon:130.00,name:"S.Australia"},
+  AUS_W:      {lat:-25.0, lon:108.00,name:"W.Australia"},
+  AUS_N:      {lat:-12.0, lon:127.00,name:"N.Australia"},
+  TIMOR:      {lat:-9.50, lon:127.00,name:"Timor Sea"},
+  ARAFURA:    {lat:-12.0, lon:136.00,name:"Arafura Sea"},
+  TORRES:     {lat:-10.5, lon:142.50,name:"Torres Strait"},
+  CORAL:      {lat:-18.0, lon:152.00,name:"Coral Sea"},
+  TASMAN:     {lat:-38.0, lon:157.00,name:"Tasman Sea"},
+  BLACK_W:    {lat:43.00, lon:29.00, name:"W.Black Sea"},
+  BASC:       {lat:47.00, lon:-5.00, name:"Bay of Biscay"},
+  NORW:       {lat:62.00, lon:4.00,  name:"Norwegian Sea"},
+  NORTH_SEA:  {lat:56.00, lon:3.00,  name:"North Sea"},
+};
+
+// ─── AUTO ROUTE — proper sea-lane based routing ───────────────────────────────
 function buildAutoRoute(fromPort, toPort) {
   const from = PORTS_DB.find(p => p.id === fromPort);
   const to   = PORTS_DB.find(p => p.id === toPort);
   if (!from || !to) return [];
 
-  const intermediates = [];
+  // Region classifiers
+  const R = {
+    persGulf: p => p.lon>=48&&p.lon<58&&p.lat>22,
+    gulfOman: p => p.lon>=56&&p.lon<62&&p.lat>=21&&p.lat<26,
+    redSea:   p => p.lon>=32&&p.lon<44&&p.lat>=11&&p.lat<31,
+    indW:     p => p.lon>=44&&p.lon<80&&p.lat>=-10&&p.lat<25,
+    indSW:    p => p.lon>=30&&p.lon<80&&p.lat>=-35&&p.lat<-10,
+    sriLanka: p => p.lon>=79&&p.lon<82&&p.lat>=5&&p.lat<10,
+    bayBengal:p => p.lon>=80&&p.lon<97&&p.lat>=5&&p.lat<23,
+    seAsia:   p => p.lon>=97&&p.lon<120&&p.lat>=-10&&p.lat<20,
+    farEast:  p => p.lon>=120&&p.lat>=-5&&p.lat<45,
+    china:    p => p.lon>=108&&p.lon<130&&p.lat>=18&&p.lat<42,
+    japan:    p => p.lon>=129&&p.lat>=28&&p.lat<46,
+    korea:    p => p.lon>=125&&p.lon<132&&p.lat>=33&&p.lat<38,
+    med:      p => p.lon>-6&&p.lon<37&&p.lat>30&&p.lat<47,
+    europe:   p => (p.lon<20&&p.lat>40)||(p.lon>=-10&&p.lon<25&&p.lat>50),
+    ukNorth:  p => p.lon>=-10&&p.lon<5&&p.lat>=55&&p.lat<62,
+    baltic:   p => p.lon>9&&p.lon<32&&p.lat>53&&p.lat<66,
+    blackSea: p => p.lon>27&&p.lon<42&&p.lat>40&&p.lat<48,
+    wAfrica:  p => p.lon>=-20&&p.lon<10&&p.lat>=-10&&p.lat<20,
+    sAfrica:  p => p.lat<-20&&p.lon>10&&p.lon<40,
+    eAfrica:  p => p.lon>=36&&p.lon<50&&p.lat>=-30&&p.lat<15,
+    wAtl:     p => p.lon<-60&&p.lat>0&&p.lat<50,
+    eastUS:   p => p.lon>=-82&&p.lon<-65&&p.lat>=24&&p.lat<47,
+    gulfMex:  p => p.lon>=-100&&p.lon<-80&&p.lat>=18&&p.lat<32,
+    carib:    p => p.lon>=-88&&p.lon<-60&&p.lat>=8&&p.lat<24,
+    wCoast:   p => p.lon<=-100&&p.lat>=10&&p.lat<62,
+    sPac:     p => p.lon>150||p.lon<-130&&p.lat<-10,
+    australia:p => p.lon>=113&&p.lon<155&&p.lat>=-45&&p.lat<-10,
+    sAtl:     p => p.lon>=-55&&p.lon<20&&p.lat<-10,
+    sAmer:    p => p.lon>=-85&&p.lon<-30&&p.lat<10,
+    canal:    p => p.lon>=-82&&p.lon<-75&&p.lat>6&&p.lat<12,
+  };
 
-  // Indian Ocean West <-> SE Asia (through Malacca)
-  const isWIndian = (p) => p.lon < 90 && p.lon > 40 && p.lat < 30;
-  const isSEAsia  = (p) => p.lon >= 90 && p.lon < 130 && p.lat < 25;
-  const isFarEast = (p) => p.lon >= 120;
-  const isPersGulf= (p) => p.lon >= 48 && p.lon < 58 && p.lat > 22;
-  const isEurope  = (p) => p.lon < 20 && p.lat > 40;
-  const isWAfrica = (p) => p.lon < 20 && p.lat < 20;
-  const isMed     = (p) => p.lon > -6 && p.lon < 37 && p.lat > 30 && p.lat < 47;
+  const via = (...pts) => pts; // chain of SEA_WP keys
 
-  // Persian Gulf needs Hormuz
-  if (isPersGulf(from) && !isPersGulf(to)) {
-    intermediates.push(PASSAGES.HORMUZ);
+  // Determine route chain between regions
+  const wps = [];
+
+  const addVia = (...keys) => keys.forEach(k => { if(SEA_WP[k]) wps.push(SEA_WP[k]); });
+
+  const fR = Object.keys(R).find(k => R[k](from));
+  const tR = Object.keys(R).find(k => R[k](to));
+
+  // ── SAME-REGION SHORTCUTS ──────────────────────────────────────────────────
+  // Persian Gulf <-> Gulf of Oman / Indian Ocean West
+  if(R.persGulf(from)&&!R.persGulf(to)){addVia('HORMUZ','HORMUZ_E');}
+  if(R.persGulf(to)&&!R.persGulf(from)){addVia('HORMUZ_E','HORMUZ');}
+
+  // Red Sea / Gulf of Aden
+  if(R.redSea(from)&&!R.redSea(to)){addVia('RED_S','BAB','ADEN_G','SOCOTRA');}
+  if(R.redSea(to)&&!R.redSea(from)){addVia('SOCOTRA','ADEN_G','BAB','RED_S');}
+
+  // Suez Canal needed when crossing between Mediterranean/Europe and Indian Ocean
+  const needsSuez = (R.med(from)||R.europe(from)||R.blackSea(from)) &&
+    (R.indW(to)||R.persGulf(to)||R.redSea(to)||R.eAfrica(to)||R.seAsia(to)||R.farEast(to)||R.bayBengal(to)||R.sriLanka(to));
+  const needsSuezRev = (R.med(to)||R.europe(to)||R.blackSea(to)) &&
+    (R.indW(from)||R.persGulf(from)||R.redSea(from)||R.eAfrica(from)||R.seAsia(from)||R.farEast(from)||R.bayBengal(from)||R.sriLanka(from));
+
+  if(needsSuez){
+    if(R.blackSea(from)) addVia('BLACK_W');
+    if(R.europe(from)&&!R.med(from)) addVia('BASC','GIBRALTAR');
+    if(R.ukNorth(from)) addVia('NORTH_SEA','DOVER','BASC','GIBRALTAR');
+    if(R.baltic(from)) addVia('NORTH_SEA','DOVER','BASC','GIBRALTAR');
+    addVia('MED_W','MED_E','SUEZ_N','SUEZ_S','RED_N','RED_S','BAB','ADEN_G','SOCOTRA');
+    if(R.persGulf(to)){addVia('HORMUZ_E','HORMUZ');}
+    else if(R.indW(to)){addVia('IND_W');}
+    else if(R.eAfrica(to)){addVia('AFR_E');}
+    else if(R.bayBengal(to)||R.sriLanka(to)){addVia('IND_C','IND_NE');}
+    else if(R.seAsia(to)){addVia('IND_C','LAKSHADWEEP','IND_NE','ANDAMAN','MALACCA_N','MALACCA_S');}
+    else if(R.farEast(to)||R.china(to)||R.japan(to)){addVia('IND_C','IND_NE','ANDAMAN','MALACCA_N','MALACCA_S','S_CHINA_N');}
   }
-  if (isPersGulf(to) && !isPersGulf(from)) {
-    intermediates.push(PASSAGES.HORMUZ);
+  if(needsSuezRev){
+    if(R.persGulf(from)){addVia('HORMUZ','HORMUZ_E');}
+    else if(R.seAsia(from)||R.farEast(from)){addVia('S_CHINA_N','MALACCA_S','MALACCA_N','ANDAMAN','IND_NE','IND_C');}
+    else if(R.bayBengal(from)){addVia('IND_NE','IND_C');}
+    else if(R.eAfrica(from)){addVia('AFR_E','IND_W');}
+    addVia('SOCOTRA','ADEN_G','BAB','RED_S','RED_N','SUEZ_S','SUEZ_N','MED_E','MED_W');
+    if(R.blackSea(to)) addVia('BLACK_W');
+    if(R.europe(to)&&!R.med(to)) addVia('GIBRALTAR','BASC');
+    if(R.ukNorth(to)) addVia('GIBRALTAR','BASC','DOVER','NORTH_SEA');
+    if(R.baltic(to)) addVia('GIBRALTAR','BASC','DOVER','NORTH_SEA');
   }
 
-  // Determine if needs Suez or Cape
-  const needsSuez = (
-    (isEurope(from) || isMed(from) || from.lon < 30) &&
-    (isWIndian(to) || isSEAsia(to) || isFarEast(to) || isPersGulf(to))
-  ) || (
-    (isWIndian(from) || isSEAsia(from) || isFarEast(from) || isPersGulf(from)) &&
-    (isEurope(to) || isMed(to) || to.lon < 30)
+  // ── CAPE OF GOOD HOPE (when Suez is not used, going between oceans) ─────────
+  const needsCape = !needsSuez && !needsSuezRev &&
+    ((R.sAtl(from)||R.wAfrica(from)||R.sAmer(from)) && (R.indW(to)||R.eAfrica(to)||R.seAsia(to)||R.farEast(to)||R.australia(to))) ||
+    ((R.sAtl(to)||R.wAfrica(to)||R.sAmer(to)) && (R.indW(from)||R.eAfrica(from)||R.seAsia(from)||R.farEast(from)||R.australia(from)));
+
+  if(needsCape){
+    const toIndian = R.indW(to)||R.eAfrica(to)||R.seAsia(to)||R.farEast(to)||R.australia(to);
+    if(toIndian){ addVia('ATLANTIC_S','CAPE_GH','IND_S','IND_SW'); }
+    else { addVia('IND_SW','IND_S','CAPE_GH','ATLANTIC_S'); }
+  }
+
+  // ── MALACCA STRAIT ──────────────────────────────────────────────────────────
+  const needsMalacca = !needsSuez && !needsSuezRev && !needsCape && (
+    ((R.indW(from)||R.bayBengal(from)||R.sriLanka(from))&&(R.seAsia(to)||R.farEast(to)||R.china(to)||R.japan(to)||R.korea(to))) ||
+    ((R.seAsia(from)||R.farEast(from)||R.china(from)||R.japan(from)||R.korea(from))&&(R.indW(to)||R.bayBengal(to)||R.sriLanka(to)))
   );
-
-  if (needsSuez) {
-    // Route via Suez Canal
-    if (isEurope(from) || isMed(from)) {
-      intermediates.push(PASSAGES.GIBRALTAR);
-      intermediates.push(PASSAGES.PORT_SAID);
-      intermediates.push(PASSAGES.SUEZ_S);
-      intermediates.push(PASSAGES.RED_SEA_S);
-      intermediates.push(PASSAGES.ADEN);
-    } else {
-      intermediates.push(PASSAGES.ADEN);
-      intermediates.push(PASSAGES.RED_SEA_S);
-      intermediates.push(PASSAGES.SUEZ_S);
-      intermediates.push(PASSAGES.SUEZ_N);
-      intermediates.push(PASSAGES.PORT_SAID);
-      if (isEurope(to)) {
-        intermediates.push(PASSAGES.GIBRALTAR);
-      }
-    }
+  if(needsMalacca){
+    const toEast=R.seAsia(to)||R.farEast(to)||R.china(to)||R.japan(to)||R.korea(to);
+    if(toEast){ addVia('IND_NE','ANDAMAN','MALACCA_N','MALACCA_S'); }
+    else { addVia('MALACCA_S','MALACCA_N','ANDAMAN','IND_NE'); }
   }
 
-  // Indian Ocean to Far East - through Malacca
-  if ((isWIndian(from) || isPersGulf(from)) && (isSEAsia(to) || isFarEast(to))) {
-    if (!intermediates.some(p => p === PASSAGES.MALACCA_N)) {
-      intermediates.push(PASSAGES.MALACCA_N);
-      intermediates.push(PASSAGES.MALACCA_S);
-    }
-  }
-  if ((isSEAsia(from) || isFarEast(from)) && (isWIndian(to) || isPersGulf(to))) {
-    if (!intermediates.some(p => p === PASSAGES.MALACCA_S)) {
-      intermediates.push(PASSAGES.MALACCA_S);
-      intermediates.push(PASSAGES.MALACCA_N);
-    }
+  // ── SOUTH CHINA SEA routing ──────────────────────────────────────────────────
+  const needsSCS = !needsSuez && !needsSuezRev && !needsMalacca && (
+    (R.seAsia(from)&&(R.farEast(to)||R.china(to)||R.japan(to)||R.korea(to))) ||
+    ((R.farEast(from)||R.china(from)||R.japan(from)||R.korea(from))&&R.seAsia(to))
+  );
+  if(needsSCS){
+    const toNorth=R.farEast(to)||R.china(to)||R.japan(to)||R.korea(to);
+    if(toNorth){ addVia('S_CHINA_S','S_CHINA_N'); }
+    else { addVia('S_CHINA_N','S_CHINA_S'); }
   }
 
-  // Build waypoint list
+  // ── FAR EAST internal routing ────────────────────────────────────────────────
+  if(!needsSuez&&!needsSuezRev&&!needsMalacca&&!needsSCS){
+    if((R.japan(from)||R.korea(from))&&R.china(to)){ addVia('EAST_CHINA'); }
+    if((R.japan(to)||R.korea(to))&&R.china(from)){ addVia('EAST_CHINA'); }
+    if(R.japan(from)&&R.korea(to)){ addVia('JAPAN_SEA'); }
+    if(R.japan(to)&&R.korea(from)){ addVia('JAPAN_SEA'); }
+  }
+
+  // ── PACIFIC ROUTES ────────────────────────────────────────────────────────
+  const needsPacific = (R.farEast(from)||R.japan(from)||R.korea(from)||R.china(from)) &&
+    (R.wCoast(to)||R.eastUS(to));
+  const needsPacificRev = (R.farEast(to)||R.japan(to)||R.korea(to)||R.china(to)) &&
+    (R.wCoast(from)||R.eastUS(from));
+  if(needsPacific){ addVia('PAC_NW','PAC_NE'); }
+  if(needsPacificRev){ addVia('PAC_NE','PAC_NW'); }
+
+  // ── PANAMA CANAL ─────────────────────────────────────────────────────────
+  const needsPanama = !needsSuez && !needsSuezRev && (
+    (R.wCoast(from)&&(R.eastUS(to)||R.carib(to)||R.sAtl(to)||R.europe(to)||R.wAfrica(to))) ||
+    ((R.eastUS(from)||R.carib(from)||R.sAtl(from))&&R.wCoast(to))
+  );
+  if(needsPanama){
+    const toPac=R.wCoast(to);
+    if(toPac){ addVia('CARIB','PANAMA_A','PANAMA_P'); }
+    else { addVia('PANAMA_P','PANAMA_A','CARIB'); }
+  }
+
+  // ── ATLANTIC ROUTES ────────────────────────────────────────────────────────
+  const crossAtl = !needsPanama && !needsSuez && !needsSuezRev && !needsCape && (
+    (R.europe(from)&&(R.eastUS(to)||R.carib(to)||R.sAmer(to))) ||
+    ((R.eastUS(from)||R.carib(from)||R.sAmer(from))&&R.europe(to)) ||
+    (R.europe(from)&&R.wAfrica(to)) ||
+    (R.wAfrica(from)&&R.europe(to)) ||
+    (R.wAfrica(from)&&(R.eastUS(to)||R.carib(to))) ||
+    ((R.eastUS(from)||R.carib(from))&&R.wAfrica(to))
+  );
+  if(crossAtl){
+    const toUS=R.eastUS(to)||R.carib(to);
+    if(toUS&&R.europe(from)){ addVia('BASC','ATLANTIC_N'); }
+    else if(R.europe(to)&&(R.eastUS(from)||R.carib(from))){ addVia('ATLANTIC_N','BASC'); }
+    else if(R.sAmer(to)||R.sAtl(to)){ addVia('ATLANTIC_C','ATLANTIC_S'); }
+    else if(R.sAmer(from)||R.sAtl(from)){ addVia('ATLANTIC_S','ATLANTIC_C'); }
+    else if(R.wAfrica(from)||R.wAfrica(to)){ addVia('ATLANTIC_C'); }
+  }
+
+  // ── AUSTRALIA ROUTING ────────────────────────────────────────────────────
+  if(!needsCape && !needsSuez && !needsSuezRev){
+    if(R.australia(from)&&(R.seAsia(to)||R.farEast(to)||R.china(to))){
+      if(from.lon>140){ addVia('TORRES','ARAFURA','TIMOR','LOMBOK','S_CHINA_S'); }
+      else if(from.lat< -25){ addVia('AUS_W','IND_SE','LOMBOK','S_CHINA_S'); }
+      else { addVia('AUS_N','TIMOR','LOMBOK','S_CHINA_S'); }
+    }
+    if(R.australia(to)&&(R.seAsia(from)||R.farEast(from)||R.china(from))){
+      if(to.lon>140){ addVia('S_CHINA_S','LOMBOK','TIMOR','ARAFURA','TORRES'); }
+      else if(to.lat< -25){ addVia('S_CHINA_S','LOMBOK','IND_SE','AUS_W'); }
+      else { addVia('S_CHINA_S','LOMBOK','TIMOR','AUS_N'); }
+    }
+    if(R.australia(from)&&R.eAfrica(to)){ addVia('IND_S','IND_SW','AFR_E'); }
+    if(R.eAfrica(from)&&R.australia(to)){ addVia('AFR_E','IND_SW','IND_S'); }
+    if(R.australia(from)&&(R.sPac(to)||to.lon>150)){ addVia('CORAL','TASMAN','PAC_SW'); }
+    if((R.sPac(from)||from.lon>150)&&R.australia(to)){ addVia('PAC_SW','TASMAN','CORAL'); }
+  }
+
+  // ── EUROPE / UK / BALTIC internal routing ────────────────────────────────
+  if(!needsSuez&&!needsSuezRev&&!crossAtl){
+    if(R.baltic(from)&&!R.baltic(to)){ addVia('NORTH_SEA'); }
+    if(R.baltic(to)&&!R.baltic(from)){ addVia('NORTH_SEA'); }
+    if((R.ukNorth(from)||R.ukNorth(to))&&(R.europe(from)||R.europe(to))){ addVia('NORTH_SEA'); }
+    if(R.blackSea(from)&&!R.blackSea(to)){ addVia('BLACK_W'); }
+    if(R.blackSea(to)&&!R.blackSea(from)){ addVia('BLACK_W'); }
+  }
+
+  // ── BUILD FINAL WAYPOINT ARRAY ────────────────────────────────────────────
   const rawPoints = [
-    { lat: from.lat, lon: from.lon, name: from.name },
-    ...intermediates.map(p => ({ lat: p.lat, lon: p.lon, name: p.name })),
-    { lat: to.lat,   lon: to.lon,   name: to.name },
+    {lat:from.lat,lon:from.lon,name:from.name},
+    ...wps,
+    {lat:to.lat,  lon:to.lon,  name:to.name},
   ];
 
-  // Interpolate each segment
+  // Interpolate each sea-corridor segment with great-circle arcs
   const allWPs = [];
-  for (let i = 0; i < rawPoints.length - 1; i++) {
-    const a = rawPoints[i], b = rawPoints[i+1];
-    const dist = haversine(a.lat, a.lon, b.lat, b.lon);
-    const nPts = Math.max(2, Math.min(8, Math.floor(dist / 300)));
-    const seg = greatCircle(a.lat, a.lon, b.lat, b.lon, nPts);
-    seg.forEach((pt, j) => {
-      if (i > 0 && j === 0) return; // avoid duplicates
-      const isNamed = (i === 0 && j === 0) || (i === rawPoints.length - 2 && j === seg.length - 1);
-      const namedPt = rawPoints.find((rp,ri) => Math.abs(rp.lat - pt[0]) < 0.01 && ri <= i);
+  for(let i=0;i<rawPoints.length-1;i++){
+    const a=rawPoints[i],b=rawPoints[i+1];
+    const dist=haversine(a.lat,a.lon,b.lat,b.lon);
+    const nPts=Math.max(2,Math.min(10,Math.floor(dist/250)));
+    const seg=greatCircle(a.lat,a.lon,b.lat,b.lon,nPts);
+    seg.forEach((pt,j)=>{
+      if(i>0&&j===0)return;
       allWPs.push({
-        lat: Math.round(pt[0]*10000)/10000,
-        lon: Math.round(pt[1]*10000)/10000,
-        name: (j === 0 && rawPoints[i].name) ? rawPoints[i].name : undefined,
+        lat:Math.round(pt[0]*10000)/10000,
+        lon:Math.round(pt[1]*10000)/10000,
+        name:(j===0&&rawPoints[i].name)?rawPoints[i].name:undefined,
       });
     });
   }
-
-  // Add final point name
-  if (allWPs.length > 0) {
-    allWPs[allWPs.length-1].name = to.name;
-  }
-
+  if(allWPs.length>0) allWPs[allWPs.length-1].name=to.name;
   return recalcWaypoints(allWPs);
 }
 
@@ -720,23 +1213,45 @@ function normalizeSheetRow(row, idx, tag){
 }
 
 // ─── MAP VIEW ─────────────────────────────────────────────────────────────────
-function MapView({waypoints,setWaypoints,overlays,playing,setPlaying,speed,onMapClick}){
+function MapView({waypoints,setWaypoints,overlays,playing,setPlaying,speed,onMapClick,mapMode}){
   const containerRef=useRef(null);
   const mapRef=useRef(null);
-  const layersRef=useRef({route:null,markers:[],zones:{},ship:null,trail:null});
+  const layersRef=useRef({route:null,markers:[],zones:{},ship:null,trail:null,baseTile:null,seamarkTile:null});
   const animRef=useRef(null);
   const animIdxRef=useRef(0);
   const animPtsRef=useRef([]);
   const [ready,setReady]=useState(false);
 
+  const MAP_TILES={
+    night:{url:'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',attr:'© OpenStreetMap © CARTO'},
+    day:  {url:'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',attr:'© OpenStreetMap © CARTO'},
+    dusk: {url:'https://{s}.basemaps.cartocdn.com/rastertiles/voyager_nolabels/{z}/{x}/{y}{r}.png',attr:'© OpenStreetMap © CARTO',filter:'sepia(40%) saturate(70%) brightness(70%)'},
+  };
+
+  // Swap base tile when mapMode changes
+  useEffect(()=>{
+    if(!ready||!window.L||!mapRef.current)return;
+    const L=window.L;const map=mapRef.current;const lrs=layersRef.current;
+    if(lrs.baseTile){lrs.baseTile.remove();}
+    const cfg=MAP_TILES[mapMode]||MAP_TILES.night;
+    lrs.baseTile=L.tileLayer(cfg.url,{attribution:cfg.attr,subdomains:'abcd',maxZoom:19}).addTo(map);
+    // Re-add seamark on top
+    if(lrs.seamarkTile){lrs.seamarkTile.remove();}
+    lrs.seamarkTile=L.tileLayer('https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png',{opacity:0.55,maxZoom:18}).addTo(map);
+    // Apply CSS filter for dusk
+    if(containerRef.current){
+      containerRef.current.style.filter=cfg.filter||'none';
+    }
+  },[mapMode,ready]);
+
   const initMap=()=>{
     if(mapRef.current||!containerRef.current)return;
     const L=window.L;
     mapRef.current=L.map(containerRef.current,{center:[15,70],zoom:3,preferCanvas:true,zoomControl:true});
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{
+    layersRef.current.baseTile=L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{
       attribution:'© OpenStreetMap © CARTO',subdomains:'abcd',maxZoom:19
     }).addTo(mapRef.current);
-    L.tileLayer('https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png',{opacity:0.6,maxZoom:18}).addTo(mapRef.current);
+    layersRef.current.seamarkTile=L.tileLayer('https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png',{opacity:0.55,maxZoom:18}).addTo(mapRef.current);
     mapRef.current.on('click',e=>{onMapClick&&onMapClick(e.latlng.lat,e.latlng.lng);});
     setReady(true);
   };
@@ -1008,12 +1523,19 @@ function RoutePlannerPage({notify}){
   const [speed,setSpeed]=useState(5);
   const [clickAdd,setClickAdd]=useState(false);
   const [overlays,setOverlays]=useState({eca:false,seca:false,marpol:false,piracy:false,layover:false});
+  const [mapMode,setMapMode]=useState('night');
   const totalNM=useMemo(()=>totalRouteNM(waypoints),[waypoints]);
 
   const searchPort=(q,setSugg)=>{
-    if(!q.trim()){setSugg([]);return;}
-    const ql=q.toLowerCase();
-    setSugg(PORTS_DB.filter(p=>p.name.toLowerCase().includes(ql)||p.id.toLowerCase().includes(ql)||p.keywords.includes(ql)).slice(0,6));
+    if(!q||q.trim().length<2){setSugg([]);return;}
+    const ql=q.toLowerCase().trim();
+    setSugg(PORTS_DB.filter(p=>
+      p.name.toLowerCase().includes(ql)||
+      p.city?.toLowerCase().includes(ql)||
+      p.id.toLowerCase().includes(ql)||
+      p.country.toLowerCase().includes(ql)||
+      p.keywords.includes(ql)
+    ).slice(0,8));
   };
 
   useEffect(()=>searchPort(fromPort,setFromSugg),[fromPort]);
@@ -1077,6 +1599,16 @@ function RoutePlannerPage({notify}){
           ⬇ CSV
         </button>
         <button className="btn btn-danger" style={{padding:'7px 12px',fontSize:'0.72rem'}} onClick={clearRoute}>🗑 Clear</button>
+        <div style={{display:'flex',gap:3,marginLeft:'auto',border:'1px solid var(--border)',borderRadius:8,overflow:'hidden'}}>
+          {[['night','🌙 Night'],['dusk','🌅 Dusk'],['day','☀️ Day']].map(([m,l])=>(
+            <button key={m} onClick={()=>setMapMode(m)}
+              style={{padding:'5px 10px',fontSize:'0.68rem',border:'none',cursor:'pointer',fontFamily:'Exo 2,sans-serif',fontWeight:600,
+                background:mapMode===m?(m==='night'?'#0B1D35':m==='dusk'?'#7C3A1A':'#1565C0'):'transparent',
+                color:mapMode===m?'white':'var(--text2)',transition:'all 0.2s'}}>
+              {l}
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="planner-layout">
@@ -1100,7 +1632,12 @@ function RoutePlannerPage({notify}){
                     {fromSugg.length>0&&(
                       <div className="ac" style={{position:'absolute',zIndex:200}}>
                         {fromSugg.map(p=><div key={p.id} className="ac-item" onClick={()=>{setFromPort(p.name);setFromSugg([]);}}>
-                          <span>📍</span><div><div style={{fontWeight:600,fontSize:'0.82rem'}}>{p.name}</div><div style={{fontSize:'0.7rem',color:'var(--text2)'}}>{p.country} · {p.id}</div></div>
+                          <span>📍</span>
+                          <div>
+                            <div style={{fontWeight:600,fontSize:'0.82rem'}}>{p.name}</div>
+                            <div style={{fontSize:'0.67rem',color:'var(--text2)'}}>{p.city} · {p.country}</div>
+                            <div style={{fontSize:'0.62rem',color:'var(--text3)'}}>{p.lat.toFixed(4)}°N / {p.lon.toFixed(4)}°E · {p.id}</div>
+                          </div>
                         </div>)}
                       </div>
                     )}
@@ -1114,7 +1651,12 @@ function RoutePlannerPage({notify}){
                     {toSugg.length>0&&(
                       <div className="ac" style={{position:'absolute',zIndex:200}}>
                         {toSugg.map(p=><div key={p.id} className="ac-item" onClick={()=>{setToPort(p.name);setToSugg([]);}}>
-                          <span>📍</span><div><div style={{fontWeight:600,fontSize:'0.82rem'}}>{p.name}</div><div style={{fontSize:'0.7rem',color:'var(--text2)'}}>{p.country} · {p.id}</div></div>
+                          <span>🏁</span>
+                          <div>
+                            <div style={{fontWeight:600,fontSize:'0.82rem'}}>{p.name}</div>
+                            <div style={{fontSize:'0.67rem',color:'var(--text2)'}}>{p.city} · {p.country}</div>
+                            <div style={{fontSize:'0.62rem',color:'var(--text3)'}}>{p.lat.toFixed(4)}°N / {p.lon.toFixed(4)}°E · {p.id}</div>
+                          </div>
                         </div>)}
                       </div>
                     )}
@@ -1243,6 +1785,7 @@ function RoutePlannerPage({notify}){
           setPlaying={setPlaying}
           speed={speed}
           onMapClick={handleMapClick}
+          mapMode={mapMode}
         />
       </div>
     </div>
@@ -1361,10 +1904,28 @@ function RoutesPage({routes,sheetRoutes,searchQuery,notify,user,setTab}){
     (typeF==='all'||r.type?.toLowerCase()===typeF.toLowerCase())&&smartMatch(r,q)
   );
 
-  const handleDL=(r)=>{
+  const handleDL=async(r)=>{
     if(!user){notify('🔐 Login required to download files','error');setTab('login');return;}
-    if(r.fileUrl){window.open(r.fileUrl,'_blank');notify(`Downloading ${r.fileName}`,'success');}
-    else notify('File link not set. Contact admin.','error');
+    if(!r.fileUrl){notify('File link not set. Contact admin.','error');return;}
+    notify(`⏳ Preparing download: ${r.fileName}…`,'success');
+    try{
+      // Convert Google Drive view/share link → direct download link
+      let url=r.fileUrl;
+      const gdMatch=url.match(/\/d\/([a-zA-Z0-9_-]+)/);
+      if(gdMatch){url=`https://drive.google.com/uc?export=download&id=${gdMatch[1]}`;}
+      const resp=await fetch(url,{mode:'cors'});
+      if(!resp.ok)throw new Error('fetch failed');
+      const blob=await resp.blob();
+      const a=document.createElement('a');
+      a.href=URL.createObjectURL(blob);
+      a.download=r.fileName||(gdMatch?gdMatch[1]+'.rtz':'download');
+      a.click();URL.revokeObjectURL(a.href);
+      notify(`✅ Downloaded: ${r.fileName}`,'success');
+    }catch{
+      // Fallback: direct link in same tab
+      window.open(r.fileUrl,'_blank');
+      notify(`Opened: ${r.fileName} — save the file from browser`,'success');
+    }
   };
 
   const pickSugg=(s)=>{setQ(s);setShowSugg(false);};
@@ -1562,10 +2123,26 @@ function ChartsPage({charts,sheetCharts,notify,user,setTab,isAdmin}){
 
   const filtered=brandCharts.filter(c=>smartMatch(c,q));
 
-  const handleDL=(c)=>{
+  const handleDL=async(c)=>{
     if(!user){notify('🔐 Login required','error');setTab('login');return;}
-    if(c.fileUrl){window.open(c.fileUrl,'_blank');notify(`Downloading ${c.fileName}`,'success');}
-    else notify('File link not set. Contact admin.','error');
+    if(!c.fileUrl){notify('File link not set. Contact admin.','error');return;}
+    notify(`⏳ Preparing download: ${c.fileName}…`,'success');
+    try{
+      let url=c.fileUrl;
+      const gdMatch=url.match(/\/d\/([a-zA-Z0-9_-]+)/);
+      if(gdMatch){url=`https://drive.google.com/uc?export=download&id=${gdMatch[1]}`;}
+      const resp=await fetch(url,{mode:'cors'});
+      if(!resp.ok)throw new Error('fetch failed');
+      const blob=await resp.blob();
+      const a=document.createElement('a');
+      a.href=URL.createObjectURL(blob);
+      a.download=c.fileName||(gdMatch?gdMatch[1]+'.000':'download');
+      a.click();URL.revokeObjectURL(a.href);
+      notify(`✅ Downloaded: ${c.fileName}`,'success');
+    }catch{
+      window.open(c.fileUrl,'_blank');
+      notify(`Opened: ${c.fileName} — save the file from browser`,'success');
+    }
   };
 
   const pickSugg=(s)=>{setQ(s);setShowSugg(false);};
