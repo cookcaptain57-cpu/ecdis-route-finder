@@ -270,10 +270,15 @@ const SEA_WP = {
   ADEN_G:      {lat:11.80,  lon:45.50,  name:"Gulf of Aden"},
   HORMUZ:      {lat:26.35,  lon:56.50,  name:"Strait of Hormuz"},
   HORMUZ_E:    {lat:23.50,  lon:59.00,  name:"Gulf of Oman East"},
-  MALACCA_NW:  {lat:6.50,   lon:99.00,  name:"NW Malacca Approach"},
-  MALACCA_N:   {lat:5.20,   lon:100.60, name:"N.Malacca Strait"},
-  MALACCA_C:   {lat:2.80,   lon:101.80, name:"C.Malacca Strait"},
-  MALACCA_S:   {lat:1.15,   lon:103.50, name:"S.Malacca/Singapore"},
+  // ── Malacca Strait — CENTERLINE coordinates (all in open water) ──────────────
+  // Strait runs between Sumatra (W) and Malay Peninsula (E), NW→SE
+  // Width ~40-300km. Ship lane on Sumatra side at ~99-103°E
+  MALACCA_NW:  {lat:6.20,   lon:98.20,  name:"Malacca NW Approach"},  // Andaman Sea, entering strait
+  MALACCA_N:   {lat:5.00,   lon:99.20,  name:"N.Malacca Strait"},      // North strait, clear of One Fathom Bank
+  MALACCA_C1:  {lat:4.00,   lon:99.80,  name:"Malacca Strait Central"},// Mid-north strait
+  MALACCA_C:   {lat:2.80,   lon:100.80, name:"C.Malacca Strait"},      // Central strait off Port Klang
+  MALACCA_S1:  {lat:1.80,   lon:102.00, name:"S.Malacca Approach"},    // South strait off Malacca city
+  MALACCA_S:   {lat:1.15,   lon:103.40, name:"Singapore Strait W"},    // Western Singapore Strait entrance
   LOMBOK:      {lat:-8.50,  lon:115.80, name:"Lombok Strait"},
   SUNDA:       {lat:-6.10,  lon:105.70, name:"Sunda Strait"},
   PANAMA_P:    {lat:8.90,   lon:-79.50, name:"Panama Canal Pacific"},
@@ -387,11 +392,11 @@ const PORT_EXIT = {
   BND:  ['HORMUZ'],
   // SE Asia
   SIN:  [],
-  LEM:  ['MALACCA_S','MALACCA_C'],
-  BKK:  ['MALACCA_S','MALACCA_C'],
-  PKL:  ['MALACCA_S','MALACCA_C'],
+  LEM:  ['MALACCA_S','MALACCA_S1','MALACCA_C','MALACCA_C1'],
+  BKK:  ['MALACCA_S','MALACCA_S1','MALACCA_C','MALACCA_C1'],
+  PKL:  ['MALACCA_S','MALACCA_S1','MALACCA_C','MALACCA_C1'],
   JHB:  [],
-  PGU:  ['MALACCA_N','MALACCA_C'],
+  PGU:  ['MALACCA_N','MALACCA_C1','MALACCA_C'],
   // Bay of Bengal
   CTG:  ['BAY_N'],
   MGL:  ['BAY_N'],
@@ -480,22 +485,22 @@ function buildAutoRoute(fromPort, toPort) {
   const needsMalaccaRev = (isSeAsia(from)||isFarEast(from)||isJapanKorea(from)) &&
     (isIndianOcn(to)||isWestIndia(to)||isBayBengal(to)||isSriLanka(to)||isPersGulf(to)||isRedSea(to)||isEAfrica(to)||isMed(to)||isEurope(to));
 
-  if(needsMalacca && !fromExit.some(k=>['MALACCA_N','MALACCA_C','MALACCA_S'].includes(k))) {
+  if(needsMalacca && !fromExit.some(k=>['MALACCA_N','MALACCA_C1','MALACCA_C','MALACCA_S1','MALACCA_S'].includes(k))) {
     if(!isBayBengal(from)&&!isEastIndia(from)) {
       // Coming from west/Indian Ocean — MUST go around Sri Lanka before Andaman
       // IND_TIP already added by PORT_EXIT for west India ports
       // Add Sri Lanka bypass: go south of Sri Lanka then northeast
-      add('PALK_W','LANKA_SW','LANKA_S','LANKA_SE','IND_NE','ANDAMAN_W','ANDAMAN_S','MALACCA_NW','MALACCA_N','MALACCA_C','MALACCA_S');
+      add('PALK_W','LANKA_SW','LANKA_S','LANKA_SE','IND_NE','ANDAMAN_W','ANDAMAN_S','MALACCA_NW','MALACCA_N','MALACCA_C1','MALACCA_C','MALACCA_S1','MALACCA_S');
     } else {
       // Bay of Bengal / East India — already east of Sri Lanka
-      add('ANDAMAN_W','ANDAMAN_S','MALACCA_NW','MALACCA_N','MALACCA_C','MALACCA_S');
+      add('ANDAMAN_W','ANDAMAN_S','MALACCA_NW','MALACCA_N','MALACCA_C1','MALACCA_C','MALACCA_S1','MALACCA_S');
     }
   }
   if(needsMalaccaRev) {
     if(!isBayBengal(to)&&!isEastIndia(to)) {
-      add('MALACCA_S','MALACCA_C','MALACCA_N','MALACCA_NW','ANDAMAN_S','ANDAMAN_W','IND_NE','LANKA_SE','LANKA_S','LANKA_SW','PALK_W');
+      add('MALACCA_S','MALACCA_S1','MALACCA_C','MALACCA_C1','MALACCA_N','MALACCA_NW','ANDAMAN_S','ANDAMAN_W','IND_NE','LANKA_SE','LANKA_S','LANKA_SW','PALK_W');
     } else {
-      add('MALACCA_S','MALACCA_C','MALACCA_N','MALACCA_NW','ANDAMAN_S','ANDAMAN_W');
+      add('MALACCA_S','MALACCA_S1','MALACCA_C','MALACCA_C1','MALACCA_N','MALACCA_NW','ANDAMAN_S','ANDAMAN_W');
     }
   }
 
@@ -516,12 +521,12 @@ function buildAutoRoute(fromPort, toPort) {
     else if(isWestIndia(to)||isIndianOcn(to)) add('IND_W');
     else if(isBayBengal(to)||isSriLanka(to))  add('IND_W','PALK_W','LANKA_SW','LANKA_S','LANKA_SE','IND_NE');
     else if(isEastIndia(to)) add('IND_W','PALK_W','LANKA_SW','LANKA_S','LANKA_SE','IND_NE','IND_E_COAST');
-    else if(isSeAsia(to)||isFarEast(to)) add('IND_W','PALK_W','LANKA_SW','LANKA_S','LANKA_SE','IND_NE','ANDAMAN_S','MALACCA_NW','MALACCA_N','MALACCA_C','MALACCA_S');
+    else if(isSeAsia(to)||isFarEast(to)) add('IND_W','PALK_W','LANKA_SW','LANKA_S','LANKA_SE','IND_NE','ANDAMAN_S','MALACCA_NW','MALACCA_N','MALACCA_C1','MALACCA_C','MALACCA_S1','MALACCA_S');
   }
   if(needsSuezRev){
     if(isPersGulf(from))     add('HORMUZ','HORMUZ_E');
     else if(isEAfrica(from)) add('AFR_E','IND_W');
-    else if(isSeAsia(from)||isFarEast(from)) add('MALACCA_S','MALACCA_C','MALACCA_N','MALACCA_NW','ANDAMAN_S','IND_NE','LANKA_SE','LANKA_S','LANKA_SW','PALK_W','IND_W');
+    else if(isSeAsia(from)||isFarEast(from)) add('MALACCA_S','MALACCA_S1','MALACCA_C','MALACCA_C1','MALACCA_N','MALACCA_NW','ANDAMAN_S','IND_NE','LANKA_SE','LANKA_S','LANKA_SW','PALK_W','IND_W');
     else if(isBayBengal(from)||isEastIndia(from)) add('IND_NE','LANKA_SE','LANKA_S','LANKA_SW','PALK_W','IND_W');
     else if(isWestIndia(from)) add('IND_W');
     add('SOCOTRA','ADEN_G','BAB','RED_S','RED_N','SUEZ_S','SUEZ_N','MED_E','MED_W');
