@@ -864,9 +864,6 @@ function buildAutoRoute(fromPort, toPort) {
   if(allWPs.length>0) allWPs[allWPs.length-1].name=to.name;
   return recalcWaypoints(allWPs);
 }
-  const from = PORTS_DB.find(p => p.id === fromPort);
-  const to   = PORTS_DB.find(p => p.id === toPort);
-  if (!from || !to) return [];
 
 // ─── RTZ PARSE / EXPORT ───────────────────────────────────────────────────────
 function parseRTZ(xmlText) {
