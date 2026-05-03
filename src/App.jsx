@@ -466,9 +466,20 @@ const ROUTE_TABLE = {
   "DXB-ROT":[[25.05,55.13],[26.58,56.35],[23.5,59.0],[12.0,62.0],[12.0,50.0],[12.58,43.38],[15.0,41.5],[22.0,38.0],[29.77,32.55],[31.27,32.33],[34.5,24.0],[37.5,15.0],[37.5,5.0],[35.98,-5.5],[45.0,-5.0],[51.92,4.48]],
   "DXB-MUM":[[25.05,55.13],[26.58,56.35],[23.5,59.0],[18.0,62.0],[14.0,67.0],[18.93,72.83]],
   "DXB-SHA":[[25.05,55.13],[26.58,56.35],[23.5,59.0],[12.0,62.0],[8.5,75.0],[8.5,84.5],[6.5,95.0],[5.9,98.5],[3.09,101.02],[1.18,103.82],[3.0,108.0],[14.0,112.0],[27.0,122.0],[31.23,121.47]],
-  "ROT-SIN":[[51.92,4.48],[51.05,1.5],[45.0,-5.0],[35.98,-5.5],[37.5,5.0],[34.5,24.0],[31.27,32.33],[29.77,32.55],[22.0,38.0],[15.0,41.5],[12.58,43.38],[12.0,50.0],[12.0,62.0],[8.5,75.0],[8.5,84.5],[6.5,95.0],[5.9,98.5],[5.0,99.2],[3.09,101.02],[2.33,101.35],[1.56,102.39],[1.15,103.41],[1.29,103.85]],
-  "ROT-SHA":[[51.92,4.48],[51.05,1.5],[45.0,-5.0],[35.98,-5.5],[37.5,5.0],[34.5,24.0],[31.27,32.33],[29.77,32.55],[15.0,41.5],[12.58,43.38],[12.0,62.0],[8.5,84.5],[6.5,95.0],[3.09,101.02],[1.15,103.41],[3.0,108.0],[14.0,112.0],[27.0,122.0],[31.23,121.47]],
-  "ROT-MUM":[[51.92,4.48],[35.98,-5.5],[34.5,24.0],[31.27,32.33],[29.77,32.55],[15.0,41.5],[12.58,43.38],[12.0,62.0],[14.0,67.0],[18.93,72.83]],
+  "ROT-SIN":[[51.92,4.48],[51.9,3.0],[51.05,1.5],[48.0,-5.5],[45.0,-8.0],[40.0,-9.5],[36.5,-7.0],[35.98,-5.5],[37.5,5.0],[34.5,24.0],[31.27,32.33],[29.77,32.55],[22.0,38.0],[15.0,41.5],[12.58,43.38],[12.0,50.0],[12.0,62.0],[8.5,75.0],[8.5,84.5],[6.5,95.0],[5.9,98.5],[5.0,99.2],[3.09,101.02],[2.33,101.35],[1.56,102.39],[1.15,103.41],[1.29,103.85]],
+  "ROT-SHA":[[51.92,4.48],[51.9,3.0],[51.05,1.5],[48.0,-5.5],[45.0,-8.0],[40.0,-9.5],[36.5,-7.0],[35.98,-5.5],[37.5,5.0],[34.5,24.0],[31.27,32.33],[29.77,32.55],[15.0,41.5],[12.58,43.38],[12.0,62.0],[8.5,84.5],[6.5,95.0],[3.09,101.02],[1.15,103.41],[3.0,108.0],[14.0,112.0],[27.0,122.0],[31.23,121.47]],
+  "ROT-MUM":[[51.92,4.48],[51.9,3.0],[51.05,1.5],[48.0,-5.5],[45.0,-8.0],[40.0,-9.5],[36.5,-7.0],[35.98,-5.5],[34.5,24.0],[31.27,32.33],[29.77,32.55],[15.0,41.5],[12.58,43.38],[12.0,62.0],[14.0,67.0],[18.93,72.83]],
+  "ROT-NYK":[[51.92,4.48],[51.9,3.0],[51.05,1.5],[48.0,-5.5],[45.0,-10.0],[42.0,-20.0],[42.0,-40.0],[42.0,-60.0],[40.65,-74.07]],
+  "MUM-ROT":[[18.93,72.83],[14.0,67.0],[12.0,62.0],[12.58,43.38],[15.0,41.5],[22.0,38.0],[29.77,32.55],[31.27,32.33],[34.5,24.0],[37.5,5.0],[35.98,-5.5],[36.5,-7.0],[40.0,-9.5],[45.0,-8.0],[48.0,-5.5],[51.05,1.5],[51.9,3.0],[51.92,4.48]],
+  "SHA-ROT":[[31.23,121.47],[27.0,122.0],[14.0,112.0],[5.0,108.0],[1.15,103.41],[6.5,95.0],[8.5,84.5],[12.0,62.0],[12.58,43.38],[15.0,41.5],[22.0,38.0],[29.77,32.55],[31.27,32.33],[34.5,24.0],[37.5,5.0],[35.98,-5.5],[36.5,-7.0],[40.0,-9.5],[45.0,-8.0],[48.0,-5.5],[51.05,1.5],[51.9,3.0],[51.92,4.48]],
+  "SIN-ROT":[[1.29,103.85],[1.56,102.39],[2.33,101.35],[3.09,101.02],[5.9,98.5],[6.5,95.0],[8.5,84.5],[5.4,80.6],[12.0,62.0],[12.58,43.38],[15.0,41.5],[22.0,38.0],[29.77,32.55],[31.27,32.33],[34.5,24.0],[37.5,5.0],[35.98,-5.5],[36.5,-7.0],[40.0,-9.5],[45.0,-8.0],[48.0,-5.5],[51.05,1.5],[51.9,3.0],[51.92,4.48]],
+  "HKG-ROT":[[22.29,114.16],[14.0,112.0],[3.0,108.0],[1.29,103.85],[6.5,95.0],[8.5,84.5],[12.0,62.0],[12.58,43.38],[15.0,41.5],[22.0,38.0],[29.77,32.55],[31.27,32.33],[34.5,24.0],[37.5,5.0],[35.98,-5.5],[36.5,-7.0],[40.0,-9.5],[45.0,-8.0],[48.0,-5.5],[51.05,1.5],[51.9,3.0],[51.92,4.48]],
+  "NYK-ROT":[[35.45,139.65],[40.0,-140.0],[45.0,-160.0],[48.0,170.0],[51.05,1.5],[51.92,4.48]],
+  "DXB-ROT":[[25.05,55.13],[26.58,56.35],[23.5,59.0],[12.0,62.0],[12.0,50.0],[12.58,43.38],[15.0,41.5],[22.0,38.0],[29.77,32.55],[31.27,32.33],[34.5,24.0],[37.5,5.0],[35.98,-5.5],[36.5,-7.0],[40.0,-9.5],[45.0,-8.0],[48.0,-5.5],[51.05,1.5],[51.9,3.0],[51.92,4.48]],
+  "NYK-LAX":[[35.45,139.65],[40.0,150.0],[48.0,170.0],[45.0,-160.0],[40.0,-140.0],[33.74,-118.27]],
+  "LAX-YOK":[[33.74,-118.27],[40.0,-140.0],[45.0,-160.0],[48.0,170.0],[40.0,150.0],[35.45,139.65]],
+  "LAX-SHA":[[33.74,-118.27],[40.0,-140.0],[45.0,-160.0],[48.0,170.0],[40.0,150.0],[35.45,139.65],[31.23,121.47]],
+  "NYK-ROT2":[[35.45,139.65],[34.0,132.0],[27.0,122.0],[14.0,112.0],[3.0,108.0],[1.29,103.85],[6.5,95.0],[8.5,84.5],[12.0,62.0],[12.58,43.38],[15.0,41.5],[22.0,38.0],[29.77,32.55],[31.27,32.33],[34.5,24.0],[37.5,5.0],[35.98,-5.5],[36.5,-7.0],[40.0,-9.5],[45.0,-8.0],[48.0,-5.5],[51.05,1.5],[51.92,4.48]]
   "COL-SIN":[[6.94,79.85],[5.8,79.8],[5.4,80.6],[6.0,82.0],[8.5,84.5],[6.5,95.0],[5.9,98.5],[5.0,99.2],[3.09,101.02],[2.33,101.35],[1.56,102.39],[1.15,103.41],[1.29,103.85]],
   "COL-MUM":[[6.94,79.85],[7.5,78.8],[7.5,76.5],[10.0,74.8],[14.0,73.0],[18.93,72.83]],
   "KAR-SIN":[[24.86,67.01],[20.0,65.0],[12.0,62.0],[8.5,75.0],[8.5,84.5],[6.5,95.0],[5.0,99.2],[3.09,101.02],[2.33,101.35],[1.15,103.41],[1.29,103.85]],
@@ -1497,7 +1508,9 @@ function ETACalculator({totalNM}){
 }
 
 // ─── ROUTE PLANNER PAGE ───────────────────────────────────────────────────────
-function RoutePlannerPage({notify,sheetRoutes=[]}){
+function RoutePlannerPage({notify,sheetRoutes=[],portsDb=[]}){
+  // Use reactive portsDb if loaded, else fall back to module-level PORTS_DB
+  const portsList=portsDb.length>88?portsDb:PORTS_DB;
   const [panel,setPanel]=useState('auto');
   const [fromPort,setFromPort]=useState('');
   const [toPort,setToPort]=useState('');
@@ -1515,7 +1528,7 @@ function RoutePlannerPage({notify,sheetRoutes=[]}){
   const searchPort=(q,setSugg)=>{
     if(!q||q.trim().length<2){setSugg([]);return;}
     const ql=q.toLowerCase().trim();
-    setSugg(PORTS_DB.filter(p=>{
+    setSugg(portsList.filter(p=>{
       const kw=(p.keywords||[p.name,p.city,p.country,p.id].filter(Boolean).join(' ')).toLowerCase();
       return p.name?.toLowerCase().includes(ql)||
              p.city?.toLowerCase().includes(ql)||
@@ -1547,8 +1560,8 @@ function RoutePlannerPage({notify,sheetRoutes=[]}){
   };
 
   const generateRoute=()=>{
-    const f=PORTS_DB.find(p=>p.name.toLowerCase()===fromPort.toLowerCase()||p.id.toLowerCase()===fromPort.toLowerCase());
-    const t=PORTS_DB.find(p=>p.name.toLowerCase()===toPort.toLowerCase()||p.id.toLowerCase()===toPort.toLowerCase());
+    const f=portsList.find(p=>p.name?.toLowerCase()===fromPort.toLowerCase()||p.id?.toLowerCase()===fromPort.toLowerCase());
+    const t=portsList.find(p=>p.name?.toLowerCase()===toPort.toLowerCase()||p.id?.toLowerCase()===toPort.toLowerCase());
     if(!f||!t){notify('Select valid departure and arrival ports from suggestions','error');return;}
 
     // 1. Check ECDIS route sheet database FIRST
@@ -1602,8 +1615,8 @@ function RoutePlannerPage({notify,sheetRoutes=[]}){
   };
 
   const fallbackAutoRoute=()=>{
-    const f=PORTS_DB.find(p=>p.name.toLowerCase()===fromPort.toLowerCase()||p.id.toLowerCase()===fromPort.toLowerCase());
-    const t=PORTS_DB.find(p=>p.name.toLowerCase()===toPort.toLowerCase()||p.id.toLowerCase()===toPort.toLowerCase());
+    const f=portsList.find(p=>p.name?.toLowerCase()===fromPort.toLowerCase()||p.id?.toLowerCase()===fromPort.toLowerCase());
+    const t=portsList.find(p=>p.name?.toLowerCase()===toPort.toLowerCase()||p.id?.toLowerCase()===toPort.toLowerCase());
     if(!f||!t) return;
     const wps=buildAutoRoute(f.id,t.id);
     setWaypoints(wps);
@@ -1733,18 +1746,27 @@ function RoutePlannerPage({notify,sheetRoutes=[]}){
                       ✅ {dbSuggestions.length} route{dbSuggestions.length>1?'s':''} found in your ECDIS database
                     </div>
                     {dbSuggestions.map((r,i)=>{
-                      const name=r.fileName||r['File Name']||r['Route Name']||`Route ${i+1}`;
-                      const port=r.portName||r['Port Name']||r['Route Description']||'';
+                      // Pick best name from any column in the sheet row
+                      const allVals=Object.entries(r).filter(([k,v])=>v&&typeof v==='string'&&v.trim().length>2);
+                      const nameCols=allVals.filter(([k])=>/(name|route|file|rtz|title)/i.test(k));
+                      const portCols=allVals.filter(([k])=>/(port|from|to|dep|arr|desc)/i.test(k));
+                      const name=r.fileName||r['File Name']||r['Route Name']||r['RTZ File']||r['Title']||
+                                 nameCols[0]?.[1]||allVals[0]?.[1]||`Route ${i+1}`;
+                      const port=r.portName||r['Port Name']||r['From']||r['To']||r['Route Description']||
+                                 r['Departure']||r['Arrival']||portCols[0]?.[1]||'';
+                      const hasUrl=!!(r.fileUrl||r['File URL']||r['Drive Link']||r['Download URL']||
+                        Object.values(r).find(v=>typeof v==='string'&&v.includes('drive.google')));
                       return(
-                        <div key={i} style={{display:'flex',alignItems:'center',gap:8,padding:'6px 8px',borderRadius:7,
-                          background:'rgba(0,0,0,0.2)',marginBottom:4,cursor:'pointer'}}
+                        <div key={i} style={{display:'flex',alignItems:'center',gap:8,padding:'8px 10px',borderRadius:8,
+                          background:'rgba(0,0,0,0.2)',marginBottom:5,cursor:'pointer',border:'1px solid rgba(255,255,255,0.04)'}}
                           onClick={()=>useDbRoute(r)}>
-                          <span style={{fontSize:'1rem'}}>🗺</span>
+                          <span style={{fontSize:'1.1rem'}}>{hasUrl?'📥':'🗺'}</span>
                           <div style={{flex:1,minWidth:0}}>
-                            <div style={{fontSize:'0.76rem',fontWeight:600,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{name}</div>
-                            {port&&<div style={{fontSize:'0.66rem',color:'var(--text2)'}}>{port}</div>}
+                            <div style={{fontSize:'0.8rem',fontWeight:600,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',color:'var(--text)'}}>{name}</div>
+                            {port&&<div style={{fontSize:'0.68rem',color:'var(--cyan)',marginTop:1}}>📍 {port}</div>}
+                            {!hasUrl&&<div style={{fontSize:'0.62rem',color:'var(--text3)'}}>Auto route will be used</div>}
                           </div>
-                          <button style={{background:'var(--cyan)',color:'#000',border:'none',borderRadius:5,padding:'3px 8px',fontSize:'0.65rem',fontWeight:700,cursor:'pointer'}}>
+                          <button style={{background:'var(--cyan)',color:'#000',border:'none',borderRadius:6,padding:'4px 10px',fontSize:'0.68rem',fontWeight:700,cursor:'pointer',flexShrink:0}}>
                             USE
                           </button>
                         </div>
@@ -2461,43 +2483,37 @@ function LoginPage({notify,onLogin}){
 }
 
 // ─── PORT SEARCH PAGE ─────────────────────────────────────────────────────────
-function PortSearchPage({sheetLoading,refreshSheets}){
+function PortSearchPage({portsDb=[],sheetLoading,refreshSheets}){
   const [q,setQ]=useState('');
   const results=useMemo(()=>{
-    if(!q.trim()||q.length<2) return PORTS_DB.slice(0,50);
+    const db=portsDb.length>0?portsDb:PORTS_DB;
+    if(!q.trim()||q.length<2) return db.slice(0,60);
     const ql=q.toLowerCase().trim();
-    return PORTS_DB.filter(p=>{
+    return db.filter(p=>{
       const kw=(p.keywords||[p.name,p.city,p.country,p.id].filter(Boolean).join(' ')).toLowerCase();
       return p.name?.toLowerCase().includes(ql)||p.city?.toLowerCase().includes(ql)||
              p.id?.toLowerCase().includes(ql)||p.country?.toLowerCase().includes(ql)||kw.includes(ql);
-    }).slice(0,100);
-  },[q]);
+    }).slice(0,200);
+  },[q,portsDb]);
+  const db=portsDb.length>0?portsDb:PORTS_DB;
 
   return(
     <div className="section">
       <div className="sec-hdr">
         <div className="sec-title">⚓ Port Search</div>
-        <div style={{display:'flex',gap:8,alignItems:'center'}}>
-          <span className="badge">{PORTS_DB.length} ports loaded</span>
-          <button className="btn btn-secondary" style={{fontSize:'0.7rem',padding:'4px 10px'}} onClick={refreshSheets} disabled={sheetLoading}>
-            {sheetLoading?'⏳':'🔄'} Sync
-          </button>
-        </div>
-      </div>
-      <div className="info-box" style={{fontSize:'0.74rem'}}>
-        📡 Port data from your <strong style={{color:'var(--cyan)'}}>Google Sheet</strong> — search any port worldwide by name, country, city or LOCODE. Shows coordinates for ECDIS route planning.
+        <span className="badge">{db.length} ports</span>
       </div>
       <div className="siw" style={{marginBottom:'1rem'}}>
         <span className="si-ic">🔍</span>
         <input className="si" style={{paddingLeft:40}} autoFocus
-          placeholder="Search port name, country, LOCODE… e.g. Mumbai, SIN, Japan"
+          placeholder="Search port name, country, LOCODE… e.g. Mumbai, SIN, Japan, Rotterdam"
           value={q} onChange={e=>setQ(e.target.value)}/>
       </div>
       {results.length===0
         ?<div className="empty"><div className="empty-icon">⚓</div><div className="empty-t">No Ports Found</div><div className="empty-d">Try a different name or LOCODE</div></div>
         :<div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(280px,1fr))',gap:'0.6rem'}}>
-          {results.map(p=>(
-            <div key={p.id} style={{background:'var(--card)',border:'1px solid var(--border)',borderRadius:10,padding:'12px 14px'}}>
+          {results.map((p,idx)=>(
+            <div key={p.id+idx} style={{background:'var(--card)',border:'1px solid var(--border)',borderRadius:10,padding:'12px 14px'}}>
               <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:4}}>
                 <div style={{fontWeight:700,fontSize:'0.86rem',color:'var(--cyan)'}}>{p.name}</div>
                 <span style={{background:'rgba(0,180,216,0.12)',color:'var(--cyan)',border:'1px solid rgba(0,180,216,0.25)',borderRadius:5,padding:'1px 6px',fontSize:'0.65rem',fontFamily:'monospace'}}>{p.id}</span>
@@ -2506,18 +2522,18 @@ function PortSearchPage({sheetLoading,refreshSheets}){
               <div style={{display:'flex',gap:8,fontSize:'0.72rem'}}>
                 <div style={{background:'rgba(0,0,0,0.2)',borderRadius:6,padding:'4px 8px',flex:1,textAlign:'center'}}>
                   <div style={{color:'var(--text3)',fontSize:'0.6rem',marginBottom:1}}>LATITUDE</div>
-                  <div style={{color:'var(--green)',fontFamily:'monospace'}}>{p.lat?.toFixed(5)}°{p.lat>=0?'N':'S'}</div>
+                  <div style={{color:'var(--green)',fontFamily:'monospace'}}>{Number(p.lat)?.toFixed(5)}°{p.lat>=0?'N':'S'}</div>
                 </div>
                 <div style={{background:'rgba(0,0,0,0.2)',borderRadius:6,padding:'4px 8px',flex:1,textAlign:'center'}}>
                   <div style={{color:'var(--text3)',fontSize:'0.6rem',marginBottom:1}}>LONGITUDE</div>
-                  <div style={{color:'var(--gold)',fontFamily:'monospace'}}>{p.lon?.toFixed(5)}°{p.lon>=0?'E':'W'}</div>
+                  <div style={{color:'var(--gold)',fontFamily:'monospace'}}>{Number(p.lon)?.toFixed(5)}°{p.lon>=0?'E':'W'}</div>
                 </div>
               </div>
             </div>
           ))}
         </div>
       }
-      {!q&&<div style={{textAlign:'center',marginTop:'1rem',fontSize:'0.72rem',color:'var(--text3)'}}>Showing first 50 ports · Type to search all {PORTS_DB.length}</div>}
+      {!q&&<div style={{textAlign:'center',marginTop:'1rem',fontSize:'0.72rem',color:'var(--text3)'}}>Showing first 60 · Type to search all {db.length} ports</div>}
     </div>
   );
 }
@@ -2619,6 +2635,7 @@ function AdminPage({notify,routes,setRoutes,charts,setCharts,sheetRoutes,sheetCh
     {k:'charts',      i:'🗂', l:'Manage Charts'},
     {k:'sheet-routes',i:'🔄', l:'Sheet Routes'},
     {k:'sheet-charts',i:'🔄', l:'Sheet Charts'},
+    {k:'port-search', i:'⚓', l:'Port Search'},
     {k:'users',       i:'👥', l:'User Database'},
   ];
 
@@ -2938,6 +2955,25 @@ function AdminPage({notify,routes,setRoutes,charts,setCharts,sheetRoutes,sheetCh
             </>
           )}
 
+          {section==='port-search'&&(
+            <>
+              <div className="a-hdr">
+                <div className="a-title">⚓ Port Search Database</div>
+                <div style={{display:'flex',gap:8,alignItems:'center'}}>
+                  <span className="badge">{sheetRoutes.length>0||sheetCharts.length>0?'Synced':'Not synced'}</span>
+                  <button className="btn btn-primary" style={{padding:'5px 12px',fontSize:'0.72rem'}} onClick={refreshSheets} disabled={sheetLoading}>
+                    {sheetLoading?'⏳ Syncing…':'🔄 Sync Port Database'}
+                  </button>
+                </div>
+              </div>
+              <div className="info-box">
+                📡 Syncs all 3000+ ports from your Google Sheet into the Port Search and Route Planner. Click <strong>Sync Port Database</strong> to reload all port data from your sheet.
+                <br/><span style={{color:'var(--cyan)',fontSize:'0.72rem'}}>Sheet ID: 1BFpUuo-nqS3MaUTtANtKT4CFem-X3nZJYGRADZtuIdk</span>
+              </div>
+              <PortSearchPage portsDb={sheetRoutes.length>0?PORTS_DB:[]} sheetLoading={sheetLoading} refreshSheets={refreshSheets}/>
+            </>
+          )}
+
           {section==='users'&&(
             <>
               <div className="a-hdr">
@@ -3020,6 +3056,7 @@ export default function App(){
   const [sheetRoutes,setSheetRoutes]=useState([]);
   const [sheetCharts,setSheetCharts]=useState([]);
   const [sheetLoading,setSheetLoading]=useState(false);
+  const [portsDb,setPortsDb]=useState(PORTS_DB); // reactive port list — updates when sheet loads
 
   const isAdmin = user?.email===ADMIN_EMAIL;
 
@@ -3037,21 +3074,41 @@ export default function App(){
         ),
         Promise.reject()
       ).catch(()=>[]);
-    Promise.all([fetchRouteSheet(),fetchChartSheet(),fetchPortsSheet()])
+
+    // Fetch ALL tabs from ports sheet to get all 3000+ ports
+    const PORT_ALL_TABS=["Sheet1","Sheet2","Sheet3","Sheet4","Sheet5","Sheet6",
+      "Ports","World Ports","Data","Asia","Europe","Americas","Africa","Oceania","Middle East","India"];
+    const fetchAllPortTabs=()=>
+      Promise.allSettled(PORT_ALL_TABS.map(tab=>
+        fetch(`https://opensheet.elk.sh/${PORTS_SHEET_ID}/${tab}`)
+          .then(r=>{if(!r.ok)throw new Error();return r.json();})
+          .then(d=>{if(!Array.isArray(d)||d.length===0)throw new Error();return d;})
+          .catch(()=>[])
+      )).then(results=>{
+        const all=[];
+        results.forEach(r=>{ if(r.status==='fulfilled'&&Array.isArray(r.value)) all.push(...r.value); });
+        return all;
+      });
+
+    Promise.all([fetchRouteSheet(),fetchChartSheet(),fetchAllPortTabs()])
       .then(([d1,d2,d3])=>{
         setSheetRoutes(Array.isArray(d1)?d1:[]);
         setSheetCharts(Array.isArray(d2)?d2:[]);
-        // Merge Google Sheet ports into PORTS_DB (sheet overrides seed for same id)
         if(Array.isArray(d3)&&d3.length>0){
           const sheetPorts=d3.map(normalizePortRow).filter(Boolean);
-          const seedIds=new Set(PORTS_DB.map(p=>p.id));
-          const extras=sheetPorts.filter(p=>!seedIds.has(p.id));
-          // Update seed entries with sheet data where available
-          sheetPorts.forEach(sp=>{
-            const idx=PORTS_DB.findIndex(p=>p.id===sp.id||p.name.toLowerCase()===sp.name.toLowerCase());
-            if(idx>=0) PORTS_DB[idx]={...PORTS_DB[idx],...sp};
+          // Dedupe by id+name
+          const seen=new Set();
+          const deduped=[];
+          sheetPorts.forEach(p=>{
+            const key=(p.id+p.name).toLowerCase();
+            if(!seen.has(key)){seen.add(key);deduped.push(p);}
           });
-          PORTS_DB=[...PORTS_DB,...extras];
+          // Merge with seed ports
+          const seedIds=new Set(PORTS_DB.map(p=>p.id));
+          const extras=deduped.filter(p=>!seedIds.has(p.id));
+          const merged=[...PORTS_DB,...extras];
+          PORTS_DB=merged; // update module-level ref for buildAutoRoute
+          setPortsDb([...merged]); // trigger React re-render
         }
       }).catch(e=>console.log('Sheet fetch error',e))
       .finally(()=>setSheetLoading(false));
@@ -3198,8 +3255,8 @@ export default function App(){
           {!loading&&tab==='home'    &&<HomePage routes={routes} charts={charts} onSearch={handleSearch} setTab={switchTab} user={user}/>}
           {!loading&&tab==='routes'  &&<RoutesPage routes={routes} sheetRoutes={sheetRoutes} searchQuery={searchQ} notify={notify} user={user} setTab={switchTab}/>}
           {!loading&&tab==='charts'  &&<ChartsPage charts={charts} sheetCharts={sheetCharts} notify={notify} user={user} setTab={switchTab} isAdmin={isAdmin}/>}
-          {!loading&&tab==='planner' &&<RoutePlannerPage notify={notify} sheetRoutes={[...routes,...sheetRoutes]}/>}
-          {!loading&&tab==='ports'   &&<PortSearchPage sheetLoading={sheetLoading} refreshSheets={fetchSheets}/>}
+          {!loading&&tab==='planner' &&<RoutePlannerPage notify={notify} sheetRoutes={[...routes,...sheetRoutes]} portsDb={portsDb}/>}
+          {!loading&&tab==='ports'   &&<PortSearchPage portsDb={portsDb} sheetLoading={sheetLoading} refreshSheets={fetchSheets}/>}
           {!loading&&tab==='login'   &&<LoginPage notify={notify} onLogin={u=>{setUser(u);setTab('home');}}/>}
           {!loading&&tab==='admin'   &&(isAdmin
             ?<AdminPage notify={notify} routes={routes} setRoutes={setRoutes} charts={charts} setCharts={setCharts} sheetRoutes={sheetRoutes} sheetCharts={sheetCharts} refreshSheets={fetchSheets} sheetLoading={sheetLoading}/>
