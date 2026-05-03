@@ -381,8 +381,6 @@ const SEA_WP = {
   IND_OCEAN_SE:{lat:-15.0,lon:80.0,name:"IND OCEAN SE"},
 };
 
-};
-
 // ─── PORT EXIT CORRIDORS — tells the router how to leave each port safely ─────
 // Each entry: array of SEA_WP keys to insert right after departure
 const PORT_EXIT = {
@@ -399,8 +397,8 @@ const PORT_EXIT = {
   HAL:  ['BAY_N','BAY_C'],
   ENN:  ['IND_E_COAST'],
   // Sri Lanka — go south of island
-  COL:  ['IND_TIP_E','LANKA_S'],
-  TRI:  ['IND_SE','LANKA_S'],
+  COL:  ['PALK_W','LANKA_SW','LANKA_S'],
+  TRI:  ['LANKA_SE','LANKA_S'],
   HAM2: ['LANKA_S'],
   // Pakistan — through Arabian Sea
   KAR:  ['IND_W'],
@@ -444,11 +442,90 @@ const PORT_EXIT = {
   DAL:  ['EAST_CHINA'],
 };
 
+// ─── ROUTE LOOKUP TABLE — exact waypoints extracted from PortToPort TSS data ──
+// Key = "FROM-TO", value = [[lat,lon],...] deep-water waypoints
+const ROUTE_TABLE = {
+  "MUM-SIN":[[18.93,72.83],[14.0,73.0],[10.0,74.8],[7.5,76.5],[6.0,77.5],[7.5,78.8],[5.8,79.8],[5.4,80.6],[6.0,82.0],[8.5,84.5],[6.5,95.0],[5.9,98.5],[5.0,99.2],[3.09,101.02],[2.33,101.35],[1.83,101.8],[1.56,102.39],[1.15,103.41],[1.29,103.85]],
+  "MUM-PKL":[[18.93,72.83],[14.0,73.0],[10.0,74.8],[7.5,76.5],[6.0,77.5],[7.5,78.8],[5.8,79.8],[5.4,80.6],[6.0,82.0],[8.5,84.5],[6.5,95.0],[5.9,98.5],[5.0,99.2],[3.09,101.02],[2.9,100.67],[3.0,101.37]],
+  "MUM-COL":[[18.93,72.83],[14.0,73.0],[10.0,74.8],[7.5,76.5],[7.5,78.8],[6.94,79.85]],
+  "MUM-DXB":[[18.93,72.83],[20.0,65.0],[24.0,60.0],[26.58,56.35],[25.05,55.13]],
+  "MUM-KAR":[[18.93,72.83],[22.0,70.5],[24.86,67.01]],
+  "MUM-JED":[[18.93,72.83],[14.0,73.0],[10.0,74.8],[7.5,76.5],[6.0,77.5],[7.5,78.8],[5.4,80.6],[5.9,98.5],[5.0,99.2],[3.09,101.02],[2.33,101.35],[1.15,103.41],[1.29,103.85],[6.94,79.85],[12.0,62.0],[12.58,43.38],[15.0,41.5],[21.49,39.18]],
+  "MUM-ROT":[[18.93,72.83],[14.0,73.0],[10.0,74.8],[7.5,76.5],[6.0,77.5],[7.5,78.8],[5.8,79.8],[5.4,80.6],[12.0,62.0],[12.58,43.38],[15.0,41.5],[22.0,38.0],[29.77,32.55],[31.27,32.33],[34.5,24.0],[37.5,15.0],[37.5,5.0],[35.98,-5.5],[45.0,-5.0],[51.92,4.48]],
+  "SIN-SHA":[[1.29,103.85],[1.15,103.41],[3.0,108.0],[14.0,112.0],[22.0,117.0],[27.0,122.0],[31.23,121.47]],
+  "SIN-HKG":[[1.29,103.85],[1.15,103.41],[3.0,108.0],[14.0,112.0],[22.29,114.16]],
+  "SIN-MAN":[[1.29,103.85],[1.15,103.41],[3.0,108.0],[10.0,115.0],[14.59,120.98]],
+  "SIN-BUS":[[1.29,103.85],[1.15,103.41],[3.0,108.0],[14.0,112.0],[27.0,122.0],[34.0,127.0],[35.1,129.04]],
+  "SIN-YOK":[[1.29,103.85],[1.15,103.41],[3.0,108.0],[14.0,112.0],[22.0,117.0],[27.0,122.0],[34.0,132.0],[35.45,139.65]],
+  "SIN-SYD":[[1.29,103.85],[3.0,108.0],[-8.5,115.8],[-18.0,120.0],[-30.0,135.0],[-33.86,151.21]],
+  "SIN-COL":[[1.29,103.85],[1.15,103.41],[1.56,102.39],[2.33,101.35],[3.09,101.02],[5.9,98.5],[6.5,95.0],[8.5,84.5],[6.0,82.0],[5.4,80.6],[5.8,79.8],[6.94,79.85]],
+  "SIN-MUM":[[1.29,103.85],[1.56,102.39],[2.33,101.35],[3.09,101.02],[5.0,99.2],[5.9,98.5],[6.5,95.0],[8.5,84.5],[6.0,82.0],[5.4,80.6],[5.8,79.8],[7.5,78.8],[6.0,77.5],[7.5,76.5],[10.0,74.8],[14.0,73.0],[18.93,72.83]],
+  "SIN-DXB":[[1.29,103.85],[1.56,102.39],[2.33,101.35],[3.09,101.02],[5.9,98.5],[6.5,95.0],[8.5,84.5],[5.4,80.6],[6.0,77.5],[7.5,76.5],[10.0,74.8],[14.0,73.0],[18.93,72.83],[12.0,62.0],[12.0,50.0],[12.58,43.38],[12.0,62.0],[23.5,59.0],[26.58,56.35],[25.05,55.13]],
+  "SIN-ROT":[[1.29,103.85],[1.56,102.39],[2.33,101.35],[3.09,101.02],[5.9,98.5],[6.5,95.0],[8.5,84.5],[5.4,80.6],[12.0,62.0],[12.58,43.38],[15.0,41.5],[22.0,38.0],[29.77,32.55],[31.27,32.33],[34.5,24.0],[37.5,5.0],[35.98,-5.5],[45.0,-5.0],[51.92,4.48]],
+  "DXB-SIN":[[25.05,55.13],[26.58,56.35],[23.5,59.0],[12.0,62.0],[10.0,65.0],[8.5,75.0],[8.5,84.5],[6.5,95.0],[5.9,98.5],[5.0,99.2],[3.09,101.02],[2.33,101.35],[1.56,102.39],[1.15,103.41],[1.29,103.85]],
+  "DXB-ROT":[[25.05,55.13],[26.58,56.35],[23.5,59.0],[12.0,62.0],[12.0,50.0],[12.58,43.38],[15.0,41.5],[22.0,38.0],[29.77,32.55],[31.27,32.33],[34.5,24.0],[37.5,15.0],[37.5,5.0],[35.98,-5.5],[45.0,-5.0],[51.92,4.48]],
+  "DXB-MUM":[[25.05,55.13],[26.58,56.35],[23.5,59.0],[18.0,62.0],[14.0,67.0],[18.93,72.83]],
+  "DXB-SHA":[[25.05,55.13],[26.58,56.35],[23.5,59.0],[12.0,62.0],[8.5,75.0],[8.5,84.5],[6.5,95.0],[5.9,98.5],[3.09,101.02],[1.18,103.82],[3.0,108.0],[14.0,112.0],[27.0,122.0],[31.23,121.47]],
+  "ROT-SIN":[[51.92,4.48],[51.05,1.5],[45.0,-5.0],[35.98,-5.5],[37.5,5.0],[34.5,24.0],[31.27,32.33],[29.77,32.55],[22.0,38.0],[15.0,41.5],[12.58,43.38],[12.0,50.0],[12.0,62.0],[8.5,75.0],[8.5,84.5],[6.5,95.0],[5.9,98.5],[5.0,99.2],[3.09,101.02],[2.33,101.35],[1.56,102.39],[1.15,103.41],[1.29,103.85]],
+  "ROT-SHA":[[51.92,4.48],[51.05,1.5],[45.0,-5.0],[35.98,-5.5],[37.5,5.0],[34.5,24.0],[31.27,32.33],[29.77,32.55],[15.0,41.5],[12.58,43.38],[12.0,62.0],[8.5,84.5],[6.5,95.0],[3.09,101.02],[1.15,103.41],[3.0,108.0],[14.0,112.0],[27.0,122.0],[31.23,121.47]],
+  "ROT-MUM":[[51.92,4.48],[35.98,-5.5],[34.5,24.0],[31.27,32.33],[29.77,32.55],[15.0,41.5],[12.58,43.38],[12.0,62.0],[14.0,67.0],[18.93,72.83]],
+  "COL-SIN":[[6.94,79.85],[5.8,79.8],[5.4,80.6],[6.0,82.0],[8.5,84.5],[6.5,95.0],[5.9,98.5],[5.0,99.2],[3.09,101.02],[2.33,101.35],[1.56,102.39],[1.15,103.41],[1.29,103.85]],
+  "COL-MUM":[[6.94,79.85],[7.5,78.8],[7.5,76.5],[10.0,74.8],[14.0,73.0],[18.93,72.83]],
+  "KAR-SIN":[[24.86,67.01],[20.0,65.0],[12.0,62.0],[8.5,75.0],[8.5,84.5],[6.5,95.0],[5.0,99.2],[3.09,101.02],[2.33,101.35],[1.15,103.41],[1.29,103.85]],
+  "KAR-DXB":[[24.86,67.01],[26.0,61.0],[26.58,56.35],[25.05,55.13]],
+  "SHA-SIN":[[31.23,121.47],[27.0,122.0],[14.0,112.0],[5.0,108.0],[3.0,108.0],[1.15,103.41],[1.29,103.85]],
+  "SHA-ROT":[[31.23,121.47],[27.0,122.0],[14.0,112.0],[5.0,108.0],[1.15,103.41],[6.5,95.0],[8.5,84.5],[12.0,62.0],[12.58,43.38],[15.0,41.5],[22.0,38.0],[29.77,32.55],[31.27,32.33],[34.5,24.0],[37.5,5.0],[35.98,-5.5],[45.0,-5.0],[51.92,4.48]],
+  "SHA-BUS":[[31.23,121.47],[34.0,127.0],[35.1,129.04]],
+  "HKG-SIN":[[22.29,114.16],[14.0,112.0],[3.0,108.0],[1.29,103.85]],
+  "HKG-ROT":[[22.29,114.16],[14.0,112.0],[3.0,108.0],[1.29,103.85],[6.5,95.0],[8.5,84.5],[12.0,62.0],[12.58,43.38],[15.0,41.5],[22.0,38.0],[29.77,32.55],[31.27,32.33],[34.5,24.0],[37.5,5.0],[35.98,-5.5],[51.92,4.48]],
+  "BUS-SIN":[[35.1,129.04],[34.0,127.0],[27.0,122.0],[14.0,112.0],[3.0,108.0],[1.15,103.41],[1.29,103.85]],
+  "BUS-SHA":[[35.1,129.04],[34.0,127.0],[27.0,122.0],[31.23,121.47]],
+  "YOK-SIN":[[35.45,139.65],[34.0,132.0],[27.0,122.0],[14.0,112.0],[3.0,108.0],[1.15,103.41],[1.29,103.85]],
+  "YOK-SHA":[[35.45,139.65],[34.0,132.0],[31.23,121.47]],
+  "YOK-LAX":[[35.45,139.65],[40.0,150.0],[48.0,170.0],[45.0,-160.0],[40.0,-140.0],[33.74,-118.27]],
+  "LAX-YOK":[[33.74,-118.27],[40.0,-140.0],[45.0,-160.0],[48.0,170.0],[40.0,150.0],[35.45,139.65]],
+  "LAX-SHA":[[33.74,-118.27],[40.0,-140.0],[45.0,-160.0],[48.0,170.0],[40.0,150.0],[35.45,139.65],[31.23,121.47]],
+  "NYK-ROT":[[40.65,-74.07],[42.0,-60.0],[45.0,-30.0],[50.0,-10.0],[51.92,4.48]],
+  "ROT-NYK":[[51.92,4.48],[50.0,-10.0],[45.0,-30.0],[42.0,-60.0],[40.65,-74.07]],
+  "NYK-SIN":[[40.65,-74.07],[35.0,-73.0],[28.0,-80.0],[22.0,-80.0],[15.0,-75.0],[9.38,-79.9],[8.9,-79.5],[5.0,-85.0],[3.0,-85.0],[3.0,108.0],[1.29,103.85]],
+  "MOM-MUM":[[- 4.05,39.67],[-10.0,43.0],[8.0,60.0],[12.0,62.0],[14.0,67.0],[18.93,72.83]],
+  "MOM-SIN":[[-4.05,39.67],[-10.0,43.0],[-15.0,55.0],[8.5,84.5],[6.5,95.0],[5.0,99.2],[3.09,101.02],[1.29,103.85]],
+  "CHE-SIN":[[13.08,80.29],[10.0,81.0],[8.5,84.5],[6.5,95.0],[5.0,99.2],[3.09,101.02],[2.33,101.35],[1.29,103.85]],
+  "CTG-SIN":[[22.34,91.82],[18.0,90.0],[13.5,87.0],[8.5,84.5],[6.5,95.0],[5.0,99.2],[3.09,101.02],[1.29,103.85]],
+  "JAK-SIN":[[-6.11,106.88],[-6.1,105.7],[1.15,103.41],[1.29,103.85]],
+  "SIN-JAK":[[1.29,103.85],[1.15,103.41],[-6.1,105.7],[-6.11,106.88]],
+  "SYD-SIN":[[-33.86,151.21],[-30.0,135.0],[-18.0,120.0],[-8.5,115.8],[3.0,108.0],[1.29,103.85]],
+  "SYD-SHA":[[-33.86,151.21],[-18.0,152.0],[-10.5,142.5],[3.0,130.0],[14.0,119.0],[22.0,117.0],[31.23,121.47]],
+  "ADE-MUM":[[12.77,44.99],[12.58,43.38],[12.0,50.0],[12.0,62.0],[14.0,67.0],[18.93,72.83]],
+  "ADE-SIN":[[12.77,44.99],[12.58,43.38],[12.0,62.0],[8.5,75.0],[8.5,84.5],[6.5,95.0],[5.0,99.2],[3.09,101.02],[1.29,103.85]],
+  "PSD-DXB":[[31.26,32.31],[29.77,32.55],[15.0,41.5],[12.58,43.38],[12.0,50.0],[23.5,59.0],[26.58,56.35],[25.05,55.13]],
+  "PSD-MUM":[[31.26,32.31],[29.77,32.55],[15.0,41.5],[12.58,43.38],[12.0,62.0],[14.0,67.0],[18.93,72.83]],
+  "PSD-SIN":[[31.26,32.31],[29.77,32.55],[15.0,41.5],[12.58,43.38],[12.0,62.0],[8.5,75.0],[8.5,84.5],[6.5,95.0],[5.0,99.2],[3.09,101.02],[1.29,103.85]],
+};
+
 // ─── AUTO ROUTE — sea-lane routing with coastal avoidance ─────────────────────
 function buildAutoRoute(fromPort, toPort) {
   const from = PORTS_DB.find(p => p.id === fromPort);
   const to   = PORTS_DB.find(p => p.id === toPort);
   if (!from || !to) return [];
+
+  // ── 1. Check direct lookup table first ──────────────────────────────────────
+  const key  = `${fromPort}-${toPort}`;
+  const keyR = `${toPort}-${fromPort}`;
+  if (ROUTE_TABLE[key]) {
+    const wps = ROUTE_TABLE[key].map(([lat,lon],i,arr)=>({
+      lat,lon,
+      name: i===0?from.name:i===arr.length-1?to.name:undefined,
+    }));
+    return recalcWaypoints(wps);
+  }
+  if (ROUTE_TABLE[keyR]) {
+    const wps = [...ROUTE_TABLE[keyR]].reverse().map(([lat,lon],i,arr)=>({
+      lat,lon,
+      name: i===0?from.name:i===arr.length-1?to.name:undefined,
+    }));
+    return recalcWaypoints(wps);
+  }
 
   const wps = [];
   const add = (...keys) => keys.forEach(k => { if(SEA_WP[k]) wps.push({...SEA_WP[k]}); });
@@ -503,7 +580,7 @@ function buildAutoRoute(fromPort, toPort) {
   // ── India subcontinent bypass ──────────────────────────────────────────────
   // West→East: need to go around southern tip of India
   if(fromWestIndia && toEastOfIndia && !alreadyRoundedTip) {
-    add('IND_TIP_E','LANKA_S');
+    add('PALK_W','LANKA_SW','LANKA_S','LANKA_SE');
   }
   // East→West: around the southern tip going west
   if(fromEastOfIndia && toWestOfIndia && !fromExit.includes('IND_TIP')) {
@@ -1420,7 +1497,7 @@ function ETACalculator({totalNM}){
 }
 
 // ─── ROUTE PLANNER PAGE ───────────────────────────────────────────────────────
-function RoutePlannerPage({notify}){
+function RoutePlannerPage({notify,sheetRoutes=[]}){
   const [panel,setPanel]=useState('auto');
   const [fromPort,setFromPort]=useState('');
   const [toPort,setToPort]=useState('');
@@ -1451,14 +1528,87 @@ function RoutePlannerPage({notify}){
   useEffect(()=>searchPort(fromPort,setFromSugg),[fromPort]);
   useEffect(()=>searchPort(toPort,setToSugg),[toPort]);
 
+  const [dbSuggestions,setDbSuggestions]=useState([]);
+  const [showDbSugg,setShowDbSugg]=useState(false);
+
+  // Search ECDIS route sheet for matching routes
+  const searchEcdisRoutes=(dep,arr)=>{
+    if(!dep&&!arr) return [];
+    const ql=(dep+' '+arr).toLowerCase().trim();
+    return sheetRoutes.filter(r=>{
+      const hay=[r.fileName,r.portName,r.keywords,r.fileUrl,
+                 r['Route Name'],r['Port Name'],r['File Name'],r['Keywords'],
+                 Object.values(r).join(' ')].filter(Boolean).join(' ').toLowerCase();
+      // Match if both port names appear in the route record
+      const depMatch=dep.length>1&&hay.includes(dep.toLowerCase().substring(0,4));
+      const arrMatch=arr.length>1&&hay.includes(arr.toLowerCase().substring(0,4));
+      return depMatch||arrMatch||hay.includes(ql.substring(0,6));
+    }).slice(0,6);
+  };
+
   const generateRoute=()=>{
     const f=PORTS_DB.find(p=>p.name.toLowerCase()===fromPort.toLowerCase()||p.id.toLowerCase()===fromPort.toLowerCase());
     const t=PORTS_DB.find(p=>p.name.toLowerCase()===toPort.toLowerCase()||p.id.toLowerCase()===toPort.toLowerCase());
-    if(!f||!t){notify('Select valid departure and arrival ports','error');return;}
+    if(!f||!t){notify('Select valid departure and arrival ports from suggestions','error');return;}
+
+    // 1. Check ECDIS route sheet database FIRST
+    const dbMatches=searchEcdisRoutes(f.name,t.name);
+    if(dbMatches.length>0){
+      setDbSuggestions(dbMatches);
+      setShowDbSugg(true);
+      notify(`Found ${dbMatches.length} route${dbMatches.length>1?'s':''} in ECDIS database — select one or use Auto Route`,'success');
+      return;
+    }
+
+    // 2. Fall back to auto route (ROUTE_TABLE first, then corridor routing)
+    setShowDbSugg(false);
+    const wps=buildAutoRoute(f.id,t.id);
+    if(wps.length<2){notify('Could not generate route for this port pair','error');return;}
+    setWaypoints(wps);
+    setRouteName(`${f.name} to ${t.name}`);
+    notify(`Auto route: ${wps.length} waypoints — ${totalRouteNM(wps).toFixed(0)} NM`,'success');
+  };
+
+  const useDbRoute=(r)=>{
+    setShowDbSugg(false);
+    // Get the file URL and fetch the RTZ if possible
+    const url=r.fileUrl||r['File URL']||r['Download URL']||r['Drive Link']||
+              Object.values(r).find(v=>typeof v==='string'&&v.includes('drive.google'));
+    if(url){
+      notify('Loading route from ECDIS database…','success');
+      let fetchUrl=url;
+      const gdMatch=url.match(/\/d\/([a-zA-Z0-9_-]+)/);
+      if(gdMatch) fetchUrl=`https://drive.google.com/uc?export=download&id=${gdMatch[1]}`;
+      fetch(fetchUrl,{mode:'cors'})
+        .then(r=>r.text())
+        .then(text=>{
+          const result=parseRTZ(text);
+          if(result&&result.waypoints.length>0){
+            setWaypoints(result.waypoints);
+            const name=r.fileName||r['File Name']||r['Route Name']||'ECDIS Route';
+            setRouteName(name);
+            notify(`Loaded: ${name} — ${result.waypoints.length} waypoints`,'success');
+          } else {
+            notify('Could not parse RTZ — using auto route as fallback','error');
+            fallbackAutoRoute();
+          }
+        }).catch(()=>{
+          notify('Could not fetch RTZ file — using auto route as fallback','error');
+          fallbackAutoRoute();
+        });
+    } else {
+      fallbackAutoRoute();
+    }
+  };
+
+  const fallbackAutoRoute=()=>{
+    const f=PORTS_DB.find(p=>p.name.toLowerCase()===fromPort.toLowerCase()||p.id.toLowerCase()===fromPort.toLowerCase());
+    const t=PORTS_DB.find(p=>p.name.toLowerCase()===toPort.toLowerCase()||p.id.toLowerCase()===toPort.toLowerCase());
+    if(!f||!t) return;
     const wps=buildAutoRoute(f.id,t.id);
     setWaypoints(wps);
     setRouteName(`${f.name} to ${t.name}`);
-    notify(`Route generated — ${wps.length} waypoints, ${totalRouteNM(wps).toFixed(0)} NM`,'success');
+    notify(`Auto route: ${wps.length} waypoints — ${totalRouteNM(wps).toFixed(0)} NM`,'success');
   };
 
   const handleRTZLoad=(e)=>{
@@ -1572,9 +1722,40 @@ function RoutePlannerPage({notify}){
                     )}
                   </div>
                 </div>
-                <button className="btn btn-primary" style={{width:'100%',justifyContent:'center',marginBottom:'1rem'}} onClick={generateRoute}>
+                <button className="btn btn-primary" style={{width:'100%',justifyContent:'center',marginBottom:'0.6rem'}} onClick={generateRoute}>
                   🗺 Generate Sea Route
                 </button>
+
+                {/* ECDIS Database Suggestions */}
+                {showDbSugg&&dbSuggestions.length>0&&(
+                  <div style={{marginBottom:'1rem',background:'rgba(0,180,216,0.06)',border:'1px solid rgba(0,180,216,0.25)',borderRadius:10,padding:'10px'}}>
+                    <div style={{fontSize:'0.72rem',color:'var(--cyan)',fontWeight:700,marginBottom:6}}>
+                      ✅ {dbSuggestions.length} route{dbSuggestions.length>1?'s':''} found in your ECDIS database
+                    </div>
+                    {dbSuggestions.map((r,i)=>{
+                      const name=r.fileName||r['File Name']||r['Route Name']||`Route ${i+1}`;
+                      const port=r.portName||r['Port Name']||r['Route Description']||'';
+                      return(
+                        <div key={i} style={{display:'flex',alignItems:'center',gap:8,padding:'6px 8px',borderRadius:7,
+                          background:'rgba(0,0,0,0.2)',marginBottom:4,cursor:'pointer'}}
+                          onClick={()=>useDbRoute(r)}>
+                          <span style={{fontSize:'1rem'}}>🗺</span>
+                          <div style={{flex:1,minWidth:0}}>
+                            <div style={{fontSize:'0.76rem',fontWeight:600,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{name}</div>
+                            {port&&<div style={{fontSize:'0.66rem',color:'var(--text2)'}}>{port}</div>}
+                          </div>
+                          <button style={{background:'var(--cyan)',color:'#000',border:'none',borderRadius:5,padding:'3px 8px',fontSize:'0.65rem',fontWeight:700,cursor:'pointer'}}>
+                            USE
+                          </button>
+                        </div>
+                      );
+                    })}
+                    <button className="btn btn-secondary" style={{width:'100%',fontSize:'0.7rem',padding:'5px',marginTop:4}}
+                      onClick={()=>{setShowDbSugg(false);fallbackAutoRoute();}}>
+                      ⚡ Skip — use Auto Route instead
+                    </button>
+                  </div>
+                )}
 
                 {/* Map Click Mode */}
                 <div className="p-section">
@@ -2197,8 +2378,26 @@ function LoginPage({notify,onLogin}){
 
   const doLogin=async()=>{
     setLoading(true);setErr('');
-    try{const c=await signInWithEmailAndPassword(auth,email,pass);notify('Welcome back! 👋','success');onLogin(c.user);}
-    catch{setErr('Invalid email or password.');}
+    try{
+      const c=await signInWithEmailAndPassword(auth,email,pass);
+      // Check if user is blocked in Firestore
+      const {getDoc,doc:firestoreDoc}=await import('firebase/firestore');
+      const snap=await getDoc(firestoreDoc(db,'users',c.user.uid));
+      if(snap.exists()&&snap.data().blocked){
+        await signOut(auth);
+        setErr('⚠️ ACCESS SUSPENDED — Suspicious login detected by admin. Contact owner on Instagram: @manish_the_navigator');
+        setLoading(false);return;
+      }
+      notify('Welcome back! 👋','success');onLogin(c.user);
+    }
+    catch(e){
+      if(e.code==='auth/invalid-credential'||e.code==='auth/wrong-password'||e.code==='auth/user-not-found')
+        setErr('Invalid email or password.');
+      else if(!e.code)
+        setErr('⚠️ ACCESS SUSPENDED — Contact owner: @manish_the_navigator on Instagram');
+      else
+        setErr('Login error: '+e.message);
+    }
     setLoading(false);
   };
   const doSignup=async()=>{
@@ -2261,7 +2460,68 @@ function LoginPage({notify,onLogin}){
   );
 }
 
-// ─── ADMIN PAGE ───────────────────────────────────────────────────────────────
+// ─── PORT SEARCH PAGE ─────────────────────────────────────────────────────────
+function PortSearchPage({sheetLoading,refreshSheets}){
+  const [q,setQ]=useState('');
+  const results=useMemo(()=>{
+    if(!q.trim()||q.length<2) return PORTS_DB.slice(0,50);
+    const ql=q.toLowerCase().trim();
+    return PORTS_DB.filter(p=>{
+      const kw=(p.keywords||[p.name,p.city,p.country,p.id].filter(Boolean).join(' ')).toLowerCase();
+      return p.name?.toLowerCase().includes(ql)||p.city?.toLowerCase().includes(ql)||
+             p.id?.toLowerCase().includes(ql)||p.country?.toLowerCase().includes(ql)||kw.includes(ql);
+    }).slice(0,100);
+  },[q]);
+
+  return(
+    <div className="section">
+      <div className="sec-hdr">
+        <div className="sec-title">⚓ Port Search</div>
+        <div style={{display:'flex',gap:8,alignItems:'center'}}>
+          <span className="badge">{PORTS_DB.length} ports loaded</span>
+          <button className="btn btn-secondary" style={{fontSize:'0.7rem',padding:'4px 10px'}} onClick={refreshSheets} disabled={sheetLoading}>
+            {sheetLoading?'⏳':'🔄'} Sync
+          </button>
+        </div>
+      </div>
+      <div className="info-box" style={{fontSize:'0.74rem'}}>
+        📡 Port data from your <strong style={{color:'var(--cyan)'}}>Google Sheet</strong> — search any port worldwide by name, country, city or LOCODE. Shows coordinates for ECDIS route planning.
+      </div>
+      <div className="siw" style={{marginBottom:'1rem'}}>
+        <span className="si-ic">🔍</span>
+        <input className="si" style={{paddingLeft:40}} autoFocus
+          placeholder="Search port name, country, LOCODE… e.g. Mumbai, SIN, Japan"
+          value={q} onChange={e=>setQ(e.target.value)}/>
+      </div>
+      {results.length===0
+        ?<div className="empty"><div className="empty-icon">⚓</div><div className="empty-t">No Ports Found</div><div className="empty-d">Try a different name or LOCODE</div></div>
+        :<div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(280px,1fr))',gap:'0.6rem'}}>
+          {results.map(p=>(
+            <div key={p.id} style={{background:'var(--card)',border:'1px solid var(--border)',borderRadius:10,padding:'12px 14px'}}>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:4}}>
+                <div style={{fontWeight:700,fontSize:'0.86rem',color:'var(--cyan)'}}>{p.name}</div>
+                <span style={{background:'rgba(0,180,216,0.12)',color:'var(--cyan)',border:'1px solid rgba(0,180,216,0.25)',borderRadius:5,padding:'1px 6px',fontSize:'0.65rem',fontFamily:'monospace'}}>{p.id}</span>
+              </div>
+              <div style={{fontSize:'0.74rem',color:'var(--text2)',marginBottom:6}}>{p.city&&p.city!==p.name?`${p.city} · `:''}{p.country}</div>
+              <div style={{display:'flex',gap:8,fontSize:'0.72rem'}}>
+                <div style={{background:'rgba(0,0,0,0.2)',borderRadius:6,padding:'4px 8px',flex:1,textAlign:'center'}}>
+                  <div style={{color:'var(--text3)',fontSize:'0.6rem',marginBottom:1}}>LATITUDE</div>
+                  <div style={{color:'var(--green)',fontFamily:'monospace'}}>{p.lat?.toFixed(5)}°{p.lat>=0?'N':'S'}</div>
+                </div>
+                <div style={{background:'rgba(0,0,0,0.2)',borderRadius:6,padding:'4px 8px',flex:1,textAlign:'center'}}>
+                  <div style={{color:'var(--text3)',fontSize:'0.6rem',marginBottom:1}}>LONGITUDE</div>
+                  <div style={{color:'var(--gold)',fontFamily:'monospace'}}>{p.lon?.toFixed(5)}°{p.lon>=0?'E':'W'}</div>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      }
+      {!q&&<div style={{textAlign:'center',marginTop:'1rem',fontSize:'0.72rem',color:'var(--text3)'}}>Showing first 50 ports · Type to search all {PORTS_DB.length}</div>}
+    </div>
+  );
+}
+
 function AdminPage({notify,routes,setRoutes,charts,setCharts,sheetRoutes,sheetCharts,refreshSheets,sheetLoading}){
   const [user,setUser]=useState(null);
   const [email,setEmail]=useState('');const [pass,setPass]=useState('');
@@ -2321,6 +2581,20 @@ function AdminPage({notify,routes,setRoutes,charts,setCharts,sheetRoutes,sheetCh
   const deleteRoute=async id=>{try{await deleteDoc(doc(db,'routes',id));setRoutes(r=>r.filter(x=>x.id!==id));notify('Deleted','success');}catch{notify('Delete failed','error');}};
   const deleteChart=async id=>{try{await deleteDoc(doc(db,'charts',id));setCharts(c=>c.filter(x=>x.id!==id));notify('Deleted','success');}catch{notify('Delete failed','error');}};
 
+  const blockUser=async(u)=>{
+    try{
+      await setDoc(doc(db,'users',u.id),{blocked:true,blockedAt:serverTimestamp()},{merge:true});
+      setUsers(us=>us.map(x=>x.id===u.id?{...x,blocked:true}:x));
+      notify(`⛔ ${u.name||u.email} blocked`,'success');
+    }catch{notify('Failed to block user','error');}
+  };
+  const unblockUser=async(u)=>{
+    try{
+      await setDoc(doc(db,'users',u.id),{blocked:false,blockedAt:null},{merge:true});
+      setUsers(us=>us.map(x=>x.id===u.id?{...x,blocked:false}:x));
+      notify(`✅ ${u.name||u.email} unblocked`,'success');
+    }catch{notify('Failed to unblock user','error');}
+  };
   if(!user) return(
     <div className="auth-wrap">
       <div className="auth-card">
@@ -2668,25 +2942,55 @@ function AdminPage({notify,routes,setRoutes,charts,setCharts,sheetRoutes,sheetCh
             <>
               <div className="a-hdr">
                 <div className="a-title">👥 User Database</div>
-                <div style={{display:'flex',gap:8}}>
+                <div style={{display:'flex',gap:8,flexWrap:'wrap',alignItems:'center'}}>
                   <span className="badge badge-green">{users.length} registered</span>
+                  <span className="badge" style={{background:'rgba(255,60,60,0.15)',color:'#ff6b6b',border:'1px solid rgba(255,60,60,0.3)'}}>
+                    {users.filter(u=>u.blocked).length} blocked
+                  </span>
                   <button className="btn btn-secondary" style={{padding:'5px 10px',fontSize:'0.72rem'}} onClick={loadUsers}>🔄 Refresh</button>
                 </div>
               </div>
-              <div className="info-box">All users who create a free account appear here. Use this to track your audience and for future marketing.</div>
+              <div className="info-box">
+                🛡 <strong style={{color:'var(--text)'}}>Access Control</strong> — Block suspicious users instantly. Blocked users are auto-logged out and shown a warning with your contact info when they try to login again.
+              </div>
               {users.length===0
                 ?<div className="empty"><div className="empty-icon">👥</div><div className="empty-t">No Users Yet</div><div className="empty-d">Users appear here after they register</div></div>
                 :<div className="tw">
                   <table className="tbl">
-                    <thead><tr><th>#</th><th>Name</th><th>Email</th><th>Phone</th><th>Joined</th><th>Role</th></tr></thead>
+                    <thead>
+                      <tr>
+                        <th>#</th><th>Name</th><th>Email</th><th>Phone</th><th>Joined</th><th>Status</th><th>Action</th>
+                      </tr>
+                    </thead>
                     <tbody>{users.map((u,i)=>(
-                      <tr key={u.id}>
+                      <tr key={u.id} style={{opacity:u.blocked?0.7:1,background:u.blocked?'rgba(255,60,60,0.04)':'transparent'}}>
                         <td style={{color:'var(--text3)'}}>{i+1}</td>
-                        <td style={{color:'var(--cyan)',fontWeight:600}}>{u.name||'—'}</td>
+                        <td style={{color:u.blocked?'#ff6b6b':'var(--cyan)',fontWeight:600}}>
+                          {u.blocked&&<span style={{marginRight:4}}>⛔</span>}{u.name||'—'}
+                        </td>
                         <td style={{color:'var(--text2)',fontSize:'0.78rem'}}>{u.email}</td>
                         <td style={{color:'var(--gold)',fontSize:'0.78rem'}}>{u.phone||'—'}</td>
                         <td style={{color:'var(--text2)',fontSize:'0.72rem'}}>{u.createdAt?.toDate?.()?.toLocaleDateString()||'—'}</td>
-                        <td><span className="badge">{u.role||'user'}</span></td>
+                        <td>
+                          {u.blocked
+                            ?<span style={{background:'rgba(255,60,60,0.15)',color:'#ff6b6b',border:'1px solid rgba(255,60,60,0.3)',borderRadius:5,padding:'2px 8px',fontSize:'0.68rem',fontWeight:700}}>⛔ BLOCKED</span>
+                            :<span style={{background:'rgba(0,200,100,0.12)',color:'var(--green)',border:'1px solid rgba(0,200,100,0.25)',borderRadius:5,padding:'2px 8px',fontSize:'0.68rem',fontWeight:700}}>✅ ACTIVE</span>
+                          }
+                        </td>
+                        <td>
+                          {u.blocked
+                            ?<button
+                                style={{background:'rgba(0,200,100,0.15)',color:'var(--green)',border:'1px solid rgba(0,200,100,0.3)',borderRadius:6,padding:'4px 10px',fontSize:'0.68rem',fontWeight:700,cursor:'pointer'}}
+                                onClick={()=>unblockUser(u)}>
+                                ✅ Unblock
+                              </button>
+                            :<button
+                                style={{background:'rgba(255,60,60,0.12)',color:'#ff6b6b',border:'1px solid rgba(255,60,60,0.3)',borderRadius:6,padding:'4px 10px',fontSize:'0.68rem',fontWeight:700,cursor:'pointer'}}
+                                onClick={()=>{if(window.confirm(`Block ${u.name||u.email}? They will be logged out immediately.`))blockUser(u);}}>
+                                ⛔ Block
+                              </button>
+                          }
+                        </td>
                       </tr>
                     ))}</tbody>
                   </table>
@@ -2707,7 +3011,8 @@ export default function App(){
   const [notif,setNotif]=useState(null);
   const [menuOpen,setMenuOpen]=useState(false);
   const [user,setUser]=useState(null);
-  const [userProfile,setUserProfile]=useState(null); // Firestore profile {name,phone,...}
+  const [userProfile,setUserProfile]=useState(null);
+  const [isBlocked,setIsBlocked]=useState(false);
   const [routes,setRoutes]=useState([]);
   const [charts,setCharts]=useState([]);
   const [loading,setLoading]=useState(true);
@@ -2760,10 +3065,26 @@ export default function App(){
         try{
           const {getDoc,doc:firestoreDoc}=await import('firebase/firestore');
           const snap=await getDoc(firestoreDoc(db,'users',u.uid));
-          setUserProfile(snap.exists()?{id:snap.id,...snap.data()}:null);
-        }catch{setUserProfile(null);}
+          if(snap.exists()){
+            const profile={id:snap.id,...snap.data()};
+            if(profile.blocked){
+              // Auto logout blocked user
+              setIsBlocked(true);
+              await signOut(auth);
+              setUser(null);
+              setUserProfile(null);
+              return;
+            }
+            setIsBlocked(false);
+            setUserProfile(profile);
+          } else {
+            setIsBlocked(false);
+            setUserProfile(null);
+          }
+        }catch{setUserProfile(null);setIsBlocked(false);}
       }else{
         setUserProfile(null);
+        // Don't reset isBlocked here — we want to keep showing the warning
       }
     });
     return()=>unsub();
@@ -2785,7 +3106,7 @@ export default function App(){
     {k:'routes',  i:'🗺', l:'Routes'},
     {k:'charts',  i:'📊', l:'Charts',  cls:'gold'},
     {k:'planner', i:'✏️', l:'Planner', cls:'green'},
-    // Admin tab ONLY when logged in with admin email
+    {k:'ports',   i:'⚓', l:'Ports'},
     ...(isAdmin?[{k:'admin',i:'🛡',l:'Admin'}]:[]),
   ];
 
@@ -2839,13 +3160,46 @@ export default function App(){
           }
         </div>
 
-        {/* MAIN CONTENT */}
+        {/* BLOCKED USER WARNING SCREEN */}
+        {isBlocked&&(
+          <div style={{position:'fixed',inset:0,background:'var(--bg)',zIndex:9999,display:'flex',alignItems:'center',justifyContent:'center',padding:'1.5rem'}}>
+            <div style={{maxWidth:400,width:'100%',background:'var(--card)',border:'2px solid rgba(255,60,60,0.5)',borderRadius:16,padding:'2rem',textAlign:'center',boxShadow:'0 0 40px rgba(255,60,60,0.2)'}}>
+              <div style={{fontSize:'3.5rem',marginBottom:'1rem'}}>⚠️</div>
+              <div style={{fontFamily:'Orbitron,monospace',fontSize:'1rem',fontWeight:700,color:'#ff6b6b',marginBottom:'0.5rem',letterSpacing:1}}>
+                ACCESS SUSPENDED
+              </div>
+              <div style={{fontSize:'0.82rem',color:'var(--text2)',lineHeight:1.6,marginBottom:'1.2rem'}}>
+                Suspicious or unauthorised login activity has been detected on your account. Your access has been suspended by the administrator.
+              </div>
+              <div style={{background:'rgba(255,60,60,0.08)',border:'1px solid rgba(255,60,60,0.2)',borderRadius:10,padding:'12px',marginBottom:'1.4rem',fontSize:'0.76rem',color:'var(--text2)'}}>
+                If you believe this is a mistake, please contact the owner to restore your access.
+              </div>
+              <a
+                href="https://www.instagram.com/manish_the_navigator"
+                target="_blank"
+                rel="noreferrer"
+                style={{display:'flex',alignItems:'center',justifyContent:'center',gap:10,
+                  background:'linear-gradient(135deg,#833ab4,#fd1d1d,#fcb045)',
+                  color:'white',borderRadius:10,padding:'12px 20px',textDecoration:'none',
+                  fontWeight:700,fontSize:'0.85rem',marginBottom:'1rem'}}>
+                <span style={{fontSize:'1.2rem'}}>📸</span> Contact on Instagram
+              </a>
+              <div style={{fontSize:'0.68rem',color:'var(--text3)'}}>@manish_the_navigator</div>
+              <button
+                style={{marginTop:'1rem',background:'transparent',border:'1px solid var(--border)',color:'var(--text3)',borderRadius:8,padding:'6px 16px',fontSize:'0.7rem',cursor:'pointer'}}
+                onClick={()=>setIsBlocked(false)}>
+                Dismiss
+              </button>
+            </div>
+          </div>
+        )}
         <div style={{flex:1,display:'flex',flexDirection:'column',minHeight:0,overflow:isPlannerFull?'hidden':'auto'}}>
           {loading&&<div className="loading"><div className="spin"/><span>Connecting to Firebase…</span></div>}
           {!loading&&tab==='home'    &&<HomePage routes={routes} charts={charts} onSearch={handleSearch} setTab={switchTab} user={user}/>}
           {!loading&&tab==='routes'  &&<RoutesPage routes={routes} sheetRoutes={sheetRoutes} searchQuery={searchQ} notify={notify} user={user} setTab={switchTab}/>}
           {!loading&&tab==='charts'  &&<ChartsPage charts={charts} sheetCharts={sheetCharts} notify={notify} user={user} setTab={switchTab} isAdmin={isAdmin}/>}
-          {!loading&&tab==='planner' &&<RoutePlannerPage notify={notify}/>}
+          {!loading&&tab==='planner' &&<RoutePlannerPage notify={notify} sheetRoutes={[...routes,...sheetRoutes]}/>}
+          {!loading&&tab==='ports'   &&<PortSearchPage sheetLoading={sheetLoading} refreshSheets={fetchSheets}/>}
           {!loading&&tab==='login'   &&<LoginPage notify={notify} onLogin={u=>{setUser(u);setTab('home');}}/>}
           {!loading&&tab==='admin'   &&(isAdmin
             ?<AdminPage notify={notify} routes={routes} setRoutes={setRoutes} charts={charts} setCharts={setCharts} sheetRoutes={sheetRoutes} sheetCharts={sheetCharts} refreshSheets={fetchSheets} sheetLoading={sheetLoading}/>
