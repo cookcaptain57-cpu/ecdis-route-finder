@@ -2495,13 +2495,12 @@ function PortSearchPage({portsDb=[],sheetLoading,refreshSheets}){
              p.id?.toLowerCase().includes(ql)||p.country?.toLowerCase().includes(ql)||kw.includes(ql);
     }).slice(0,200);
   },[q,portsDb]);
-  const db=portsDb.length>0?portsDb:PORTS_DB;
 
   return(
     <div className="section">
       <div className="sec-hdr">
         <div className="sec-title">⚓ Port Search</div>
-        <span className="badge">{db.length} ports</span>
+        <span className="badge">{(portsDb.length>0?portsDb:PORTS_DB).length} ports</span>
       </div>
       <div className="siw" style={{marginBottom:'1rem'}}>
         <span className="si-ic">🔍</span>
@@ -2533,7 +2532,7 @@ function PortSearchPage({portsDb=[],sheetLoading,refreshSheets}){
           ))}
         </div>
       }
-      {!q&&<div style={{textAlign:'center',marginTop:'1rem',fontSize:'0.72rem',color:'var(--text3)'}}>Showing first 60 · Type to search all {db.length} ports</div>}
+      {!q&&<div style={{textAlign:'center',marginTop:'1rem',fontSize:'0.72rem',color:'var(--text3)'}}>Showing first 60 · Type to search all {(portsDb.length>0?portsDb:PORTS_DB).length} ports</div>}
     </div>
   );
 }
