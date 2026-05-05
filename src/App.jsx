@@ -1,5 +1,14 @@
 /* eslint-disable */
 import { useState, useEffect, useRef, useMemo } from "react";
+import { auth, db } from "./firebase";
+import {
+  signInWithEmailAndPassword, createUserWithEmailAndPassword,
+  signOut, onAuthStateChanged, sendPasswordResetEmail
+} from "firebase/auth";
+import {
+  collection, getDocs, addDoc, deleteDoc, doc, setDoc, serverTimestamp
+} from "firebase/firestore";
+
 // ─── GOOGLE SHEET APIs ─────────────────────────────────
 const API_1 =
   "https://opensheet.elk.sh/1ILzyQODb4Ig2mdq9auZ7aJOfdKBBM01t192VE59WbCE/Sheet1";
@@ -18,27 +27,9 @@ const fetchChartSheet = () =>
     Promise.reject()
   ).catch(() => []);
 
-// ─── PORTS SHEET (world ports from Google Sheet) ───────────────────────────────
+// ─── PORTS SHEET ────────────────────────────────────────
 const PORTS_SHEET_ID = "1BFpUuo-nqS3MaUTtANtKT4CFem-X3nZJYGRADZtuIdk";
-const PORTS_TABS = ["Sheet1","Ports","World Ports","Data","Sheet2"];
-const fetchPortsSheet = () =>
-  PORTS_TABS.reduce(
-    (chain, tab) =>
-      chain.catch(() =>
-        fetch(`https://opensheet.elk.sh/${PORTS_SHEET_ID}/${tab}`)
-          .then(r => { if (!r.ok) throw new Error(); return r.json(); })
-          .then(d => { if (!Array.isArray(d) || d.length === 0) throw new Error(); return d; })
-      ),
-    Promise.reject()
-  ).catch(() => []);
-import { auth, db } from "./firebase";
-import {
-  signInWithEmailAndPassword, createUserWithEmailAndPassword,
-  signOut, onAuthStateChanged, sendPasswordResetEmail
-} from "firebase/auth";
-import {
-  collection, getDocs, addDoc, deleteDoc, doc, setDoc, serverTimestamp
-} from "firebase/firestore";
+
 
 // ─── ECDIS BRANDS ─────────────────────────────────────────────────────────────
 const ECDIS_BRANDS = [
