@@ -6,7 +6,7 @@ import {
   signOut, onAuthStateChanged, sendPasswordResetEmail
 } from "firebase/auth";
 import {
-  collection, getDocs, addDoc, deleteDoc, doc, setDoc, serverTimestamp
+  collection, getDocs, addDoc, deleteDoc, doc, setDoc, serverTimestamp, getDoc, query, orderBy
 } from "firebase/firestore";
 
 // ─── GOOGLE SHEET APIs ─────────────────────────────────
@@ -2394,8 +2394,7 @@ function LoginPage({notify,onLogin}){
     try{
       const c=await signInWithEmailAndPassword(auth,email,pass);
       // Check if user is blocked in Firestore
-      const {getDoc,doc:firestoreDoc}=await import('firebase/firestore');
-      const snap=await getDoc(firestoreDoc(db,'users',c.user.uid));
+      const snap=await getDoc(doc(db,'users',c.user.uid));
       if(snap.exists()&&snap.data().blocked){
         await signOut(auth);
         setErr('⚠️ ACCESS SUSPENDED — Suspicious login detected by admin. Contact owner on Instagram: @manish_the_navigator');
@@ -3110,8 +3109,7 @@ export default function App(){
       setUser(u);
       if(u){
         try{
-          const {getDoc,doc:firestoreDoc}=await import('firebase/firestore');
-          const snap=await getDoc(firestoreDoc(db,'users',u.uid));
+          const snap=await getDoc(doc(db,'users',u.uid));
           if(snap.exists()){
             const profile={id:snap.id,...snap.data()};
             if(profile.blocked){
