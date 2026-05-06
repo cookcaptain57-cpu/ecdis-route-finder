@@ -1,3 +1,4 @@
+
 /* eslint-disable */
 import { useState, useEffect, useRef, useMemo } from "react";
 import { auth, db } from "./firebase";
@@ -2790,6 +2791,600 @@ function PortSearchPage({portsDb=[],sheetLoading,refreshSheets}){
   );
 }
 
+// ─── NAV MODE PAGE ────────────────────────────────────────────────────────────
+function NavModePage({notify,sheetRoutes=[],portsDb=[]}){
+  const mapRef=useRef(null);
+  const leafRef=useRef(null);
+  const layersRef=useRef({route:null,vessel:null,vector:null,ais:{},trail:[]});
+  const wsRef=useRef(null);
+  const gpsRef=useRef(null);
+  const [mapReady,setMapReady]=useState(false);
+
+  // State
+  const [gpsOn,setGpsOn]=useState(false);
+  const [aisOn,setAisOn]=useState(false);
+  const [autoCenter,setAutoCenter]=useState(true);
+  const [vectorTime,setVectorTime]=useState(6);
+  const [activeTab,setActiveTab]=useState('route'); // route|gps|ais|vector
+  const [panelOpen,setPanelOpen]=useState(true);
+
+  // Own ship data
+  const [ownShip,setOwnShip]=useState(null); // {lat,lon,cog,sog,heading}
+  const [posHistory,setPosHistory]=useState([]);
+
+  // Loaded route
+  const [navRoute,setNavRoute]=useState(null); // {name, waypoints:[{lat,lon}]}
+  const [routeSearch,setRouteSearch]=useState('');
+  const [routeSuggs,setRouteSuggs]=useState([]);
+
+  // AIS targets
+  const [aisTargets,setAisTargets]=useState({});
+  const [selTarget,setSelTarget]=useState(null);
+
+  // ── MATH HELPERS ──────────────────────────────────────────────────────────
+  const haverNM=(lat1,lon1,lat2,lon2)=>{
+    const R=3440.065,d2r=Math.PI/180;
+    const dlat=(lat2-lat1)*d2r,dlon=(lon2-lon1)*d2r;
+    const a=Math.sin(dlat/2)**2+Math.cos(lat1*d2r)*Math.cos(lat2*d2r)*Math.sin(dlon/2)**2;
+    return 2*R*Math.asin(Math.sqrt(a));
+  };
+
+  const cogBetween=(lat1,lon1,lat2,lon2)=>{
+    const d2r=Math.PI/180,r2d=180/Math.PI;
+    const dlon=(lon2-lon1)*d2r;
+    const y=Math.sin(dlon)*Math.cos(lat2*d2r);
+    const x=Math.cos(lat1*d2r)*Math.sin(lat2*d2r)-Math.sin(lat1*d2r)*Math.cos(lat2*d2r)*Math.cos(dlon);
+    return (Math.atan2(y,x)*r2d+360)%360;
+  };
+
+  const predictPos=(lat,lon,cog,sogKt,timeMin)=>{
+    const distNM=sogKt*(timeMin/60);
+    const R=3440.065,d2r=Math.PI/180,r2d=180/Math.PI;
+    const lat2=Math.asin(Math.sin(lat*d2r)*Math.cos(distNM/R)+
+      Math.cos(lat*d2r)*Math.sin(distNM/R)*Math.cos(cog*d2r));
+    const lon2=lon*d2r+Math.atan2(
+      Math.sin(cog*d2r)*Math.sin(distNM/R)*Math.cos(lat*d2r),
+      Math.cos(distNM/R)-Math.sin(lat*d2r)*Math.sin(lat2));
+    return {lat:lat2*r2d,lon:lon2*r2d};
+  };
+
+  // ── CPA / TCPA ────────────────────────────────────────────────────────────
+  const calcCPATCPA=(own,tgt)=>{
+    if(!own||!tgt) return {cpa:'—',tcpa:'—'};
+    const d2r=Math.PI/180;
+    const kts2ms=0.514444;
+    // Convert to Cartesian (flat earth approximation, OK for short ranges)
+    const latR=((own.lat+tgt.lat)/2)*d2r;
+    const dx=(tgt.lon-own.lon)*d2r*Math.cos(latR)*6371000;
+    const dy=(tgt.lat-own.lat)*d2r*6371000;
+    const ovx=own.sog*kts2ms*Math.sin(own.cog*d2r);
+    const ovy=own.sog*kts2ms*Math.cos(own.cog*d2r);
+    const tvx=tgt.sog*kts2ms*Math.sin(tgt.cog*d2r);
+    const tvy=tgt.sog*kts2ms*Math.cos(tgt.cog*d2r);
+    const rvx=tvx-ovx,rvy=tvy-ovy;
+    const vv=rvx*rvx+rvy*rvy;
+    const pv=dx*rvx+dy*rvy;
+    const pp=dx*dx+dy*dy;
+    if(vv<0.0001){const cpaM=Math.sqrt(pp);return{cpa:(cpaM/1852).toFixed(2)+' NM',tcpa:'—'};}
+    const tcpaSec=-pv/vv;
+    if(tcpaSec<0) return{cpa:'Passed',tcpa:'—'};
+    const cpax=dx+rvx*tcpaSec,cpay=dy+rvy*tcpaSec;
+    const cpaM=Math.sqrt(cpax*cpax+cpay*cpay);
+    const tcpaMin=tcpaSec/60;
+    return{
+      cpa:(cpaM/1852).toFixed(2)+' NM',
+      tcpa:tcpaMin<60?tcpaMin.toFixed(1)+' min':(tcpaMin/60).toFixed(1)+' hr'
+    };
+  };
+
+  // ── MAP INIT ─────────────────────────────────────────────────────────────
+  useEffect(()=>{
+    if(mapReady||!mapRef.current) return;
+    if(!window.L){
+      const s=document.createElement('script');
+      s.src='https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+      s.onload=()=>initMap();
+      document.head.appendChild(s);
+      const css=document.createElement('link');
+      css.rel='stylesheet';
+      css.href='https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+      document.head.appendChild(css);
+    } else { initMap(); }
+    return()=>{
+      if(leafRef.current){leafRef.current.remove();leafRef.current=null;}
+      stopGPS();stopAIS();
+    };
+  },[]);
+
+  const initMap=()=>{
+    if(leafRef.current||!mapRef.current) return;
+    const L=window.L;
+    leafRef.current=L.map(mapRef.current,{
+      center:[20,70],zoom:5,preferCanvas:true,zoomControl:false,attributionControl:false
+    });
+    // Dark nautical tile
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{
+      attribution:'CARTO',subdomains:'abcd',maxZoom:20
+    }).addTo(leafRef.current);
+    // OpenSeaMap seamark overlay
+    L.tileLayer('https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png',{
+      opacity:0.7,maxZoom:18
+    }).addTo(leafRef.current);
+    // Zoom control top-left
+    L.control.zoom({position:'topleft'}).addTo(leafRef.current);
+    setMapReady(true);
+  };
+
+  // ── VESSEL SVG ICON ──────────────────────────────────────────────────────
+  const makeVesselIcon=(cog=0,color='#00D4FF',size=32)=>{
+    const L=window.L;
+    const svg=`<svg width="${size}" height="${size}" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg" style="transform:rotate(${cog}deg)">
+      <polygon points="16,2 22,28 16,24 10,28" fill="${color}" stroke="#000" stroke-width="1.5" opacity="0.95"/>
+    </svg>`;
+    return L.divIcon({html:svg,iconSize:[size,size],iconAnchor:[size/2,size/2],className:''});
+  };
+
+  const makeAISIcon=(cog=0,color='#FFB300')=>{
+    const L=window.L;
+    const svg=`<svg width="22" height="22" viewBox="0 0 22 22" xmlns="http://www.w3.org/2000/svg" style="transform:rotate(${cog}deg)">
+      <polygon points="11,1 15,20 11,17 7,20" fill="${color}" stroke="#000" stroke-width="1" opacity="0.9"/>
+    </svg>`;
+    return L.divIcon({html:svg,iconSize:[22,22],iconAnchor:[11,11],className:''});
+  };
+
+  // ── ROUTE DISPLAY ─────────────────────────────────────────────────────────
+  useEffect(()=>{
+    if(!mapReady||!leafRef.current) return;
+    const L=window.L;
+    const lrs=layersRef.current;
+    if(lrs.route){lrs.route.remove();}
+    if(!navRoute||!navRoute.waypoints||navRoute.waypoints.length<2) return;
+    const pts=navRoute.waypoints.map(w=>[w.lat,w.lon]);
+    const totalNM=navRoute.waypoints.reduce((s,w,i,a)=>
+      i>0?s+haverNM(a[i-1].lat,a[i-1].lon,w.lat,w.lon):s,0);
+    lrs.route=L.layerGroup().addTo(leafRef.current);
+    // Route line
+    L.polyline(pts,{color:'#00D4FF',weight:3,opacity:0.9,dashArray:'8,4'}).addTo(lrs.route);
+    // Waypoint markers
+    navRoute.waypoints.forEach((w,i)=>{
+      const isFirst=i===0,isLast=i===navRoute.waypoints.length-1;
+      const color=isFirst?'#00FF88':isLast?'#FF4444':'#00D4FF';
+      L.circleMarker([w.lat,w.lon],{radius:isFirst||isLast?8:5,color,fillColor:color,fillOpacity:1,weight:2})
+        .addTo(lrs.route)
+        .bindTooltip(w.name||`WP ${i+1}`,{permanent:false,direction:'top'});
+    });
+    leafRef.current.fitBounds(pts,{padding:[40,40]});
+  },[navRoute,mapReady]);
+
+  // ── GPS ───────────────────────────────────────────────────────────────────
+  const startGPS=()=>{
+    if(!navigator.geolocation){notify('GPS not supported on this device','error');return;}
+    let lastPos=null,lastTime=null;
+    gpsRef.current=navigator.geolocation.watchPosition(pos=>{
+      const {latitude:lat,longitude:lon,speed,heading}=pos.coords;
+      const sogKt=speed!=null?speed*1.944:0;
+      const now=Date.now();
+      let cog=heading!=null?heading:0;
+      // If no heading from GPS, calculate from movement
+      if(lastPos&&lastTime&&now-lastTime>500){
+        cog=cogBetween(lastPos.lat,lastPos.lon,lat,lon);
+      }
+      lastPos={lat,lon};lastTime=now;
+      const ship={lat,lon,cog,sog:sogKt,heading:heading||cog,ts:now};
+      setOwnShip(ship);
+      setPosHistory(h=>[...h.slice(-60),{lat,lon,ts:now}]);
+      if(leafRef.current&&autoCenter){leafRef.current.setView([lat,lon],Math.max(leafRef.current.getZoom(),12));}
+      updateVesselOnMap(ship);
+    },{enableHighAccuracy:true,maximumAge:1000,timeout:10000},
+    err=>{notify('GPS error: '+err.message,'error');setGpsOn(false);});
+  };
+
+  const stopGPS=()=>{
+    if(gpsRef.current!=null){navigator.geolocation?.clearWatch(gpsRef.current);gpsRef.current=null;}
+    if(layersRef.current.vessel){layersRef.current.vessel.remove();layersRef.current.vessel=null;}
+    if(layersRef.current.vector){layersRef.current.vector.remove();layersRef.current.vector=null;}
+  };
+
+  useEffect(()=>{
+    if(gpsOn) startGPS(); else stopGPS();
+  },[gpsOn]);
+
+  const updateVesselOnMap=(ship)=>{
+    if(!leafRef.current||!window.L) return;
+    const L=window.L;const lrs=layersRef.current;
+    if(lrs.vessel){lrs.vessel.remove();}
+    lrs.vessel=makeVesselIcon(ship.cog,'#00D4FF',36);
+    L.marker([ship.lat,ship.lon],{icon:lrs.vessel,zIndexOffset:1000}).addTo(leafRef.current);
+    // Trail
+    lrs.trail.push([ship.lat,ship.lon]);
+    if(lrs.trail.length>100) lrs.trail=lrs.trail.slice(-100);
+    if(lrs.trailLine){lrs.trailLine.remove();}
+    if(lrs.trail.length>1){
+      lrs.trailLine=L.polyline(lrs.trail,{color:'#00D4FF',weight:1.5,opacity:0.4,dashArray:'4,3'}).addTo(leafRef.current);
+    }
+  };
+
+  // ── VECTOR PREDICTION ─────────────────────────────────────────────────────
+  useEffect(()=>{
+    if(!mapReady||!leafRef.current||!window.L) return;
+    const L=window.L;const lrs=layersRef.current;
+    if(lrs.vector){lrs.vector.remove();lrs.vector=null;}
+    if(!ownShip||ownShip.sog<0.1) return;
+    const endPos=predictPos(ownShip.lat,ownShip.lon,ownShip.cog,ownShip.sog,vectorTime);
+    const pts=[[ownShip.lat,ownShip.lon],[endPos.lat,endPos.lon]];
+    lrs.vector=L.layerGroup([
+      L.polyline(pts,{color:'#FFB300',weight:2.5,opacity:0.85,dashArray:'10,5'}),
+      L.circleMarker([endPos.lat,endPos.lon],{radius:6,color:'#FFB300',fillColor:'#FFB300',fillOpacity:0.6,weight:2})
+        .bindTooltip(`+${vectorTime}min`,{permanent:false})
+    ]).addTo(leafRef.current);
+  },[ownShip,vectorTime,mapReady]);
+
+  // ── AIS ───────────────────────────────────────────────────────────────────
+  const startAIS=()=>{
+    if(wsRef.current) return;
+    try{
+      const ws=new WebSocket('wss://stream.aisstream.io/v0/stream');
+      ws.onopen=()=>{
+        const sub={APIKey:'732d8c6a956ecc8cdb7d1654028c8e09f65521eb',
+          BoundingBoxes:[[[ownShip?ownShip.lat-2:-90,ownShip?ownShip.lon-2:-180],
+                          [ownShip?ownShip.lat+2:90, ownShip?ownShip.lon+2:180]]],
+          FilterMessageTypes:['PositionReport','ShipStaticData']};
+        ws.send(JSON.stringify(sub));
+        notify('AIS stream connected','success');
+      };
+      ws.onmessage=e=>{
+        try{
+          const msg=JSON.parse(e.data);
+          const mmsi=msg.MetaData?.MMSI_String||msg.MetaData?.MMSI;
+          if(!mmsi) return;
+          const pr=msg.Message?.PositionReport;
+          const ss=msg.Message?.ShipStaticData;
+          setAisTargets(prev=>{
+            const t=prev[mmsi]||{mmsi};
+            if(pr){
+              t.lat=pr.Latitude;t.lon=pr.Longitude;
+              t.cog=pr.Cog;t.sog=pr.Sog;t.heading=pr.TrueHeading;
+            }
+            if(ss){t.name=ss.Name?.trim();t.type=ss.Type;}
+            if(msg.MetaData?.ShipName) t.name=msg.MetaData.ShipName.trim();
+            t.ts=Date.now();
+            return{...prev,[mmsi]:t};
+          });
+        }catch{}
+      };
+      ws.onerror=()=>{notify('AIS connection error','error');setAisOn(false);};
+      ws.onclose=()=>{wsRef.current=null;};
+      wsRef.current=ws;
+    }catch(e){notify('AIS failed: '+e.message,'error');setAisOn(false);}
+  };
+
+  const stopAIS=()=>{
+    if(wsRef.current){wsRef.current.close();wsRef.current=null;}
+    Object.values(layersRef.current.ais).forEach(l=>l?.remove&&l.remove());
+    layersRef.current.ais={};
+  };
+
+  useEffect(()=>{ if(aisOn) startAIS(); else stopAIS(); },[aisOn]);
+
+  // Render AIS targets on map
+  useEffect(()=>{
+    if(!mapReady||!leafRef.current||!window.L) return;
+    const L=window.L;const lrs=layersRef.current;
+    const now=Date.now();
+    Object.entries(aisTargets).forEach(([mmsi,t])=>{
+      if(!t.lat||!t.lon) return;
+      if(now-t.ts>300000) return; // skip stale > 5min
+      const {cpa,tcpa}=calcCPATCPA(ownShip,{lat:t.lat,lon:t.lon,cog:t.cog||0,sog:t.sog||0});
+      if(lrs.ais[mmsi]) lrs.ais[mmsi].remove();
+      lrs.ais[mmsi]=L.marker([t.lat,t.lon],{
+        icon:makeAISIcon(t.cog||0,'#FFB300'),zIndexOffset:500
+      }).addTo(leafRef.current)
+        .bindPopup(`<div style="font-family:monospace;font-size:12px;color:#000;min-width:180px">
+          <b>${t.name||'Unknown'}</b><br/>
+          MMSI: ${mmsi}<br/>
+          SOG: ${(t.sog||0).toFixed(1)} kt<br/>
+          COG: ${(t.cog||0).toFixed(0)}°<br/>
+          <hr style="margin:4px 0"/>
+          <b>CPA:</b> ${cpa}<br/>
+          <b>TCPA:</b> ${tcpa}
+        </div>`);
+    });
+  },[aisTargets,mapReady,ownShip]);
+
+  // ── ROUTE SEARCH ─────────────────────────────────────────────────────────
+  useEffect(()=>{
+    if(!routeSearch.trim()){setRouteSuggs([]);return;}
+    const ql=routeSearch.toLowerCase();
+    setRouteSuggs(sheetRoutes.filter(r=>{
+      const hay=[r.fileName,r.portName,r['File Name'],r['Route Name'],
+        Object.values(r).join(' ')].filter(Boolean).join(' ').toLowerCase();
+      return hay.includes(ql);
+    }).slice(0,6));
+  },[routeSearch,sheetRoutes]);
+
+  const loadRouteFromDB=async(r)=>{
+    const url=r.fileUrl||r['File URL']||r['Drive Link']||
+      Object.values(r).find(v=>typeof v==='string'&&v.includes('drive.google'));
+    if(!url){notify('No download link in this route record','error');return;}
+    notify('Loading route…','success');
+    try{
+      let fetchUrl=url;
+      const gd=url.match(/\/d\/([a-zA-Z0-9_-]+)/);
+      if(gd) fetchUrl=`https://drive.google.com/uc?export=download&id=${gd[1]}`;
+      const res=await fetch(fetchUrl,{mode:'cors'});
+      const text=await res.text();
+      const parsed=parseRTZ(text);
+      if(parsed?.waypoints?.length>1){
+        setNavRoute({name:r.fileName||r['File Name']||'Route',waypoints:parsed.waypoints});
+        setRouteSuggs([]);setRouteSearch('');
+        notify(`Loaded: ${parsed.waypoints.length} waypoints`,'success');
+      }else{notify('Could not parse route file','error');}
+    }catch{notify('Failed to fetch route file','error');}
+  };
+
+  const loadRouteFromFile=async(file)=>{
+    const text=await file.text();
+    let wps=null;
+    if(file.name.endsWith('.rtz')||text.includes('<route')){
+      const parsed=parseRTZ(text);
+      if(parsed?.waypoints?.length>1) wps=parsed.waypoints;
+    } else if(file.name.endsWith('.csv')){
+      const lines=text.trim().split('\n');
+      wps=lines.slice(1).map(l=>{
+        const p=l.split(',');
+        return{lat:parseFloat(p[0]),lon:parseFloat(p[1]),name:p[2]||''};
+      }).filter(w=>!isNaN(w.lat)&&!isNaN(w.lon));
+    } else if(file.name.endsWith('.gpx')){
+      const parser=new DOMParser();
+      const xml=parser.parseFromString(text,'text/xml');
+      wps=[...xml.querySelectorAll('rtept,trkpt,wpt')].map(n=>({
+        lat:parseFloat(n.getAttribute('lat')),
+        lon:parseFloat(n.getAttribute('lon')),
+        name:n.querySelector('name')?.textContent||''
+      })).filter(w=>!isNaN(w.lat)&&!isNaN(w.lon));
+    }
+    if(wps&&wps.length>1){
+      setNavRoute({name:file.name,waypoints:wps});
+      notify(`Loaded ${file.name}: ${wps.length} waypoints`,'success');
+    } else {notify('Could not parse file. Supported: RTZ, CSV, GPX','error');}
+  };
+
+  // ── STYLES ───────────────────────────────────────────────────────────────
+  const NAV_S=`
+    .nm-wrap{position:fixed;inset:0;z-index:100;background:#040C1A;display:flex;flex-direction:column;}
+    .nm-map{flex:1;position:relative;}
+    .nm-panel{position:absolute;top:10px;right:10px;z-index:500;width:260px;
+      background:rgba(4,12,26,0.92);border:1px solid rgba(0,212,255,0.25);
+      border-radius:14px;backdrop-filter:blur(12px);overflow:hidden;}
+    .nm-panel-header{display:flex;align-items:center;justify-content:space-between;
+      padding:10px 14px;border-bottom:1px solid rgba(0,212,255,0.15);cursor:pointer;}
+    .nm-tabs{display:flex;border-bottom:1px solid rgba(0,212,255,0.12);}
+    .nm-tab{flex:1;padding:8px 4px;font-size:0.62rem;font-weight:700;text-align:center;
+      cursor:pointer;color:rgba(255,255,255,0.4);letter-spacing:0.05em;
+      transition:all 0.2s;border-bottom:2px solid transparent;}
+    .nm-tab.active{color:#00D4FF;border-bottom-color:#00D4FF;}
+    .nm-body{padding:12px;max-height:360px;overflow-y:auto;}
+    .nm-toggle{display:flex;align-items:center;justify-content:space-between;
+      padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.06);}
+    .nm-toggle-label{font-size:0.75rem;color:rgba(255,255,255,0.7);}
+    .nm-sw{position:relative;width:40px;height:22px;cursor:pointer;}
+    .nm-sw input{opacity:0;width:0;height:0;}
+    .nm-sw-slider{position:absolute;inset:0;background:#1a2744;border-radius:22px;transition:0.3s;border:1px solid rgba(255,255,255,0.1);}
+    .nm-sw input:checked+.nm-sw-slider{background:#00D4FF;}
+    .nm-sw-slider:before{content:'';position:absolute;width:16px;height:16px;left:2px;bottom:2px;
+      background:white;border-radius:50%;transition:0.3s;}
+    .nm-sw input:checked+.nm-sw-slider:before{transform:translateX(18px);}
+    .nm-data{background:rgba(0,212,255,0.05);border:1px solid rgba(0,212,255,0.15);
+      border-radius:8px;padding:10px;margin-top:8px;}
+    .nm-data-row{display:flex;justify-content:space-between;margin-bottom:4px;font-size:0.73rem;}
+    .nm-data-label{color:rgba(255,255,255,0.5);}
+    .nm-data-val{color:#00D4FF;font-weight:700;font-family:monospace;}
+    .nm-btn{padding:7px 12px;border-radius:8px;border:none;cursor:pointer;
+      font-size:0.72rem;font-weight:700;transition:all 0.2s;}
+    .nm-route-item{padding:9px 10px;border-radius:8px;cursor:pointer;margin-bottom:4px;
+      background:rgba(0,212,255,0.06);border:1px solid rgba(0,212,255,0.12);
+      font-size:0.74rem;color:rgba(255,255,255,0.8);transition:all 0.15s;}
+    .nm-route-item:hover{background:rgba(0,212,255,0.14);border-color:rgba(0,212,255,0.3);}
+    .nm-vec-btn{flex:1;padding:6px;border-radius:7px;border:1px solid rgba(255,179,0,0.25);
+      background:transparent;color:rgba(255,179,0,0.6);font-size:0.7rem;
+      font-weight:700;cursor:pointer;transition:all 0.2s;text-align:center;}
+    .nm-vec-btn.active{background:rgba(255,179,0,0.2);color:#FFB300;border-color:#FFB300;}
+    .nm-hud{position:absolute;bottom:16px;left:50%;transform:translateX(-50%);
+      display:flex;gap:8px;z-index:400;}
+    .nm-hud-card{background:rgba(4,12,26,0.88);border:1px solid rgba(0,212,255,0.25);
+      border-radius:10px;padding:8px 14px;text-align:center;backdrop-filter:blur(8px);min-width:80px;}
+    .nm-hud-val{font-size:1.1rem;font-weight:700;color:#00D4FF;font-family:monospace;}
+    .nm-hud-lbl{font-size:0.55rem;color:rgba(255,255,255,0.4);text-transform:uppercase;letter-spacing:0.1em;}
+    .nm-center-btn{position:absolute;bottom:100px;right:10px;z-index:400;
+      width:40px;height:40px;border-radius:50%;background:rgba(4,12,26,0.88);
+      border:1px solid rgba(0,212,255,0.3);color:#00D4FF;font-size:1rem;
+      cursor:pointer;display:flex;align-items:center;justify-content:center;}
+  `;
+
+  return(
+    <div className="nm-wrap">
+      <style>{NAV_S}</style>
+
+      {/* MAP */}
+      <div className="nm-map" ref={mapRef}/>
+
+      {/* CONTROL PANEL */}
+      <div className="nm-panel">
+        <div className="nm-panel-header" onClick={()=>setPanelOpen(o=>!o)}>
+          <span style={{fontSize:'0.78rem',fontWeight:700,color:'#00D4FF',letterSpacing:'0.08em'}}>
+            🧭 NAV MODE
+          </span>
+          <div style={{display:'flex',gap:6,alignItems:'center'}}>
+            {navRoute&&<span style={{background:'rgba(0,255,136,0.15)',color:'#00FF88',border:'1px solid rgba(0,255,136,0.3)',borderRadius:4,padding:'1px 6px',fontSize:'0.6rem',fontWeight:700}}>ROUTE LOADED</span>}
+            {gpsOn&&<span style={{background:'rgba(0,212,255,0.15)',color:'#00D4FF',border:'1px solid rgba(0,212,255,0.3)',borderRadius:4,padding:'1px 6px',fontSize:'0.6rem',fontWeight:700}}>GPS</span>}
+            {aisOn&&<span style={{background:'rgba(255,179,0,0.15)',color:'#FFB300',border:'1px solid rgba(255,179,0,0.3)',borderRadius:4,padding:'1px 6px',fontSize:'0.6rem',fontWeight:700}}>AIS</span>}
+            <span style={{color:'rgba(255,255,255,0.4)',fontSize:'0.9rem'}}>{panelOpen?'▲':'▼'}</span>
+          </div>
+        </div>
+
+        {panelOpen&&<>
+          <div className="nm-tabs">
+            {[['route','ROUTE'],['gps','GPS'],['vector','VECTOR'],['ais','AIS']].map(([k,l])=>(
+              <div key={k} className={`nm-tab ${activeTab===k?'active':''}`} onClick={()=>setActiveTab(k)}>{l}</div>
+            ))}
+          </div>
+
+          <div className="nm-body">
+            {/* ROUTE TAB */}
+            {activeTab==='route'&&<>
+              {navRoute&&(
+                <div style={{background:'rgba(0,255,136,0.06)',border:'1px solid rgba(0,255,136,0.2)',borderRadius:8,padding:'8px',marginBottom:10}}>
+                  <div style={{fontSize:'0.7rem',fontWeight:700,color:'#00FF88',marginBottom:2}}>✅ {navRoute.name}</div>
+                  <div style={{fontSize:'0.65rem',color:'rgba(255,255,255,0.5)'}}>{navRoute.waypoints.length} waypoints</div>
+                  <button className="nm-btn" style={{background:'rgba(255,60,60,0.15)',color:'#FF6B6B',marginTop:6,width:'100%'}}
+                    onClick={()=>setNavRoute(null)}>✕ Clear Route</button>
+                </div>
+              )}
+              {/* Search DB */}
+              <div style={{position:'relative',marginBottom:8}}>
+                <input value={routeSearch} onChange={e=>setRouteSearch(e.target.value)}
+                  placeholder="Search route database…"
+                  style={{width:'100%',padding:'7px 10px',background:'rgba(0,212,255,0.06)',
+                    border:'1px solid rgba(0,212,255,0.2)',borderRadius:8,color:'white',
+                    fontSize:'0.73rem',boxSizing:'border-box'}}/>
+                {routeSuggs.length>0&&(
+                  <div style={{position:'absolute',top:'100%',left:0,right:0,zIndex:600,
+                    background:'rgba(4,12,26,0.97)',border:'1px solid rgba(0,212,255,0.2)',
+                    borderRadius:8,marginTop:2,maxHeight:180,overflowY:'auto'}}>
+                    {routeSuggs.map((r,i)=>{
+                      const name=r.fileName||r['File Name']||r['Route Name']||`Route ${i+1}`;
+                      return<div key={i} className="nm-route-item" onClick={()=>loadRouteFromDB(r)}>
+                        🗺 {name}
+                      </div>;
+                    })}
+                  </div>
+                )}
+              </div>
+              {/* Upload file */}
+              <label style={{display:'flex',alignItems:'center',gap:8,padding:'8px 10px',
+                background:'rgba(0,212,255,0.06)',border:'1px dashed rgba(0,212,255,0.25)',
+                borderRadius:8,cursor:'pointer',fontSize:'0.72rem',color:'rgba(255,255,255,0.6)'}}>
+                📁 Open route file (RTZ / CSV / GPX)
+                <input type="file" accept=".rtz,.xml,.csv,.gpx,.txt" style={{display:'none'}}
+                  onChange={e=>e.target.files[0]&&loadRouteFromFile(e.target.files[0])}/>
+              </label>
+            </>}
+
+            {/* GPS TAB */}
+            {activeTab==='gps'&&<>
+              <div className="nm-toggle">
+                <span className="nm-toggle-label">GPS Tracking</span>
+                <label className="nm-sw"><input type="checkbox" checked={gpsOn} onChange={e=>setGpsOn(e.target.checked)}/><div className="nm-sw-slider"/></label>
+              </div>
+              <div className="nm-toggle">
+                <span className="nm-toggle-label">Auto-Center Map</span>
+                <label className="nm-sw"><input type="checkbox" checked={autoCenter} onChange={e=>setAutoCenter(e.target.checked)}/><div className="nm-sw-slider"/></label>
+              </div>
+              {ownShip&&(
+                <div className="nm-data">
+                  <div className="nm-data-row"><span className="nm-data-label">Latitude</span><span className="nm-data-val">{ownShip.lat.toFixed(5)}°</span></div>
+                  <div className="nm-data-row"><span className="nm-data-label">Longitude</span><span className="nm-data-val">{ownShip.lon.toFixed(5)}°</span></div>
+                  <div className="nm-data-row"><span className="nm-data-label">COG</span><span className="nm-data-val">{ownShip.cog.toFixed(1)}°</span></div>
+                  <div className="nm-data-row"><span className="nm-data-label">SOG</span><span className="nm-data-val">{ownShip.sog.toFixed(1)} kt</span></div>
+                </div>
+              )}
+              {!gpsOn&&<div style={{textAlign:'center',padding:'16px 0',color:'rgba(255,255,255,0.3)',fontSize:'0.73rem'}}>Enable GPS to track vessel position</div>}
+            </>}
+
+            {/* VECTOR TAB */}
+            {activeTab==='vector'&&<>
+              <div style={{fontSize:'0.7rem',color:'rgba(255,255,255,0.5)',marginBottom:8}}>Prediction time from vessel position:</div>
+              <div style={{display:'flex',gap:5,marginBottom:12}}>
+                {[3,6,12,30].map(t=>(
+                  <button key={t} className={`nm-vec-btn ${vectorTime===t?'active':''}`} onClick={()=>setVectorTime(t)}>{t}m</button>
+                ))}
+              </div>
+              {ownShip&&ownShip.sog>0.1?(
+                <div className="nm-data">
+                  <div style={{fontSize:'0.65rem',color:'#FFB300',fontWeight:700,marginBottom:6}}>⚡ Predicted Position in {vectorTime} min</div>
+                  {(()=>{const p=predictPos(ownShip.lat,ownShip.lon,ownShip.cog,ownShip.sog,vectorTime);return<>
+                    <div className="nm-data-row"><span className="nm-data-label">Lat</span><span className="nm-data-val" style={{color:'#FFB300'}}>{p.lat.toFixed(5)}°</span></div>
+                    <div className="nm-data-row"><span className="nm-data-label">Lon</span><span className="nm-data-val" style={{color:'#FFB300'}}>{p.lon.toFixed(5)}°</span></div>
+                    <div className="nm-data-row"><span className="nm-data-label">Distance</span><span className="nm-data-val" style={{color:'#FFB300'}}>{(ownShip.sog*(vectorTime/60)).toFixed(2)} NM</span></div>
+                  </>})()}
+                </div>
+              ):<div style={{textAlign:'center',padding:'16px 0',color:'rgba(255,255,255,0.3)',fontSize:'0.73rem'}}>Enable GPS and start moving to see vector</div>}
+            </>}
+
+            {/* AIS TAB */}
+            {activeTab==='ais'&&<>
+              <div className="nm-toggle">
+                <span className="nm-toggle-label">AIS Overlay</span>
+                <label className="nm-sw"><input type="checkbox" checked={aisOn} onChange={e=>setAisOn(e.target.checked)}/><div className="nm-sw-slider"/></label>
+              </div>
+              {aisOn&&<>
+                <div style={{fontSize:'0.67rem',color:'rgba(255,255,255,0.4)',margin:'8px 0 4px'}}>
+                  {Object.keys(aisTargets).length} vessels in range
+                </div>
+                <div style={{maxHeight:200,overflowY:'auto'}}>
+                  {Object.values(aisTargets).slice(0,15).map(t=>{
+                    const {cpa,tcpa}=calcCPATCPA(ownShip,{lat:t.lat,lon:t.lon,cog:t.cog||0,sog:t.sog||0});
+                    return<div key={t.mmsi} style={{padding:'7px 8px',borderRadius:7,marginBottom:4,
+                      background:'rgba(255,179,0,0.06)',border:'1px solid rgba(255,179,0,0.12)',
+                      fontSize:'0.7rem',cursor:'pointer'}}
+                      onClick={()=>{if(leafRef.current&&t.lat)leafRef.current.setView([t.lat,t.lon],14);}}>
+                      <div style={{fontWeight:700,color:'#FFB300'}}>{t.name||t.mmsi}</div>
+                      <div style={{color:'rgba(255,255,255,0.5)',fontSize:'0.63rem'}}>
+                        SOG: {(t.sog||0).toFixed(1)}kt · COG: {(t.cog||0).toFixed(0)}° · CPA: {cpa}
+                      </div>
+                    </div>;
+                  })}
+                </div>
+              </>}
+              {!aisOn&&<div style={{textAlign:'center',padding:'12px 0',color:'rgba(255,255,255,0.3)',fontSize:'0.72rem'}}>
+                Enable AIS to see nearby vessels<br/>
+                <span style={{fontSize:'0.63rem',opacity:0.6}}>Powered by aisstream.io</span>
+              </div>}
+            </>}
+          </div>
+        </>}
+      </div>
+
+      {/* HUD — bottom center */}
+      {ownShip&&(
+        <div className="nm-hud">
+          <div className="nm-hud-card">
+            <div className="nm-hud-val">{ownShip.sog.toFixed(1)}</div>
+            <div className="nm-hud-lbl">SOG (kt)</div>
+          </div>
+          <div className="nm-hud-card">
+            <div className="nm-hud-val">{ownShip.cog.toFixed(0)}°</div>
+            <div className="nm-hud-lbl">COG</div>
+          </div>
+          {navRoute&&(()=>{
+            const wps=navRoute.waypoints;
+            const next=wps.find(w=>haverNM(ownShip.lat,ownShip.lon,w.lat,w.lon)>0.05);
+            const dist=next?haverNM(ownShip.lat,ownShip.lon,next.lat,next.lon):null;
+            return dist!=null?<div className="nm-hud-card">
+              <div className="nm-hud-val">{dist.toFixed(1)}</div>
+              <div className="nm-hud-lbl">NM to WP</div>
+            </div>:null;
+          })()}
+          <div className="nm-hud-card">
+            <div className="nm-hud-val" style={{color:'#FFB300'}}>{vectorTime}m</div>
+            <div className="nm-hud-lbl">VECTOR</div>
+          </div>
+        </div>
+      )}
+
+      {/* Auto-center button */}
+      <button className="nm-center-btn" onClick={()=>{
+        setAutoCenter(true);
+        if(ownShip&&leafRef.current) leafRef.current.setView([ownShip.lat,ownShip.lon]);
+        else if(navRoute&&leafRef.current){
+          const pts=navRoute.waypoints.map(w=>[w.lat,w.lon]);
+          leafRef.current.fitBounds(pts,{padding:[40,40]});
+        }
+      }} title="Center map">⌖</button>
+    </div>
+  );
+}
+
 // ─── MARITIME LIBRARY PAGE ────────────────────────────────────────────────────
 function MaritimeLibraryPage({setTab}){
   const BOOKS=[
@@ -3457,6 +4052,7 @@ export default function App(){
     {k:'routes',  i:'🛤', l:'Routes'},
     {k:'charts',  i:'📊', l:'ECDIS Charts', cls:'gold'},
     {k:'planner', i:'🗺', l:'Route Planner', cls:'green'},
+    {k:'navmode', i:'🧭', l:'Nav Mode', cls:'green'},
     {k:'ports',   i:'⚓', l:'Ports Database'},
     {k:'library', i:'📖', l:'Maritime Library'},
     ...(isAdmin?[{k:'admin',i:'🛡',l:'Admin'}]:[]),
@@ -3466,7 +4062,7 @@ export default function App(){
   const switchTab=k=>{setTab(k);setMenuOpen(false);};
 
   // Planner needs full height
-  const isPlannerFull=tab==='planner';
+  const isPlannerFull=tab==='planner'||tab==='navmode';
 
   return(
     <>
@@ -3553,6 +4149,7 @@ export default function App(){
           {!loading&&tab==='planner' &&<RoutePlannerPage notify={notify} sheetRoutes={[...routes,...sheetRoutes]} portsDb={portsDb}/>}
           {!loading&&tab==='ports'   &&<PortSearchPage portsDb={portsDb} sheetLoading={sheetLoading} refreshSheets={fetchSheets}/>}
           {!loading&&tab==='library' &&<MaritimeLibraryPage setTab={switchTab}/>}
+          {!loading&&tab==='navmode' &&<NavModePage notify={notify} sheetRoutes={[...routes,...sheetRoutes]} portsDb={portsDb}/>}
           {!loading&&tab==='login'   &&<LoginPage notify={notify} onLogin={u=>{setUser(u);setTab('home');}}/>}
           {!loading&&tab==='admin'   &&(isAdmin
             ?<AdminPage notify={notify} routes={routes} setRoutes={setRoutes} charts={charts} setCharts={setCharts} sheetRoutes={sheetRoutes} sheetCharts={sheetCharts} refreshSheets={fetchSheets} sheetLoading={sheetLoading}/>
@@ -3568,4 +4165,4 @@ export default function App(){
       </div>
     </>
   );
-}
+                                        }
