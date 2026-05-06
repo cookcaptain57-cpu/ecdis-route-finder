@@ -1,3 +1,4 @@
+
 /* eslint-disable */
 import { useState, useEffect, useRef, useMemo } from "react";
 import { auth, db } from "./firebase";
@@ -9,11 +10,11 @@ import {
   collection, getDocs, addDoc, deleteDoc, doc, setDoc, serverTimestamp, getDoc, query, orderBy
 } from "firebase/firestore";
 
-// â”€â”€â”€ GOOGLE SHEET APIs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── GOOGLE SHEET APIs ─────────────────────────────────
 const API_1 =
   "https://opensheet.elk.sh/1ILzyQODb4Ig2mdq9auZ7aJOfdKBBM01t192VE59WbCE/Sheet1";
 
-// Chart sheet â€” try multiple likely tab names
+// Chart sheet — try multiple likely tab names
 const CHART_SHEET_ID = "1zuZxqUSFtxzg-E8CkTGj01YehhXCZIPodCisCicpxRA";
 const CHART_TABS = ["Sheet1","Charts","ECDIS Charts","Routes","Chart","Data","Sheet2"];
 const fetchChartSheet = () =>
@@ -27,36 +28,36 @@ const fetchChartSheet = () =>
     Promise.reject()
   ).catch(() => []);
 
-// â”€â”€â”€ PORTS SHEET â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── PORTS SHEET ────────────────────────────────────────
 const PORTS_SHEET_ID = "1BFpUuo-nqS3MaUTtANtKT4CFem-X3nZJYGRADZtuIdk";
 
 
-// â”€â”€â”€ ECDIS BRANDS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── ECDIS BRANDS ─────────────────────────────────────────────────────────────
 const ECDIS_BRANDS = [
-  { id:"furuno",    name:"Furuno",             emoji:"ðŸŸ¦", color:"#0066CC", models:"FMD-3200 / FMD-3300" },
-  { id:"jrc",       name:"JRC",                emoji:"ðŸŸ¥", color:"#CC0000", models:"JAN-7201S / JAN-9201S" },
-  { id:"transas",   name:"Transas / WÃ¤rtsilÃ¤", emoji:"ðŸŸ©", color:"#007A4D", models:"Navi-Sailor 4000/3000" },
-  { id:"sperry",    name:"Sperry Marine",       emoji:"ðŸŸ¨", color:"#D4900A", models:"VisionMaster FT / Pro" },
-  { id:"tokimec",   name:"Tokimec / JMR",       emoji:"ðŸŸª", color:"#6B21A8", models:"JMR-7700 / JMR-9900" },
-  { id:"raytheon",  name:"Raytheon AnschÃ¼tz",   emoji:"â¬›", color:"#374151", models:"ECDIS 1000 / 2000" },
-  { id:"kongsberg", name:"Kongsberg Maritime",  emoji:"ðŸ”µ", color:"#1D4ED8", models:"K-Bridge ECDIS" },
-  { id:"danelec",   name:"Danelec Marine",      emoji:"ðŸ”¶", color:"#EA580C", models:"DM800 ECDIS" },
-  { id:"kelvin",    name:"Kelvin Hughes",        emoji:"ðŸ”·", color:"#0891B2", models:"SharpEye ECDIS" },
-  { id:"northrop",  name:"Northrop Grumman",    emoji:"â­•", color:"#DC2626", models:"Integrated Bridge" },
-  { id:"sam",       name:"SAM Electronics",     emoji:"ðŸŸ«", color:"#92400E", models:"NACOS Platinum" },
-  { id:"wartsila",  name:"WÃ¤rtsilÃ¤ Voyage",     emoji:"ðŸ”º", color:"#059669", models:"Navi-Sailor Series" },
+  { id:"furuno",    name:"Furuno",             emoji:"🟦", color:"#0066CC", models:"FMD-3200 / FMD-3300" },
+  { id:"jrc",       name:"JRC",                emoji:"🟥", color:"#CC0000", models:"JAN-7201S / JAN-9201S" },
+  { id:"transas",   name:"Transas / Wärtsilä", emoji:"🟩", color:"#007A4D", models:"Navi-Sailor 4000/3000" },
+  { id:"sperry",    name:"Sperry Marine",       emoji:"🟨", color:"#D4900A", models:"VisionMaster FT / Pro" },
+  { id:"tokimec",   name:"Tokimec / JMR",       emoji:"🟪", color:"#6B21A8", models:"JMR-7700 / JMR-9900" },
+  { id:"raytheon",  name:"Raytheon Anschütz",   emoji:"⬛", color:"#374151", models:"ECDIS 1000 / 2000" },
+  { id:"kongsberg", name:"Kongsberg Maritime",  emoji:"🔵", color:"#1D4ED8", models:"K-Bridge ECDIS" },
+  { id:"danelec",   name:"Danelec Marine",      emoji:"🔶", color:"#EA580C", models:"DM800 ECDIS" },
+  { id:"kelvin",    name:"Kelvin Hughes",        emoji:"🔷", color:"#0891B2", models:"SharpEye ECDIS" },
+  { id:"northrop",  name:"Northrop Grumman",    emoji:"⭕", color:"#DC2626", models:"Integrated Bridge" },
+  { id:"sam",       name:"SAM Electronics",     emoji:"🟫", color:"#92400E", models:"NACOS Platinum" },
+  { id:"wartsila",  name:"Wärtsilä Voyage",     emoji:"🔺", color:"#059669", models:"Navi-Sailor Series" },
 ];
 
 const ROUTE_TYPES = ["Ocean","Coastal","Deep Sea","Strait","River","Port Approach","Anchorage"];
 
-// â”€â”€â”€ ADMIN CONFIG â€” change this to your real admin email â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── ADMIN CONFIG — change this to your real admin email ──────────────────────
 const ADMIN_EMAIL = 'ecdisroutes@gmail.com';
 
-// â”€â”€â”€ PORTS DATABASE â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-// Seed list â€” critical ports used by buildAutoRoute PORT_EXIT keys
+// ─── PORTS DATABASE ───────────────────────────────────────────────────────────
+// Seed list — critical ports used by buildAutoRoute PORT_EXIT keys
 // Full world list is loaded at runtime from the Google Sheet above
-// â”€â”€â”€ PORTS DATABASE â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-// Minimal seed â€” only critical routing anchor ports used by buildAutoRoute
+// ─── PORTS DATABASE ──────────────────────────────────────────────────────────
+// Minimal seed — only critical routing anchor ports used by buildAutoRoute
 // All 10,000+ ports are fetched live from Google Sheet at startup
 let PORTS_DB = [
   {id:"MUM",name:"Mumbai",        city:"Mumbai",      country:"India",       lat:18.93, lon:72.83},
@@ -102,7 +103,7 @@ let PORTS_DB = [
   {id:"DUR",name:"Durban",        city:"Durban",      country:"South Africa",lat:-29.87,lon:31.04},
 ];
 
-// â”€â”€â”€ NORMALIZE PORT ROW from Google Sheet â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── NORMALIZE PORT ROW from Google Sheet ────────────────────────────────────
 function normalizePortRow(row){
   const get=(...keys)=>{
     for(const k of keys){
@@ -123,7 +124,7 @@ function normalizePortRow(row){
   return {id:code, name, city, country, lat, lon, keywords};
 }
 
-// â”€â”€â”€ MARITIME ZONES â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── MARITIME ZONES ───────────────────────────────────────────────────────────
 const ECA_ZONES = [
   { name:"North Sea ECA",       coords:[[48,-5],[62,-5],[62,13],[48,13]] },
   { name:"Baltic Sea ECA",      coords:[[53,9],[66,9],[66,30],[53,30]] },
@@ -160,7 +161,7 @@ const LAYOVER_ZONES = [
   { name:"Colombo Anchorage",      coords:[[6.8,79.7],[6.8,80.0],[7.1,80.0],[7.1,79.7]] },
 ];
 
-// â”€â”€â”€ MATH HELPERS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── MATH HELPERS ─────────────────────────────────────────────────────────────
 const DEG = Math.PI / 180;
 function haversine(lat1, lon1, lat2, lon2) {
   const R = 3440.065; // NM
@@ -208,9 +209,9 @@ function totalRouteNM(wps) {
   return wps.reduce((s, w) => s + (w.distance || 0), 0);
 }
 
-// â”€â”€â”€ SEA CORRIDORS â€” extracted from PortToPort.exe IMO TSS SHP data â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── SEA CORRIDORS — extracted from PortToPort.exe IMO TSS SHP data ───────────
 const SEA_WP = {
-  // â”€â”€ Suez Canal & Red Sea
+  // ── Suez Canal & Red Sea
   SUEZ_N:{lat:31.27,lon:32.33,name:"SUEZ N"},
   SUEZ_S:{lat:29.92,lon:32.55,name:"SUEZ S"},
   RED_N:{lat:29.77,lon:32.55,name:"RED N"},
@@ -219,13 +220,13 @@ const SEA_WP = {
   RED_S:{lat:15.0,lon:41.5,name:"RED S"},
   BAB:{lat:12.58,lon:43.38,name:"BAB"},
   ADEN_G:{lat:11.8,lon:45.5,name:"ADEN G"},
-  // â”€â”€ Persian Gulf & Arabian Sea
+  // ── Persian Gulf & Arabian Sea
   HORMUZ:{lat:26.58,lon:56.35,name:"HORMUZ"},
   HORMUZ_E:{lat:23.5,lon:59.0,name:"HORMUZ E"},
   IND_W:{lat:12.0,lon:62.0,name:"IND W"},
   IND_C:{lat:4.0,lon:73.0,name:"IND C"},
   SOCOTRA:{lat:12.0,lon:54.0,name:"SOCOTRA"},
-  // â”€â”€ India Coastal Corridor (avoids land)
+  // ── India Coastal Corridor (avoids land)
   IND_W_COAST:{lat:14.0,lon:73.0,name:"IND W COAST"},
   LAKSHADWEEP:{lat:10.0,lon:71.0,name:"LAKSHADWEEP"},
   IND_SW:{lat:10.0,lon:74.8,name:"IND SW"},
@@ -237,14 +238,14 @@ const SEA_WP = {
   LANKA_SE:{lat:6.0,lon:82.0,name:"LANKA SE"},
   IND_NE:{lat:8.5,lon:84.5,name:"IND NE"},
   IND_E_COAST:{lat:12.0,lon:81.5,name:"IND E COAST"},
-  // â”€â”€ Bay of Bengal & Andaman Sea
+  // ── Bay of Bengal & Andaman Sea
   BAY_SW:{lat:10.0,lon:83.0,name:"BAY SW"},
   BAY_C:{lat:13.5,lon:87.0,name:"BAY C"},
   BAY_N:{lat:18.0,lon:90.0,name:"BAY N"},
   ANDAMAN_W:{lat:11.0,lon:92.0,name:"ANDAMAN W"},
   ANDAMAN:{lat:10.5,lon:94.0,name:"ANDAMAN"},
   ANDAMAN_S:{lat:6.5,lon:95.0,name:"ANDAMAN S"},
-  // â”€â”€ Malacca & Singapore Strait (real IMO TSS data)
+  // ── Malacca & Singapore Strait (real IMO TSS data)
   MALACCA_NW:{lat:6.5,lon:98.8,name:"MALACCA NW"},
   MALACCA_N:{lat:3.09,lon:101.02,name:"MALACCA N"},
   MALACCA_C1:{lat:2.9,lon:100.67,name:"MALACCA C1"},
@@ -253,7 +254,7 @@ const SEA_WP = {
   MALACCA_S2:{lat:1.56,lon:102.39,name:"MALACCA S2"},
   MALACCA_S3:{lat:1.15,lon:103.41,name:"MALACCA S3"},
   MALACCA_S:{lat:1.18,lon:103.82,name:"MALACCA S"},
-  // â”€â”€ South China Sea & SE Asia
+  // ── South China Sea & SE Asia
   S_CHINA_N:{lat:14.0,lon:112.0,name:"S CHINA N"},
   S_CHINA_S:{lat:3.0,lon:108.0,name:"S CHINA S"},
   PHILIP:{lat:10.0,lon:122.0,name:"PHILIP"},
@@ -264,30 +265,30 @@ const SEA_WP = {
   TORRES:{lat:-10.5,lon:142.5,name:"TORRES"},
   AUS_N:{lat:-12.0,lon:127.0,name:"AUS N"},
   AUS_W:{lat:-25.0,lon:108.0,name:"AUS W"},
-  // â”€â”€ Far East
+  // ── Far East
   EAST_CHINA:{lat:27.0,lon:124.0,name:"EAST CHINA"},
   EAST_CHINA_N:{lat:37.57,lon:122.61,name:"EAST CHINA N"},
   EAST_CHINA2:{lat:31.0,lon:124.0,name:"EAST CHINA2"},
   KOREA_STR:{lat:34.5,lon:129.0,name:"KOREA STR"},
   JAPAN_SEA:{lat:37.0,lon:132.0,name:"JAPAN SEA"},
   TSUGARU:{lat:41.5,lon:140.8,name:"TSUGARU"},
-  // â”€â”€ Mediterranean
+  // ── Mediterranean
   GIBRALTAR:{lat:35.98,lon:-5.5,name:"GIBRALTAR"},
   MED_W:{lat:37.5,lon:5.0,name:"MED W"},
   MED_C:{lat:37.5,lon:15.0,name:"MED C"},
   MED_E:{lat:34.5,lon:24.0,name:"MED E"},
   BLACK_W:{lat:43.0,lon:29.0,name:"BLACK W"},
-  // â”€â”€ N.Europe
+  // ── N.Europe
   BASC:{lat:47.0,lon:-5.0,name:"BASC"},
   DOVER:{lat:51.05,lon:1.5,name:"DOVER"},
   NORTH_SEA:{lat:56.0,lon:3.0,name:"NORTH SEA"},
   BALTIC_E:{lat:59.0,lon:21.5,name:"BALTIC E"},
-  // â”€â”€ Atlantic Ocean
+  // ── Atlantic Ocean
   ATLANTIC_N:{lat:45.0,lon:-30.0,name:"ATLANTIC N"},
   ATLANTIC_C:{lat:20.0,lon:-35.0,name:"ATLANTIC C"},
   ATLANTIC_S:{lat:-15.0,lon:-20.0,name:"ATLANTIC S"},
   ATLANTIC_SW:{lat:-40.0,lon:-40.0,name:"ATLANTIC SW"},
-  // â”€â”€ Australia & Pacific
+  // ── Australia & Pacific
   AUS_SE:{lat:-38.5,lon:148.2,name:"AUS SE"},
   CORAL:{lat:-18.0,lon:152.0,name:"CORAL"},
   TASMAN:{lat:-38.0,lon:157.0,name:"TASMAN"},
@@ -298,60 +299,60 @@ const SEA_WP = {
   PAC_C:{lat:5.0,lon:-140.0,name:"PAC C"},
   PAC_SW:{lat:-20.0,lon:170.0,name:"PAC SW"},
   PAC_SE:{lat:-20.0,lon:-90.0,name:"PAC SE"},
-  // â”€â”€ Caribbean & Gulf of Mexico (real TSS)
+  // ── Caribbean & Gulf of Mexico (real TSS)
   CARIB:{lat:15.0,lon:-75.0,name:"CARIB"},
   GULF_MEX:{lat:28.88,lon:-90.02,name:"GULF MEX"},
   PANAMA_CH:{lat:7.0,lon:-81.83,name:"PANAMA CH"},
   PANAMA_A:{lat:9.38,lon:-79.9,name:"PANAMA A"},
   PANAMA_P:{lat:8.9,lon:-79.5,name:"PANAMA P"},
-  // â”€â”€ US East Coast (real TSS)
+  // ── US East Coast (real TSS)
   US_NE:{lat:40.45,lon:-73.68,name:"US NE"},
   US_BOSTON:{lat:42.36,lon:-70.92,name:"US BOSTON"},
   US_SE:{lat:36.93,lon:-75.92,name:"US SE"},
-  // â”€â”€ US West Coast (real TSS)
+  // ── US West Coast (real TSS)
   US_PNW:{lat:48.19,lon:-122.78,name:"US PNW"},
   US_CA:{lat:33.74,lon:-118.27,name:"US CA"},
-  // â”€â”€ S.America (real TSS)
+  // ── S.America (real TSS)
   CALLAO:{lat:-12.03,lon:-77.23,name:"CALLAO"},
   ANTOF:{lat:-23.63,lon:-70.49,name:"ANTOF"},
   VALP:{lat:-32.74,lon:-71.53,name:"VALP"},
   ILO:{lat:-18.47,lon:-70.42,name:"ILO"},
   CAPE_HORN:{lat:-56.0,lon:-67.5,name:"CAPE HORN"},
-  // â”€â”€ Africa
+  // ── Africa
   CANARY:{lat:28.04,lon:-15.07,name:"CANARY"},
   AFR_W:{lat:5.0,lon:-5.0,name:"AFR W"},
   AFR_E:{lat:-10.0,lon:43.0,name:"AFR E"},
   CAPE_GH:{lat:-34.5,lon:18.0,name:"CAPE GH"},
   IND_SW2:{lat:-25.0,lon:40.0,name:"IND SW2"},
-  // â”€â”€ Indian Ocean
+  // ── Indian Ocean
   IND_S:{lat:-30.0,lon:65.0,name:"IND S"},
   IND_OCEAN_SE:{lat:-15.0,lon:80.0,name:"IND OCEAN SE"},
 };
 
-// â”€â”€â”€ PORT EXIT CORRIDORS â€” tells the router how to leave each port safely â”€â”€â”€â”€â”€
+// ─── PORT EXIT CORRIDORS — tells the router how to leave each port safely ─────
 // Each entry: array of SEA_WP keys to insert right after departure
 const PORT_EXIT = {
-  // India West Coast â€” must go SW then around southern tip before heading east
+  // India West Coast — must go SW then around southern tip before heading east
   MUM:  ['IND_W_COAST','IND_SW','IND_TIP_W','IND_TIP','PALK_W'],
   KAN:  ['LAKSHADWEEP','IND_SW','IND_TIP_W','IND_TIP','PALK_W'],
   KOC:  ['IND_SW','IND_TIP_W','IND_TIP','PALK_W'],
   MOR:  ['IND_W_COAST','IND_SW','IND_TIP_W','IND_TIP','PALK_W'],
   NEW:  ['IND_W_COAST','IND_SW','IND_TIP_W','IND_TIP','PALK_W'],
-  // India East Coast â€” exit east/southeast, no need to go around tip
+  // India East Coast — exit east/southeast, no need to go around tip
   CHE:  ['IND_E_COAST'],
   VIS:  ['IND_E_COAST'],
   PAR:  ['BAY_SW'],
   HAL:  ['BAY_N','BAY_C'],
   ENN:  ['IND_E_COAST'],
-  // Sri Lanka â€” go south of island
+  // Sri Lanka — go south of island
   COL:  ['PALK_W','LANKA_SW','LANKA_S'],
   TRI:  ['LANKA_SE','LANKA_S'],
   HAM2: ['LANKA_S'],
-  // Pakistan â€” through Arabian Sea
+  // Pakistan — through Arabian Sea
   KAR:  ['IND_W'],
   QPQ:  ['IND_W'],
   GWD:  ['HORMUZ_E','IND_W'],
-  // Gulf ports â€” must exit through Hormuz
+  // Gulf ports — must exit through Hormuz
   DXB:  ['HORMUZ'],
   AUH:  ['HORMUZ'],
   FUJ:  [],  // Fujairah is already outside Hormuz
@@ -378,7 +379,7 @@ const PORT_EXIT = {
   CTG:  ['BAY_N'],
   MGL:  ['BAY_N'],
   RGN:  ['BAY_C','ANDAMAN_W'],
-  // China / Far East â€” exit through SCS
+  // China / Far East — exit through SCS
   SHA:  ['EAST_CHINA'],
   HKG:  ['S_CHINA_N'],
   SZX:  ['S_CHINA_N'],
@@ -389,7 +390,7 @@ const PORT_EXIT = {
   DAL:  ['EAST_CHINA'],
 };
 
-// â”€â”€â”€ ROUTE LOOKUP TABLE â€” exact waypoints extracted from PortToPort TSS data â”€â”€
+// ─── ROUTE LOOKUP TABLE — exact waypoints extracted from PortToPort TSS data ──
 // Key = "FROM-TO", value = [[lat,lon],...] deep-water waypoints
 const ROUTE_TABLE = {
   "MUM-SIN":[[18.93,72.83],[14.0,73.0],[10.0,74.8],[7.5,76.5],[6.0,77.5],[7.5,78.8],[5.8,79.8],[5.4,80.6],[6.0,82.0],[8.5,84.5],[6.5,95.0],[5.9,98.5],[5.0,99.2],[3.09,101.02],[2.33,101.35],[1.83,101.8],[1.56,102.39],[1.15,103.41],[1.29,103.85]],
@@ -461,13 +462,13 @@ const ROUTE_TABLE = {
   "PSD-SIN":[[31.26,32.31],[29.77,32.55],[15.0,41.5],[12.58,43.38],[12.0,62.0],[8.5,75.0],[8.5,84.5],[6.5,95.0],[5.0,99.2],[3.09,101.02],[1.29,103.85]],
 };
 
-// â”€â”€â”€ AUTO ROUTE â€” sea-lane routing with coastal avoidance â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── AUTO ROUTE — sea-lane routing with coastal avoidance ─────────────────────
 function buildAutoRoute(fromPort, toPort) {
   const from = PORTS_DB.find(p => p.id === fromPort);
   const to   = PORTS_DB.find(p => p.id === toPort);
   if (!from || !to) return [];
 
-  // â”€â”€ 1. Check direct lookup table first â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── 1. Check direct lookup table first ──────────────────────────────────────
   const key  = `${fromPort}-${toPort}`;
   const keyR = `${toPort}-${fromPort}`;
   if (ROUTE_TABLE[key]) {
@@ -488,7 +489,7 @@ function buildAutoRoute(fromPort, toPort) {
   const wps = [];
   const add = (...keys) => keys.forEach(k => { if(SEA_WP[k]) wps.push({...SEA_WP[k]}); });
 
-  // â”€â”€ Helper region tests â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Helper region tests ────────────────────────────────────────────────────
   const isWestIndia  = p => p.lon>=69 && p.lon<77  && p.lat>=8  && p.lat<24;
   const isEastIndia  = p => p.lon>=77 && p.lon<88  && p.lat>=8  && p.lat<22;
   const isBayBengal  = p => p.lon>=79 && p.lon<99  && p.lat>=5  && p.lat<24;
@@ -516,11 +517,11 @@ function buildAutoRoute(fromPort, toPort) {
   const isAustralia  = p => p.lon>=113&& p.lon<155 && p.lat>=-45&& p.lat<-10;
   const isPacific    = p => p.lon>155 || (p.lon<-130&& p.lat<-10);
 
-  // â”€â”€ Apply port departure corridor â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Apply port departure corridor ──────────────────────────────────────────
   const fromExit = PORT_EXIT[from.id] || [];
   fromExit.forEach(k => { if(SEA_WP[k]) wps.push({...SEA_WP[k]}); });
 
-  // â”€â”€ After exit, determine the ocean-crossing waypoints â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── After exit, determine the ocean-crossing waypoints ───────────────────
   // Key concept: once we know the "cleared" position (after exit corridor),
   // determine if we need Suez, Malacca, Cape etc.
 
@@ -535,18 +536,18 @@ function buildAutoRoute(fromPort, toPort) {
   // Did we already go around India tip in the exit corridor?
   const alreadyRoundedTip = fromExit.includes('IND_TIP') || fromExit.includes('IND_TIP_W');
 
-  // â”€â”€ India subcontinent bypass â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  // Westâ†’East: need to go around southern tip of India
+  // ── India subcontinent bypass ──────────────────────────────────────────────
+  // West→East: need to go around southern tip of India
   if(fromWestIndia && toEastOfIndia && !alreadyRoundedTip) {
     add('PALK_W','LANKA_SW','LANKA_S','LANKA_SE');
   }
-  // Eastâ†’West: around the southern tip going west
+  // East→West: around the southern tip going west
   if(fromEastOfIndia && toWestOfIndia && !fromExit.includes('IND_TIP')) {
     // Insert tip waypoints before any west-India destination
     add('LANKA_S','IND_TIP','IND_TIP_W');
   }
 
-  // â”€â”€ Connecting to Malacca â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Connecting to Malacca ──────────────────────────────────────────────────
   const needsMalacca = (isIndianOcn(from)||isWestIndia(from)||isBayBengal(from)||isSriLanka(from)||isPersGulf(from)||isRedSea(from)||isEAfrica(from)||isMed(from)||isEurope(from)) &&
     (isSeAsia(to)||isFarEast(to)||isJapanKorea(to));
   const needsMalaccaRev = (isSeAsia(from)||isFarEast(from)||isJapanKorea(from)) &&
@@ -554,12 +555,12 @@ function buildAutoRoute(fromPort, toPort) {
 
   if(needsMalacca && !fromExit.some(k=>['MALACCA_N','MALACCA_C1','MALACCA_C','MALACCA_S1','MALACCA_S'].includes(k))) {
     if(!isBayBengal(from)&&!isEastIndia(from)) {
-      // Coming from west/Indian Ocean â€” MUST go around Sri Lanka before Andaman
+      // Coming from west/Indian Ocean — MUST go around Sri Lanka before Andaman
       // IND_TIP already added by PORT_EXIT for west India ports
       // Add Sri Lanka bypass: go south of Sri Lanka then northeast
       add('PALK_W','LANKA_SW','LANKA_S','LANKA_SE','IND_NE','ANDAMAN_W','ANDAMAN_S','MALACCA_NW','MALACCA_N','MALACCA_C1','MALACCA_C','MALACCA_S1','MALACCA_S2','MALACCA_S3','MALACCA_S');
     } else {
-      // Bay of Bengal / East India â€” already east of Sri Lanka
+      // Bay of Bengal / East India — already east of Sri Lanka
       add('ANDAMAN_W','ANDAMAN_S','MALACCA_NW','MALACCA_N','MALACCA_C1','MALACCA_C','MALACCA_S1','MALACCA_S2','MALACCA_S3','MALACCA_S');
     }
   }
@@ -571,7 +572,7 @@ function buildAutoRoute(fromPort, toPort) {
     }
   }
 
-  // â”€â”€ Suez Canal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Suez Canal ────────────────────────────────────────────────────────────
   const needsSuez = (isMed(from)||isEurope(from)||isBaltic(from)||isUKNorth(from)||isBlackSea(from)) &&
     (isIndianOcn(to)||isPersGulf(to)||isEAfrica(to)||isBayBengal(to)||isSeAsia(to)||isFarEast(to)||isWestIndia(to)||isSriLanka(to));
   const needsSuezRev = (isMed(to)||isEurope(to)||isBaltic(to)||isUKNorth(to)||isBlackSea(to)) &&
@@ -603,7 +604,7 @@ function buildAutoRoute(fromPort, toPort) {
     if(isEurope(to)&&!isMed(to)&&!isUKNorth(to)&&!isBaltic(to)) add('GIBRALTAR','BASC');
   }
 
-  // â”€â”€ Cape of Good Hope â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Cape of Good Hope ─────────────────────────────────────────────────────
   const needsCape = !needsSuez && !needsSuezRev && (
     ((isSAtl(from)||isWAfrica(from)||isSAmer(from))&&(isIndianOcn(to)||isEAfrica(to)||isSeAsia(to)||isFarEast(to)||isAustralia(to)))||
     ((isSAtl(to)||isWAfrica(to)||isSAmer(to))&&(isIndianOcn(from)||isEAfrica(from)||isSeAsia(from)||isFarEast(from)||isAustralia(from)))
@@ -616,7 +617,7 @@ function buildAutoRoute(fromPort, toPort) {
     }
   }
 
-  // â”€â”€ Panama Canal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Panama Canal ──────────────────────────────────────────────────────────
   const needsPanama = !needsSuez && !needsSuezRev && (
     (isWestUS(from)&&(isEastUS(to)||isCarib(to)||isSAtl(to)||isEurope(to)||isWAfrica(to)))||
     ((isEastUS(from)||isCarib(from)||isSAtl(from))&&isWestUS(to))
@@ -626,13 +627,13 @@ function buildAutoRoute(fromPort, toPort) {
     else             { add('PANAMA_P','PANAMA_A','CARIB'); }
   }
 
-  // â”€â”€ Pacific crossing â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Pacific crossing ──────────────────────────────────────────────────────
   const needsPacific    = (isFarEast(from)||isJapanKorea(from))&&(isWestUS(to)||isEastUS(to));
   const needsPacificRev = (isFarEast(to)||isJapanKorea(to))&&(isWestUS(from)||isEastUS(from));
   if(needsPacific)    add('PAC_NW','PAC_NE');
   if(needsPacificRev) add('PAC_NE','PAC_NW');
 
-  // â”€â”€ Atlantic crossing â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Atlantic crossing ─────────────────────────────────────────────────────
   const crossAtl = !needsPanama && !needsSuez && !needsSuezRev && !needsCape && (
     (isEurope(from)||(isEastUS(from)||isCarib(from))) && (isEurope(to)||isEastUS(to)||isCarib(to)||isWAfrica(to)||isSAmer(to))
   );
@@ -644,7 +645,7 @@ function buildAutoRoute(fromPort, toPort) {
     else                                                 add('ATLANTIC_C');
   }
 
-  // â”€â”€ Australia routing â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Australia routing ─────────────────────────────────────────────────────
   if(!needsCape&&!needsSuez&&!needsSuezRev){
     if(isAustralia(from)&&(isSeAsia(to)||isFarEast(to))){
       if(from.lon>140)       add('TORRES','ARAFURA','TIMOR','LOMBOK','S_CHINA_S');
@@ -662,7 +663,7 @@ function buildAutoRoute(fromPort, toPort) {
     if(isPacific(from)&&isAustralia(to))   add('PAC_SW','TASMAN','CORAL');
   }
 
-  // â”€â”€ Far East internal routing â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Far East internal routing ─────────────────────────────────────────────
   if(!needsSuez&&!needsSuezRev&&!needsMalacca&&!needsMalaccaRev){
     if((isJapanKorea(from))&&isFarEast(to)&&!isJapanKorea(to)) add('EAST_CHINA');
     if((isJapanKorea(to))&&isFarEast(from)&&!isJapanKorea(from)) add('EAST_CHINA');
@@ -674,7 +675,7 @@ function buildAutoRoute(fromPort, toPort) {
     }
   }
 
-  // â”€â”€ Apply destination approach corridor â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Apply destination approach corridor ───────────────────────────────────
   // For destinations on India west coast coming from east, ensure route goes around tip
   const toExit = PORT_EXIT[to.id] || [];
   const approachFromEast = isSeAsia(from)||isFarEast(from)||isBayBengal(from)||isEastIndia(from);
@@ -686,7 +687,7 @@ function buildAutoRoute(fromPort, toPort) {
     }
   }
 
-  // â”€â”€ Build final point list with great-circle interpolation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Build final point list with great-circle interpolation ────────────────
   const rawPoints = [
     {lat:from.lat, lon:from.lon, name:from.name},
     ...wps,
@@ -720,7 +721,7 @@ function buildAutoRoute(fromPort, toPort) {
   return recalcWaypoints(allWPs);
 }
 
-// â”€â”€â”€ RTZ PARSE / EXPORT â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── RTZ PARSE / EXPORT ───────────────────────────────────────────────────────
 function parseRTZ(xmlText) {
   try {
     const parser = new DOMParser();
@@ -760,7 +761,7 @@ function exportRTZ(routeName, waypoints) {
 }
 
 function exportCSV(waypoints) {
-  const header = 'WP,Name,Latitude,Longitude,Bearing(Â°),Distance(NM),Total(NM)';
+  const header = 'WP,Name,Latitude,Longitude,Bearing(°),Distance(NM),Total(NM)';
   const rows = waypoints.map((wp, i) =>
     `WP${String(i+1).padStart(2,'0')},${wp.name||''},${wp.lat.toFixed(6)},${wp.lon.toFixed(6)},${(wp.bearing||0).toFixed(1)},${(wp.distance||0).toFixed(1)},${(wp.totalNM||0).toFixed(1)}`
   );
@@ -775,26 +776,26 @@ function downloadFile(content, filename, type) {
   URL.revokeObjectURL(url);
 }
 
-// â”€â”€â”€ TIMEZONES â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── TIMEZONES ────────────────────────────────────────────────────────────────
 const TIMEZONES = [
   { label:"UTC / GMT",            offset:0 },
-  { label:"IST â€” India (UTC+5:30)",       offset:5.5 },
-  { label:"GST â€” Gulf / UAE (UTC+4)",     offset:4 },
-  { label:"PKT â€” Pakistan (UTC+5)",       offset:5 },
-  { label:"SGT â€” Singapore (UTC+8)",      offset:8 },
-  { label:"CST â€” China (UTC+8)",          offset:8 },
-  { label:"JST â€” Japan (UTC+9)",          offset:9 },
-  { label:"KST â€” Korea (UTC+9)",          offset:9 },
-  { label:"EAT â€” E.Africa (UTC+3)",       offset:3 },
-  { label:"CET â€” C.Europe (UTC+1)",       offset:1 },
-  { label:"CEST â€” C.Europe Summer(UTC+2)",offset:2 },
-  { label:"BST â€” UK Summer (UTC+1)",      offset:1 },
-  { label:"EST â€” US East (UTC-5)",        offset:-5 },
-  { label:"EDT â€” US East Summer (UTC-4)", offset:-4 },
-  { label:"CST â€” US Central (UTC-6)",     offset:-6 },
-  { label:"PST â€” US West (UTC-8)",        offset:-8 },
-  { label:"WIB â€” W.Indonesia (UTC+7)",    offset:7 },
-  { label:"IRST â€” Iran (UTC+3:30)",       offset:3.5 },
+  { label:"IST — India (UTC+5:30)",       offset:5.5 },
+  { label:"GST — Gulf / UAE (UTC+4)",     offset:4 },
+  { label:"PKT — Pakistan (UTC+5)",       offset:5 },
+  { label:"SGT — Singapore (UTC+8)",      offset:8 },
+  { label:"CST — China (UTC+8)",          offset:8 },
+  { label:"JST — Japan (UTC+9)",          offset:9 },
+  { label:"KST — Korea (UTC+9)",          offset:9 },
+  { label:"EAT — E.Africa (UTC+3)",       offset:3 },
+  { label:"CET — C.Europe (UTC+1)",       offset:1 },
+  { label:"CEST — C.Europe Summer(UTC+2)",offset:2 },
+  { label:"BST — UK Summer (UTC+1)",      offset:1 },
+  { label:"EST — US East (UTC-5)",        offset:-5 },
+  { label:"EDT — US East Summer (UTC-4)", offset:-4 },
+  { label:"CST — US Central (UTC-6)",     offset:-6 },
+  { label:"PST — US West (UTC-8)",        offset:-8 },
+  { label:"WIB — W.Indonesia (UTC+7)",    offset:7 },
+  { label:"IRST — Iran (UTC+3:30)",       offset:3.5 },
 ];
 
 function addHours(date, hours) {
@@ -805,7 +806,7 @@ function formatDateLocal(date, offsetHours) {
   return local.toISOString().replace('T',' ').substring(0,16) + ` (UTC${offsetHours>=0?'+':''}${offsetHours})`;
 }
 
-// â”€â”€â”€ STYLES â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── STYLES ──────────────────────────────────────────────────────────────────
 const S = `
   @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700;900&family=Exo+2:wght@300;400;500;600&display=swap');
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
@@ -1105,10 +1106,10 @@ const S = `
   .leaflet-popup-tip{background:#0B1D35;}
 `;
 
-// â”€â”€â”€ HELPERS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── HELPERS ──────────────────────────────────────────────────────────────────
 function Notif({msg,type,onClose}){
   useEffect(()=>{const t=setTimeout(onClose,4000);return()=>clearTimeout(t);},[]);
-  return<div className={`notif notif-${type}`}>{type==="success"?"âœ…":type==="error"?"âŒ":"â„¹ï¸"} {msg}</div>;
+  return<div className={`notif notif-${type}`}>{type==="success"?"✅":type==="error"?"❌":"ℹ️"} {msg}</div>;
 }
 
 function Footer(){
@@ -1116,12 +1117,12 @@ function Footer(){
     <footer className="footer">
       <div>
         <div className="footer-brand">Owner: <span>Manish Bharti</span></div>
-        <div className="footer-copy">Â© 2024 NavisphereX Marine Â· Maritime Navigation System</div>
+        <div className="footer-copy">© 2024 NavisphereX Marine · Maritime Navigation System</div>
       </div>
       <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
         <span style={{fontSize:"0.74rem",color:"var(--text2)"}}>Follow for more maritime updates:</span>
         <a className="ig-btn" href="https://instagram.com/manish_the_navigator" target="_blank" rel="noreferrer">
-          ðŸ“· @manish_the_navigator
+          📷 @manish_the_navigator
         </a>
       </div>
     </footer>
@@ -1135,7 +1136,7 @@ function smartMatch(file,q){
     .filter(Boolean).map(s=>s.toLowerCase()).some(t=>t.includes(ql));
 }
 
-// â”€â”€â”€ NORMALIZE GOOGLE SHEET ROW â†’ STANDARD FILE OBJECT â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── NORMALIZE GOOGLE SHEET ROW → STANDARD FILE OBJECT ───────────────────────
 function normalizeSheetRow(row, idx, tag){
   const pick=(...keys)=>{
     for(const k of keys){
@@ -1156,7 +1157,7 @@ function normalizeSheetRow(row, idx, tag){
   return{id:`${tag}-${idx}`,fileName,fileUrl,portName,keywords:allKw,type,brand,model,region,source:'sheet'};
 }
 
-// â”€â”€â”€ MAP VIEW â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── MAP VIEW ─────────────────────────────────────────────────────────────────
 function MapView({waypoints,setWaypoints,overlays,playing,setPlaying,speed,onMapClick,mapMode}){
   const containerRef=useRef(null);
   const mapRef=useRef(null);
@@ -1167,9 +1168,9 @@ function MapView({waypoints,setWaypoints,overlays,playing,setPlaying,speed,onMap
   const [ready,setReady]=useState(false);
 
   const MAP_TILES={
-    night:{url:'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',attr:'Â© OpenStreetMap Â© CARTO'},
-    day:  {url:'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',attr:'Â© OpenStreetMap Â© CARTO'},
-    dusk: {url:'https://{s}.basemaps.cartocdn.com/rastertiles/voyager_nolabels/{z}/{x}/{y}{r}.png',attr:'Â© OpenStreetMap Â© CARTO',filter:'sepia(40%) saturate(70%) brightness(70%)'},
+    night:{url:'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',attr:'© OpenStreetMap © CARTO'},
+    day:  {url:'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',attr:'© OpenStreetMap © CARTO'},
+    dusk: {url:'https://{s}.basemaps.cartocdn.com/rastertiles/voyager_nolabels/{z}/{x}/{y}{r}.png',attr:'© OpenStreetMap © CARTO',filter:'sepia(40%) saturate(70%) brightness(70%)'},
   };
 
   // Swap base tile when mapMode changes
@@ -1193,7 +1194,7 @@ function MapView({waypoints,setWaypoints,overlays,playing,setPlaying,speed,onMap
     const L=window.L;
     mapRef.current=L.map(containerRef.current,{center:[15,70],zoom:3,preferCanvas:true,zoomControl:true});
     layersRef.current.baseTile=L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{
-      attribution:'Â© OpenStreetMap Â© CARTO',subdomains:'abcd',maxZoom:19
+      attribution:'© OpenStreetMap © CARTO',subdomains:'abcd',maxZoom:19
     }).addTo(mapRef.current);
     layersRef.current.seamarkTile=L.tileLayer('https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png',{opacity:0.55,maxZoom:18}).addTo(mapRef.current);
     mapRef.current.on('click',e=>{onMapClick&&onMapClick(e.latlng.lat,e.latlng.lng);});
@@ -1239,9 +1240,9 @@ function MapView({waypoints,setWaypoints,overlays,playing,setPlaying,speed,onMap
       });
       const m=L.marker([wp.lat,wp.lon],{icon,draggable:true,zIndexOffset:i===0||i===waypoints.length-1?100:0});
       const popupHtml=`<div style="font-size:12px;min-width:130px;">
-        <b style="color:#00B4D8">WP${String(i+1).padStart(2,'0')}${wp.name?` â€” ${wp.name}`:''}</b><br/>
-        Lat: ${wp.lat.toFixed(5)}Â°<br/>Lon: ${wp.lon.toFixed(5)}Â°
-        ${i>0?`<br/>Course: ${(wp.bearing||0).toFixed(1)}Â°<br/>Leg: ${(wp.distance||0).toFixed(1)} NM`:''}
+        <b style="color:#00B4D8">WP${String(i+1).padStart(2,'0')}${wp.name?` — ${wp.name}`:''}</b><br/>
+        Lat: ${wp.lat.toFixed(5)}°<br/>Lon: ${wp.lon.toFixed(5)}°
+        ${i>0?`<br/>Course: ${(wp.bearing||0).toFixed(1)}°<br/>Leg: ${(wp.distance||0).toFixed(1)} NM`:''}
         ${wp.totalNM?`<br/>Total: ${wp.totalNM.toFixed(1)} NM`:''}
       </div>`;
       m.bindPopup(popupHtml);
@@ -1294,7 +1295,7 @@ function MapView({waypoints,setWaypoints,overlays,playing,setPlaying,speed,onMap
     if(!playing){if(layersRef.current.ship){layersRef.current.ship.remove();layersRef.current.ship=null;}animIdxRef.current=0;return;}
     const L=window.L;const map=mapRef.current;const pts=animPtsRef.current;
     if(pts.length<2)return;
-    const shipIcon=L.divIcon({html:`<div style="font-size:22px;line-height:1;">ðŸš¢</div>`,className:'',iconSize:[24,24],iconAnchor:[12,12]});
+    const shipIcon=L.divIcon({html:`<div style="font-size:22px;line-height:1;">🚢</div>`,className:'',iconSize:[24,24],iconAnchor:[12,12]});
     if(!layersRef.current.ship)layersRef.current.ship=L.marker(pts[0],{icon:shipIcon,zIndexOffset:500}).addTo(map);
     let idx=animIdxRef.current;
     const ms=Math.max(30,1500/Math.max(1,speed));
@@ -1314,7 +1315,7 @@ function MapView({waypoints,setWaypoints,overlays,playing,setPlaying,speed,onMap
     <div className="planner-map">
       <div ref={containerRef} style={{width:'100%',height:'100%',minHeight:400}}/>
       {!ready&&<div style={{position:'absolute',inset:0,display:'flex',alignItems:'center',justifyContent:'center',background:'var(--bg2)',zIndex:10}}>
-        <div className="loading"><div className="spin"/><span>Loading nautical mapâ€¦</span></div>
+        <div className="loading"><div className="spin"/><span>Loading nautical map…</span></div>
       </div>}
       {activeOverlays.length>0&&(
         <div className="map-legend">
@@ -1330,7 +1331,7 @@ function MapView({waypoints,setWaypoints,overlays,playing,setPlaying,speed,onMap
   );
 }
 
-// â”€â”€â”€ ETA CALCULATOR â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── ETA CALCULATOR ───────────────────────────────────────────────────────────
 function ETACalculator({totalNM}){
   const [mode,setMode]=useState('speed');
   const [speed,setSpeed]=useState('');
@@ -1371,7 +1372,7 @@ function ETACalculator({totalNM}){
       return{
         requiredSpeed:`${reqSpeed.toFixed(2)} knots`,
         totalTime:`${Math.floor(diffHrs/24)}d ${Math.floor(diffHrs%24)}h`,
-        feasible:reqSpeed<25?'âœ… Feasible':'âš ï¸ Check vessel max speed',
+        feasible:reqSpeed<25?'✅ Feasible':'⚠️ Check vessel max speed',
         depUTC:depUTC.toISOString().replace('T',' ').substring(0,16)+' UTC',
         etaUTC:arrUTC.toISOString().replace('T',' ').substring(0,16)+' UTC',
       };
@@ -1382,34 +1383,34 @@ function ETACalculator({totalNM}){
   return(
     <div>
       <div className="eta-mode-tabs">
-        {[['speed','Speed â†’ ETA'],['arrival','Arrival â†’ Speed']].map(([k,l])=>(
+        {[['speed','Speed → ETA'],['arrival','Arrival → Speed']].map(([k,l])=>(
           <button key={k} className={`emt ${mode===k?'active':''}`} onClick={()=>setMode(k)}>{l}</button>
         ))}
       </div>
 
       <div className="ff">
-        <label className="fl">ðŸ“ Total Distance (NM)</label>
+        <label className="fl">📏 Total Distance (NM)</label>
         <input className="fi" type="number" placeholder="Auto-filled from route" value={distance} onChange={e=>setDistance(e.target.value)}/>
       </div>
       <div className="ff">
-        <label className="fl">ðŸ• Port Stay / Waiting (hours)</label>
+        <label className="fl">🕐 Port Stay / Waiting (hours)</label>
         <input className="fi" type="number" placeholder="0" value={extraHours} onChange={e=>setExtraHours(e.target.value)}/>
       </div>
 
       {mode==='speed'&&(
         <div className="ff">
-          <label className="fl">âš¡ Ship Speed (knots)</label>
+          <label className="fl">⚡ Ship Speed (knots)</label>
           <input className="fi" type="number" placeholder="e.g. 14.5" value={speed} onChange={e=>setSpeed(e.target.value)}/>
         </div>
       )}
 
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
         <div className="ff">
-          <label className="fl">ðŸ›³ Departure Date/Time</label>
+          <label className="fl">🛳 Departure Date/Time</label>
           <input className="fi" type="datetime-local" value={depDate} onChange={e=>setDepDate(e.target.value)}/>
         </div>
         <div className="ff">
-          <label className="fl">ðŸŒ Departure Timezone</label>
+          <label className="fl">🌍 Departure Timezone</label>
           <select className="fi" value={depTZ} onChange={e=>setDepTZ(e.target.value)}>
             {TIMEZONES.map(tz=><option key={tz.label} value={tz.offset}>{tz.label}</option>)}
           </select>
@@ -1419,11 +1420,11 @@ function ETACalculator({totalNM}){
       {mode==='arrival'&&(
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
           <div className="ff">
-            <label className="fl">ðŸ Required Arrival</label>
+            <label className="fl">🏁 Required Arrival</label>
             <input className="fi" type="datetime-local" value={arrDate} onChange={e=>setArrDate(e.target.value)}/>
           </div>
           <div className="ff">
-            <label className="fl">ðŸŒ Arrival Timezone</label>
+            <label className="fl">🌍 Arrival Timezone</label>
             <select className="fi" value={arrTZ} onChange={e=>setArrTZ(e.target.value)}>
               {TIMEZONES.map(tz=><option key={tz.label} value={tz.offset}>{tz.label}</option>)}
             </select>
@@ -1454,7 +1455,7 @@ function ETACalculator({totalNM}){
   );
 }
 
-// â”€â”€â”€ ROUTE PLANNER PAGE â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── ROUTE PLANNER PAGE ───────────────────────────────────────────────────────
 function RoutePlannerPage({notify,sheetRoutes=[],portsDb=[]}){
   // Use reactive portsDb if loaded, else fall back to module-level PORTS_DB
   const portsList=portsDb.length>88?portsDb:PORTS_DB;
@@ -1516,7 +1517,7 @@ function RoutePlannerPage({notify,sheetRoutes=[],portsDb=[]}){
     if(dbMatches.length>0){
       setDbSuggestions(dbMatches);
       setShowDbSugg(true);
-      notify(`Found ${dbMatches.length} route${dbMatches.length>1?'s':''} in ECDIS database â€” select one or use Auto Route`,'success');
+      notify(`Found ${dbMatches.length} route${dbMatches.length>1?'s':''} in ECDIS database — select one or use Auto Route`,'success');
       return;
     }
 
@@ -1526,7 +1527,7 @@ function RoutePlannerPage({notify,sheetRoutes=[],portsDb=[]}){
     if(wps.length<2){notify('Could not generate route for this port pair','error');return;}
     setWaypoints(wps);
     setRouteName(`${f.name} to ${t.name}`);
-    notify(`Auto route: ${wps.length} waypoints â€” ${totalRouteNM(wps).toFixed(0)} NM`,'success');
+    notify(`Auto route: ${wps.length} waypoints — ${totalRouteNM(wps).toFixed(0)} NM`,'success');
   };
 
   const useDbRoute=(r)=>{
@@ -1535,7 +1536,7 @@ function RoutePlannerPage({notify,sheetRoutes=[],portsDb=[]}){
     const url=r.fileUrl||r['File URL']||r['Download URL']||r['Drive Link']||
               Object.values(r).find(v=>typeof v==='string'&&v.includes('drive.google'));
     if(url){
-      notify('Loading route from ECDIS databaseâ€¦','success');
+      notify('Loading route from ECDIS database…','success');
       let fetchUrl=url;
       const gdMatch=url.match(/\/d\/([a-zA-Z0-9_-]+)/);
       if(gdMatch) fetchUrl=`https://drive.google.com/uc?export=download&id=${gdMatch[1]}`;
@@ -1547,13 +1548,13 @@ function RoutePlannerPage({notify,sheetRoutes=[],portsDb=[]}){
             setWaypoints(result.waypoints);
             const name=r.fileName||r['File Name']||r['Route Name']||'ECDIS Route';
             setRouteName(name);
-            notify(`Loaded: ${name} â€” ${result.waypoints.length} waypoints`,'success');
+            notify(`Loaded: ${name} — ${result.waypoints.length} waypoints`,'success');
           } else {
-            notify('Could not parse RTZ â€” using auto route as fallback','error');
+            notify('Could not parse RTZ — using auto route as fallback','error');
             fallbackAutoRoute();
           }
         }).catch(()=>{
-          notify('Could not fetch RTZ file â€” using auto route as fallback','error');
+          notify('Could not fetch RTZ file — using auto route as fallback','error');
           fallbackAutoRoute();
         });
     } else {
@@ -1568,7 +1569,7 @@ function RoutePlannerPage({notify,sheetRoutes=[],portsDb=[]}){
     const wps=buildAutoRoute(f.id,t.id);
     setWaypoints(wps);
     setRouteName(`${f.name} to ${t.name}`);
-    notify(`Auto route: ${wps.length} waypoints â€” ${totalRouteNM(wps).toFixed(0)} NM`,'success');
+    notify(`Auto route: ${wps.length} waypoints — ${totalRouteNM(wps).toFixed(0)} NM`,'success');
   };
 
   const handleRTZLoad=(e)=>{
@@ -1580,7 +1581,7 @@ function RoutePlannerPage({notify,sheetRoutes=[],portsDb=[]}){
       if(!result||result.waypoints.length===0){notify('Could not parse RTZ file','error');return;}
       setWaypoints(result.waypoints);
       setRouteName(result.name);
-      notify(`Loaded: ${result.name} â€” ${result.waypoints.length} waypoints`,'success');
+      notify(`Loaded: ${result.name} — ${result.waypoints.length} waypoints`,'success');
     };
     reader.readAsText(file);
   };
@@ -1607,20 +1608,20 @@ function RoutePlannerPage({notify,sheetRoutes=[],portsDb=[]}){
     <div style={{display:'flex',flexDirection:'column',flex:1,minHeight:0}}>
       {/* Route Name + Export Bar */}
       <div style={{display:'flex',alignItems:'center',gap:8,padding:'0.7rem 1rem',background:'var(--card)',borderBottom:'1px solid var(--border)',flexWrap:'wrap'}}>
-        <input className="fi" style={{flex:1,minWidth:150,padding:'7px 12px',fontSize:'0.82rem'}} placeholder="Route Nameâ€¦" value={routeName} onChange={e=>setRouteName(e.target.value)}/>
-        {totalNM>0&&<span style={{fontFamily:'Orbitron,monospace',fontSize:'0.78rem',color:'var(--cyan)',whiteSpace:'nowrap'}}>ðŸ“ {totalNM.toFixed(1)} NM</span>}
+        <input className="fi" style={{flex:1,minWidth:150,padding:'7px 12px',fontSize:'0.82rem'}} placeholder="Route Name…" value={routeName} onChange={e=>setRouteName(e.target.value)}/>
+        {totalNM>0&&<span style={{fontFamily:'Orbitron,monospace',fontSize:'0.78rem',color:'var(--cyan)',whiteSpace:'nowrap'}}>📏 {totalNM.toFixed(1)} NM</span>}
         <span style={{fontFamily:'Orbitron,monospace',fontSize:'0.72rem',color:'var(--text2)'}}>{waypoints.length} WPTs</span>
         <button className="btn btn-gold" style={{padding:'7px 12px',fontSize:'0.72rem'}} disabled={waypoints.length<2}
           onClick={()=>downloadFile(exportRTZ(routeName,waypoints),`${routeName.replace(/\s+/g,'-')}.rtz`,'application/xml')}>
-          â¬‡ RTZ
+          ⬇ RTZ
         </button>
         <button className="btn btn-green" style={{padding:'7px 12px',fontSize:'0.72rem'}} disabled={waypoints.length<2}
           onClick={()=>downloadFile(exportCSV(waypoints),`${routeName.replace(/\s+/g,'-')}.csv`,'text/csv')}>
-          â¬‡ CSV
+          ⬇ CSV
         </button>
-        <button className="btn btn-danger" style={{padding:'7px 12px',fontSize:'0.72rem'}} onClick={clearRoute}>ðŸ—‘ Clear</button>
+        <button className="btn btn-danger" style={{padding:'7px 12px',fontSize:'0.72rem'}} onClick={clearRoute}>🗑 Clear</button>
         <div style={{display:'flex',gap:3,marginLeft:'auto',border:'1px solid var(--border)',borderRadius:8,overflow:'hidden'}}>
-          {[['night','ðŸŒ™ Night'],['dusk','ðŸŒ… Dusk'],['day','â˜€ï¸ Day']].map(([m,l])=>(
+          {[['night','🌙 Night'],['dusk','🌅 Dusk'],['day','☀️ Day']].map(([m,l])=>(
             <button key={m} onClick={()=>setMapMode(m)}
               style={{padding:'5px 10px',fontSize:'0.68rem',border:'none',cursor:'pointer',fontFamily:'Exo 2,sans-serif',fontWeight:600,
                 background:mapMode===m?(m==='night'?'#0B1D35':m==='dusk'?'#7C3A1A':'#1565C0'):'transparent',
@@ -1635,7 +1636,7 @@ function RoutePlannerPage({notify,sheetRoutes=[],portsDb=[]}){
         {/* SIDEBAR */}
         <div className="planner-sidebar">
           <div className="p-tabs">
-            {[['auto','ðŸ—º Auto'],['load','ðŸ“‚ Load RTZ'],['eta','â± ETA'],['wpts','ðŸ“‹ WPTs']].map(([k,l])=>(
+            {[['auto','🗺 Auto'],['load','📂 Load RTZ'],['eta','⏱ ETA'],['wpts','📋 WPTs']].map(([k,l])=>(
               <button key={k} className={`p-tab ${panel===k?'active':''}`} onClick={()=>setPanel(k)}>{l}</button>
             ))}
           </div>
@@ -1645,18 +1646,18 @@ function RoutePlannerPage({notify,sheetRoutes=[],portsDb=[]}){
             {panel==='auto'&&(
               <>
                 <div className="p-section">
-                  <span className="p-label">ðŸ›³ Departure Port</span>
+                  <span className="p-label">🛳 Departure Port</span>
                   <div style={{position:'relative'}}>
                     <input className="fi" placeholder="e.g. Mumbai, MUM" value={fromPort}
                       onChange={e=>setFromPort(e.target.value)} onFocus={()=>searchPort(fromPort,setFromSugg)}/>
                     {fromSugg.length>0&&(
                       <div className="ac" style={{position:'absolute',zIndex:200}}>
                         {fromSugg.map(p=><div key={p.id} className="ac-item" onClick={()=>{setFromPort(p.name);setFromSugg([]);}}>
-                          <span>ðŸ“</span>
+                          <span>📍</span>
                           <div>
                             <div style={{fontWeight:600,fontSize:'0.82rem'}}>{p.name}</div>
-                            <div style={{fontSize:'0.67rem',color:'var(--text2)'}}>{p.city} Â· {p.country}</div>
-                            <div style={{fontSize:'0.62rem',color:'var(--text3)'}}>{p.lat.toFixed(4)}Â°N / {p.lon.toFixed(4)}Â°E Â· {p.id}</div>
+                            <div style={{fontSize:'0.67rem',color:'var(--text2)'}}>{p.city} · {p.country}</div>
+                            <div style={{fontSize:'0.62rem',color:'var(--text3)'}}>{p.lat.toFixed(4)}°N / {p.lon.toFixed(4)}°E · {p.id}</div>
                           </div>
                         </div>)}
                       </div>
@@ -1664,18 +1665,18 @@ function RoutePlannerPage({notify,sheetRoutes=[],portsDb=[]}){
                   </div>
                 </div>
                 <div className="p-section">
-                  <span className="p-label">ðŸ Arrival Port</span>
+                  <span className="p-label">🏁 Arrival Port</span>
                   <div style={{position:'relative'}}>
                     <input className="fi" placeholder="e.g. Singapore, SIN" value={toPort}
                       onChange={e=>setToPort(e.target.value)} onFocus={()=>searchPort(toPort,setToSugg)}/>
                     {toSugg.length>0&&(
                       <div className="ac" style={{position:'absolute',zIndex:200}}>
                         {toSugg.map(p=><div key={p.id} className="ac-item" onClick={()=>{setToPort(p.name);setToSugg([]);}}>
-                          <span>ðŸ</span>
+                          <span>🏁</span>
                           <div>
                             <div style={{fontWeight:600,fontSize:'0.82rem'}}>{p.name}</div>
-                            <div style={{fontSize:'0.67rem',color:'var(--text2)'}}>{p.city} Â· {p.country}</div>
-                            <div style={{fontSize:'0.62rem',color:'var(--text3)'}}>{p.lat.toFixed(4)}Â°N / {p.lon.toFixed(4)}Â°E Â· {p.id}</div>
+                            <div style={{fontSize:'0.67rem',color:'var(--text2)'}}>{p.city} · {p.country}</div>
+                            <div style={{fontSize:'0.62rem',color:'var(--text3)'}}>{p.lat.toFixed(4)}°N / {p.lon.toFixed(4)}°E · {p.id}</div>
                           </div>
                         </div>)}
                       </div>
@@ -1683,14 +1684,14 @@ function RoutePlannerPage({notify,sheetRoutes=[],portsDb=[]}){
                   </div>
                 </div>
                 <button className="btn btn-primary" style={{width:'100%',justifyContent:'center',marginBottom:'0.6rem'}} onClick={generateRoute}>
-                  ðŸ—º Generate Sea Route
+                  🗺 Generate Sea Route
                 </button>
 
                 {/* ECDIS Database Suggestions */}
                 {showDbSugg&&dbSuggestions.length>0&&(
                   <div style={{marginBottom:'1rem',background:'rgba(0,180,216,0.06)',border:'1px solid rgba(0,180,216,0.25)',borderRadius:10,padding:'10px'}}>
                     <div style={{fontSize:'0.72rem',color:'var(--cyan)',fontWeight:700,marginBottom:6}}>
-                      âœ… {dbSuggestions.length} route{dbSuggestions.length>1?'s':''} found in your ECDIS database
+                      ✅ {dbSuggestions.length} route{dbSuggestions.length>1?'s':''} found in your ECDIS database
                     </div>
                     {dbSuggestions.map((r,i)=>{
                       // Pick best name from any column in the sheet row
@@ -1707,10 +1708,10 @@ function RoutePlannerPage({notify,sheetRoutes=[],portsDb=[]}){
                         <div key={i} style={{display:'flex',alignItems:'center',gap:8,padding:'8px 10px',borderRadius:8,
                           background:'rgba(0,0,0,0.2)',marginBottom:5,cursor:'pointer',border:'1px solid rgba(255,255,255,0.04)'}}
                           onClick={()=>useDbRoute(r)}>
-                          <span style={{fontSize:'1.1rem'}}>{hasUrl?'ðŸ“¥':'ðŸ—º'}</span>
+                          <span style={{fontSize:'1.1rem'}}>{hasUrl?'📥':'🗺'}</span>
                           <div style={{flex:1,minWidth:0}}>
                             <div style={{fontSize:'0.8rem',fontWeight:600,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',color:'var(--text)'}}>{name}</div>
-                            {port&&<div style={{fontSize:'0.68rem',color:'var(--cyan)',marginTop:1}}>ðŸ“ {port}</div>}
+                            {port&&<div style={{fontSize:'0.68rem',color:'var(--cyan)',marginTop:1}}>📍 {port}</div>}
                             {!hasUrl&&<div style={{fontSize:'0.62rem',color:'var(--text3)'}}>Auto route will be used</div>}
                           </div>
                           <button style={{background:'var(--cyan)',color:'#000',border:'none',borderRadius:6,padding:'4px 10px',fontSize:'0.68rem',fontWeight:700,cursor:'pointer',flexShrink:0}}>
@@ -1721,29 +1722,29 @@ function RoutePlannerPage({notify,sheetRoutes=[],portsDb=[]}){
                     })}
                     <button className="btn btn-secondary" style={{width:'100%',fontSize:'0.7rem',padding:'5px',marginTop:4}}
                       onClick={()=>{setShowDbSugg(false);fallbackAutoRoute();}}>
-                      âš¡ Skip â€” use Auto Route instead
+                      ⚡ Skip — use Auto Route instead
                     </button>
                   </div>
                 )}
 
                 {/* Map Click Mode */}
                 <div className="p-section">
-                  <span className="p-label">ðŸ“Œ Manual Waypoints</span>
+                  <span className="p-label">📌 Manual Waypoints</span>
                   <button className={`btn ${clickAdd?'btn-gold':'btn-secondary'}`} style={{width:'100%',justifyContent:'center'}}
                     onClick={()=>setClickAdd(c=>!c)}>
-                    {clickAdd?'âœ… Click map to add WP (ON)':'Click map to add WP'}
+                    {clickAdd?'✅ Click map to add WP (ON)':'Click map to add WP'}
                   </button>
                 </div>
 
                 {/* Overlays */}
                 <div className="p-section">
-                  <span className="p-label">ðŸ—º Maritime Zone Overlays</span>
+                  <span className="p-label">🗺 Maritime Zone Overlays</span>
                   <div className="overlay-grid">
                     {ovCfg.map(ov=>(
                       <button key={ov.k} className={`ov-btn ${overlays[ov.k]?'active':''}`}
                         style={{color:overlays[ov.k]?ov.color:'var(--text2)',borderColor:overlays[ov.k]?ov.color:'var(--border)'}}
                         onClick={()=>toggleOverlay(ov.k)} title={ov.desc}>
-                        {overlays[ov.k]?'âœ“ ':''}{ov.label}
+                        {overlays[ov.k]?'✓ ':''}{ov.label}
                       </button>
                     ))}
                   </div>
@@ -1751,11 +1752,11 @@ function RoutePlannerPage({notify,sheetRoutes=[],portsDb=[]}){
 
                 {/* Animation */}
                 <div className="p-section">
-                  <span className="p-label">ðŸš¢ Ship Animation</span>
+                  <span className="p-label">🚢 Ship Animation</span>
                   <div style={{display:'flex',gap:6,alignItems:'center',marginBottom:8}}>
                     <button className={`btn ${playing?'btn-danger':'btn-green'}`} style={{flex:1,justifyContent:'center'}}
                       disabled={waypoints.length<2} onClick={()=>setPlaying(p=>!p)}>
-                      {playing?'â¹ Stop':'â–¶ Play'}
+                      {playing?'⏹ Stop':'▶ Play'}
                     </button>
                   </div>
                   <div style={{display:'flex',alignItems:'center',gap:8}}>
@@ -1771,29 +1772,29 @@ function RoutePlannerPage({notify,sheetRoutes=[],portsDb=[]}){
             {panel==='load'&&(
               <>
                 <div className="p-section">
-                  <span className="p-label">ðŸ“‚ Load RTZ File from your ECDIS</span>
+                  <span className="p-label">📂 Load RTZ File from your ECDIS</span>
                   <div style={{border:'2px dashed var(--border2)',borderRadius:10,padding:'1.5rem',textAlign:'center',cursor:'pointer',background:'var(--bg2)',marginBottom:'0.8rem'}}>
-                    <div style={{fontSize:'2rem',marginBottom:6}}>ðŸ“‚</div>
+                    <div style={{fontSize:'2rem',marginBottom:6}}>📂</div>
                     <div style={{fontWeight:600,fontSize:'0.84rem',marginBottom:3}}>Select RTZ File</div>
                     <div style={{fontSize:'0.72rem',color:'var(--text2)'}}>Accepts .rtz and .rtzp files</div>
                     <input type="file" accept=".rtz,.rtzp" onChange={handleRTZLoad} style={{display:'block',marginTop:10,width:'100%',fontSize:'0.75rem'}}/>
                   </div>
-                  {waypoints.length>0&&<div className="ok-box" style={{textAlign:'center',fontSize:'0.78rem'}}>âœ… {waypoints.length} waypoints loaded from file</div>}
+                  {waypoints.length>0&&<div className="ok-box" style={{textAlign:'center',fontSize:'0.78rem'}}>✅ {waypoints.length} waypoints loaded from file</div>}
                 </div>
                 <div className="p-section">
-                  <span className="p-label">âœï¸ Edit loaded route</span>
+                  <span className="p-label">✏️ Edit loaded route</span>
                   <p style={{fontSize:'0.75rem',color:'var(--text2)',lineHeight:1.6}}>
                     After loading, drag waypoints on the map to adjust. Use the WPTs tab to view and delete waypoints. Export back to RTZ when done.
                   </p>
                 </div>
                 {/* Also overlays and animation here */}
                 <div className="p-section">
-                  <span className="p-label">ðŸ—º Zone Overlays</span>
+                  <span className="p-label">🗺 Zone Overlays</span>
                   <div className="overlay-grid">
                     {ovCfg.map(ov=>(
                       <button key={ov.k} className={`ov-btn ${overlays[ov.k]?'active':''}`}
                         style={{color:overlays[ov.k]?ov.color:'var(--text2)',borderColor:overlays[ov.k]?ov.color:'var(--border)'}}
-                        onClick={()=>toggleOverlay(ov.k)}>{overlays[ov.k]?'âœ“ ':''}{ov.label}</button>
+                        onClick={()=>toggleOverlay(ov.k)}>{overlays[ov.k]?'✓ ':''}{ov.label}</button>
                     ))}
                   </div>
                 </div>
@@ -1811,18 +1812,18 @@ function RoutePlannerPage({notify,sheetRoutes=[],portsDb=[]}){
                   {waypoints.length>0&&<button className="btn btn-danger" style={{padding:'4px 9px',fontSize:'0.7rem'}} onClick={clearRoute}>Clear All</button>}
                 </div>
                 {waypoints.length===0
-                  ?<div className="empty"><div className="empty-icon">ðŸ“‹</div><div className="empty-t">No Waypoints</div><div className="empty-d">Generate a route or load an RTZ file</div></div>
+                  ?<div className="empty"><div className="empty-icon">📋</div><div className="empty-t">No Waypoints</div><div className="empty-d">Generate a route or load an RTZ file</div></div>
                   :<div style={{overflowX:'auto'}}>
                     <table className="wp-table">
-                      <thead><tr><th>WP</th><th>Lat</th><th>Lon</th><th>CrsÂ°</th><th>NM</th><th>Del</th></tr></thead>
+                      <thead><tr><th>WP</th><th>Lat</th><th>Lon</th><th>Crs°</th><th>NM</th><th>Del</th></tr></thead>
                       <tbody>{waypoints.map((wp,i)=>(
                         <tr key={i}>
                           <td style={{color:'var(--cyan)',fontFamily:'Orbitron,monospace'}}>WP{String(i+1).padStart(2,'0')}</td>
                           <td>{wp.lat.toFixed(4)}</td>
                           <td>{wp.lon.toFixed(4)}</td>
-                          <td>{i>0?(wp.bearing||0).toFixed(0):'â€”'}</td>
+                          <td>{i>0?(wp.bearing||0).toFixed(0):'—'}</td>
                           <td>{i>0?(wp.distance||0).toFixed(1):'0'}</td>
-                          <td><button onClick={()=>removeWP(i)} style={{background:'none',border:'none',color:'var(--red)',cursor:'pointer',fontSize:'0.9rem'}}>âœ•</button></td>
+                          <td><button onClick={()=>removeWP(i)} style={{background:'none',border:'none',color:'var(--red)',cursor:'pointer',fontSize:'0.9rem'}}>✕</button></td>
                         </tr>
                       ))}</tbody>
                     </table>
@@ -1852,7 +1853,7 @@ function RoutePlannerPage({notify,sheetRoutes=[],portsDb=[]}){
   );
 }
 
-// â”€â”€â”€ HOME PAGE â€” NavisphereX Marine Dashboard â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── HOME PAGE — NavisphereX Marine Dashboard ─────────────────────────────────
 function HomePage({routes,charts,onSearch,setTab,user,portsDb=[]}){
   const [q,setQ]=useState('');
   const [sugg,setSugg]=useState([]);
@@ -1877,34 +1878,34 @@ function HomePage({routes,charts,onSearch,setTab,user,portsDb=[]}){
   const doSearch=(val)=>{const v=val||q;if(v.trim()){onSearch(v);setShowSugg(false);}};
 
   const FEATURE_CARDS=[
-    {icon:'ðŸ—º',title:'ROUTES',desc:'Browse, search & download routes in multiple formats.',tab:'routes',color:'var(--cyan)'},
-    {icon:'ðŸ“Š',title:'ECDIS CHARTS',desc:'Access charts, formats & user charts.',tab:'charts',color:'var(--gold)'},
-    {icon:'âœï¸',title:'ROUTE PLANNER',desc:'Plan optimised routes with advanced tools.',tab:'planner',color:'var(--green)'},
-    {icon:'ðŸ§­',title:'NAV MODE',desc:'Navigate with precision using smart nav mode.',tab:'planner',color:'#A78BFA',badge:'NEW'},
-    {icon:'âš“',title:'PORTS DATABASE',desc:'Explore global ports with details & coordinates.',tab:'ports',color:'var(--cyan)'},
-    {icon:'ðŸ“š',title:'MARITIME LIBRARY',desc:'SOLAS, MARPOL, IMO, STCW & more books.',tab:'library',color:'var(--gold)'},
+    {icon:'🗺',title:'ROUTES',desc:'Browse, search & download routes in multiple formats.',tab:'routes',color:'var(--cyan)'},
+    {icon:'📊',title:'ECDIS CHARTS',desc:'Access charts, formats & user charts.',tab:'charts',color:'var(--gold)'},
+    {icon:'✏️',title:'ROUTE PLANNER',desc:'Plan optimised routes with advanced tools.',tab:'planner',color:'var(--green)'},
+    {icon:'🧭',title:'NAV MODE',desc:'Navigate with precision using smart nav mode.',tab:'planner',color:'#A78BFA',badge:'NEW'},
+    {icon:'⚓',title:'PORTS DATABASE',desc:'Explore global ports with details & coordinates.',tab:'ports',color:'var(--cyan)'},
+    {icon:'📚',title:'MARITIME LIBRARY',desc:'SOLAS, MARPOL, IMO, STCW & more books.',tab:'library',color:'var(--gold)'},
   ];
 
   const QUICK_ACTIONS=[
-    {icon:'â¬†ï¸',title:'Upload Route',desc:'Share your route',tab:'admin',color:'var(--cyan)'},
-    {icon:'â¬‡ï¸',title:'Download Latest',desc:'Get latest updates',tab:'routes',color:'var(--green)'},
-    {icon:'ðŸ“Š',title:'New Charts',desc:'Explore new charts',tab:'charts',color:'var(--gold)'},
-    {icon:'â­',title:'Favourites',desc:'View saved items',tab:'routes',color:'#F59E0B'},
+    {icon:'⬆️',title:'Upload Route',desc:'Share your route',tab:'admin',color:'var(--cyan)'},
+    {icon:'⬇️',title:'Download Latest',desc:'Get latest updates',tab:'routes',color:'var(--green)'},
+    {icon:'📊',title:'New Charts',desc:'Explore new charts',tab:'charts',color:'var(--gold)'},
+    {icon:'⭐',title:'Favourites',desc:'View saved items',tab:'routes',color:'#F59E0B'},
   ];
 
   const KNOWLEDGE=[
-    {title:'SOLAS',desc:'Safety of Life at Sea',icon:'ðŸ›¡',color:'var(--cyan)'},
-    {title:'MARPOL',desc:'Pollution Prevention Regulations',icon:'ðŸŒŠ',color:'var(--green)'},
-    {title:'STCW',desc:'Standards of Training & Certification',icon:'âš“',color:'var(--gold)'},
-    {title:'IMO CIRCULARS',desc:'Latest IMO Circulars',icon:'ðŸ›',color:'var(--purple)'},
-    {title:'ECDIS MANUALS',desc:'User Manuals & Guides',icon:'ðŸ“¡',color:'var(--cyan)'},
+    {title:'SOLAS',desc:'Safety of Life at Sea',icon:'🛡',color:'var(--cyan)'},
+    {title:'MARPOL',desc:'Pollution Prevention Regulations',icon:'🌊',color:'var(--green)'},
+    {title:'STCW',desc:'Standards of Training & Certification',icon:'⚓',color:'var(--gold)'},
+    {title:'IMO CIRCULARS',desc:'Latest IMO Circulars',icon:'🏛',color:'var(--purple)'},
+    {title:'ECDIS MANUALS',desc:'User Manuals & Guides',icon:'📡',color:'var(--cyan)'},
   ];
 
   const db=portsDb.length>0?portsDb:PORTS_DB;
 
   return(
     <div style={{flex:1}}>
-      {/* â”€â”€ HERO SECTION â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+      {/* ── HERO SECTION ──────────────────────────────────────────── */}
       <div style={{
         background:'linear-gradient(135deg,#040C1A 0%,#071428 40%,#0B1D35 100%)',
         borderBottom:'1px solid var(--border)',padding:'2rem 1.4rem 1.6rem',
@@ -1914,7 +1915,7 @@ function HomePage({routes,charts,onSearch,setTab,user,portsDb=[]}){
         <div style={{position:'absolute',right:0,top:0,bottom:0,width:'45%',
           background:'linear-gradient(to left,rgba(0,180,216,0.04),transparent)',
           display:'flex',alignItems:'center',justifyContent:'center',fontSize:'6rem',opacity:0.08,
-          userSelect:'none',pointerEvents:'none'}}>ðŸš¢</div>
+          userSelect:'none',pointerEvents:'none'}}>🚢</div>
 
         {/* Live data badge */}
         <div style={{display:'flex',justifyContent:'flex-end',marginBottom:'0.6rem'}}>
@@ -1935,7 +1936,7 @@ function HomePage({routes,charts,onSearch,setTab,user,portsDb=[]}){
             color:'var(--text3)',letterSpacing:'0.12em',textTransform:'uppercase',marginBottom:'0.8rem'}}>
             {['Smart Navigation','Routes','Charts','Ports','Maritime Library'].map((t,i)=>(
               <span key={i} style={{display:'flex',alignItems:'center',gap:6}}>
-                {i>0&&<span style={{color:'var(--border2)'}}>â€¢</span>}{t}
+                {i>0&&<span style={{color:'var(--border2)'}}>•</span>}{t}
               </span>
             ))}
           </div>
@@ -1954,12 +1955,12 @@ function HomePage({routes,charts,onSearch,setTab,user,portsDb=[]}){
             cursor:'pointer',transition:'all 0.2s',fontWeight:600}}
             onMouseEnter={e=>e.currentTarget.style.borderColor='var(--cyan)'}
             onMouseLeave={e=>e.currentTarget.style.borderColor='var(--border2)'}>
-            <span style={{fontSize:'1.1rem'}}>ðŸ”</span>
+            <span style={{fontSize:'1.1rem'}}>🔍</span>
             <div style={{textAlign:'left'}}>
               <div style={{fontSize:'0.82rem',fontWeight:700}}>Search Routes / Ports</div>
               <div style={{fontSize:'0.66rem',color:'var(--text3)'}}>Search anything...</div>
             </div>
-            <span style={{color:'var(--cyan)',marginLeft:'auto'}}>â†’</span>
+            <span style={{color:'var(--cyan)',marginLeft:'auto'}}>→</span>
           </button>
           <button onClick={()=>setTab('planner')} style={{
             display:'flex',alignItems:'center',gap:10,padding:'12px 20px',
@@ -1969,21 +1970,21 @@ function HomePage({routes,charts,onSearch,setTab,user,portsDb=[]}){
             cursor:'pointer',transition:'all 0.2s',fontWeight:600}}
             onMouseEnter={e=>e.currentTarget.style.background='rgba(0,180,216,0.2)'}
             onMouseLeave={e=>e.currentTarget.style.background='linear-gradient(135deg,rgba(0,180,216,0.15),rgba(21,101,192,0.2))'}>
-            <span style={{fontSize:'1.1rem'}}>ðŸ§­</span>
+            <span style={{fontSize:'1.1rem'}}>🧭</span>
             <div style={{textAlign:'left'}}>
               <div style={{fontSize:'0.82rem',fontWeight:700}}>Open Route Planner</div>
               <div style={{fontSize:'0.66rem',color:'rgba(0,180,216,0.7)'}}>Plan your voyage</div>
             </div>
-            <span style={{marginLeft:'auto'}}>â†’</span>
+            <span style={{marginLeft:'auto'}}>→</span>
           </button>
         </div>
 
         {/* Search box inline */}
         <div ref={wRef} style={{position:'relative',maxWidth:600}}>
           <div className="siw">
-            <span className="si-ic">ðŸ”</span>
+            <span className="si-ic">🔍</span>
             <input className="si" style={{paddingLeft:42}}
-              placeholder="Search port, route or file nameâ€¦ e.g. Mumbai, MUM, Singapore"
+              placeholder="Search port, route or file name… e.g. Mumbai, MUM, Singapore"
               value={q} onChange={e=>{setQ(e.target.value);setShowSugg(true);}}
               onFocus={()=>setShowSugg(true)}
               onKeyDown={e=>e.key==='Enter'&&doSearch()}/>
@@ -1997,14 +1998,14 @@ function HomePage({routes,charts,onSearch,setTab,user,portsDb=[]}){
           {showSugg&&sugg.length>0&&(
             <div className="ac">
               {sugg.map((s,i)=><div key={i} className="ac-item" onClick={()=>{setQ(s);doSearch(s);}}>
-                <span>ðŸ”Ž</span><span>{s}</span>
+                <span>🔎</span><span>{s}</span>
               </div>)}
             </div>
           )}
         </div>
       </div>
 
-      {/* â”€â”€ MAIN CONTENT â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+      {/* ── MAIN CONTENT ──────────────────────────────────────────── */}
       <div style={{padding:'1.4rem',maxWidth:1100,margin:'0 auto',width:'100%'}}>
 
         {/* Stats bar */}
@@ -2047,7 +2048,7 @@ function HomePage({routes,charts,onSearch,setTab,user,portsDb=[]}){
                 <div style={{fontSize:'0.72rem',color:'var(--text2)',lineHeight:1.5,marginBottom:'0.8rem'}}>{c.desc}</div>
                 <div style={{display:'flex',justifyContent:'flex-end'}}>
                   <span style={{width:28,height:28,borderRadius:'50%',border:`1px solid ${c.color}55`,
-                    display:'flex',alignItems:'center',justifyContent:'center',color:c.color,fontSize:'0.8rem'}}>â†’</span>
+                    display:'flex',alignItems:'center',justifyContent:'center',color:c.color,fontSize:'0.8rem'}}>→</span>
                 </div>
               </div>
             ))}
@@ -2064,7 +2065,7 @@ function HomePage({routes,charts,onSearch,setTab,user,portsDb=[]}){
           <div style={{width:48,height:48,borderRadius:'50%',background:'rgba(0,180,216,0.1)',
             border:'1px solid rgba(0,180,216,0.2)',display:'flex',alignItems:'center',justifyContent:'center',
             fontSize:'1.4rem',flexShrink:0}}>
-            {user?'ðŸ‘¤':'ðŸ”'}
+            {user?'👤':'🔐'}
           </div>
           <div style={{flex:1}}>
             <div style={{fontFamily:'Orbitron,monospace',fontSize:'0.78rem',fontWeight:700,marginBottom:2}}>MY ACCOUNT</div>
@@ -2072,7 +2073,7 @@ function HomePage({routes,charts,onSearch,setTab,user,portsDb=[]}){
               {user?`Logged in as ${user.email}`:'Login, save routes, manage your data.'}
             </div>
           </div>
-          <span style={{color:'var(--cyan)',fontSize:'1.1rem'}}>â†’</span>
+          <span style={{color:'var(--cyan)',fontSize:'1.1rem'}}>→</span>
         </div>
 
         {/* Quick Actions */}
@@ -2109,7 +2110,7 @@ function HomePage({routes,charts,onSearch,setTab,user,portsDb=[]}){
               <span style={{fontFamily:'Orbitron,monospace',fontSize:'0.82rem',fontWeight:700}}>Maritime Knowledge Hub</span>
             </div>
             <span style={{fontSize:'0.74rem',color:'var(--cyan)',cursor:'pointer'}}
-              onClick={()=>setTab('library')}>View all â†’</span>
+              onClick={()=>setTab('library')}>View all →</span>
           </div>
           <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(140px,1fr))',gap:'0.7rem'}}>
             {KNOWLEDGE.map((k,i)=>(
@@ -2131,7 +2132,7 @@ function HomePage({routes,charts,onSearch,setTab,user,portsDb=[]}){
   );
 }
 
-// â”€â”€â”€ ROUTES PAGE â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── ROUTES PAGE ──────────────────────────────────────────────────────────────
 function RoutesPage({routes,sheetRoutes,searchQuery,notify,user,setTab}){
   const [q,setQ]=useState(searchQuery||'');
   const [typeF,setTypeF]=useState('all');
@@ -2145,7 +2146,7 @@ function RoutesPage({routes,sheetRoutes,searchQuery,notify,user,setTab}){
     (sheetRoutes||[]).map((r,i)=>normalizeSheetRow(r,i,'sr'))
   ,[sheetRoutes]);
 
-  // Merge Firebase + Sheet â€” sheet rows de-duped by fileName
+  // Merge Firebase + Sheet — sheet rows de-duped by fileName
   const allRoutes=useMemo(()=>{
     const fbNames=new Set(routes.map(r=>r.fileName?.toLowerCase()));
     const extra=normalizedSheet.filter(r=>r.fileName&&!fbNames.has(r.fileName.toLowerCase()));
@@ -2174,11 +2175,11 @@ function RoutesPage({routes,sheetRoutes,searchQuery,notify,user,setTab}){
   );
 
   const handleDL=async(r)=>{
-    if(!user){notify('ðŸ” Login required to download files','error');setTab('login');return;}
+    if(!user){notify('🔐 Login required to download files','error');setTab('login');return;}
     if(!r.fileUrl){notify('File link not set. Contact admin.','error');return;}
-    notify(`â³ Preparing download: ${r.fileName}â€¦`,'success');
+    notify(`⏳ Preparing download: ${r.fileName}…`,'success');
     try{
-      // Convert Google Drive view/share link â†’ direct download link
+      // Convert Google Drive view/share link → direct download link
       let url=r.fileUrl;
       const gdMatch=url.match(/\/d\/([a-zA-Z0-9_-]+)/);
       if(gdMatch){url=`https://drive.google.com/uc?export=download&id=${gdMatch[1]}`;}
@@ -2189,11 +2190,11 @@ function RoutesPage({routes,sheetRoutes,searchQuery,notify,user,setTab}){
       a.href=URL.createObjectURL(blob);
       a.download=r.fileName||(gdMatch?gdMatch[1]+'.rtz':'download');
       a.click();URL.revokeObjectURL(a.href);
-      notify(`âœ… Downloaded: ${r.fileName}`,'success');
+      notify(`✅ Downloaded: ${r.fileName}`,'success');
     }catch{
       // Fallback: direct link in same tab
       window.open(r.fileUrl,'_blank');
-      notify(`Opened: ${r.fileName} â€” save the file from browser`,'success');
+      notify(`Opened: ${r.fileName} — save the file from browser`,'success');
     }
   };
 
@@ -2202,28 +2203,28 @@ function RoutesPage({routes,sheetRoutes,searchQuery,notify,user,setTab}){
   return(
     <div className="section">
       <div className="sec-hdr">
-        <div className="sec-title">ðŸ—º RTZ Route Files</div>
+        <div className="sec-title">🗺 RTZ Route Files</div>
         <span className="badge">{filtered.length} / {allRoutes.length} files</span>
       </div>
-      {!user&&<div className="warn-box">ðŸ” <strong>Login required to download.</strong> <span style={{cursor:'pointer',textDecoration:'underline'}} onClick={()=>setTab('login')}>Create free account â†’</span></div>}
+      {!user&&<div className="warn-box">🔐 <strong>Login required to download.</strong> <span style={{cursor:'pointer',textDecoration:'underline'}} onClick={()=>setTab('login')}>Create free account →</span></div>}
 
       {/* SEARCH WITH SUGGESTIONS */}
       <div style={{position:'relative',marginBottom:'0.9rem'}}>
         <div style={{display:'flex',gap:8}}>
           <div className="siw" style={{flex:1}}>
-            <span className="si-ic">ðŸ”</span>
+            <span className="si-ic">🔍</span>
             <input
               ref={inputRef}
               className="si"
               style={{paddingLeft:40}}
-              placeholder="Search by port, route name, file name, keywordâ€¦"
+              placeholder="Search by port, route name, file name, keyword…"
               value={q}
               onChange={e=>{setQ(e.target.value);setShowSugg(true);}}
               onFocus={()=>setShowSugg(true)}
               onBlur={()=>setTimeout(()=>setShowSugg(false),180)}
             />
           </div>
-          {q&&<button className="btn btn-secondary" onClick={()=>{setQ('');setShowSugg(false);}}>âœ•</button>}
+          {q&&<button className="btn btn-secondary" onClick={()=>{setQ('');setShowSugg(false);}}>✕</button>}
         </div>
         {/* SUGGESTIONS DROPDOWN */}
         {showSugg&&suggestions.length>0&&(
@@ -2237,7 +2238,7 @@ function RoutesPage({routes,sheetRoutes,searchQuery,notify,user,setTab}){
                   borderBottom:'1px solid rgba(255,255,255,0.04)',transition:'background 0.15s'}}
                 onMouseEnter={e=>e.currentTarget.style.background='rgba(0,180,216,0.08)'}
                 onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
-                <span style={{color:'var(--cyan)',fontSize:'0.85rem'}}>ðŸ”Ž</span>
+                <span style={{color:'var(--cyan)',fontSize:'0.85rem'}}>🔎</span>
                 <span style={{fontSize:'0.84rem'}}>{s}</span>
               </div>
             ))}
@@ -2258,22 +2259,22 @@ function RoutesPage({routes,sheetRoutes,searchQuery,notify,user,setTab}){
         {['all',...ROUTE_TYPES].map(t=>(
           <button key={t} className={`fbtn ${typeF===(t==='all'?'all':t)?'active':''}`}
             onClick={()=>setTypeF(t==='all'?'all':t)}>
-            {t==='all'?'ðŸŒ All':t}
+            {t==='all'?'🌐 All':t}
           </button>
         ))}
       </div>
 
       {filtered.length===0
         ?<div className="empty">
-          <div className="empty-icon">ðŸ§­</div>
+          <div className="empty-icon">🧭</div>
           <div className="empty-t">No Routes Found</div>
           <div className="empty-d">Try "Mumbai", "MUM", "Singapore" or "mumbaitosingapore"</div>
         </div>
         :<div className="files-grid">{filtered.map(r=>(
           <div key={r.id} className="file-card">
-            <div className="file-icon">{r.source==='sheet'?'ðŸ”„':'ðŸ—º'}</div>
+            <div className="file-icon">{r.source==='sheet'?'🔄':'🗺'}</div>
             <div className="file-name">{r.fileName}</div>
-            {r.portName&&<div className="file-port">ðŸ“ {r.portName}</div>}
+            {r.portName&&<div className="file-port">📍 {r.portName}</div>}
             <div className="file-tags">
               <span className="ftag tag-rtz">RTZ File</span>
               {r.type&&<span className="ftag tag-rtz">{r.type}</span>}
@@ -2281,9 +2282,9 @@ function RoutesPage({routes,sheetRoutes,searchQuery,notify,user,setTab}){
             </div>
             {user
               ?<button className="dl-btn" onClick={()=>handleDL(r)} disabled={!r.fileUrl}>
-                {r.fileUrl?'â¬‡ Download RTZ File':'âŒ Link Not Set'}
+                {r.fileUrl?'⬇ Download RTZ File':'❌ Link Not Set'}
               </button>
-              :<button className="login-req" onClick={()=>setTab('login')}>ðŸ” Login to Download</button>
+              :<button className="login-req" onClick={()=>setTab('login')}>🔐 Login to Download</button>
             }
           </div>
         ))}</div>
@@ -2292,7 +2293,7 @@ function RoutesPage({routes,sheetRoutes,searchQuery,notify,user,setTab}){
   );
 }
 
-// â”€â”€â”€ CHARTS PAGE â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── CHARTS PAGE ──────────────────────────────────────────────────────────────
 function ChartsPage({charts,sheetCharts,notify,user,setTab,isAdmin}){
   const [selBrand,setSelBrand]=useState(null);
   const [q,setQ]=useState('');
@@ -2310,11 +2311,11 @@ function ChartsPage({charts,sheetCharts,notify,user,setTab,isAdmin}){
     return[...charts,...extra];
   },[charts,normalizedSheet]);
 
-  // Model-number â†’ brand aliases extracted from ECDIS_BRANDS.models
+  // Model-number → brand aliases extracted from ECDIS_BRANDS.models
   const MODEL_ALIASES = useMemo(()=>{
     const map=[];
     ECDIS_BRANDS.forEach(b=>{
-      // e.g. "FMD-3200 / FMD-3300" â†’ ["fmd3200","fmd3300","fmd-3200","fmd-3300"]
+      // e.g. "FMD-3200 / FMD-3300" → ["fmd3200","fmd3300","fmd-3200","fmd-3300"]
       const tokens=(b.models||'').split(/[\s/,]+/).map(t=>t.trim().toLowerCase()).filter(Boolean);
       tokens.forEach(t=>{ if(t.length>2) map.push({token:t,id:b.id}); });
       // Also add id and name
@@ -2323,12 +2324,12 @@ function ChartsPage({charts,sheetCharts,notify,user,setTab,isAdmin}){
       // Extra common abbreviations
       if(b.id==='jrc')    map.push({token:'jan',id:'jrc'});
       if(b.id==='furuno') map.push({token:'fmd',id:'furuno'},{token:'furuno',id:'furuno'});
-      if(b.id==='transas'||b.id==='wartsila') map.push({token:'navisailor',id:'transas'},{token:'navi-sailor',id:'transas'},{token:'wartsila',id:'transas'},{token:'wÃ¤rtsilÃ¤',id:'transas'});
+      if(b.id==='transas'||b.id==='wartsila') map.push({token:'navisailor',id:'transas'},{token:'navi-sailor',id:'transas'},{token:'wartsila',id:'transas'},{token:'wärtsilä',id:'transas'});
       if(b.id==='sperry') map.push({token:'visionmaster',id:'sperry'},{token:'vision master',id:'sperry'});
       if(b.id==='tokimec'||b.id==='jmr') map.push({token:'jmr',id:'tokimec'});
       if(b.id==='danelec') map.push({token:'dm800',id:'danelec'},{token:'dm-800',id:'danelec'});
       if(b.id==='kongsberg') map.push({token:'kbridge',id:'kongsberg'},{token:'k-bridge',id:'kongsberg'});
-      if(b.id==='raytheon') map.push({token:'anschutz',id:'raytheon'},{token:'anschÃ¼tz',id:'raytheon'});
+      if(b.id==='raytheon') map.push({token:'anschutz',id:'raytheon'},{token:'anschütz',id:'raytheon'});
     });
     return map;
   },[]);
@@ -2393,9 +2394,9 @@ function ChartsPage({charts,sheetCharts,notify,user,setTab,isAdmin}){
   const filtered=brandCharts.filter(c=>smartMatch(c,q));
 
   const handleDL=async(c)=>{
-    if(!user){notify('ðŸ” Login required','error');setTab('login');return;}
+    if(!user){notify('🔐 Login required','error');setTab('login');return;}
     if(!c.fileUrl){notify('File link not set. Contact admin.','error');return;}
-    notify(`â³ Preparing download: ${c.fileName}â€¦`,'success');
+    notify(`⏳ Preparing download: ${c.fileName}…`,'success');
     try{
       let url=c.fileUrl;
       const gdMatch=url.match(/\/d\/([a-zA-Z0-9_-]+)/);
@@ -2407,10 +2408,10 @@ function ChartsPage({charts,sheetCharts,notify,user,setTab,isAdmin}){
       a.href=URL.createObjectURL(blob);
       a.download=c.fileName||(gdMatch?gdMatch[1]+'.000':'download');
       a.click();URL.revokeObjectURL(a.href);
-      notify(`âœ… Downloaded: ${c.fileName}`,'success');
+      notify(`✅ Downloaded: ${c.fileName}`,'success');
     }catch{
       window.open(c.fileUrl,'_blank');
-      notify(`Opened: ${c.fileName} â€” save the file from browser`,'success');
+      notify(`Opened: ${c.fileName} — save the file from browser`,'success');
     }
   };
 
@@ -2421,15 +2422,15 @@ function ChartsPage({charts,sheetCharts,notify,user,setTab,isAdmin}){
       {!selBrand?(
         <>
           <div className="sec-hdr">
-            <div className="sec-title">ðŸ“Š ECDIS Chart Files</div>
-            <span className="badge badge-gold">{ECDIS_BRANDS.length} Brands Â· {allCharts.length} charts</span>
+            <div className="sec-title">📊 ECDIS Chart Files</div>
+            <span className="badge badge-gold">{ECDIS_BRANDS.length} Brands · {allCharts.length} charts</span>
           </div>
           <div className="info-box">
-            <strong style={{color:'var(--cyan)'}}>Step 1:</strong> Select your ECDIS brand â†’&nbsp;
-            <strong style={{color:'var(--cyan)'}}>Step 2:</strong> Search by port or region â†’&nbsp;
+            <strong style={{color:'var(--cyan)'}}>Step 1:</strong> Select your ECDIS brand →&nbsp;
+            <strong style={{color:'var(--cyan)'}}>Step 2:</strong> Search by port or region →&nbsp;
             <strong style={{color:'var(--cyan)'}}>Step 3:</strong> Download chart file
           </div>
-          {!user&&<div className="warn-box">ðŸ” Login required to download. <span style={{cursor:'pointer',textDecoration:'underline'}} onClick={()=>setTab('login')}>Register free â†’</span></div>}
+          {!user&&<div className="warn-box">🔐 Login required to download. <span style={{cursor:'pointer',textDecoration:'underline'}} onClick={()=>setTab('login')}>Register free →</span></div>}
           <div className="brand-grid">
             {ECDIS_BRANDS.map(b=>{
               const cnt=brandCount(b.id);
@@ -2440,21 +2441,21 @@ function ChartsPage({charts,sheetCharts,notify,user,setTab,isAdmin}){
                   <div className="brand-name" style={{color:cnt>0?b.color:'var(--text2)'}}>{b.name}</div>
                   <div className="brand-models">{b.models}</div>
                   <div className="brand-count" style={{color:cnt>0?'var(--green)':'var(--text3)'}}>
-                    {cnt>0?`${cnt} chart${cnt>1?'s':''}  âœ…`:'No charts yet'}
+                    {cnt>0?`${cnt} chart${cnt>1?'s':''}  ✅`:'No charts yet'}
                   </div>
                 </div>
               );
             })}
-            {/* All Sheet Charts â€” admin only */}
+            {/* All Sheet Charts — admin only */}
             {isAdmin&&normalizedSheet.length>0&&(
               <div className="brand-card" style={{borderColor:'rgba(0,200,150,0.4)',gridColumn:'1/-1',display:'flex',flexDirection:'row',alignItems:'center',gap:14,padding:'12px 16px'}}
                 onClick={()=>{setSelBrand('all-sheet');setQ('');}}>
-                <div style={{fontSize:'1.6rem'}}>ðŸ”„</div>
+                <div style={{fontSize:'1.6rem'}}>🔄</div>
                 <div style={{flex:1}}>
                   <div style={{fontFamily:'Orbitron,monospace',fontSize:'0.78rem',fontWeight:700,color:'var(--green)'}}>All Google Sheet Charts</div>
-                  <div style={{fontSize:'0.68rem',color:'var(--text2)',marginTop:2}}>Browse all {normalizedSheet.length} charts from your live Google Sheet â€” regardless of brand</div>
+                  <div style={{fontSize:'0.68rem',color:'var(--text2)',marginTop:2}}>Browse all {normalizedSheet.length} charts from your live Google Sheet — regardless of brand</div>
                 </div>
-                <span className="badge" style={{background:'rgba(0,200,150,0.15)',color:'var(--green)',border:'1px solid rgba(0,200,150,0.3)'}}>{normalizedSheet.length} charts âœ…</span>
+                <span className="badge" style={{background:'rgba(0,200,150,0.15)',color:'var(--green)',border:'1px solid rgba(0,200,150,0.3)'}}>{normalizedSheet.length} charts ✅</span>
               </div>
             )}
           </div>
@@ -2462,8 +2463,8 @@ function ChartsPage({charts,sheetCharts,notify,user,setTab,isAdmin}){
       ):(
         <>
           <div style={{display:'flex',alignItems:'center',gap:12,marginBottom:'1.2rem',flexWrap:'wrap'}}>
-            <button className="btn btn-secondary" onClick={()=>{setSelBrand(null);setQ('');}}>â† Back</button>
-            <span style={{fontSize:'1.4rem'}}>{selBrand==='all-sheet'?'ðŸ”„':sb?.emoji}</span>
+            <button className="btn btn-secondary" onClick={()=>{setSelBrand(null);setQ('');}}>← Back</button>
+            <span style={{fontSize:'1.4rem'}}>{selBrand==='all-sheet'?'🔄':sb?.emoji}</span>
             <div>
               <div style={{fontFamily:'Orbitron,monospace',fontSize:'0.88rem',fontWeight:700,color:selBrand==='all-sheet'?'var(--green)':sb?.color}}>
                 {selBrand==='all-sheet'?'All Google Sheet Charts':sb?.name}
@@ -2472,17 +2473,17 @@ function ChartsPage({charts,sheetCharts,notify,user,setTab,isAdmin}){
             </div>
             <span className="badge badge-gold">{brandCharts.length} chart files</span>
           </div>
-          {!user&&<div className="warn-box">ðŸ” Login required. <span style={{cursor:'pointer',textDecoration:'underline'}} onClick={()=>setTab('login')}>Login / Register â†’</span></div>}
+          {!user&&<div className="warn-box">🔐 Login required. <span style={{cursor:'pointer',textDecoration:'underline'}} onClick={()=>setTab('login')}>Login / Register →</span></div>}
 
           {/* SEARCH WITH SUGGESTIONS */}
           <div style={{position:'relative',marginBottom:'1rem'}}>
             <div style={{display:'flex',gap:8}}>
               <div className="siw" style={{flex:1}}>
-                <span className="si-ic">ðŸ”</span>
+                <span className="si-ic">🔍</span>
                 <input
                   className="si"
                   style={{paddingLeft:40}}
-                  placeholder={`Search port, region, file name for ${sb?.name}â€¦`}
+                  placeholder={`Search port, region, file name for ${sb?.name}…`}
                   value={q}
                   autoFocus
                   onChange={e=>{setQ(e.target.value);setShowSugg(true);}}
@@ -2490,7 +2491,7 @@ function ChartsPage({charts,sheetCharts,notify,user,setTab,isAdmin}){
                   onBlur={()=>setTimeout(()=>setShowSugg(false),180)}
                 />
               </div>
-              {q&&<button className="btn btn-secondary" onClick={()=>{setQ('');setShowSugg(false);}}>âœ•</button>}
+              {q&&<button className="btn btn-secondary" onClick={()=>{setQ('');setShowSugg(false);}}>✕</button>}
             </div>
             {showSugg&&suggestions.length>0&&(
               <div style={{position:'absolute',top:'100%',left:0,right:0,zIndex:300,
@@ -2503,7 +2504,7 @@ function ChartsPage({charts,sheetCharts,notify,user,setTab,isAdmin}){
                       borderBottom:'1px solid rgba(255,255,255,0.04)',transition:'background 0.15s'}}
                     onMouseEnter={e=>e.currentTarget.style.background='rgba(240,165,0,0.08)'}
                     onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
-                    <span style={{color:'var(--gold)',fontSize:'0.85rem'}}>ðŸ”Ž</span>
+                    <span style={{color:'var(--gold)',fontSize:'0.85rem'}}>🔎</span>
                     <span style={{fontSize:'0.84rem'}}>{s}</span>
                   </div>
                 ))}
@@ -2513,7 +2514,7 @@ function ChartsPage({charts,sheetCharts,notify,user,setTab,isAdmin}){
 
           {filtered.length===0
             ?<div className="empty">
-              <div className="empty-icon">{selBrand==='all-sheet'?'ðŸ”„':sb?.emoji}</div>
+              <div className="empty-icon">{selBrand==='all-sheet'?'🔄':sb?.emoji}</div>
               <div className="empty-t">{brandCharts.length===0?'No Charts Available':'No Results'}</div>
               <div className="empty-d">{brandCharts.length===0?'Admin will upload charts soon.':'Try a different port name or keyword.'}</div>
             </div>
@@ -2521,10 +2522,10 @@ function ChartsPage({charts,sheetCharts,notify,user,setTab,isAdmin}){
               const brand=detectBrand(c)||sb;
               return(
                 <div key={c.id} className="file-card">
-                  <div className="file-icon">ðŸ“Š</div>
+                  <div className="file-icon">📊</div>
                   <div className="file-name">{c.fileName}</div>
-                  {c.portName&&<div className="file-port">âš“ {c.portName}</div>}
-                  {c.model&&<div style={{fontSize:'0.72rem',color:'#A78BFA',marginBottom:6}}>ðŸ–¥ Model: {c.model}</div>}
+                  {c.portName&&<div className="file-port">⚓ {c.portName}</div>}
+                  {c.model&&<div style={{fontSize:'0.72rem',color:'#A78BFA',marginBottom:6}}>🖥 Model: {c.model}</div>}
                   <div className="file-tags">
                     <span className="ftag tag-chart">Chart File</span>
                     <span className="ftag tag-brand" style={{color:brand?.color}}>{brand?.emoji} {c.brand||brand?.name}</span>
@@ -2533,9 +2534,9 @@ function ChartsPage({charts,sheetCharts,notify,user,setTab,isAdmin}){
                   </div>
                   {user
                     ?<button className="dl-btn" onClick={()=>handleDL(c)} disabled={!c.fileUrl}>
-                      {c.fileUrl?'â¬‡ Download Chart File':'âŒ Link Not Set'}
+                      {c.fileUrl?'⬇ Download Chart File':'❌ Link Not Set'}
                     </button>
-                    :<button className="login-req" onClick={()=>setTab('login')}>ðŸ” Login to Download</button>
+                    :<button className="login-req" onClick={()=>setTab('login')}>🔐 Login to Download</button>
                   }
                 </div>
               );
@@ -2547,7 +2548,7 @@ function ChartsPage({charts,sheetCharts,notify,user,setTab,isAdmin}){
   );
 }
 
-// â”€â”€â”€ LOGIN PAGE â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── LOGIN PAGE ───────────────────────────────────────────────────────────────
 function LoginPage({notify,onLogin}){
   const [mode,setMode]=useState('login');
   const [email,setEmail]=useState('');const [pass,setPass]=useState('');
@@ -2562,16 +2563,16 @@ function LoginPage({notify,onLogin}){
       const snap=await getDoc(doc(db,'users',c.user.uid));
       if(snap.exists()&&snap.data().blocked){
         await signOut(auth);
-        setErr('âš ï¸ ACCESS SUSPENDED â€” Suspicious login detected by admin. Contact owner on Instagram: @manish_the_navigator');
+        setErr('⚠️ ACCESS SUSPENDED — Suspicious login detected by admin. Contact owner on Instagram: @manish_the_navigator');
         setLoading(false);return;
       }
-      notify('Welcome back! ðŸ‘‹','success');onLogin(c.user);
+      notify('Welcome back! 👋','success');onLogin(c.user);
     }
     catch(e){
       if(e.code==='auth/invalid-credential'||e.code==='auth/wrong-password'||e.code==='auth/user-not-found')
         setErr('Invalid email or password.');
       else if(!e.code)
-        setErr('âš ï¸ ACCESS SUSPENDED â€” Contact owner: @manish_the_navigator on Instagram');
+        setErr('⚠️ ACCESS SUSPENDED — Contact owner: @manish_the_navigator on Instagram');
       else
         setErr('Login error: '+e.message);
     }
@@ -2592,7 +2593,7 @@ function LoginPage({notify,onLogin}){
         createdAt:serverTimestamp(),
         role:'user'
       });
-      notify('Account created! ðŸŽ‰','success');onLogin(c.user);
+      notify('Account created! 🎉','success');onLogin(c.user);
     }catch(e){setErr(e.code==='auth/email-already-in-use'?'Email already registered. Login instead.':'Error: '+e.message);}
     setLoading(false);
   };
@@ -2608,9 +2609,9 @@ function LoginPage({notify,onLogin}){
     <div className="auth-wrap">
       <div className="auth-card">
         <div className="auth-logo">
-          <div className="auth-icon">ðŸ§­</div>
+          <div className="auth-icon">🧭</div>
           <div className="auth-title">NavisphereX Marine</div>
-          <div className="auth-sub">{mode==='reset'?'Reset Password':'Free account Â· Download all files'}</div>
+          <div className="auth-sub">{mode==='reset'?'Reset Password':'Free account · Download all files'}</div>
         </div>
         {mode!=='reset'&&(
           <div className="auth-tabs">
@@ -2618,7 +2619,7 @@ function LoginPage({notify,onLogin}){
             <button className={`atab ${mode==='signup'?'active':''}`} onClick={()=>{setMode('signup');setErr('');setOk('');}}>Create Account</button>
           </div>
         )}
-        <div className="info-box" style={{fontSize:'0.74rem'}}>ðŸ†“ Free account Â· Access all RTZ routes &amp; ECDIS charts</div>
+        <div className="info-box" style={{fontSize:'0.74rem'}}>🆓 Free account · Access all RTZ routes &amp; ECDIS charts</div>
         {mode==='signup'&&<>
           <div className="ff"><label className="fl">Full Name *</label><input className="fi" placeholder="Capt. Ahmed Khan" value={name} onChange={e=>setName(e.target.value)}/></div>
           <div className="ff"><label className="fl">Phone Number *</label><input className="fi" type="tel" placeholder="+91 9876543210" value={phone} onChange={e=>setPhone(e.target.value)}/></div>
@@ -2628,16 +2629,16 @@ function LoginPage({notify,onLogin}){
         {err&&<div className="err-box">{err}</div>}
         {ok&&<div className="ok-box">{ok}</div>}
         <button className="submit-btn" onClick={mode==='login'?doLogin:mode==='signup'?doSignup:doReset} disabled={loading}>
-          {loading?'Please waitâ€¦':mode==='login'?'ðŸ” LOGIN':mode==='signup'?'âœ… CREATE FREE ACCOUNT':'ðŸ“§ SEND RESET EMAIL'}
+          {loading?'Please wait…':mode==='login'?'🔐 LOGIN':mode==='signup'?'✅ CREATE FREE ACCOUNT':'📧 SEND RESET EMAIL'}
         </button>
         {mode==='login'&&<div className="link-txt" onClick={()=>{setMode('reset');setErr('');setOk('');}}>Forgot password?</div>}
-        {mode==='reset'&&<div className="link-txt" onClick={()=>{setMode('login');setErr('');setOk('');}}>â† Back to login</div>}
+        {mode==='reset'&&<div className="link-txt" onClick={()=>{setMode('login');setErr('');setOk('');}}>← Back to login</div>}
       </div>
     </div>
   );
 }
 
-// â”€â”€â”€ PORT SEARCH PAGE â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── PORT SEARCH PAGE ─────────────────────────────────────────────────────────
 function PortSearchPage({portsDb=[],sheetLoading,refreshSheets}){
   const [q,setQ]=useState('');
   const [selected,setSelected]=useState(null);
@@ -2664,22 +2665,22 @@ function PortSearchPage({portsDb=[],sheetLoading,refreshSheets}){
   return(
     <div className="section">
       <div className="sec-hdr">
-        <div className="sec-title">âš“ Ports Database</div>
+        <div className="sec-title">⚓ Ports Database</div>
         <div style={{display:'flex',gap:8,alignItems:'center'}}>
           <span className="badge">{db.length.toLocaleString()} ports</span>
-          {sheetLoading&&<span style={{fontSize:'0.68rem',color:'var(--text3)'}}>â³ Loadingâ€¦</span>}
+          {sheetLoading&&<span style={{fontSize:'0.68rem',color:'var(--text3)'}}>⏳ Loading…</span>}
         </div>
       </div>
       <div ref={wRef} style={{position:'relative',marginBottom:'1.4rem'}}>
         <div className="siw">
-          <span className="si-ic">ðŸ”</span>
+          <span className="si-ic">🔍</span>
           <input className="si" style={{paddingLeft:42,fontSize:'0.92rem'}} autoFocus
-            placeholder="Search by port name, country, LOCODEâ€¦ e.g. Mumbai, SIN, Rotterdam"
+            placeholder="Search by port name, country, LOCODE… e.g. Mumbai, SIN, Rotterdam"
             value={q} onChange={e=>{setQ(e.target.value);setSelected(null);setShowSugg(true);}}
             onFocus={()=>q.length>=2&&setShowSugg(true)}/>
           {q&&<button onClick={()=>{setQ('');setSugg([]);setSelected(null);}}
             style={{position:'absolute',right:10,top:'50%',transform:'translateY(-50%)',
-              background:'none',border:'none',color:'var(--text3)',fontSize:'1.1rem',cursor:'pointer'}}>âœ•</button>}
+              background:'none',border:'none',color:'var(--text3)',fontSize:'1.1rem',cursor:'pointer'}}>✕</button>}
         </div>
         {showSugg&&sugg.length>0&&(
           <div style={{position:'absolute',top:'calc(100% + 6px)',left:0,right:0,zIndex:300,
@@ -2691,10 +2692,10 @@ function PortSearchPage({portsDb=[],sheetLoading,refreshSheets}){
                   gap:12,borderBottom:'1px solid rgba(255,255,255,0.04)',transition:'background 0.15s'}}
                 onMouseEnter={e=>e.currentTarget.style.background='rgba(0,180,216,0.07)'}
                 onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
-                <span style={{fontSize:'1.1rem'}}>ðŸ“</span>
+                <span style={{fontSize:'1.1rem'}}>📍</span>
                 <div style={{flex:1,minWidth:0}}>
                   <div style={{fontWeight:600,fontSize:'0.86rem',color:'var(--cyan)'}}>{p.name}</div>
-                  <div style={{fontSize:'0.7rem',color:'var(--text2)'}}>{p.city&&p.city!==p.name?`${p.city} Â· `:''}{p.country}</div>
+                  <div style={{fontSize:'0.7rem',color:'var(--text2)'}}>{p.city&&p.city!==p.name?`${p.city} · `:''}{p.country}</div>
                 </div>
                 <span style={{background:'rgba(0,180,216,0.1)',color:'var(--cyan)',border:'1px solid rgba(0,180,216,0.2)',
                   borderRadius:5,padding:'1px 7px',fontSize:'0.63rem',fontFamily:'monospace',flexShrink:0}}>{p.id}</span>
@@ -2708,24 +2709,24 @@ function PortSearchPage({portsDb=[],sheetLoading,refreshSheets}){
           <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:'1rem',flexWrap:'wrap',gap:8}}>
             <div>
               <div style={{fontFamily:'Orbitron,monospace',fontSize:'1rem',fontWeight:700,color:'var(--cyan)',marginBottom:4}}>{selected.name}</div>
-              <div style={{fontSize:'0.8rem',color:'var(--text2)'}}>{selected.city&&selected.city!==selected.name?`${selected.city} Â· `:''}{selected.country}</div>
+              <div style={{fontSize:'0.8rem',color:'var(--text2)'}}>{selected.city&&selected.city!==selected.name?`${selected.city} · `:''}{selected.country}</div>
             </div>
             <span style={{background:'rgba(0,180,216,0.1)',color:'var(--cyan)',border:'1px solid rgba(0,180,216,0.25)',borderRadius:8,padding:'4px 12px',fontSize:'0.78rem',fontFamily:'monospace',fontWeight:700}}>{selected.id}</span>
           </div>
           <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'0.8rem',marginBottom:'1rem'}}>
             <div style={{background:'rgba(0,0,0,0.25)',borderRadius:10,padding:'14px',textAlign:'center'}}>
               <div style={{fontSize:'0.58rem',color:'var(--text3)',textTransform:'uppercase',letterSpacing:'0.1em',marginBottom:6}}>LATITUDE</div>
-              <div style={{fontFamily:'monospace',fontSize:'1.1rem',fontWeight:700,color:'var(--green)'}}>{Number(selected.lat).toFixed(5)}Â°{selected.lat>=0?'N':'S'}</div>
+              <div style={{fontFamily:'monospace',fontSize:'1.1rem',fontWeight:700,color:'var(--green)'}}>{Number(selected.lat).toFixed(5)}°{selected.lat>=0?'N':'S'}</div>
             </div>
             <div style={{background:'rgba(0,0,0,0.25)',borderRadius:10,padding:'14px',textAlign:'center'}}>
               <div style={{fontSize:'0.58rem',color:'var(--text3)',textTransform:'uppercase',letterSpacing:'0.1em',marginBottom:6}}>LONGITUDE</div>
-              <div style={{fontFamily:'monospace',fontSize:'1.1rem',fontWeight:700,color:'var(--gold)'}}>{Number(selected.lon).toFixed(5)}Â°{selected.lon>=0?'E':'W'}</div>
+              <div style={{fontFamily:'monospace',fontSize:'1.1rem',fontWeight:700,color:'var(--gold)'}}>{Number(selected.lon).toFixed(5)}°{selected.lon>=0?'E':'W'}</div>
             </div>
           </div>
         </div>
       ):(
         <div style={{textAlign:'center',padding:'3rem 1rem',color:'var(--text3)'}}>
-          <div style={{fontSize:'3rem',marginBottom:'1rem'}}>âš“</div>
+          <div style={{fontSize:'3rem',marginBottom:'1rem'}}>⚓</div>
           <div style={{fontFamily:'Orbitron,monospace',fontSize:'0.82rem',marginBottom:6}}>Search Any Port</div>
           <div style={{fontSize:'0.76rem',lineHeight:1.6}}>
             Type a port name, country or LOCODE above<br/>
@@ -2737,19 +2738,19 @@ function PortSearchPage({portsDb=[],sheetLoading,refreshSheets}){
   );
 }
 
-// â”€â”€â”€ MARITIME LIBRARY PAGE â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── MARITIME LIBRARY PAGE ────────────────────────────────────────────────────
 function MaritimeLibraryPage({setTab}){
   const BOOKS=[
-    {title:'SOLAS 2020',full:'International Convention for the Safety of Life at Sea',icon:'ðŸ›¡',color:'var(--cyan)',cat:'Safety',desc:'Consolidated edition covering all amendments up to 2020. Essential for all seafarers.',link:'https://www.imo.org/en/Publications/Pages/Home.aspx'},
-    {title:'MARPOL 2022',full:'International Convention for the Prevention of Pollution from Ships',icon:'ðŸŒŠ',color:'var(--green)',cat:'Environment',desc:'Annex Iâ€“VI covering oil, noxious liquids, garbage, air pollution and sewage.',link:'https://www.imo.org/en/Publications/Pages/Home.aspx'},
-    {title:'STCW 2017',full:'Standards of Training, Certification and Watchkeeping',icon:'âš“',color:'var(--gold)',cat:'Certification',desc:'Manila amendments consolidated edition including STCW Code Parts A and B.',link:'https://www.imo.org/en/Publications/Pages/Home.aspx'},
-    {title:'COLREGS',full:'Convention on the International Regulations for Preventing Collisions at Sea',icon:'ðŸ’¡',color:'#F87171',cat:'Navigation',desc:'72 COLREGS with all amendments. Rules of the road for all vessels.',link:'https://www.imo.org/en/Publications/Pages/Home.aspx'},
-    {title:'IAMSAR Manual',full:'International Aeronautical and Maritime Search and Rescue Manual',icon:'ðŸ†˜',color:'#FB923C',cat:'Safety',desc:'Volume I, II and III covering SAR services, mission coordination and mobile facilities.',link:'https://www.imo.org/en/Publications/Pages/Home.aspx'},
-    {title:'ISM Code',full:'International Safety Management Code',icon:'ðŸ“‹',color:'var(--purple)',cat:'Management',desc:'Requirements for the safe management and operation of ships and pollution prevention.',link:'https://www.imo.org/en/Publications/Pages/Home.aspx'},
-    {title:'ISPS Code',full:'International Ship and Port Facility Security Code',icon:'ðŸ”’',color:'#A78BFA',cat:'Security',desc:'Security framework for ships and ports. Part A mandatory, Part B recommended.',link:'https://www.imo.org/en/Publications/Pages/Home.aspx'},
-    {title:'MLC 2006',full:'Maritime Labour Convention',icon:'ðŸ‘·',color:'var(--gold)',cat:'Labour',desc:'Seafarers rights, working conditions, manning, wages and repatriation.',link:'https://www.ilo.org/global/standards/maritime-labour-convention/lang--en/index.htm'},
-    {title:'ECDIS Manual',full:'ECDIS Operation and Best Practices Guide',icon:'ðŸ“¡',color:'var(--cyan)',cat:'ECDIS',desc:'General guide to ECDIS operation, chart updates, route planning and passage monitoring.',link:'https://www.nautinst.org/'},
-    {title:'IMO Circulars',full:'Latest IMO MSC/MEPC Circulars',icon:'ðŸ›',color:'#60A5FA',cat:'Regulations',desc:'Latest Marine Safety Committee and Marine Environment Protection Committee circulars.',link:'https://www.imo.org/en/OurWork/Pages/Home.aspx'},
+    {title:'SOLAS 2020',full:'International Convention for the Safety of Life at Sea',icon:'🛡',color:'var(--cyan)',cat:'Safety',desc:'Consolidated edition covering all amendments up to 2020. Essential for all seafarers.',link:'https://www.imo.org/en/Publications/Pages/Home.aspx'},
+    {title:'MARPOL 2022',full:'International Convention for the Prevention of Pollution from Ships',icon:'🌊',color:'var(--green)',cat:'Environment',desc:'Annex I–VI covering oil, noxious liquids, garbage, air pollution and sewage.',link:'https://www.imo.org/en/Publications/Pages/Home.aspx'},
+    {title:'STCW 2017',full:'Standards of Training, Certification and Watchkeeping',icon:'⚓',color:'var(--gold)',cat:'Certification',desc:'Manila amendments consolidated edition including STCW Code Parts A and B.',link:'https://www.imo.org/en/Publications/Pages/Home.aspx'},
+    {title:'COLREGS',full:'Convention on the International Regulations for Preventing Collisions at Sea',icon:'💡',color:'#F87171',cat:'Navigation',desc:'72 COLREGS with all amendments. Rules of the road for all vessels.',link:'https://www.imo.org/en/Publications/Pages/Home.aspx'},
+    {title:'IAMSAR Manual',full:'International Aeronautical and Maritime Search and Rescue Manual',icon:'🆘',color:'#FB923C',cat:'Safety',desc:'Volume I, II and III covering SAR services, mission coordination and mobile facilities.',link:'https://www.imo.org/en/Publications/Pages/Home.aspx'},
+    {title:'ISM Code',full:'International Safety Management Code',icon:'📋',color:'var(--purple)',cat:'Management',desc:'Requirements for the safe management and operation of ships and pollution prevention.',link:'https://www.imo.org/en/Publications/Pages/Home.aspx'},
+    {title:'ISPS Code',full:'International Ship and Port Facility Security Code',icon:'🔒',color:'#A78BFA',cat:'Security',desc:'Security framework for ships and ports. Part A mandatory, Part B recommended.',link:'https://www.imo.org/en/Publications/Pages/Home.aspx'},
+    {title:'MLC 2006',full:'Maritime Labour Convention',icon:'👷',color:'var(--gold)',cat:'Labour',desc:'Seafarers rights, working conditions, manning, wages and repatriation.',link:'https://www.ilo.org/global/standards/maritime-labour-convention/lang--en/index.htm'},
+    {title:'ECDIS Manual',full:'ECDIS Operation and Best Practices Guide',icon:'📡',color:'var(--cyan)',cat:'ECDIS',desc:'General guide to ECDIS operation, chart updates, route planning and passage monitoring.',link:'https://www.nautinst.org/'},
+    {title:'IMO Circulars',full:'Latest IMO MSC/MEPC Circulars',icon:'🏛',color:'#60A5FA',cat:'Regulations',desc:'Latest Marine Safety Committee and Marine Environment Protection Committee circulars.',link:'https://www.imo.org/en/OurWork/Pages/Home.aspx'},
   ];
   const [cat,setCat]=useState('All');
   const cats=['All','Safety','Environment','Navigation','Certification','ECDIS','Regulations','Security','Management','Labour'];
@@ -2757,11 +2758,11 @@ function MaritimeLibraryPage({setTab}){
   return(
     <div className="section">
       <div className="sec-hdr">
-        <div className="sec-title">ðŸ“š Maritime Knowledge Hub</div>
+        <div className="sec-title">📚 Maritime Knowledge Hub</div>
         <span className="badge">{BOOKS.length} publications</span>
       </div>
       <div className="info-box" style={{marginBottom:'1rem'}}>
-        ðŸ“– Essential maritime publications â€” SOLAS, MARPOL, STCW, COLREGS and more. Links open official IMO/ILO resources.
+        📖 Essential maritime publications — SOLAS, MARPOL, STCW, COLREGS and more. Links open official IMO/ILO resources.
       </div>
       <div className="fbar" style={{marginBottom:'1.2rem'}}>
         {cats.map(c=><button key={c} className={`fbtn ${cat===c?'active':''}`} onClick={()=>setCat(c)}>{c}</button>)}
@@ -2786,7 +2787,7 @@ function MaritimeLibraryPage({setTab}){
               style={{display:'flex',alignItems:'center',justifyContent:'center',gap:6,padding:'8px',background:`${b.color}10`,border:`1px solid ${b.color}30`,borderRadius:8,color:b.color,fontSize:'0.74rem',fontWeight:600,textDecoration:'none',transition:'all 0.2s'}}
               onMouseEnter={e=>e.currentTarget.style.background=`${b.color}20`}
               onMouseLeave={e=>e.currentTarget.style.background=`${b.color}10`}>
-              ðŸ“– Open Publication â†’
+              📖 Open Publication →
             </a>
           </div>
         ))}
@@ -2815,7 +2816,7 @@ function AdminPage({notify,routes,setRoutes,charts,setCharts,sheetRoutes,sheetCh
       const c=await signInWithEmailAndPassword(auth,email,pass);
       if(c.user.email!==ADMIN_EMAIL){
         await signOut(auth);
-        setErr('âŒ Access denied. This portal is for admins only.');
+        setErr('❌ Access denied. This portal is for admins only.');
         setLoading(false);return;
       }
     }
@@ -2835,7 +2836,7 @@ function AdminPage({notify,routes,setRoutes,charts,setCharts,sheetRoutes,sheetCh
       const ref=await addDoc(collection(db,'routes'),data);
       setRoutes(r=>[...r,{id:ref.id,...data}]);
       setNr({fileName:'',fileUrl:'',portName:'',keywords:'',type:'Ocean'});
-      notify('Route saved âœ…','success');
+      notify('Route saved ✅','success');
     }catch(e){notify('Error: '+e.message,'error');}
   };
 
@@ -2847,7 +2848,7 @@ function AdminPage({notify,routes,setRoutes,charts,setCharts,sheetRoutes,sheetCh
       const ref=await addDoc(collection(db,'charts'),data);
       setCharts(c=>[...c,{id:ref.id,...data}]);
       setNc({fileName:'',fileUrl:'',portName:'',brand:'furuno',region:'',keywords:''});
-      notify('Chart saved âœ…','success');
+      notify('Chart saved ✅','success');
     }catch(e){notify('Error: '+e.message,'error');}
   };
 
@@ -2858,49 +2859,49 @@ function AdminPage({notify,routes,setRoutes,charts,setCharts,sheetRoutes,sheetCh
     try{
       await setDoc(doc(db,'users',u.id),{blocked:true,blockedAt:serverTimestamp()},{merge:true});
       setUsers(us=>us.map(x=>x.id===u.id?{...x,blocked:true}:x));
-      notify(`â›” ${u.name||u.email} blocked`,'success');
+      notify(`⛔ ${u.name||u.email} blocked`,'success');
     }catch{notify('Failed to block user','error');}
   };
   const unblockUser=async(u)=>{
     try{
       await setDoc(doc(db,'users',u.id),{blocked:false,blockedAt:null},{merge:true});
       setUsers(us=>us.map(x=>x.id===u.id?{...x,blocked:false}:x));
-      notify(`âœ… ${u.name||u.email} unblocked`,'success');
+      notify(`✅ ${u.name||u.email} unblocked`,'success');
     }catch{notify('Failed to unblock user','error');}
   };
   if(!user) return(
     <div className="auth-wrap">
       <div className="auth-card">
         <div className="auth-logo">
-          <div className="auth-icon" style={{background:'linear-gradient(135deg,var(--gold),var(--gold2))'}}>ðŸ›¡</div>
+          <div className="auth-icon" style={{background:'linear-gradient(135deg,var(--gold),var(--gold2))'}}>🛡</div>
           <div className="auth-title">Admin Portal</div>
-          <div className="auth-sub">NavisphereX Marine â€” Admin Only</div>
+          <div className="auth-sub">NavisphereX Marine — Admin Only</div>
         </div>
         <div className="ff"><label className="fl">Admin Email</label><input className="fi" type="email" placeholder="admin@example.com" value={email} onChange={e=>setEmail(e.target.value)} onKeyDown={e=>e.key==='Enter'&&login()}/></div>
-        <div className="ff"><label className="fl">Password</label><input className="fi" type="password" placeholder="â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢" value={pass} onChange={e=>setPass(e.target.value)} onKeyDown={e=>e.key==='Enter'&&login()}/></div>
+        <div className="ff"><label className="fl">Password</label><input className="fi" type="password" placeholder="••••••••" value={pass} onChange={e=>setPass(e.target.value)} onKeyDown={e=>e.key==='Enter'&&login()}/></div>
         {err&&<div className="err-box">{err}</div>}
-        <button className="submit-btn" style={{background:'linear-gradient(135deg,var(--gold),var(--gold2))',color:'#000'}} onClick={login} disabled={loading}>{loading?'Logging inâ€¦':'ðŸ›¡ ADMIN LOGIN'}</button>
+        <button className="submit-btn" style={{background:'linear-gradient(135deg,var(--gold),var(--gold2))',color:'#000'}} onClick={login} disabled={loading}>{loading?'Logging in…':'🛡 ADMIN LOGIN'}</button>
       </div>
     </div>
   );
 
   const sides=[
-    {k:'dashboard',   i:'ðŸ“Š', l:'Dashboard'},
-    {k:'add-route',   i:'ðŸ—º', l:'Add Route'},
-    {k:'add-chart',   i:'ðŸ“Š', l:'Add Chart'},
-    {k:'routes',      i:'ðŸ“‹', l:'Manage Routes'},
-    {k:'charts',      i:'ðŸ—‚', l:'Manage Charts'},
-    {k:'sheet-routes',i:'ðŸ”„', l:'Sheet Routes'},
-    {k:'sheet-charts',i:'ðŸ”„', l:'Sheet Charts'},
-    {k:'port-search', i:'âš“', l:'Port Search'},
-    {k:'users',       i:'ðŸ‘¥', l:'User Database'},
+    {k:'dashboard',   i:'📊', l:'Dashboard'},
+    {k:'add-route',   i:'🗺', l:'Add Route'},
+    {k:'add-chart',   i:'📊', l:'Add Chart'},
+    {k:'routes',      i:'📋', l:'Manage Routes'},
+    {k:'charts',      i:'🗂', l:'Manage Charts'},
+    {k:'sheet-routes',i:'🔄', l:'Sheet Routes'},
+    {k:'sheet-charts',i:'🔄', l:'Sheet Charts'},
+    {k:'port-search', i:'⚓', l:'Port Search'},
+    {k:'users',       i:'👥', l:'User Database'},
   ];
 
   const GDriveHelp=()=>(
     <div className="info-box" style={{fontSize:'0.74rem'}}>
-      ðŸ“ <strong style={{color:'var(--text)'}}>Google Drive Link Guide:</strong><br/>
+      📁 <strong style={{color:'var(--text)'}}>Google Drive Link Guide:</strong><br/>
       1. Upload file to <strong>drive.google.com</strong> (ecdisroutes@gmail.com)<br/>
-      2. Right click â†’ Share â†’ Anyone with link<br/>
+      2. Right click → Share → Anyone with link<br/>
       3. Copy link: <code style={{color:'var(--cyan)'}}>drive.google.com/file/d/ID/view</code><br/>
       4. Convert to: <code style={{color:'var(--green)'}}>drive.google.com/uc?export=download&amp;id=ID</code>
     </div>
@@ -2910,7 +2911,7 @@ function AdminPage({notify,routes,setRoutes,charts,setCharts,sheetRoutes,sheetCh
     <div>
       <div className="adm-mob-tabs">
         {sides.map(s=><button key={s.k} className={`amtab ${section===s.k?'active':''}`} onClick={()=>setSection(s.k)}>{s.i} {s.l}</button>)}
-        <button className="amtab" onClick={()=>signOut(auth)}>ðŸšª Logout</button>
+        <button className="amtab" onClick={()=>signOut(auth)}>🚪 Logout</button>
       </div>
       <div className="adm-layout">
         <div className="adm-sidebar">
@@ -2920,8 +2921,8 @@ function AdminPage({notify,routes,setRoutes,charts,setCharts,sheetRoutes,sheetCh
           </div>
           <div>
             <div className="s-label">Account</div>
-            <div className="s-item" style={{fontSize:'0.7rem',color:'var(--text3)'}}><span>ðŸ‘¤</span>{user.email}</div>
-            <div className="s-item" onClick={()=>signOut(auth)}><span>ðŸšª</span>Logout</div>
+            <div className="s-item" style={{fontSize:'0.7rem',color:'var(--text3)'}}><span>👤</span>{user.email}</div>
+            <div className="s-item" onClick={()=>signOut(auth)}><span>🚪</span>Logout</div>
           </div>
         </div>
 
@@ -2929,15 +2930,15 @@ function AdminPage({notify,routes,setRoutes,charts,setCharts,sheetRoutes,sheetCh
 
           {section==='dashboard'&&(
             <>
-              <div className="a-hdr"><div className="a-title">ðŸ“Š Dashboard</div><span style={{fontSize:'0.72rem',color:'var(--green)'}}>ðŸ”¥ Firebase + Google Drive</span></div>
+              <div className="a-hdr"><div className="a-title">📊 Dashboard</div><span style={{fontSize:'0.72rem',color:'var(--green)'}}>🔥 Firebase + Google Drive</span></div>
               <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(145px,1fr))',gap:'0.8rem',marginBottom:'1.4rem'}}>
                 {[
-                  {l:'RTZ Routes (DB)',  v:routes.length,    i:'ðŸ—º', c:'var(--cyan)'},
-                  {l:'Chart Files (DB)', v:charts.length,    i:'ðŸ“Š', c:'var(--gold)'},
-                  {l:'Sheet Routes',     v:sheetRoutes.length,i:'ðŸ”„',c:'var(--green)'},
-                  {l:'Sheet Charts',     v:sheetCharts.length,i:'ðŸ”„',c:'#A78BFA'},
-                  {l:'Links Active',     v:[...routes,...charts].filter(f=>f.fileUrl).length,i:'âœ…',c:'var(--green)'},
-                  {l:'ECDIS Brands',     v:ECDIS_BRANDS.length,i:'ðŸ–¥',c:'var(--text2)'},
+                  {l:'RTZ Routes (DB)',  v:routes.length,    i:'🗺', c:'var(--cyan)'},
+                  {l:'Chart Files (DB)', v:charts.length,    i:'📊', c:'var(--gold)'},
+                  {l:'Sheet Routes',     v:sheetRoutes.length,i:'🔄',c:'var(--green)'},
+                  {l:'Sheet Charts',     v:sheetCharts.length,i:'🔄',c:'#A78BFA'},
+                  {l:'Links Active',     v:[...routes,...charts].filter(f=>f.fileUrl).length,i:'✅',c:'var(--green)'},
+                  {l:'ECDIS Brands',     v:ECDIS_BRANDS.length,i:'🖥',c:'var(--text2)'},
                 ].map(s=>(
                   <div key={s.l} className="file-card" style={{padding:'1rem'}}>
                     <div style={{fontSize:'1.5rem',marginBottom:4}}>{s.i}</div>
@@ -2947,12 +2948,12 @@ function AdminPage({notify,routes,setRoutes,charts,setCharts,sheetRoutes,sheetCh
                 ))}
               </div>
               <div style={{background:'var(--card)',border:'1px solid var(--border)',borderRadius:12,padding:'1rem'}}>
-                <div style={{fontFamily:'Orbitron,monospace',fontSize:'0.78rem',marginBottom:'0.8rem',color:'var(--gold)'}}>ðŸ“‹ How to Add Files</div>
+                <div style={{fontFamily:'Orbitron,monospace',fontSize:'0.78rem',marginBottom:'0.8rem',color:'var(--gold)'}}>📋 How to Add Files</div>
                 {[
-                  '1. FIREBASE (manual): Upload .rtz or chart to Google Drive, get direct link â†’ use Add Route / Add Chart',
-                  '2. GOOGLE SHEET (auto): Add rows to your Google Sheet â†’ App Script syncs â†’ click Sheet Routes or Sheet Charts',
-                  '3. Sheet data updates live â€” click Sync Now in Sheet sections to pull latest',
-                  '4. Firebase routes/charts need login to download â€” see User Database tab',
+                  '1. FIREBASE (manual): Upload .rtz or chart to Google Drive, get direct link → use Add Route / Add Chart',
+                  '2. GOOGLE SHEET (auto): Add rows to your Google Sheet → App Script syncs → click Sheet Routes or Sheet Charts',
+                  '3. Sheet data updates live — click Sync Now in Sheet sections to pull latest',
+                  '4. Firebase routes/charts need login to download — see User Database tab',
                   '5. Google Sheet rows are shown as-is from the sheet data',
                 ].map((t,i)=><div key={i} style={{padding:'7px 0',borderBottom:'1px solid var(--border)',fontSize:'0.79rem',color:'var(--text2)'}}>{t}</div>)}
               </div>
@@ -2961,20 +2962,20 @@ function AdminPage({notify,routes,setRoutes,charts,setCharts,sheetRoutes,sheetCh
 
           {section==='add-route'&&(
             <>
-              <div className="a-hdr"><div className="a-title">ðŸ—º Add RTZ Route</div></div>
+              <div className="a-hdr"><div className="a-title">🗺 Add RTZ Route</div></div>
               <GDriveHelp/>
               <div style={{background:'var(--card)',border:'1px solid var(--border)',borderRadius:12,padding:'1.2rem'}}>
                 <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
                   <div className="ff" style={{gridColumn:'1/-1'}}>
-                    <label className="fl">ðŸ“ RTZ File Name * (exact name)</label>
+                    <label className="fl">📁 RTZ File Name * (exact name)</label>
                     <input className="fi" placeholder="mumbaitosingapore.rtz" value={nr.fileName} onChange={e=>setNr(r=>({...r,fileName:e.target.value}))}/>
                   </div>
                   <div className="ff" style={{gridColumn:'1/-1'}}>
-                    <label className="fl">ðŸ”— Google Drive Direct Download Link *</label>
+                    <label className="fl">🔗 Google Drive Direct Download Link *</label>
                     <input className="fi" placeholder="https://drive.google.com/uc?export=download&id=XXXX" value={nr.fileUrl} onChange={e=>setNr(r=>({...r,fileUrl:e.target.value}))}/>
                   </div>
                   <div className="ff">
-                    <label className="fl">ðŸ“ Port / Route Description</label>
+                    <label className="fl">📍 Port / Route Description</label>
                     <input className="fi" placeholder="Mumbai to Singapore" value={nr.portName} onChange={e=>setNr(r=>({...r,portName:e.target.value}))}/>
                   </div>
                   <div className="ff">
@@ -2984,22 +2985,22 @@ function AdminPage({notify,routes,setRoutes,charts,setCharts,sheetRoutes,sheetCh
                     </select>
                   </div>
                   <div className="ff" style={{gridColumn:'1/-1'}}>
-                    <label className="fl">ðŸ” Search Keywords (space separated)</label>
+                    <label className="fl">🔍 Search Keywords (space separated)</label>
                     <input className="fi" placeholder="mum sin india ocean" value={nr.keywords} onChange={e=>setNr(r=>({...r,keywords:e.target.value}))}/>
                   </div>
                 </div>
-                <button className="btn btn-primary" onClick={saveRoute}>âœ… Save Route to Firebase</button>
+                <button className="btn btn-primary" onClick={saveRoute}>✅ Save Route to Firebase</button>
               </div>
             </>
           )}
 
           {section==='add-chart'&&(
             <>
-              <div className="a-hdr"><div className="a-title">ðŸ“Š Add Chart File</div></div>
+              <div className="a-hdr"><div className="a-title">📊 Add Chart File</div></div>
               <GDriveHelp/>
               <div style={{background:'var(--card)',border:'1px solid var(--border)',borderRadius:12,padding:'1.2rem'}}>
                 <div className="ff">
-                  <label className="fl">ðŸ–¥ Select ECDIS Brand *</label>
+                  <label className="fl">🖥 Select ECDIS Brand *</label>
                   <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(100px,1fr))',gap:5,marginBottom:8}}>
                     {ECDIS_BRANDS.map(b=>(
                       <div key={b.id} onClick={()=>setNc(c=>({...c,brand:b.id}))}
@@ -3014,15 +3015,15 @@ function AdminPage({notify,routes,setRoutes,charts,setCharts,sheetRoutes,sheetCh
                 </div>
                 <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
                   <div className="ff">
-                    <label className="fl">ðŸ“ Chart File Name *</label>
+                    <label className="fl">📁 Chart File Name *</label>
                     <input className="fi" placeholder="mumbai_furuno.bin" value={nc.fileName} onChange={e=>setNc(c=>({...c,fileName:e.target.value}))}/>
                   </div>
                   <div className="ff">
-                    <label className="fl">âš“ Port Name *</label>
+                    <label className="fl">⚓ Port Name *</label>
                     <input className="fi" placeholder="Mumbai" value={nc.portName} onChange={e=>setNc(c=>({...c,portName:e.target.value}))}/>
                   </div>
                   <div className="ff" style={{gridColumn:'1/-1'}}>
-                    <label className="fl">ðŸ”— Google Drive Direct Download Link *</label>
+                    <label className="fl">🔗 Google Drive Direct Download Link *</label>
                     <input className="fi" placeholder="https://drive.google.com/uc?export=download&id=XXXX" value={nc.fileUrl} onChange={e=>setNc(c=>({...c,fileUrl:e.target.value}))}/>
                   </div>
                   <div className="ff">
@@ -3034,14 +3035,14 @@ function AdminPage({notify,routes,setRoutes,charts,setCharts,sheetRoutes,sheetCh
                     <input className="fi" placeholder="west coast india" value={nc.keywords} onChange={e=>setNc(c=>({...c,keywords:e.target.value}))}/>
                   </div>
                 </div>
-                <button className="btn btn-gold" onClick={saveChart}>âœ… Save Chart to Firebase</button>
+                <button className="btn btn-gold" onClick={saveChart}>✅ Save Chart to Firebase</button>
               </div>
             </>
           )}
 
           {section==='routes'&&(
             <>
-              <div className="a-hdr"><div className="a-title">ðŸ“‹ Manage Routes</div><span className="badge">{routes.length}</span></div>
+              <div className="a-hdr"><div className="a-title">📋 Manage Routes</div><span className="badge">{routes.length}</span></div>
               <div className="tw">
                 <table className="tbl">
                   <thead><tr><th>File Name</th><th>Port/Route</th><th>Type</th><th>Link</th><th>Del</th></tr></thead>
@@ -3050,10 +3051,10 @@ function AdminPage({notify,routes,setRoutes,charts,setCharts,sheetRoutes,sheetCh
                     :routes.map(r=>(
                     <tr key={r.id}>
                       <td><span style={{fontFamily:'Orbitron,monospace',fontSize:'0.68rem',color:'var(--cyan)'}}>{r.fileName}</span></td>
-                      <td style={{color:'var(--text2)',fontSize:'0.76rem'}}>{r.portName||'â€”'}</td>
-                      <td style={{fontSize:'0.72rem',color:'var(--green)'}}>{r.type||'â€”'}</td>
-                      <td>{r.fileUrl?<a href={r.fileUrl} target="_blank" rel="noreferrer" style={{color:'var(--green)',fontSize:'0.72rem'}}>âœ… Active</a>:<span style={{color:'var(--red)',fontSize:'0.72rem'}}>âŒ Missing</span>}</td>
-                      <td><button className="btn btn-danger" style={{padding:'4px 8px',fontSize:'0.7rem'}} onClick={()=>deleteRoute(r.id)}>ðŸ—‘</button></td>
+                      <td style={{color:'var(--text2)',fontSize:'0.76rem'}}>{r.portName||'—'}</td>
+                      <td style={{fontSize:'0.72rem',color:'var(--green)'}}>{r.type||'—'}</td>
+                      <td>{r.fileUrl?<a href={r.fileUrl} target="_blank" rel="noreferrer" style={{color:'var(--green)',fontSize:'0.72rem'}}>✅ Active</a>:<span style={{color:'var(--red)',fontSize:'0.72rem'}}>❌ Missing</span>}</td>
+                      <td><button className="btn btn-danger" style={{padding:'4px 8px',fontSize:'0.7rem'}} onClick={()=>deleteRoute(r.id)}>🗑</button></td>
                     </tr>
                   ))}</tbody>
                 </table>
@@ -3063,7 +3064,7 @@ function AdminPage({notify,routes,setRoutes,charts,setCharts,sheetRoutes,sheetCh
 
           {section==='charts'&&(
             <>
-              <div className="a-hdr"><div className="a-title">ðŸ—‚ Manage Charts</div><span className="badge badge-gold">{charts.length}</span></div>
+              <div className="a-hdr"><div className="a-title">🗂 Manage Charts</div><span className="badge badge-gold">{charts.length}</span></div>
               <div className="tw">
                 <table className="tbl">
                   <thead><tr><th>File Name</th><th>Port</th><th>Brand</th><th>Link</th><th>Del</th></tr></thead>
@@ -3072,10 +3073,10 @@ function AdminPage({notify,routes,setRoutes,charts,setCharts,sheetRoutes,sheetCh
                     :charts.map(c=>(
                     <tr key={c.id}>
                       <td><span style={{fontFamily:'Orbitron,monospace',fontSize:'0.68rem',color:'var(--gold)'}}>{c.fileName}</span></td>
-                      <td style={{color:'var(--text2)',fontSize:'0.76rem'}}>{c.portName||'â€”'}</td>
-                      <td style={{fontSize:'0.72rem',color:'#A78BFA'}}>{c.brand||'â€”'}</td>
-                      <td>{c.fileUrl?<a href={c.fileUrl} target="_blank" rel="noreferrer" style={{color:'var(--green)',fontSize:'0.72rem'}}>âœ… Active</a>:<span style={{color:'var(--red)',fontSize:'0.72rem'}}>âŒ Missing</span>}</td>
-                      <td><button className="btn btn-danger" style={{padding:'4px 8px',fontSize:'0.7rem'}} onClick={()=>deleteChart(c.id)}>ðŸ—‘</button></td>
+                      <td style={{color:'var(--text2)',fontSize:'0.76rem'}}>{c.portName||'—'}</td>
+                      <td style={{fontSize:'0.72rem',color:'#A78BFA'}}>{c.brand||'—'}</td>
+                      <td>{c.fileUrl?<a href={c.fileUrl} target="_blank" rel="noreferrer" style={{color:'var(--green)',fontSize:'0.72rem'}}>✅ Active</a>:<span style={{color:'var(--red)',fontSize:'0.72rem'}}>❌ Missing</span>}</td>
+                      <td><button className="btn btn-danger" style={{padding:'4px 8px',fontSize:'0.7rem'}} onClick={()=>deleteChart(c.id)}>🗑</button></td>
                     </tr>
                   ))}</tbody>
                 </table>
@@ -3086,22 +3087,22 @@ function AdminPage({notify,routes,setRoutes,charts,setCharts,sheetRoutes,sheetCh
           {section==='sheet-routes'&&(
             <>
               <div className="a-hdr">
-                <div className="a-title">ðŸ”„ Google Sheet â€” ECDIS Routes</div>
+                <div className="a-title">🔄 Google Sheet — ECDIS Routes</div>
                 <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
                   <span className="badge">{sheetRoutes.length} rows</span>
                   <button className="btn btn-primary" style={{padding:'5px 12px',fontSize:'0.72rem'}} onClick={refreshSheets} disabled={sheetLoading}>
-                    {sheetLoading?'â³ Syncingâ€¦':'ðŸ”„ Sync Now'}
+                    {sheetLoading?'⏳ Syncing…':'🔄 Sync Now'}
                   </button>
                 </div>
               </div>
               <div className="info-box" style={{fontSize:'0.74rem'}}>
-                ðŸ“¡ <strong style={{color:'var(--text)'}}>Live Google Sheet Database</strong> â€” auto-refreshes from your Google Sheet via App Script. Click <strong>Sync Now</strong> to pull the latest data. Rows appear here as soon as you add them to the sheet.<br/>
+                📡 <strong style={{color:'var(--text)'}}>Live Google Sheet Database</strong> — auto-refreshes from your Google Sheet via App Script. Click <strong>Sync Now</strong> to pull the latest data. Rows appear here as soon as you add them to the sheet.<br/>
                 <span style={{color:'var(--cyan)'}}>Sheet ID: 1ILzyQODb4Ig2mdq9auZ7aJOfdKBBM01t192VE59WbCE</span>
               </div>
               {sheetLoading
-                ?<div className="loading"><div className="spin"/><span>Fetching from Google Sheetâ€¦</span></div>
+                ?<div className="loading"><div className="spin"/><span>Fetching from Google Sheet…</span></div>
                 :sheetRoutes.length===0
-                  ?<div className="empty"><div className="empty-icon">ðŸ—º</div><div className="empty-t">No Rows Found</div><div className="empty-d">Add rows to your Google Sheet and click Sync Now</div></div>
+                  ?<div className="empty"><div className="empty-icon">🗺</div><div className="empty-t">No Rows Found</div><div className="empty-d">Add rows to your Google Sheet and click Sync Now</div></div>
                   :<div className="tw">
                     <table className="tbl">
                       <thead>
@@ -3118,9 +3119,9 @@ function AdminPage({notify,routes,setRoutes,charts,setCharts,sheetRoutes,sheetCh
                               <td key={col} style={{fontSize:'0.76rem',maxWidth:200,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
                                 {col.toLowerCase().includes('url')||col.toLowerCase().includes('link')
                                   ?row[col]
-                                    ?<a href={row[col]} target="_blank" rel="noreferrer" style={{color:'var(--green)',fontSize:'0.7rem'}}>âœ… Link</a>
-                                    :<span style={{color:'var(--red)',fontSize:'0.7rem'}}>âŒ</span>
-                                  :<span style={{color:col.toLowerCase().includes('name')||col.toLowerCase().includes('file')?'var(--cyan)':'var(--text2)'}}>{row[col]||'â€”'}</span>
+                                    ?<a href={row[col]} target="_blank" rel="noreferrer" style={{color:'var(--green)',fontSize:'0.7rem'}}>✅ Link</a>
+                                    :<span style={{color:'var(--red)',fontSize:'0.7rem'}}>❌</span>
+                                  :<span style={{color:col.toLowerCase().includes('name')||col.toLowerCase().includes('file')?'var(--cyan)':'var(--text2)'}}>{row[col]||'—'}</span>
                                 }
                               </td>
                             ))}
@@ -3131,7 +3132,7 @@ function AdminPage({notify,routes,setRoutes,charts,setCharts,sheetRoutes,sheetCh
                   </div>
               }
               <div style={{marginTop:'1rem',padding:'0.9rem',background:'var(--card)',border:'1px solid var(--border)',borderRadius:10,fontSize:'0.76rem',color:'var(--text2)'}}>
-                ðŸ’¡ <strong style={{color:'var(--gold)'}}>How to add routes:</strong> Open your Google Sheet â†’ Add a new row with file name, Google Drive link, port name, type, keywords â†’ The sheet auto-updates via App Script â†’ Click <strong>Sync Now</strong> to reflect here.
+                💡 <strong style={{color:'var(--gold)'}}>How to add routes:</strong> Open your Google Sheet → Add a new row with file name, Google Drive link, port name, type, keywords → The sheet auto-updates via App Script → Click <strong>Sync Now</strong> to reflect here.
               </div>
             </>
           )}
@@ -3139,22 +3140,22 @@ function AdminPage({notify,routes,setRoutes,charts,setCharts,sheetRoutes,sheetCh
           {section==='sheet-charts'&&(
             <>
               <div className="a-hdr">
-                <div className="a-title">ðŸ”„ Google Sheet â€” ECDIS Charts</div>
+                <div className="a-title">🔄 Google Sheet — ECDIS Charts</div>
                 <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
                   <span className="badge badge-gold">{sheetCharts.length} rows</span>
                   <button className="btn btn-gold" style={{padding:'5px 12px',fontSize:'0.72rem'}} onClick={refreshSheets} disabled={sheetLoading}>
-                    {sheetLoading?'â³ Syncingâ€¦':'ðŸ”„ Sync Now'}
+                    {sheetLoading?'⏳ Syncing…':'🔄 Sync Now'}
                   </button>
                 </div>
               </div>
               <div className="info-box" style={{fontSize:'0.74rem'}}>
-                ðŸ“¡ <strong style={{color:'var(--text)'}}>Live Google Sheet Database</strong> â€” includes ECDIS model info. Auto-refreshes from your Google Drive / App Script pipeline.<br/>
+                📡 <strong style={{color:'var(--text)'}}>Live Google Sheet Database</strong> — includes ECDIS model info. Auto-refreshes from your Google Drive / App Script pipeline.<br/>
                 <span style={{color:'var(--gold)'}}>Sheet ID: 1zuZxqUSFtxzg-E8CkTGj01YehhXCZIPodCisCicpxRA</span>
               </div>
               {sheetLoading
-                ?<div className="loading"><div className="spin"/><span>Fetching from Google Sheetâ€¦</span></div>
+                ?<div className="loading"><div className="spin"/><span>Fetching from Google Sheet…</span></div>
                 :sheetCharts.length===0
-                  ?<div className="empty"><div className="empty-icon">ðŸ“Š</div><div className="empty-t">No Rows Found</div><div className="empty-d">Add rows to your ECDIS Charts Google Sheet and click Sync Now</div></div>
+                  ?<div className="empty"><div className="empty-icon">📊</div><div className="empty-t">No Rows Found</div><div className="empty-d">Add rows to your ECDIS Charts Google Sheet and click Sync Now</div></div>
                   :<>
                     {/* Brand summary cards */}
                     <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(120px,1fr))',gap:6,marginBottom:'1rem'}}>
@@ -3190,11 +3191,11 @@ function AdminPage({notify,routes,setRoutes,charts,setCharts,sheetRoutes,sheetCh
                                   <td key={col} style={{fontSize:'0.76rem',maxWidth:180,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
                                     {col.toLowerCase().includes('url')||col.toLowerCase().includes('link')
                                       ?row[col]
-                                        ?<a href={row[col]} target="_blank" rel="noreferrer" style={{color:'var(--green)',fontSize:'0.7rem'}}>âœ… Link</a>
-                                        :<span style={{color:'var(--red)',fontSize:'0.7rem'}}>âŒ</span>
+                                        ?<a href={row[col]} target="_blank" rel="noreferrer" style={{color:'var(--green)',fontSize:'0.7rem'}}>✅ Link</a>
+                                        :<span style={{color:'var(--red)',fontSize:'0.7rem'}}>❌</span>
                                       :col===brandCol&&brand
                                         ?<span style={{color:brand.color,fontWeight:600}}>{brand.emoji} {row[col]}</span>
-                                        :<span style={{color:col.toLowerCase().includes('model')?'#A78BFA':col.toLowerCase().includes('name')||col.toLowerCase().includes('file')?'var(--gold)':'var(--text2)'}}>{row[col]||'â€”'}</span>
+                                        :<span style={{color:col.toLowerCase().includes('model')?'#A78BFA':col.toLowerCase().includes('name')||col.toLowerCase().includes('file')?'var(--gold)':'var(--text2)'}}>{row[col]||'—'}</span>
                                     }
                                   </td>
                                 ))}
@@ -3207,7 +3208,7 @@ function AdminPage({notify,routes,setRoutes,charts,setCharts,sheetRoutes,sheetCh
                   </>
               }
               <div style={{marginTop:'1rem',padding:'0.9rem',background:'var(--card)',border:'1px solid var(--border)',borderRadius:10,fontSize:'0.76rem',color:'var(--text2)'}}>
-                ðŸ’¡ <strong style={{color:'var(--gold)'}}>How to add charts:</strong> Open your ECDIS Charts Google Sheet â†’ Add a row with file name, brand, ECDIS model, port, Google Drive link â†’ App Script updates the sheet â†’ Click <strong>Sync Now</strong> here.
+                💡 <strong style={{color:'var(--gold)'}}>How to add charts:</strong> Open your ECDIS Charts Google Sheet → Add a row with file name, brand, ECDIS model, port, Google Drive link → App Script updates the sheet → Click <strong>Sync Now</strong> here.
               </div>
             </>
           )}
@@ -3215,16 +3216,16 @@ function AdminPage({notify,routes,setRoutes,charts,setCharts,sheetRoutes,sheetCh
           {section==='port-search'&&(
             <>
               <div className="a-hdr">
-                <div className="a-title">âš“ Port Search Database</div>
+                <div className="a-title">⚓ Port Search Database</div>
                 <div style={{display:'flex',gap:8,alignItems:'center'}}>
                   <span className="badge">{sheetRoutes.length>0||sheetCharts.length>0?'Synced':'Not synced'}</span>
                   <button className="btn btn-primary" style={{padding:'5px 12px',fontSize:'0.72rem'}} onClick={refreshSheets} disabled={sheetLoading}>
-                    {sheetLoading?'â³ Syncingâ€¦':'ðŸ”„ Sync Port Database'}
+                    {sheetLoading?'⏳ Syncing…':'🔄 Sync Port Database'}
                   </button>
                 </div>
               </div>
               <div className="info-box">
-                ðŸ“¡ Syncs all 3000+ ports from your Google Sheet into the Port Search and Route Planner. Click <strong>Sync Port Database</strong> to reload all port data from your sheet.
+                📡 Syncs all 3000+ ports from your Google Sheet into the Port Search and Route Planner. Click <strong>Sync Port Database</strong> to reload all port data from your sheet.
                 <br/><span style={{color:'var(--cyan)',fontSize:'0.72rem'}}>Sheet ID: 1BFpUuo-nqS3MaUTtANtKT4CFem-X3nZJYGRADZtuIdk</span>
               </div>
               <PortSearchPage portsDb={sheetRoutes.length>0?PORTS_DB:[]} sheetLoading={sheetLoading} refreshSheets={refreshSheets}/>
@@ -3234,20 +3235,20 @@ function AdminPage({notify,routes,setRoutes,charts,setCharts,sheetRoutes,sheetCh
           {section==='users'&&(
             <>
               <div className="a-hdr">
-                <div className="a-title">ðŸ‘¥ User Database</div>
+                <div className="a-title">👥 User Database</div>
                 <div style={{display:'flex',gap:8,flexWrap:'wrap',alignItems:'center'}}>
                   <span className="badge badge-green">{users.length} registered</span>
                   <span className="badge" style={{background:'rgba(255,60,60,0.15)',color:'#ff6b6b',border:'1px solid rgba(255,60,60,0.3)'}}>
                     {users.filter(u=>u.blocked).length} blocked
                   </span>
-                  <button className="btn btn-secondary" style={{padding:'5px 10px',fontSize:'0.72rem'}} onClick={loadUsers}>ðŸ”„ Refresh</button>
+                  <button className="btn btn-secondary" style={{padding:'5px 10px',fontSize:'0.72rem'}} onClick={loadUsers}>🔄 Refresh</button>
                 </div>
               </div>
               <div className="info-box">
-                ðŸ›¡ <strong style={{color:'var(--text)'}}>Access Control</strong> â€” Block suspicious users instantly. Blocked users are auto-logged out and shown a warning with your contact info when they try to login again.
+                🛡 <strong style={{color:'var(--text)'}}>Access Control</strong> — Block suspicious users instantly. Blocked users are auto-logged out and shown a warning with your contact info when they try to login again.
               </div>
               {users.length===0
-                ?<div className="empty"><div className="empty-icon">ðŸ‘¥</div><div className="empty-t">No Users Yet</div><div className="empty-d">Users appear here after they register</div></div>
+                ?<div className="empty"><div className="empty-icon">👥</div><div className="empty-t">No Users Yet</div><div className="empty-d">Users appear here after they register</div></div>
                 :<div className="tw">
                   <table className="tbl">
                     <thead>
@@ -3259,15 +3260,15 @@ function AdminPage({notify,routes,setRoutes,charts,setCharts,sheetRoutes,sheetCh
                       <tr key={u.id} style={{opacity:u.blocked?0.7:1,background:u.blocked?'rgba(255,60,60,0.04)':'transparent'}}>
                         <td style={{color:'var(--text3)'}}>{i+1}</td>
                         <td style={{color:u.blocked?'#ff6b6b':'var(--cyan)',fontWeight:600}}>
-                          {u.blocked&&<span style={{marginRight:4}}>â›”</span>}{u.name||'â€”'}
+                          {u.blocked&&<span style={{marginRight:4}}>⛔</span>}{u.name||'—'}
                         </td>
                         <td style={{color:'var(--text2)',fontSize:'0.78rem'}}>{u.email}</td>
-                        <td style={{color:'var(--gold)',fontSize:'0.78rem'}}>{u.phone||'â€”'}</td>
-                        <td style={{color:'var(--text2)',fontSize:'0.72rem'}}>{u.createdAt?.toDate?.()?.toLocaleDateString()||'â€”'}</td>
+                        <td style={{color:'var(--gold)',fontSize:'0.78rem'}}>{u.phone||'—'}</td>
+                        <td style={{color:'var(--text2)',fontSize:'0.72rem'}}>{u.createdAt?.toDate?.()?.toLocaleDateString()||'—'}</td>
                         <td>
                           {u.blocked
-                            ?<span style={{background:'rgba(255,60,60,0.15)',color:'#ff6b6b',border:'1px solid rgba(255,60,60,0.3)',borderRadius:5,padding:'2px 8px',fontSize:'0.68rem',fontWeight:700}}>â›” BLOCKED</span>
-                            :<span style={{background:'rgba(0,200,100,0.12)',color:'var(--green)',border:'1px solid rgba(0,200,100,0.25)',borderRadius:5,padding:'2px 8px',fontSize:'0.68rem',fontWeight:700}}>âœ… ACTIVE</span>
+                            ?<span style={{background:'rgba(255,60,60,0.15)',color:'#ff6b6b',border:'1px solid rgba(255,60,60,0.3)',borderRadius:5,padding:'2px 8px',fontSize:'0.68rem',fontWeight:700}}>⛔ BLOCKED</span>
+                            :<span style={{background:'rgba(0,200,100,0.12)',color:'var(--green)',border:'1px solid rgba(0,200,100,0.25)',borderRadius:5,padding:'2px 8px',fontSize:'0.68rem',fontWeight:700}}>✅ ACTIVE</span>
                           }
                         </td>
                         <td>
@@ -3275,12 +3276,12 @@ function AdminPage({notify,routes,setRoutes,charts,setCharts,sheetRoutes,sheetCh
                             ?<button
                                 style={{background:'rgba(0,200,100,0.15)',color:'var(--green)',border:'1px solid rgba(0,200,100,0.3)',borderRadius:6,padding:'4px 10px',fontSize:'0.68rem',fontWeight:700,cursor:'pointer'}}
                                 onClick={()=>unblockUser(u)}>
-                                âœ… Unblock
+                                ✅ Unblock
                               </button>
                             :<button
                                 style={{background:'rgba(255,60,60,0.12)',color:'#ff6b6b',border:'1px solid rgba(255,60,60,0.3)',borderRadius:6,padding:'4px 10px',fontSize:'0.68rem',fontWeight:700,cursor:'pointer'}}
                                 onClick={()=>{if(window.confirm(`Block ${u.name||u.email}? They will be logged out immediately.`))blockUser(u);}}>
-                                â›” Block
+                                ⛔ Block
                               </button>
                           }
                         </td>
@@ -3297,7 +3298,7 @@ function AdminPage({notify,routes,setRoutes,charts,setCharts,sheetRoutes,sheetCh
   );
 }
 
-// â”€â”€â”€ MAIN APP â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── MAIN APP ─────────────────────────────────────────────────────────────────
 export default function App(){
   const [tab,setTab]=useState('home');
   const [searchQ,setSearchQ]=useState('');
@@ -3313,7 +3314,7 @@ export default function App(){
   const [sheetRoutes,setSheetRoutes]=useState([]);
   const [sheetCharts,setSheetCharts]=useState([]);
   const [sheetLoading,setSheetLoading]=useState(false);
-  const [portsDb,setPortsDb]=useState(PORTS_DB); // reactive port list â€” updates when sheet loads
+  const [portsDb,setPortsDb]=useState(PORTS_DB); // reactive port list — updates when sheet loads
 
   const isAdmin = user?.email===ADMIN_EMAIL;
 
@@ -3330,7 +3331,7 @@ export default function App(){
       ),Promise.reject()
     ).catch(()=>[]);
 
-    // Fetch ALL tabs from ports sheet â€” tries 25 tab names to get 10,000+ ports
+    // Fetch ALL tabs from ports sheet — tries 25 tab names to get 10,000+ ports
     const PORT_TABS=["Sheet1","Sheet2","Sheet3","Sheet4","Sheet5","Sheet6","Sheet7","Sheet8","Sheet9","Sheet10",
       "Ports","World Ports","Port List","All Ports","Data","Main","Global Ports",
       "Asia","Europe","Americas","Africa","Oceania","Middle East","India","Pacific"];
@@ -3399,7 +3400,7 @@ export default function App(){
         }catch{setUserProfile(null);setIsBlocked(false);}
       }else{
         setUserProfile(null);
-        // Don't reset isBlocked here â€” we want to keep showing the warning
+        // Don't reset isBlocked here — we want to keep showing the warning
       }
     });
     return()=>unsub();
@@ -3417,13 +3418,13 @@ export default function App(){
   },[]);
 
   const TABS=[
-    {k:'home',    i:'ðŸ ', l:'Dashboard'},
-    {k:'routes',  i:'ðŸ›¤', l:'Routes'},
-    {k:'charts',  i:'ðŸ“ˆ', l:'ECDIS Charts', cls:'gold'},
-    {k:'planner', i:'ðŸ—º', l:'Route Planner', cls:'green'},
-    {k:'ports',   i:'âš“', l:'Ports Database'},
-    {k:'library', i:'ðŸ“–', l:'Maritime Library'},
-    ...(isAdmin?[{k:'admin',i:'ðŸ›¡',l:'Admin'}]:[]),
+    {k:'home',    i:'🏠', l:'Dashboard'},
+    {k:'routes',  i:'🛤', l:'Routes'},
+    {k:'charts',  i:'📈', l:'ECDIS Charts', cls:'gold'},
+    {k:'planner', i:'🗺', l:'Route Planner', cls:'green'},
+    {k:'ports',   i:'⚓', l:'Ports Database'},
+    {k:'library', i:'📖', l:'Maritime Library'},
+    ...(isAdmin?[{k:'admin',i:'🛡',l:'Admin'}]:[]),
   ];
 
   const handleSearch=(q)=>{setSearchQ(q);setTab('routes');setMenuOpen(false);};
@@ -3440,7 +3441,7 @@ export default function App(){
         {/* NAV */}
         <nav className="nav">
           <div className="nav-brand" onClick={()=>switchTab('home')} style={{cursor:'pointer'}}>
-            <div className="nav-logo">ðŸ§­</div>
+            <div className="nav-logo">🧭</div>
             <div>
               <div className="nav-title">NAVISPHERE<span style={{color:'var(--cyan)'}}>X</span></div>
               <div className="nav-sub">MARINE</div>
@@ -3454,9 +3455,9 @@ export default function App(){
             ))}
             {user
               ?<div className="uc" onClick={()=>{signOut(auth);notify('Logged out','info');}}>
-                ðŸ‘¤ {userProfile?.name?.split(' ')[0]||user.email.split('@')[0]}{isAdmin?' ðŸ›¡':''} Â· Logout
+                👤 {userProfile?.name?.split(' ')[0]||user.email.split('@')[0]}{isAdmin?' 🛡':''} · Logout
               </div>
-              :<button className="ntab" onClick={()=>switchTab('login')}>ðŸ” Login</button>
+              :<button className="ntab" onClick={()=>switchTab('login')}>🔐 Login</button>
             }
           </div>
           <div style={{display:'flex',alignItems:'center',gap:8}}>
@@ -3470,9 +3471,9 @@ export default function App(){
           {TABS.map(t=><button key={t.k} className={`mtab ${tab===t.k?'active':''}`} onClick={()=>switchTab(t.k)}>{t.i} {t.l}</button>)}
           {user
             ?<button className="mtab" onClick={()=>{signOut(auth);notify('Logged out','info');setMenuOpen(false);}}>
-              ðŸšª Logout ({userProfile?.name?.split(' ')[0]||user.email.split('@')[0]})
+              🚪 Logout ({userProfile?.name?.split(' ')[0]||user.email.split('@')[0]})
             </button>
-            :<button className="mtab" onClick={()=>switchTab('login')}>ðŸ” Login / Register</button>
+            :<button className="mtab" onClick={()=>switchTab('login')}>🔐 Login / Register</button>
           }
         </div>
 
@@ -3480,7 +3481,7 @@ export default function App(){
         {isBlocked&&(
           <div style={{position:'fixed',inset:0,background:'var(--bg)',zIndex:9999,display:'flex',alignItems:'center',justifyContent:'center',padding:'1.5rem'}}>
             <div style={{maxWidth:400,width:'100%',background:'var(--card)',border:'2px solid rgba(255,60,60,0.5)',borderRadius:16,padding:'2rem',textAlign:'center',boxShadow:'0 0 40px rgba(255,60,60,0.2)'}}>
-              <div style={{fontSize:'3.5rem',marginBottom:'1rem'}}>âš ï¸</div>
+              <div style={{fontSize:'3.5rem',marginBottom:'1rem'}}>⚠️</div>
               <div style={{fontFamily:'Orbitron,monospace',fontSize:'1rem',fontWeight:700,color:'#ff6b6b',marginBottom:'0.5rem',letterSpacing:1}}>
                 ACCESS SUSPENDED
               </div>
@@ -3498,7 +3499,7 @@ export default function App(){
                   background:'linear-gradient(135deg,#833ab4,#fd1d1d,#fcb045)',
                   color:'white',borderRadius:10,padding:'12px 20px',textDecoration:'none',
                   fontWeight:700,fontSize:'0.85rem',marginBottom:'1rem'}}>
-                <span style={{fontSize:'1.2rem'}}>ðŸ“¸</span> Contact on Instagram
+                <span style={{fontSize:'1.2rem'}}>📸</span> Contact on Instagram
               </a>
               <div style={{fontSize:'0.68rem',color:'var(--text3)'}}>@manish_the_navigator</div>
               <button
@@ -3510,7 +3511,7 @@ export default function App(){
           </div>
         )}
         <div style={{flex:1,display:'flex',flexDirection:'column',minHeight:0,overflow:isPlannerFull?'hidden':'auto'}}>
-          {loading&&<div className="loading"><div className="spin"/><span>Connecting to Firebaseâ€¦</span></div>}
+          {loading&&<div className="loading"><div className="spin"/><span>Connecting to Firebase…</span></div>}
           {!loading&&tab==='home'    &&<HomePage routes={routes} charts={charts} onSearch={handleSearch} setTab={switchTab} user={user} portsDb={portsDb}/>}
           {!loading&&tab==='routes'  &&<RoutesPage routes={routes} sheetRoutes={sheetRoutes} searchQuery={searchQ} notify={notify} user={user} setTab={switchTab}/>}
           {!loading&&tab==='charts'  &&<ChartsPage charts={charts} sheetCharts={sheetCharts} notify={notify} user={user} setTab={switchTab} isAdmin={isAdmin}/>}
@@ -3520,7 +3521,7 @@ export default function App(){
           {!loading&&tab==='login'   &&<LoginPage notify={notify} onLogin={u=>{setUser(u);setTab('home');}}/>}
           {!loading&&tab==='admin'   &&(isAdmin
             ?<AdminPage notify={notify} routes={routes} setRoutes={setRoutes} charts={charts} setCharts={setCharts} sheetRoutes={sheetRoutes} sheetCharts={sheetCharts} refreshSheets={fetchSheets} sheetLoading={sheetLoading}/>
-            :<div className="section"><div className="empty"><div className="empty-icon">ðŸ”’</div><div className="empty-t">Admin Access Only</div><div className="empty-d">Please login with admin credentials to access this panel.</div></div></div>
+            :<div className="section"><div className="empty"><div className="empty-icon">🔒</div><div className="empty-t">Admin Access Only</div><div className="empty-d">Please login with admin credentials to access this panel.</div></div></div>
           )}
         </div>
 
@@ -3532,4 +3533,4 @@ export default function App(){
       </div>
     </>
   );
-                                                }
+}
