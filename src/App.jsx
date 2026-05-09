@@ -2860,23 +2860,35 @@ function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
 
   // ── MAP INIT ─────────────────────────────────────────────────────────────
   useEffect(()=>{
-    if(mapReady||!mapRef.current) return;
     const load=()=>{
-      if(leafRef.current||!mapRef.current) return;
+      if(leafRef.current) return;
+      if(!mapRef.current){ setTimeout(load,100); return; }
       const L=window.L;
-      leafRef.current=L.map(mapRef.current,{center:[20,70],zoom:5,preferCanvas:true,zoomControl:false,attributionControl:false});
+      leafRef.current=L.map(mapRef.current,{
+        center:[20,70],zoom:4,preferCanvas:true,
+        zoomControl:false,attributionControl:false
+      });
       baseTileRef.current=L.tileLayer(TILES.night.url,{subdomains:'abcd',maxZoom:20}).addTo(leafRef.current);
       L.tileLayer('https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png',{opacity:0.7,maxZoom:18}).addTo(leafRef.current);
       L.control.zoom({position:'topleft'}).addTo(leafRef.current);
+      // Multiple invalidateSize calls to fix blank tiles on mobile
+      [100,300,600,1000].forEach(t=>setTimeout(()=>leafRef.current?.invalidateSize(),t));
       setMapReady(true);
     };
-    if(window.L){ load(); return; }
-    const link=document.createElement('link');
-    link.rel='stylesheet';link.href='https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
-    document.head.appendChild(link);
-    const s=document.createElement('script');
-    s.src='https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
-    s.onload=load;document.head.appendChild(s);
+    if(window.L){ setTimeout(load,50); }
+    else{
+      if(!document.querySelector('link[href*="leaflet"]')){
+        const link=document.createElement('link');
+        link.rel='stylesheet';link.href='https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+        document.head.appendChild(link);
+      }
+      if(!document.querySelector('script[src*="leaflet"]')){
+        const s=document.createElement('script');
+        s.src='https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+        s.onload=()=>setTimeout(load,50);
+        document.head.appendChild(s);
+      } else { const t=setInterval(()=>{if(window.L){clearInterval(t);setTimeout(load,50);}},50); }
+    }
     return()=>{ stopGPS();stopAIS();if(leafRef.current){leafRef.current.remove();leafRef.current=null;} };
   },[]);
 
@@ -2945,31 +2957,57 @@ function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
   };
 
   const startGPS=()=>{
-    if(!navigator.geolocation){notify('GPS not supported','error');setGpsOn(false);return;}
-    let lastPos=null,lastTime=null;
+    if(!navigator.geolocation){notify('GPS not available on this device','error');setGpsOn(false);return;}
+    notify('📍 Requesting location access…','success');
+    // invalidateSize fixes blank tiles when GPS toggle causes layout shift
+    setTimeout(()=>{ if(leafRef.current){ leafRef.current.invalidateSize(); } },100);
+    setTimeout(()=>{ if(leafRef.current){ leafRef.current.invalidateSize(); } },500);
+    let lastPos=null;
+    // First do a one-time getCurrentPosition to get initial fix fast
+    navigator.geolocation.getCurrentPosition(
+      (pos)=>{
+        const{latitude:lat,longitude:lon}=pos.coords;
+        if(leafRef.current) leafRef.current.setView([lat,lon],13);
+        [200,600].forEach(t=>setTimeout(()=>leafRef.current?.invalidateSize(),t));
+      },
+      ()=>{},
+      {enableHighAccuracy:true,timeout:10000}
+    );
     gpsRef.current=navigator.geolocation.watchPosition(pos=>{
       const{latitude:lat,longitude:lon,speed,heading}=pos.coords;
-      const sog=speed!=null?speed*1.944:0;
-      const now=Date.now();
-      let cog=heading!=null?heading:lastPos?cogBetween(lastPos.lat,lastPos.lon,lat,lon):0;
-      lastPos={lat,lon};lastTime=now;
-      const ship={lat,lon,cog,sog,heading:heading||cog,ts:now};
+      const sog=speed!=null&&speed>=0?speed*1.944:0;
+      const cog=heading!=null&&heading>=0?heading:lastPos?cogBetween(lastPos.lat,lastPos.lon,lat,lon):0;
+      lastPos={lat,lon};
+      const ship={lat,lon,cog,sog,heading:heading!=null&&heading>=0?heading:cog,ts:Date.now()};
       setOwnShip(ship);
-      if(autoCenter&&leafRef.current) leafRef.current.setView([lat,lon],Math.max(leafRef.current.getZoom(),12));
-      // Update vessel marker
+      if(autoCenter&&leafRef.current) leafRef.current.setView([lat,lon],Math.max(leafRef.current.getZoom(),13));
       if(!window.L||!leafRef.current) return;
       const L=window.L,lrs=layersRef.current;
       if(lrs.vessel) lrs.vessel.remove();
       lrs.vessel=L.marker([lat,lon],{icon:makeVesselIcon(cog),zIndexOffset:1000}).addTo(leafRef.current);
-      // Trail
-      lrs.trail=[...lrs.trail.slice(-100),[lat,lon]];
+      lrs.trail=[...lrs.trail.slice(-120),[lat,lon]];
       if(lrs.trailLine) lrs.trailLine.remove();
       if(lrs.trail.length>1) lrs.trailLine=L.polyline(lrs.trail,{color:'#00D4FF',weight:1.5,opacity:0.35,dashArray:'3,4'}).addTo(leafRef.current);
-    },{enableHighAccuracy:true,maximumAge:1000,timeout:15000},
-    err=>{notify('GPS error: '+err.message,'error');setGpsOn(false);});
+    },{enableHighAccuracy:true,maximumAge:2000,timeout:20000},
+    err=>{
+      const msgs={1:'⚠️ Location access denied.\nOpen browser Settings → Site permissions → Allow Location for this site.',2:'GPS signal unavailable. Ensure device GPS is on and try outdoors.',3:'GPS timeout. Move to open area with clear sky view.'};
+      notify(msgs[err.code]||'GPS error: '+err.message,'error');
+      setGpsOn(false);
+    });
   };
 
-  useEffect(()=>{ if(gpsOn) startGPS(); else stopGPS(); },[gpsOn,autoCenter]);
+  useEffect(()=>{
+    if(gpsOn) startGPS(); else stopGPS();
+    return ()=>stopGPS();
+  },[gpsOn]);
+
+  // Fix blank map when GPS toggled - Leaflet needs explicit size refresh
+  useEffect(()=>{
+    if(!mapReady) return;
+    const fix=()=>leafRef.current?.invalidateSize({animate:false});
+    fix();const t=setTimeout(fix,300);const t2=setTimeout(fix,800);
+    return()=>{clearTimeout(t);clearTimeout(t2);};
+  },[gpsOn,mapReady]);
 
   // ── VECTOR ────────────────────────────────────────────────────────────────
   useEffect(()=>{
@@ -2986,7 +3024,11 @@ function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
 
   // ── AIS ───────────────────────────────────────────────────────────────────
   const stopAIS=()=>{
-    if(wsRef.current){clearInterval(wsRef.current);wsRef.current=null;}
+    if(wsRef.current){
+      if(typeof wsRef.current.close==='function') wsRef.current.close();
+      else clearInterval(wsRef.current);
+      wsRef.current=null;
+    }
     Object.values(layersRef.current.ais).forEach(l=>l?.remove&&l.remove());
     layersRef.current.ais={};
     setAisTargets({});
@@ -2994,87 +3036,60 @@ function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
 
   const startAIS=()=>{
     if(wsRef.current) return;
-    const VESSEL_API_KEY='60229abb7d1bd88cd307b99623dfd3db84dd8d629e1cda359ffc921a94aa8f57';
-
-    const fetchVessels=async()=>{
-      try{
-        // Use own ship position to set bounding box, or default broad region
-        const lat=ownShip?.lat||20;
-        const lon=ownShip?.lon||70;
-        const delta=2; // ~220km search radius
-        const url=`https://api.vesselapi.com/v1/vessels?lat_min=${lat-delta}&lat_max=${lat+delta}&lon_min=${lon-delta}&lon_max=${lon+delta}&limit=50&api_key=${VESSEL_API_KEY}`;
-        const res=await fetch(url,{headers:{'Accept':'application/json'}});
-        if(!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data=await res.json();
-        const vessels=data.vessels||data.data||data||[];
-        if(Array.isArray(vessels)&&vessels.length>0){
-          const updated={};
-          vessels.forEach(v=>{
-            const mmsi=String(v.mmsi||v.MMSI||v.id||'');
-            if(!mmsi) return;
-            updated[mmsi]={
-              mmsi,
-              name:(v.name||v.vessel_name||v.shipname||'Unknown').trim(),
-              lat:parseFloat(v.lat||v.latitude||v.position?.lat||0),
-              lon:parseFloat(v.lon||v.lng||v.longitude||v.position?.lon||0),
-              cog:parseFloat(v.cog||v.course||0),
-              sog:parseFloat(v.sog||v.speed||0),
-              heading:parseFloat(v.heading||v.true_heading||0),
-              type:v.type||v.vessel_type||'',
-              ts:Date.now(),
-            };
-          });
-          setAisTargets(prev=>({...prev,...updated}));
-          console.log(`AIS: ${vessels.length} vessels loaded`);
-        }
-      }catch(e){
-        console.warn('VesselAPI error:',e.message);
-        // Fallback to aisstream.io WebSocket
-        if(!wsRef.current||wsRef.current._isFallback) startAISFallback();
-      }
-    };
-
-    // Initial fetch then poll every 30s
-    fetchVessels();
-    wsRef.current=setInterval(fetchVessels,30000);
-    notify('AIS: Loading vessels…','success');
-  };
-
-  const startAISFallback=()=>{
-    // aisstream.io WebSocket fallback
+    const lat=ownShip?.lat||20, lon=ownShip?.lon||70, d=4;
     try{
       const ws=new WebSocket('wss://stream.aisstream.io/v0/stream');
-      ws._isFallback=true;
+      let opened=false;
+      const watchdog=setTimeout(()=>{
+        if(!opened){ws.close();notify('AIS timeout — no connection','error');setAisOn(false);}
+      },12000);
       ws.onopen=()=>{
+        opened=true; clearTimeout(watchdog);
+        // Correct aisstream format: BoundingBoxes = [[[minLat,minLon],[maxLat,maxLon]]]
         ws.send(JSON.stringify({
           APIKey:'732d8c6a956ecc8cdb7d1654028c8e09f65521eb',
-          BoundingBoxes:[[[ownShip?ownShip.lat-3:-90,ownShip?ownShip.lon-3:-180],[ownShip?ownShip.lat+3:90,ownShip?ownShip.lon+3:180]]],
+          BoundingBoxes:[[[lat-d,lon-d],[lat+d,lon+d]]],
           FilterMessageTypes:['PositionReport','ShipStaticData']
         }));
-        notify('AIS: Connected via stream','success');
+        notify('✅ AIS connected','success');
       };
       ws.onmessage=e=>{
         try{
           const msg=JSON.parse(e.data);
+          // Check for error messages from server
+          if(msg.error||msg.Error){console.warn('AIS server:',msg.error||msg.Error);return;}
           const mmsi=String(msg.MetaData?.MMSI_String||msg.MetaData?.MMSI||'');
-          if(!mmsi) return;
+          if(!mmsi||mmsi==='undefined') return;
           setAisTargets(prev=>{
-            const t={...prev[mmsi]||{mmsi}};
+            const t={...prev[mmsi]||{mmsi,name:''}};
             const pr=msg.Message?.PositionReport;
             const ss=msg.Message?.ShipStaticData;
-            if(pr){t.lat=pr.Latitude;t.lon=pr.Longitude;t.cog=pr.Cog;t.sog=pr.Sog;}
-            if(ss) t.name=ss.Name?.trim();
+            if(pr&&pr.Latitude!=null&&Math.abs(pr.Latitude)<=90&&Math.abs(pr.Longitude)<=180){
+              t.lat=pr.Latitude; t.lon=pr.Longitude;
+              t.cog=pr.Cog>=0&&pr.Cog<360?pr.Cog:0;
+              t.sog=pr.Sog>=0?pr.Sog:0;
+              t.heading=pr.TrueHeading>0&&pr.TrueHeading<360?pr.TrueHeading:t.cog;
+            }
+            if(ss?.Name) t.name=ss.Name.trim();
             if(msg.MetaData?.ShipName) t.name=msg.MetaData.ShipName.trim();
             t.ts=Date.now();
             return{...prev,[mmsi]:t};
           });
         }catch{}
       };
-      ws.onerror=()=>console.warn('AIS stream error');
-      clearInterval(wsRef.current);
+      ws.onerror=()=>{
+        clearTimeout(watchdog);
+        notify('AIS connection error','error');
+        wsRef.current=null; setAisOn(false);
+      };
+      ws.onclose=()=>{ if(wsRef.current===ws) wsRef.current=null; };
       wsRef.current=ws;
-    }catch(e){console.warn('AIS fallback failed:',e.message);}
+    }catch(e){
+      notify('AIS failed: '+e.message,'error');
+      setAisOn(false);
+    }
   };
+
   useEffect(()=>{ if(aisOn) startAIS(); else stopAIS(); },[aisOn]);
 
   useEffect(()=>{
@@ -3101,8 +3116,9 @@ function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
 
   // ── UNIVERSAL WAYPOINT PARSER (any format) ───────────────────────────────
   const extractWaypoints=(text,filename='')=>{
-    // RTZ / XML
-    if(text.includes('<route')||text.includes('<waypoint')||text.includes('<rtept')){
+    // RTZ / XML / RT3 / ROUTE formats
+    if(text.includes('<route')||text.includes('<waypoint')||text.includes('<rtept')||
+       text.includes('<Waypoint')||text.includes('<?xml')||filename?.match(/\.(rtz|rt3|rt4|rta|rtm|rtn|route|xml|rtu)$/i)){
       const parsed=parseRTZ(text);
       if(parsed?.waypoints?.length>1) return parsed.waypoints;
     }
@@ -3165,9 +3181,9 @@ function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
   // ── STYLES ────────────────────────────────────────────────────────────────
   const NS=`
     .nm-wrap{position:fixed;inset:0;z-index:200;background:#040C1A;display:flex;flex-direction:column;}
-    .nm-topbar{height:44px;background:rgba(4,12,26,0.92);border-bottom:1px solid rgba(0,212,255,0.15);
-      display:flex;align-items:center;padding:0 10px;gap:8px;z-index:600;flex-shrink:0;}
-    .nm-map{flex:1;position:relative;overflow:hidden;}
+    .nm-topbar{height:44px;min-height:44px;flex-shrink:0;background:rgba(4,12,26,0.92);border-bottom:1px solid rgba(0,212,255,0.15);display:flex;align-items:center;padding:0 10px;gap:8px;z-index:600;}
+    .nm-map{flex:1;position:relative;overflow:hidden;width:100%;min-height:200px;}
+    .nm-map .leaflet-container{width:100%!important;height:100%!important;background:#040C1A!important;}
     .nm-panel{position:absolute;top:8px;right:8px;z-index:500;width:256px;
       background:rgba(4,12,26,0.93);border:1px solid rgba(0,212,255,0.22);
       border-radius:13px;backdrop-filter:blur(14px);overflow:visible;}
@@ -3299,9 +3315,9 @@ function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
                 background:'rgba(0,212,255,0.04)',border:'1px dashed rgba(0,212,255,0.2)',
                 borderRadius:7,cursor:'pointer',fontSize:'0.7rem',color:'rgba(255,255,255,0.55)'}}>
                 📁 Open route file
-                <input type="file" accept="*" style={{display:'none'}} onChange={e=>e.target.files[0]&&loadRouteFromFile(e.target.files[0])}/>
+                <input type="file" accept=".rtz,.rt3,.rt4,.rta,.rtm,.rtn,.route,.vp,.rte,.rut,.rux,.rou,.rtu,.xml,.csv,.gpx,.wpt,.json,.txt,*" style={{display:'none'}} onChange={e=>e.target.files[0]&&loadRouteFromFile(e.target.files[0])}/>
               </label>
-              <div style={{fontSize:'0.58rem',color:'rgba(255,255,255,0.25)',marginTop:4,textAlign:'center'}}>RTZ · GPX · CSV · JSON</div>
+              <div style={{fontSize:'0.58rem',color:'rgba(255,255,255,0.25)',marginTop:4,textAlign:'center'}}>RTZ · RT3 · GPX · CSV · XML · JSON and more</div>
             </>}
 
             {/* ── GPS TAB ── */}
@@ -4154,4 +4170,4 @@ export default function App(){
       </div>
     </>
   );
-                                                                                                                                                                                                       }
+}
