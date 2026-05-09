@@ -2187,107 +2187,96 @@ function HomePage({routes,charts,onSearch,setTab,user,portsDb=[]}){
 // ─── ROUTES PAGE ──────────────────────────────────────────────────────────────
 function RoutesPage({routes,sheetRoutes,searchQuery,notify,user,setTab}){
   const [q,setQ]=useState(searchQuery||'');
-  const [typeF,setTypeF]=useState('all');
+  const [results,setResults]=useState([]);
   const [showSugg,setShowSugg]=useState(false);
+  const [sugg,setSugg]=useState([]);
+  const [searched,setSearched]=useState(false);
   const inputRef=useRef(null);
 
-  useEffect(()=>{if(searchQuery)setQ(searchQuery);},[searchQuery]);
+  useEffect(()=>{if(searchQuery){setQ(searchQuery);doSearch(searchQuery);};},[searchQuery]);
 
-  // Normalize sheet rows once
-  const normalizedSheet=useMemo(()=>
-    (sheetRoutes||[]).map((r,i)=>normalizeSheetRow(r,i,'sr'))
-  ,[sheetRoutes]);
+  // Build search index from sheet data — only names/keywords, not full objects
+  const searchIndex=useMemo(()=>{
+    return(sheetRoutes||[]).map((r,i)=>({
+      i, // index back into sheetRoutes
+      n:(r.fileName||r['File Name']||r['Route Name']||'').toLowerCase(),
+      p:(r.portName||r['Port Name']||r['From']||'').toLowerCase(),
+      k:(r.keywords||r['Keywords']||'').toLowerCase(),
+      u:r.fileUrl||r['File URL']||r['Drive Link']||Object.values(r).find(v=>typeof v==='string'&&v.includes('drive.google'))||'',
+    }));
+  },[sheetRoutes]);
 
-  // Merge Firebase + Sheet — sheet rows de-duped by fileName
-  const allRoutes=useMemo(()=>{
-    const fbNames=new Set(routes.map(r=>r.fileName?.toLowerCase()));
-    const extra=normalizedSheet.filter(r=>r.fileName&&!fbNames.has(r.fileName.toLowerCase()));
-    return[...routes,...extra];
-  },[routes,normalizedSheet]);
-
-  // Build suggestion list from all route names + port names
-  const suggestions=useMemo(()=>{
-    if(!q.trim()||q.length<2) return[];
-    const ql=q.toLowerCase();
-    const seen=new Set();
-    const hits=[];
-    allRoutes.forEach(r=>{
-      [r.fileName,r.portName].filter(Boolean).forEach(s=>{
-        if(s.toLowerCase().includes(ql)&&!seen.has(s.toLowerCase())){
-          seen.add(s.toLowerCase());
-          hits.push(s);
-        }
-      });
-    });
-    return hits.slice(0,8);
-  },[q,allRoutes]);
-
-  const filtered=allRoutes.filter(r=>
-    (typeF==='all'||r.type?.toLowerCase()===typeF.toLowerCase())&&smartMatch(r,q)
-  );
-
-  const handleDL=async(r)=>{
-    if(!user){notify('🔐 Login required to download files','error');setTab('login');return;}
-    if(!r.fileUrl){notify('File link not set. Contact admin.','error');return;}
-    notify(`⏳ Preparing download: ${r.fileName}…`,'success');
-    try{
-      // Convert Google Drive view/share link → direct download link
-      let url=r.fileUrl;
-      const gdMatch=url.match(/\/d\/([a-zA-Z0-9_-]+)/);
-      if(gdMatch){url=`https://drive.google.com/uc?export=download&id=${gdMatch[1]}`;}
-      const resp=await fetch(url,{mode:'cors'});
-      if(!resp.ok)throw new Error('fetch failed');
-      const blob=await resp.blob();
-      const a=document.createElement('a');
-      a.href=URL.createObjectURL(blob);
-      a.download=r.fileName||(gdMatch?gdMatch[1]+'.rtz':'download');
-      a.click();URL.revokeObjectURL(a.href);
-      notify(`✅ Downloaded: ${r.fileName}`,'success');
-    }catch{
-      // Fallback: direct link in same tab
-      window.open(r.fileUrl,'_blank');
-      notify(`Opened: ${r.fileName} — save the file from browser`,'success');
-    }
+  const doSearch=(searchQ)=>{
+    const sq=(searchQ||q).trim().toLowerCase();
+    if(!sq||sq.length<2) return;
+    setSearched(true);setShowSugg(false);
+    const hits=searchIndex.filter(r=>r.n.includes(sq)||r.p.includes(sq)||r.k.includes(sq)).slice(0,50);
+    setResults(hits.map(h=>sheetRoutes[h.i]));
   };
 
-  const pickSugg=(s)=>{setQ(s);setShowSugg(false);};
+  // Suggestions while typing
+  useEffect(()=>{
+    if(!q.trim()||q.length<2){setSugg([]);return;}
+    const ql=q.toLowerCase();
+    const seen=new Set();const hits=[];
+    searchIndex.forEach(r=>{
+      [r.n,r.p].forEach(s=>{if(s&&s.includes(ql)&&!seen.has(s)){seen.add(s);hits.push(s);}});
+    });
+    setSugg(hits.slice(0,8));
+  },[q,searchIndex]);
+
+  const handleDL=async(r)=>{
+    if(!user){notify('Login required to download','error');setTab('login');return;}
+    const url=r.fileUrl||r['File URL']||r['Drive Link']||Object.values(r).find(v=>typeof v==='string'&&v.includes('drive.google'))||'';
+    if(!url){notify('No download link for this file','error');return;}
+    notify('⏳ Downloading…','success');
+    try{
+      const gd=url.match(/\/d\/([a-zA-Z0-9_-]+)/);
+      const fetchUrl=gd?`https://drive.google.com/uc?export=download&id=${gd[1]}`:url;
+      const res=await fetch(fetchUrl,{mode:'cors'});
+      if(!res.ok) throw new Error('fetch failed');
+      const blob=await res.blob();
+      const a=document.createElement('a');
+      a.href=URL.createObjectURL(blob);
+      a.download=r.fileName||r['File Name']||'route';
+      a.click();URL.revokeObjectURL(a.href);
+      notify('✅ Downloaded','success');
+    }catch{window.open(url,'_blank');notify('Opened in browser — save the file','success');}
+  };
+
+  const getName=(r)=>r.fileName||r['File Name']||r['Route Name']||Object.values(r).find(v=>v&&typeof v==='string'&&v.length>2&&!v.includes('http')&&!v.includes('drive'))||'Route File';
+  const getPort=(r)=>r.portName||r['Port Name']||r['From']||r['Route Description']||'';
 
   return(
     <div className="section">
       <div className="sec-hdr">
-        <div className="sec-title">🗺 RTZ Route Files</div>
-        <span className="badge">{filtered.length} / {allRoutes.length} files</span>
+        <div className="sec-title">🛤 Route Files</div>
+        {results.length>0&&<span className="badge">{results.length} results</span>}
       </div>
-      {!user&&<div className="warn-box">🔐 <strong>Login required to download.</strong> <span style={{cursor:'pointer',textDecoration:'underline'}} onClick={()=>setTab('login')}>Create free account →</span></div>}
 
-      {/* SEARCH WITH SUGGESTIONS */}
-      <div style={{position:'relative',marginBottom:'0.9rem'}}>
+      {/* SEARCH — primary interface */}
+      <div style={{position:'relative',marginBottom:'1rem'}}>
         <div style={{display:'flex',gap:8}}>
           <div className="siw" style={{flex:1}}>
             <span className="si-ic">🔍</span>
-            <input
-              ref={inputRef}
-              className="si"
-              style={{paddingLeft:40}}
+            <input ref={inputRef} className="si" style={{paddingLeft:42}}
               placeholder="Search by port, route name, file name, keyword…"
               value={q}
-              onChange={e=>{setQ(e.target.value);setShowSugg(true);}}
-              onFocus={()=>setShowSugg(true)}
-              onBlur={()=>setTimeout(()=>setShowSugg(false),180)}
-            />
+              onChange={e=>{setQ(e.target.value);setShowSugg(true);setSearched(false);setResults([]);}}
+              onFocus={()=>sugg.length>0&&setShowSugg(true)}
+              onBlur={()=>setTimeout(()=>setShowSugg(false),160)}
+              onKeyDown={e=>e.key==='Enter'&&doSearch()}/>
           </div>
-          {q&&<button className="btn btn-secondary" onClick={()=>{setQ('');setShowSugg(false);}}>✕</button>}
+          <button className="btn btn-primary" style={{padding:'0 16px'}} onClick={()=>doSearch()}>Search</button>
+          {q&&<button className="btn btn-secondary" onClick={()=>{setQ('');setResults([]);setSugg([]);setSearched(false);}}>✕</button>}
         </div>
-        {/* SUGGESTIONS DROPDOWN */}
-        {showSugg&&suggestions.length>0&&(
-          <div style={{position:'absolute',top:'100%',left:0,right:0,zIndex:300,
-            background:'var(--card)',border:'1px solid var(--border)',borderRadius:10,
-            boxShadow:'0 8px 28px rgba(0,0,0,0.5)',marginTop:4,overflow:'hidden'}}>
-            {suggestions.map((s,i)=>(
-              <div key={i}
-                onMouseDown={()=>pickSugg(s)}
+        {showSugg&&sugg.length>0&&(
+          <div style={{position:'absolute',top:'100%',left:0,right:0,zIndex:300,background:'var(--card)',
+            border:'1px solid var(--border)',borderRadius:10,boxShadow:'0 8px 28px rgba(0,0,0,0.5)',marginTop:4,overflow:'hidden'}}>
+            {sugg.map((s,i)=>(
+              <div key={i} onMouseDown={()=>{setQ(s);setShowSugg(false);doSearch(s);}}
                 style={{padding:'10px 14px',cursor:'pointer',display:'flex',alignItems:'center',gap:10,
-                  borderBottom:'1px solid rgba(255,255,255,0.04)',transition:'background 0.15s'}}
+                  borderBottom:'1px solid rgba(255,255,255,0.04)',transition:'background .15s'}}
                 onMouseEnter={e=>e.currentTarget.style.background='rgba(0,180,216,0.08)'}
                 onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
                 <span style={{color:'var(--cyan)',fontSize:'0.85rem'}}>🔎</span>
@@ -2298,52 +2287,55 @@ function RoutesPage({routes,sheetRoutes,searchQuery,notify,user,setTab}){
         )}
       </div>
 
-      {/* Quick-search chips */}
-      <div className="fbar" style={{marginBottom:'0.7rem'}}>
+      {/* Quick chips */}
+      <div className="fbar" style={{marginBottom:'0.8rem'}}>
         {['Mumbai','Singapore','Dubai','Rotterdam','Colombo','Karachi','Fujairah'].map(p=>(
-          <button key={p} className={`fbtn ${q.toLowerCase()===p.toLowerCase()?'active':''}`}
-            onClick={()=>setQ(p)}>{p}</button>
+          <button key={p} className={`fbtn ${q===p?'active':''}`} onClick={()=>{setQ(p);doSearch(p);}}>{p}</button>
         ))}
       </div>
 
-      {/* Type filter */}
-      <div className="fbar">
-        {['all',...ROUTE_TYPES].map(t=>(
-          <button key={t} className={`fbtn ${typeF===(t==='all'?'all':t)?'active':''}`}
-            onClick={()=>setTypeF(t==='all'?'all':t)}>
-            {t==='all'?'🌐 All':t}
-          </button>
-        ))}
-      </div>
-
-      {filtered.length===0
-        ?<div className="empty">
-          <div className="empty-icon">🧭</div>
-          <div className="empty-t">No Routes Found</div>
-          <div className="empty-d">Try "Mumbai", "MUM", "Singapore" or "mumbaitosingapore"</div>
+      {/* State: initial prompt */}
+      {!searched&&results.length===0&&(
+        <div className="empty">
+          <div className="empty-icon">🛤</div>
+          <div className="empty-t">Search Route Files</div>
+          <div className="empty-d">Type a port name, route name or keyword above and press Search</div>
         </div>
-        :<div className="files-grid">{filtered.map(r=>(
-          <div key={r.id} className="file-card">
-            <div className="file-icon">{r.source==='sheet'?'🔄':'🗺'}</div>
-            <div className="file-name">{r.fileName}</div>
-            {r.portName&&<div className="file-port">📍 {r.portName}</div>}
-            <div className="file-tags">
-              <span className="ftag tag-rtz">RTZ File</span>
-              {r.type&&<span className="ftag tag-rtz">{r.type}</span>}
-              {r.source==='sheet'&&<span className="ftag" style={{background:'rgba(0,200,150,0.1)',color:'var(--green)',border:'1px solid rgba(0,200,150,0.2)'}}>Live Sheet</span>}
+      )}
+
+      {/* State: no results */}
+      {searched&&results.length===0&&(
+        <div className="empty">
+          <div className="empty-icon">🔍</div>
+          <div className="empty-t">No Routes Found</div>
+          <div className="empty-d">Try "Mumbai", "MUM", "Singapore" or partial port name</div>
+        </div>
+      )}
+
+      {/* Results grid */}
+      {results.length>0&&(
+        <div className="files-grid">
+          {results.map((r,i)=>(
+            <div key={i} className="file-card">
+              <div className="file-icon">🛤</div>
+              <div className="file-name">{getName(r)}</div>
+              {getPort(r)&&<div className="file-port">📍 {getPort(r)}</div>}
+              <div className="file-tags">
+                <span className="ftag tag-rtz">Route File</span>
+                <span className="ftag" style={{background:'rgba(0,200,150,0.08)',color:'var(--green)',border:'1px solid rgba(0,200,150,0.18)'}}>Live Sheet</span>
+              </div>
+              {user
+                ?<button className="dl-btn" onClick={()=>handleDL(r)}>⬇ Download</button>
+                :<button className="login-req" onClick={()=>setTab('login')}>🔐 Login to Download</button>
+              }
             </div>
-            {user
-              ?<button className="dl-btn" onClick={()=>handleDL(r)} disabled={!r.fileUrl}>
-                {r.fileUrl?'⬇ Download RTZ File':'❌ Link Not Set'}
-              </button>
-              :<button className="login-req" onClick={()=>setTab('login')}>🔐 Login to Download</button>
-            }
-          </div>
-        ))}</div>
-      }
+          ))}
+        </div>
+      )}
     </div>
   );
 }
+
 
 // ─── CHARTS PAGE ──────────────────────────────────────────────────────────────
 function ChartsPage({charts,sheetCharts,notify,user,setTab,isAdmin}){
@@ -2618,7 +2610,10 @@ function LoginPage({notify,onLogin}){
         setErr('⚠️ ACCESS SUSPENDED — Suspicious login detected by admin. Contact owner on Instagram: @manish_the_navigator');
         setLoading(false);return;
       }
-      notify('Welcome back! 👋','success');onLogin(c.user);
+      notify('Welcome back! 👋','success');
+      const intended=sessionStorage.getItem('intendedTab');
+      sessionStorage.removeItem('intendedTab');
+      onLogin(c.user, intended||'home');
     }
     catch(e){
       if(e.code==='auth/invalid-credential'||e.code==='auth/wrong-password'||e.code==='auth/user-not-found')
@@ -2645,7 +2640,10 @@ function LoginPage({notify,onLogin}){
         createdAt:serverTimestamp(),
         role:'user'
       });
-      notify('Account created! 🎉','success');onLogin(c.user);
+      notify('Account created! 🎉','success');
+      const intended2=sessionStorage.getItem('intendedTab');
+      sessionStorage.removeItem('intendedTab');
+      onLogin(c.user, intended2||'home');
     }catch(e){setErr(e.code==='auth/email-already-in-use'?'Email already registered. Login instead.':'Error: '+e.message);}
     setLoading(false);
   };
@@ -4041,15 +4039,9 @@ export default function App(){
     return()=>unsub();
   },[]);
   useEffect(()=>{
-    const load=async()=>{
-      try{
-        const[rs,cs]=await Promise.all([getDocs(collection(db,'routes')),getDocs(collection(db,'charts'))]);
-        setRoutes(rs.docs.map(d=>({id:d.id,...d.data()})));
-        setCharts(cs.docs.map(d=>({id:d.id,...d.data()})));
-      }catch(e){console.log('Load error',e);}
-      setLoading(false);
-    };
-    load();
+    // Don't pre-load all routes/charts — too slow with 20000+ files
+    // Data is fetched on-demand when user searches in RoutesPage/ChartsPage
+    setLoading(false);
   },[]);
 
   const TABS=[
@@ -4064,7 +4056,17 @@ export default function App(){
   ];
 
   const handleSearch=(q)=>{setSearchQ(q);setTab('routes');setMenuOpen(false);};
-  const switchTab=k=>{setTab(k);setMenuOpen(false);};
+  const switchTab=k=>{
+    // Gate: require login for everything except home, login
+    if(!user && k!=='home' && k!=='login'){
+      setTab('login');
+      setMenuOpen(false);
+      // Store intended tab to redirect after login
+      sessionStorage.setItem('intendedTab', k);
+      return;
+    }
+    setTab(k);setMenuOpen(false);
+  };
 
   // Planner needs full height
   const isPlannerFull=tab==='planner'||tab==='navmode';
@@ -4155,7 +4157,26 @@ export default function App(){
           {!loading&&tab==='ports'   &&<PortSearchPage portsDb={portsDb} sheetLoading={sheetLoading} refreshSheets={fetchSheets}/>}
           {!loading&&tab==='library' &&<MaritimeLibraryPage setTab={switchTab}/>}
           {!loading&&tab==='navmode' &&<NavModePage notify={notify} sheetRoutes={[...routes,...sheetRoutes]} portsDb={portsDb}/>}
-          {!loading&&tab==='login'   &&<LoginPage notify={notify} onLogin={u=>{setUser(u);setTab('home');}}/>}
+          {!loading&&tab==='login'   &&<LoginPage notify={notify} onLogin={(u,redirectTo)=>{setUser(u);setTab(redirectTo||'home');}}/>}
+          {/* Login gate for unauthenticated users on protected tabs */}
+          {!loading&&!user&&tab!=='home'&&tab!=='login'&&(
+            <div style={{display:'flex',flex:1,alignItems:'center',justifyContent:'center',padding:'2rem'}}>
+              <div style={{maxWidth:380,width:'100%',background:'var(--card)',border:'1px solid var(--border2)',
+                borderRadius:16,padding:'2rem',textAlign:'center'}}>
+                <div style={{fontSize:'3rem',marginBottom:'1rem'}}>🔐</div>
+                <div style={{fontFamily:'Orbitron,monospace',fontSize:'0.9rem',fontWeight:700,marginBottom:'0.5rem'}}>
+                  Login Required
+                </div>
+                <div style={{fontSize:'0.82rem',color:'var(--text2)',marginBottom:'1.4rem',lineHeight:1.6}}>
+                  Create a free account to access Routes, Charts, Route Planner, Ports Database and Nav Mode.
+                </div>
+                <div style={{display:'flex',gap:10,justifyContent:'center'}}>
+                  <button className="btn btn-primary" onClick={()=>switchTab('login')}>🔐 Login</button>
+                  <button className="btn btn-secondary" onClick={()=>switchTab('login')}>✅ Register Free</button>
+                </div>
+              </div>
+            </div>
+          )}
           {!loading&&tab==='admin'   &&(isAdmin
             ?<AdminPage notify={notify} routes={routes} setRoutes={setRoutes} charts={charts} setCharts={setCharts} sheetRoutes={sheetRoutes} sheetCharts={sheetCharts} refreshSheets={fetchSheets} sheetLoading={sheetLoading}/>
             :<div className="section"><div className="empty"><div className="empty-icon">🔒</div><div className="empty-t">Admin Access Only</div><div className="empty-d">Please login with admin credentials to access this panel.</div></div></div>
