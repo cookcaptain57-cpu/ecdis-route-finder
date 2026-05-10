@@ -1933,7 +1933,7 @@ function HomePage({routes,charts,onSearch,setTab,user,portsDb=[]}){
     {icon:'🗺',title:'ROUTES',desc:'Browse, search & download routes in multiple formats.',tab:'routes',color:'var(--cyan)'},
     {icon:'📊',title:'ECDIS CHARTS',desc:'Access charts, formats & user charts.',tab:'charts',color:'var(--gold)'},
     {icon:'✏️',title:'ROUTE PLANNER',desc:'Plan optimised routes with advanced tools.',tab:'planner',color:'var(--green)'},
-    {icon:'🧭',title:'NAV MODE',desc:'Navigate with precision using smart nav mode.',tab:'planner',color:'#A78BFA',badge:'NEW'},
+    {icon:'🧭',title:'NAV MODE',desc:'Navigate with precision using smart nav mode.',tab:'navmode',color:'#A78BFA',badge:'NEW'},
     {icon:'⚓',title:'PORTS DATABASE',desc:'Explore global ports with details & coordinates.',tab:'ports',color:'var(--cyan)'},
     {icon:'📚',title:'MARITIME LIBRARY',desc:'SOLAS, MARPOL, IMO, STCW & more books.',tab:'library',color:'var(--gold)'},
   ];
@@ -2789,7 +2789,6 @@ function PortSearchPage({portsDb=[],sheetLoading,refreshSheets}){
 }
 
 // ─── NAV MODE PAGE ────────────────────────────────────────────────────────────
-// ─── NAV MODE PAGE ────────────────────────────────────────────────────────────
 function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
   const mapRef=useRef(null);
   const leafRef=useRef(null);
@@ -2802,15 +2801,34 @@ function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
   const [mapReady,setMapReady]=useState(false);
   const [gpsOn,setGpsOn]=useState(false);
   const [aisOn,setAisOn]=useState(false);
-  const [autoCenter,setAutoCenter]=useState(true);
-  const [vectorTime,setVectorTime]=useState(6);
-  const [activeTab,setActiveTab]=useState('route');
-  const [panelOpen,setPanelOpen]=useState(true);
-  const [mapMode,setMapMode]=useState('night');      // night|day|dusk
-  const [orientMode,setOrientMode]=useState('north'); // north|course|head
+
+  // Persisted user preferences — survive refresh
+  const [autoCenter,setAutoCenterRaw]=useState(()=>{try{return JSON.parse(localStorage.getItem('nm_autoCenter')??'true');}catch{return true;}});
+  const [vectorTime,setVectorTimeRaw]=useState(()=>{try{return parseInt(localStorage.getItem('nm_vectorTime')||'6');}catch{return 6;}});
+  const [mapMode,setMapModeRaw]=useState(()=>localStorage.getItem('nm_mapMode')||'night');
+  const [orientMode,setOrientModeRaw]=useState(()=>localStorage.getItem('nm_orientMode')||'north');
+  const [panelOpen,setPanelOpenRaw]=useState(()=>{try{return JSON.parse(localStorage.getItem('nm_panelOpen')??'true');}catch{return true;}});
+  const [activeTab,setActiveTabRaw]=useState(()=>localStorage.getItem('nm_activeTab')||'route');
+
+  // Persist wrappers
+  const setAutoCenter=v=>{setAutoCenterRaw(v);localStorage.setItem('nm_autoCenter',JSON.stringify(v));};
+  const setVectorTime=v=>{setVectorTimeRaw(v);localStorage.setItem('nm_vectorTime',String(v));};
+  const setMapMode=v=>{setMapModeRaw(v);localStorage.setItem('nm_mapMode',v);};
+  const setOrientMode=v=>{setOrientModeRaw(v);localStorage.setItem('nm_orientMode',v);};
+  const setPanelOpen=v=>{setPanelOpenRaw(v);localStorage.setItem('nm_panelOpen',JSON.stringify(v));};
+  const setActiveTab=v=>{setActiveTabRaw(v);localStorage.setItem('nm_activeTab',v);};
 
   const [ownShip,setOwnShip]=useState(null);
-  const [navRoute,setNavRoute]=useState(null);
+
+  // Persist loaded route across refresh
+  const [navRoute,setNavRouteRaw]=useState(()=>{
+    try{const s=localStorage.getItem('nm_route');return s?JSON.parse(s):null;}catch{return null;}
+  });
+  const setNavRoute=v=>{
+    setNavRouteRaw(v);
+    try{if(v)localStorage.setItem('nm_route',JSON.stringify(v));else localStorage.removeItem('nm_route');}catch{}
+  };
+
   const [routeSearch,setRouteSearch]=useState('');
   const [routeSuggs,setRouteSuggs]=useState([]);
   const [aisTargets,setAisTargets]=useState({});
@@ -2861,19 +2879,25 @@ function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
     const load=()=>{
       if(leafRef.current) return;
       if(!mapRef.current){ setTimeout(load,100); return; }
+      // CRITICAL: wait until container has actual pixel height
+      if(mapRef.current.offsetHeight < 100){ setTimeout(load,150); return; }
       const L=window.L;
       leafRef.current=L.map(mapRef.current,{
         center:[20,70],zoom:4,preferCanvas:true,
         zoomControl:false,attributionControl:false
       });
-      baseTileRef.current=L.tileLayer(TILES.night.url,{subdomains:'abcd',maxZoom:20}).addTo(leafRef.current);
+      baseTileRef.current=L.tileLayer(TILES[mapMode]?.url||TILES.night.url,{subdomains:'abcd',maxZoom:20}).addTo(leafRef.current);
       L.tileLayer('https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png',{opacity:0.7,maxZoom:18}).addTo(leafRef.current);
       L.control.zoom({position:'topleft'}).addTo(leafRef.current);
-      // Multiple invalidateSize calls to fix blank tiles on mobile
-      [100,300,600,1000].forEach(t=>setTimeout(()=>leafRef.current?.invalidateSize(),t));
-      setMapReady(true);
+      // Force layout then invalidate
+      requestAnimationFrame(()=>{
+        leafRef.current?.invalidateSize({animate:false});
+        setMapReady(true);
+        // Extra invalidations for mobile
+        [200,500,1000].forEach(t=>setTimeout(()=>leafRef.current?.invalidateSize({animate:false}),t));
+      });
     };
-    if(window.L){ setTimeout(load,50); }
+    if(window.L){ setTimeout(load,80); }
     else{
       if(!document.querySelector('link[href*="leaflet"]')){
         const link=document.createElement('link');
@@ -2883,12 +2907,21 @@ function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
       if(!document.querySelector('script[src*="leaflet"]')){
         const s=document.createElement('script');
         s.src='https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
-        s.onload=()=>setTimeout(load,50);
+        s.onload=()=>setTimeout(load,80);
         document.head.appendChild(s);
-      } else { const t=setInterval(()=>{if(window.L){clearInterval(t);setTimeout(load,50);}},50); }
+      } else { const t=setInterval(()=>{if(window.L){clearInterval(t);setTimeout(load,80);}},50); }
     }
     return()=>{ stopGPS();stopAIS();if(leafRef.current){leafRef.current.remove();leafRef.current=null;} };
   },[]);
+
+  // Fix blank map on GPS toggle / panel toggle / any layout change
+  useEffect(()=>{
+    if(!mapReady||!leafRef.current) return;
+    const fix=()=>leafRef.current?.invalidateSize({animate:false});
+    fix();
+    const ids=[100,300,700,1200].map(t=>setTimeout(fix,t));
+    return()=>ids.forEach(clearTimeout);
+  },[mapReady,gpsOn,panelOpen]);
 
   // ── SWAP TILE on mapMode change ───────────────────────────────────────────
   useEffect(()=>{
@@ -3032,40 +3065,52 @@ function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
     setAisTargets({});
   };
 
-  const startAIS=()=>{
+  const startAIS=(lat,lon)=>{
     if(wsRef.current) return;
-    const lat=ownShip?.lat||20, lon=ownShip?.lon||70, d=4;
+    // Use provided position or own ship or broad global fallback
+    const clat=lat||ownShip?.lat||20;
+    const clon=lon||ownShip?.lon||70;
+    const delta=5; // 5° = ~550km radius
     try{
       const ws=new WebSocket('wss://stream.aisstream.io/v0/stream');
       let opened=false;
       const watchdog=setTimeout(()=>{
-        if(!opened){ws.close();notify('AIS timeout — no connection','error');setAisOn(false);}
+        if(!opened){
+          ws.close();
+          notify('AIS: No response in 12s. Check connection.','error');
+          setAisOn(false);
+        }
       },12000);
       ws.onopen=()=>{
-        opened=true; clearTimeout(watchdog);
-        // Correct aisstream format: BoundingBoxes = [[[minLat,minLon],[maxLat,maxLon]]]
-        ws.send(JSON.stringify({
+        opened=true;
+        clearTimeout(watchdog);
+        const payload={
           APIKey:'732d8c6a956ecc8cdb7d1654028c8e09f65521eb',
-          BoundingBoxes:[[[lat-d,lon-d],[lat+d,lon+d]]],
+          BoundingBoxes:[[[clat-delta,clon-delta],[clat+delta,clon+delta]]],
           FilterMessageTypes:['PositionReport','ShipStaticData']
-        }));
-        notify('✅ AIS connected','success');
+        };
+        ws.send(JSON.stringify(payload));
+        console.log('AIS subscribed bbox:',clat-delta,clon-delta,'→',clat+delta,clon+delta);
+        notify('✅ AIS stream connected','success');
       };
       ws.onmessage=e=>{
         try{
           const msg=JSON.parse(e.data);
-          // Check for error messages from server
-          if(msg.error||msg.Error){console.warn('AIS server:',msg.error||msg.Error);return;}
+          if(msg.error||msg.Error){
+            console.error('AIS server error:',msg.error||msg.Error);
+            notify('AIS error: '+(msg.error||msg.Error),'error');
+            return;
+          }
           const mmsi=String(msg.MetaData?.MMSI_String||msg.MetaData?.MMSI||'');
-          if(!mmsi||mmsi==='undefined') return;
+          if(!mmsi||mmsi==='undefined'||mmsi==='0') return;
           setAisTargets(prev=>{
             const t={...prev[mmsi]||{mmsi,name:''}};
             const pr=msg.Message?.PositionReport;
             const ss=msg.Message?.ShipStaticData;
             if(pr&&pr.Latitude!=null&&Math.abs(pr.Latitude)<=90&&Math.abs(pr.Longitude)<=180){
               t.lat=pr.Latitude; t.lon=pr.Longitude;
-              t.cog=pr.Cog>=0&&pr.Cog<360?pr.Cog:0;
-              t.sog=pr.Sog>=0?pr.Sog:0;
+              t.cog=pr.Cog>=0&&pr.Cog<=360?pr.Cog:0;
+              t.sog=pr.Sog>=0&&pr.Sog<100?pr.Sog:0;
               t.heading=pr.TrueHeading>0&&pr.TrueHeading<360?pr.TrueHeading:t.cog;
             }
             if(ss?.Name) t.name=ss.Name.trim();
@@ -3073,14 +3118,18 @@ function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
             t.ts=Date.now();
             return{...prev,[mmsi]:t};
           });
-        }catch{}
+        }catch(err){console.warn('AIS parse error',err);}
       };
-      ws.onerror=()=>{
+      ws.onerror=(err)=>{
         clearTimeout(watchdog);
-        notify('AIS connection error','error');
-        wsRef.current=null; setAisOn(false);
+        console.error('AIS WS error',err);
+        wsRef.current=null;
+        setAisOn(false);
       };
-      ws.onclose=()=>{ if(wsRef.current===ws) wsRef.current=null; };
+      ws.onclose=(ev)=>{
+        console.log('AIS closed code:',ev.code,'reason:',ev.reason);
+        if(wsRef.current===ws) wsRef.current=null;
+      };
       wsRef.current=ws;
     }catch(e){
       notify('AIS failed: '+e.message,'error');
@@ -3180,8 +3229,10 @@ function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
   const NS=`
     .nm-wrap{position:fixed;inset:0;z-index:200;background:#040C1A;display:flex;flex-direction:column;}
     .nm-topbar{height:44px;min-height:44px;flex-shrink:0;background:rgba(4,12,26,0.92);border-bottom:1px solid rgba(0,212,255,0.15);display:flex;align-items:center;padding:0 10px;gap:8px;z-index:600;}
-    .nm-map{flex:1;position:relative;overflow:hidden;width:100%;min-height:200px;}
-    .nm-map .leaflet-container{width:100%!important;height:100%!important;background:#040C1A!important;}
+    .nm-map{flex:1;position:relative;overflow:hidden;width:100%;}
+    .nm-map>div{position:absolute!important;inset:0!important;width:100%!important;height:100%!important;}
+    .nm-map .leaflet-container{position:absolute!important;inset:0!important;width:100%!important;height:100%!important;background:#040C1A!important;}
+    .nm-map .leaflet-tile-pane{will-change:transform;}
     .nm-panel{position:absolute;top:8px;right:8px;z-index:500;width:256px;
       background:rgba(4,12,26,0.93);border:1px solid rgba(0,212,255,0.22);
       border-radius:13px;backdrop-filter:blur(14px);overflow:visible;}
@@ -4156,7 +4207,7 @@ export default function App(){
           {!loading&&tab==='planner' &&<RoutePlannerPage notify={notify} sheetRoutes={[...routes,...sheetRoutes]} portsDb={portsDb}/>}
           {!loading&&tab==='ports'   &&<PortSearchPage portsDb={portsDb} sheetLoading={sheetLoading} refreshSheets={fetchSheets}/>}
           {!loading&&tab==='library' &&<MaritimeLibraryPage setTab={switchTab}/>}
-          {!loading&&tab==='navmode' &&<NavModePage notify={notify} sheetRoutes={[...routes,...sheetRoutes]} portsDb={portsDb}/>}
+          {!loading&&tab==='navmode' &&<NavModePage notify={notify} sheetRoutes={[...routes,...sheetRoutes]} portsDb={portsDb} setTab={switchTab}/>}
           {!loading&&tab==='login'   &&<LoginPage notify={notify} onLogin={(u,redirectTo)=>{setUser(u);setTab(redirectTo||'home');}}/>}
           {/* Login gate for unauthenticated users on protected tabs */}
           {!loading&&!user&&tab!=='home'&&tab!=='login'&&(
