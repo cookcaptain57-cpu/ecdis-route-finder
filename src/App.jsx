@@ -4058,7 +4058,6 @@ export default function App(){
     });
     return()=>unsub();
   },[]);
-  },[]);
   useEffect(()=>{
     // Don't pre-load all routes/charts — too slow with 20000+ files
     // Data is fetched on-demand when user searches in RoutesPage/ChartsPage
