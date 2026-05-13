@@ -1,13 +1,75 @@
 /* eslint-disable */
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { auth, db } from "./firebase";
 import {
   signInWithEmailAndPassword, createUserWithEmailAndPassword,
-  signOut, onAuthStateChanged, sendPasswordResetEmail
+  signOut, onAuthStateChanged, sendPasswordResetEmail,
+  setPersistence, browserLocalPersistence
 } from "firebase/auth";
 import {
   collection, getDocs, addDoc, deleteDoc, doc, setDoc, serverTimestamp, getDoc, query, orderBy
 } from "firebase/firestore";
+
+// ─── LIVE GOOGLE SHEET SEARCH API ─────────────────────────────────────────────
+// Searches directly against Google Sheet CSV — no preloading, no sync button needed
+const ROUTE_SHEET_ID = '1ILzyQODb4Ig2mdq9auZ7aJOfdKBBM01t192VE59WbCE';
+const CHART_SHEET_ID_2 = '1zuZxqUSFtxzg-E8CkTGj01YehhXCZIPodCisCicpxRA';
+
+// Simple search cache to avoid re-fetching same queries
+const searchCache = new Map();
+
+const csvToRows = (csv) => {
+  const lines = csv.trim().split('\n');
+  if (lines.length < 2) return [];
+  const headers = lines[0].split(',').map(h => h.replace(/"/g,'').trim());
+  return lines.slice(1).map(line => {
+    const vals = []; let cur = ''; let inQ = false;
+    for (const ch of line) {
+      if (ch === '"') inQ = !inQ;
+      else if (ch === ',' && !inQ) { vals.push(cur.trim()); cur = ''; }
+      else cur += ch;
+    }
+    vals.push(cur.trim());
+    const obj = {};
+    headers.forEach((h, i) => obj[h] = (vals[i] || '').replace(/"/g, ''));
+    return obj;
+  }).filter(r => Object.values(r).some(v => v));
+};
+
+const fetchSheetCSV = async (sheetId, tabName = 'Sheet1') => {
+  const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(tabName)}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`${res.status}`);
+  return csvToRows(await res.text());
+};
+
+// Search Google Sheet live — debounced, cached, paginated
+const searchSheetLive = async (sheetId, query, tabNames = ['Sheet1'], maxResults = 50) => {
+  if (!query || query.trim().length < 2) return [];
+  const ql = query.toLowerCase().trim();
+  const cacheKey = `${sheetId}:${ql}`;
+  
+  // Return cached result (5 min TTL)
+  const cached = searchCache.get(cacheKey);
+  if (cached && Date.now() - cached.ts < 300000) return cached.data;
+  
+  let allRows = [];
+  for (const tab of tabNames) {
+    try {
+      const rows = await fetchSheetCSV(sheetId, tab);
+      allRows = [...allRows, ...rows.map(r => ({...r, _tab: tab}))];
+      if (allRows.length > 5000) break; // Safety limit per tab
+    } catch { continue; }
+  }
+  
+  const results = allRows.filter(r => {
+    const hay = Object.values(r).filter(Boolean).join(' ').toLowerCase();
+    return hay.includes(ql);
+  }).slice(0, maxResults);
+  
+  searchCache.set(cacheKey, { data: results, ts: Date.now() });
+  return results;
+};
 
 // ─── GOOGLE SHEET APIs ─────────────────────────────────
 const API_1 =
@@ -1043,79 +1105,6 @@ const S = `
   .leg-item{display:flex;align-items:center;gap:6px;margin-bottom:3px;}
   .leg-dot{width:10px;height:10px;border-radius:2px;flex-shrink:0;}
   .map-controls{position:absolute;top:10px;right:10px;z-index:400;display:flex;flex-direction:column;gap:5px;}
-  <div className="map-controls">
-  <button 
-    className={`map-ctrl-btn ${showBathymetry ? 'active' : ''}`}
-    onClick={() => setShowBathymetry(!showBathymetry)}
-    style={{
-      borderColor: showBathymetry ? 'var(--cyan)' : 'var(--border)',
-      color: showBathymetry ? 'var(--cyan)' : 'var(--text)'
-    }}
-  >
-    {showBathymetry ? '🌊 Depth ON' : '🌊 Depth OFF'}
-  </button>
-
-  {showBathymetry && (
-    <div style={{
-      background: 'rgba(4,12,26,0.95)',
-      border: '1px solid var(--border)',
-      borderRadius: 8,
-      padding: '8px 10px',
-      fontSize: '0.7rem'
-    }}>
-      <div style={{color: 'var(--text2)', marginBottom: 4}}>Vessel Draft</div>
-      <div style={{display: 'flex', alignItems: 'center', gap: 6}}>
-        <button 
-          onClick={() => setVesselDraft(Math.max(5, vesselDraft - 1))}
-          style={{
-            background: 'var(--cyan)',
-            border: 'none',
-            borderRadius: 4,
-            color: '#000',
-            cursor: 'pointer',
-            padding: '2px 6px',
-            fontSize: '0.7rem',
-            fontWeight: 'bold'
-          }}
-        >
-          -
-        </button>
-        <span style={{
-          color: 'var(--cyan)',
-          fontFamily: 'Orbitron,monospace',
-          fontSize: '0.8rem',
-          fontWeight: 'bold',
-          minWidth: 35,
-          textAlign: 'center'
-        }}>
-          {vesselDraft}m
-        </span>
-        <button 
-          onClick={() => setVesselDraft(Math.min(25, vesselDraft + 1))}
-          style={{
-            background: 'var(--cyan)',
-            border: 'none',
-            borderRadius: 4,
-            color: '#000',
-            cursor: 'pointer',
-            padding: '2px 6px',
-            fontSize: '0.7rem',
-            fontWeight: 'bold'
-          }}
-        >
-          +
-        </button>
-      </div>
-      <div style={{
-        color: 'var(--text3)',
-        fontSize: '0.6rem',
-        marginTop: 3
-      }}>
-        Safety: {vesselDraft + 3}m
-      </div>
-    </div>
-  )}
-</div>
   .map-ctrl-btn{padding:6px 10px;background:rgba(4,12,26,0.9);border:1px solid var(--border);
     border-radius:8px;color:var(--text);font-size:0.72rem;cursor:pointer;transition:all 0.2s;white-space:nowrap;}
   .map-ctrl-btn:hover{border-color:var(--cyan);color:var(--cyan);}
@@ -1282,16 +1271,14 @@ function normalizeSheetRow(row, idx, tag){
   return{id:`${tag}-${idx}`,fileName,fileUrl,portName,keywords:allKw,type,brand,model,region,source:'sheet'};
 }
 
-// ─── MAP VIEW ───────────────────────────────────────── ─────────────────────────────────────────────────────────────────
+// ─── MAP VIEW ─────────────────────────────────────────────────────────────────
 function MapView({waypoints,setWaypoints,overlays,playing,setPlaying,speed,onMapClick,mapMode}){
   const containerRef=useRef(null);
   const mapRef=useRef(null);
-  const layersRef=useRef({route:null,markers:[],zones:{},ship:null,trail:null,bathymetry:null});
+  const layersRef=useRef({route:null,markers:[],zones:{},ship:null,trail:null,baseTile:null,seamarkTile:null});
   const animRef=useRef(null);
   const animIdxRef=useRef(0);
   const animPtsRef=useRef([]);
-  const [showBathymetry, setShowBathymetry] = useState(true);
-  const [vesselDraft, setVesselDraft] = useState(12);
   const [ready,setReady]=useState(false);
 
   const MAP_TILES={
@@ -1328,35 +1315,6 @@ function MapView({waypoints,setWaypoints,overlays,playing,setPlaying,speed,onMap
     setReady(true);
   };
 
-  // ═══ BATHYMETRY LAYER FUNCTION ═══
-  const addBathymetryLayer = () => {
-    if (!mapRef.current || !window.L) return;
-    const L = window.L;
-    const map = mapRef.current;
-    const lrs = layersRef.current;
-
-    if (lrs.bathymetry) {
-      lrs.bathymetry.remove();
-      lrs.bathymetry = null;
-    }
-
-    if (!showBathymetry) return;
-
-    const gebcoLayer = L.tileLayer.wms('https://www.gebco.net/data_and_products/gebco_web_services/web_map_service/mapserv', {
-      layers: 'GEBCO_LATEST',
-      format: 'image/png',
-      transparent: true,
-      opacity: 0.6,
-      attribution: '© GEBCO',
-      maxZoom: 12
-    });
-
-    const bathymetryGroup = L.layerGroup([gebcoLayer]);
-    bathymetryGroup.addTo(map);
-    
-    lrs.bathymetry = bathymetryGroup;
-  };
-
   useEffect(()=>{
     if(window.L){initMap();return;}
     if(!document.getElementById('lcss')){
@@ -1374,12 +1332,6 @@ function MapView({waypoints,setWaypoints,overlays,playing,setPlaying,speed,onMap
       if(mapRef.current){mapRef.current.remove();mapRef.current=null;}
     };
   },[]);
-
-  // Update bathymetry when settings change
-  useEffect(() => {
-    if (!ready) return;
-    addBathymetryLayer();
-  }, [showBathymetry, vesselDraft, ready]);
 
   // Update route on map
   useEffect(()=>{
@@ -1479,120 +1431,8 @@ function MapView({waypoints,setWaypoints,overlays,playing,setPlaying,speed,onMap
       {!ready&&<div style={{position:'absolute',inset:0,display:'flex',alignItems:'center',justifyContent:'center',background:'var(--bg2)',zIndex:10}}>
         <div className="loading"><div className="spin"/><span>Loading nautical map…</span></div>
       </div>}
-      
-      <div className="map-controls">
-        <button 
-          className={`map-ctrl-btn ${showBathymetry ? 'active' : ''}`}
-          onClick={() => setShowBathymetry(!showBathymetry)}
-          style={{
-            borderColor: showBathymetry ? 'var(--cyan)' : 'var(--border)',
-            color: showBathymetry ? 'var(--cyan)' : 'var(--text)'
-          }}
-        >
-          {showBathymetry ? '🌊 Depth ON' : '🌊 Depth OFF'}
-        </button>
-
-        {showBathymetry && (
-          <div style={{
-            background: 'rgba(4,12,26,0.95)',
-            border: '1px solid var(--border)',
-            borderRadius: 8,
-            padding: '8px 10px',
-            fontSize: '0.7rem'
-          }}>
-            <div style={{color: 'var(--text2)', marginBottom: 4}}>Vessel Draft</div>
-            <div style={{display: 'flex', alignItems: 'center', gap: 6}}>
-              <button 
-                onClick={() => setVesselDraft(Math.max(5, vesselDraft - 1))}
-                style={{
-                  background: 'var(--cyan)',
-                  border: 'none',
-                  borderRadius: 4,
-                  color: '#000',
-                  cursor: 'pointer',
-                  padding: '2px 6px',
-                  fontSize: '0.7rem',
-                  fontWeight: 'bold'
-                }}
-              >
-                -
-              </button>
-              <span style={{
-                color: 'var(--cyan)',
-                fontFamily: 'Orbitron,monospace',
-                fontSize: '0.8rem',
-                fontWeight: 'bold',
-                minWidth: 35,
-                textAlign: 'center'
-              }}>
-                {vesselDraft}m
-              </span>
-              <button 
-                onClick={() => setVesselDraft(Math.min(25, vesselDraft + 1))}
-                style={{
-                  background: 'var(--cyan)',
-                  border: 'none',
-                  borderRadius: 4,
-                  color: '#000',
-                  cursor: 'pointer',
-                  padding: '2px 6px',
-                  fontSize: '0.7rem',
-                  fontWeight: 'bold'
-                }}
-              >
-                +
-              </button>
-            </div>
-            <div style={{
-              color: 'var(--text3)',
-              fontSize: '0.6rem',
-              marginTop: 3
-            }}>
-              Safety: {vesselDraft + 3}m
-            </div>
-          </div>
-        )}
-      </div>
-
-      {(activeOverlays.length > 0 || showBathymetry) && (
+      {activeOverlays.length>0&&(
         <div className="map-legend">
-          {showBathymetry && (
-            <>
-              <div style={{
-                fontFamily: 'Orbitron,monospace',
-                fontSize: '0.65rem',
-                color: 'var(--cyan)',
-                marginBottom: 6,
-                paddingBottom: 4,
-                borderBottom: '1px solid var(--border)'
-              }}>
-                🌊 DEPTH ZONES
-              </div>
-              <div className="leg-item">
-                <div className="leg-dot" style={{background: '#001f3f', border: '1px solid #00B4D8'}}/>
-                <span style={{color: 'var(--text2)', fontSize: '0.65rem'}}>Deep (&gt;200m)</span>
-              </div>
-              <div className="leg-item">
-                <div className="leg-dot" style={{background: '#0074D9'}}/>
-                <span style={{color: 'var(--text2)', fontSize: '0.65rem'}}>Medium (30-200m)</span>
-              </div>
-              <div className="leg-item">
-                <div className="leg-dot" style={{background: '#39CCCC'}}/>
-                <span style={{color: 'var(--text2)', fontSize: '0.65rem'}}>Shallow (10-30m)</span>
-              </div>
-              <div className="leg-item">
-                <div className="leg-dot" style={{background: '#FF6B6B'}}/>
-                <span style={{color: 'var(--text2)', fontSize: '0.65rem'}}>Danger (&lt;{vesselDraft + 3}m)</span>
-              </div>
-              {activeOverlays.length > 0 && (
-                <div style={{
-                  height: 1,
-                  background: 'var(--border)',
-                  margin: '6px 0'
-                }}/>
-              )}
-            </>
-          )}
           {activeOverlays.map(([k])=>(
             <div key={k} className="leg-item">
               <div className="leg-dot" style={{background:legendColors[k]}}/>
@@ -1604,6 +1444,7 @@ function MapView({waypoints,setWaypoints,overlays,playing,setPlaying,speed,onMap
     </div>
   );
 }
+
 // ─── ETA CALCULATOR ───────────────────────────────────────────────────────────
 function ETACalculator({totalNM}){
   const [mode,setMode]=useState('speed');
@@ -2406,134 +2247,124 @@ function HomePage({routes,charts,onSearch,setTab,user,portsDb=[]}){
 }
 
 // ─── ROUTES PAGE ──────────────────────────────────────────────────────────────
-function RoutesPage({routes,sheetRoutes,searchQuery,notify,user,setTab}){
+function RoutesPage({searchQuery,notify,user,setTab}){
   const [q,setQ]=useState(searchQuery||'');
   const [results,setResults]=useState([]);
-  const [showSugg,setShowSugg]=useState(false);
-  const [sugg,setSugg]=useState([]);
+  const [searching,setSearching]=useState(false);
   const [searched,setSearched]=useState(false);
-  const inputRef=useRef(null);
+  const [sugg,setSugg]=useState([]);
+  const [showSugg,setShowSugg]=useState(false);
+  const debounceRef=useRef(null);
 
-  useEffect(()=>{if(searchQuery){setQ(searchQuery);doSearch(searchQuery);};},[searchQuery]);
+  useEffect(()=>{if(searchQuery&&searchQuery.trim()){setQ(searchQuery);liveSearch(searchQuery);}},[searchQuery]);
 
-  // Build search index from sheet data — only names/keywords, not full objects
-  const searchIndex=useMemo(()=>{
-    return(sheetRoutes||[]).map((r,i)=>({
-      i, // index back into sheetRoutes
-      n:(r.fileName||r['File Name']||r['Route Name']||'').toLowerCase(),
-      p:(r.portName||r['Port Name']||r['From']||'').toLowerCase(),
-      k:(r.keywords||r['Keywords']||'').toLowerCase(),
-      u:r.fileUrl||r['File URL']||r['Drive Link']||Object.values(r).find(v=>typeof v==='string'&&v.includes('drive.google'))||'',
-    }));
-  },[sheetRoutes]);
+  const ROUTE_TABS=['Sheet1','Routes','Sheet2','Sheet3','Sheet4'];
 
-  const doSearch=(searchQ)=>{
-    const sq=(searchQ||q).trim().toLowerCase();
-    if(!sq||sq.length<2) return;
-    setSearched(true);setShowSugg(false);
-    const hits=searchIndex.filter(r=>r.n.includes(sq)||r.p.includes(sq)||r.k.includes(sq)).slice(0,50);
-    setResults(hits.map(h=>sheetRoutes[h.i]));
+  const liveSearch=useCallback(async(searchQ)=>{
+    const sq=(searchQ||q).trim();
+    if(!sq||sq.length<2){setResults([]);setSearched(false);return;}
+    setSearching(true);setSearched(true);setShowSugg(false);
+    try{
+      const res=await searchSheetLive(ROUTE_SHEET_ID,sq,ROUTE_TABS,50);
+      setResults(res);
+    }catch(e){notify('Search error: '+e.message,'error');setResults([]);}
+    setSearching(false);
+  },[q]);
+
+  // Debounced suggestions while typing
+  const handleChange=e=>{
+    const v=e.target.value;setQ(v);setResults([]);setSearched(false);
+    clearTimeout(debounceRef.current);
+    if(v.trim().length<2){setSugg([]);setShowSugg(false);return;}
+    // Show suggestions from local searchCache first
+    const ql=v.toLowerCase();
+    const cached=[...searchCache.entries()]
+      .filter(([k])=>k.startsWith(ROUTE_SHEET_ID+':')&&k.includes(ql))
+      .flatMap(([,v])=>v.data||[]);
+    if(cached.length>0){
+      const names=new Set();
+      cached.forEach(r=>{
+        const nm=r['File Name']||r['Route Name']||r.fileName||'';
+        if(nm&&nm.toLowerCase().includes(ql))names.add(nm);
+      });
+      setSugg([...names].slice(0,8));setShowSugg(true);
+    }
+    debounceRef.current=setTimeout(()=>liveSearch(v),500);
   };
-
-  // Suggestions while typing
-  useEffect(()=>{
-    if(!q.trim()||q.length<2){setSugg([]);return;}
-    const ql=q.toLowerCase();
-    const seen=new Set();const hits=[];
-    searchIndex.forEach(r=>{
-      [r.n,r.p].forEach(s=>{if(s&&s.includes(ql)&&!seen.has(s)){seen.add(s);hits.push(s);}});
-    });
-    setSugg(hits.slice(0,8));
-  },[q,searchIndex]);
 
   const handleDL=async(r)=>{
-    if(!user){notify('Login required to download','error');setTab('login');return;}
-    const url=r.fileUrl||r['File URL']||r['Drive Link']||Object.values(r).find(v=>typeof v==='string'&&v.includes('drive.google'))||'';
+    if(!user){notify('Login required','error');setTab('login');return;}
+    const url=r['File URL']||r.fileUrl||r['Drive Link']||r['Download URL']||
+      Object.values(r).find(v=>typeof v==='string'&&(v.includes('drive.google')||v.includes('googleapis')));
     if(!url){notify('No download link for this file','error');return;}
-    notify('⏳ Downloading…','success');
+    notify('⬇ Downloading…','success');
     try{
       const gd=url.match(/\/d\/([a-zA-Z0-9_-]+)/);
-      const fetchUrl=gd?`https://drive.google.com/uc?export=download&id=${gd[1]}`:url;
-      const res=await fetch(fetchUrl,{mode:'cors'});
-      if(!res.ok) throw new Error('fetch failed');
+      const direct=gd?`https://drive.google.com/uc?export=download&id=${gd[1]}`:url;
+      const res=await fetch(direct);
+      if(!res.ok)throw new Error('fetch failed');
       const blob=await res.blob();
+      const fname=r['File Name']||r.fileName||gd?.[1]||'route';
       const a=document.createElement('a');
-      a.href=URL.createObjectURL(blob);
-      a.download=r.fileName||r['File Name']||'route';
-      a.click();URL.revokeObjectURL(a.href);
-      notify('✅ Downloaded','success');
-    }catch{window.open(url,'_blank');notify('Opened in browser — save the file','success');}
+      a.href=URL.createObjectURL(blob);a.download=fname;
+      document.body.appendChild(a);a.click();
+      document.body.removeChild(a);URL.revokeObjectURL(a.href);
+      notify('✅ Downloaded: '+fname,'success');
+    }catch{window.open(url,'_blank');notify('Opened — save from browser','success');}
   };
 
-  const getName=(r)=>r.fileName||r['File Name']||r['Route Name']||Object.values(r).find(v=>v&&typeof v==='string'&&v.length>2&&!v.includes('http')&&!v.includes('drive'))||'Route File';
-  const getPort=(r)=>r.portName||r['Port Name']||r['From']||r['Route Description']||'';
+  const getName=r=>r['File Name']||r.fileName||r['Route Name']||Object.values(r).find(v=>v&&typeof v==='string'&&v.length>2&&!v.startsWith('http'))||'Route File';
+  const getPort=r=>r['Port Name']||r.portName||r['From']||r['Route Description']||'';
 
   return(
     <div className="section">
       <div className="sec-hdr">
         <div className="sec-title">🛤 Route Files</div>
         {results.length>0&&<span className="badge">{results.length} results</span>}
+        {searching&&<span className="badge" style={{background:'rgba(0,212,255,0.1)',color:'var(--cyan)'}}>🔍 Searching…</span>}
       </div>
 
-      {/* SEARCH — primary interface */}
-      <div style={{position:'relative',marginBottom:'1rem'}}>
+      <div style={{position:'relative',marginBottom:'0.8rem'}}>
         <div style={{display:'flex',gap:8}}>
           <div className="siw" style={{flex:1}}>
             <span className="si-ic">🔍</span>
-            <input ref={inputRef} className="si" style={{paddingLeft:42}}
-              placeholder="Search by port, route name, file name, keyword…"
-              value={q}
-              onChange={e=>{setQ(e.target.value);setShowSugg(true);setSearched(false);setResults([]);}}
+            <input className="si" style={{paddingLeft:42}} autoFocus
+              placeholder="Search route files by port, name, keyword…"
+              value={q} onChange={handleChange}
               onFocus={()=>sugg.length>0&&setShowSugg(true)}
-              onBlur={()=>setTimeout(()=>setShowSugg(false),160)}
-              onKeyDown={e=>e.key==='Enter'&&doSearch()}/>
+              onBlur={()=>setTimeout(()=>setShowSugg(false),180)}
+              onKeyDown={e=>e.key==='Enter'&&liveSearch()}/>
           </div>
-          <button className="btn btn-primary" style={{padding:'0 16px'}} onClick={()=>doSearch()}>Search</button>
+          <button className="btn btn-primary" style={{padding:'0 16px'}} onClick={()=>liveSearch()}>Search</button>
           {q&&<button className="btn btn-secondary" onClick={()=>{setQ('');setResults([]);setSugg([]);setSearched(false);}}>✕</button>}
         </div>
         {showSugg&&sugg.length>0&&(
-          <div style={{position:'absolute',top:'100%',left:0,right:0,zIndex:300,background:'var(--card)',
-            border:'1px solid var(--border)',borderRadius:10,boxShadow:'0 8px 28px rgba(0,0,0,0.5)',marginTop:4,overflow:'hidden'}}>
+          <div style={{position:'absolute',top:'100%',left:0,right:0,zIndex:300,
+            background:'var(--card)',border:'1px solid var(--border)',borderRadius:10,
+            boxShadow:'0 8px 28px rgba(0,0,0,0.5)',marginTop:4,overflow:'hidden'}}>
             {sugg.map((s,i)=>(
-              <div key={i} onMouseDown={()=>{setQ(s);setShowSugg(false);doSearch(s);}}
-                style={{padding:'10px 14px',cursor:'pointer',display:'flex',alignItems:'center',gap:10,
-                  borderBottom:'1px solid rgba(255,255,255,0.04)',transition:'background .15s'}}
+              <div key={i} onMouseDown={()=>{setQ(s);setShowSugg(false);liveSearch(s);}}
+                style={{padding:'10px 14px',cursor:'pointer',display:'flex',gap:10,
+                  borderBottom:'1px solid rgba(255,255,255,0.04)',transition:'background .15s',alignItems:'center'}}
                 onMouseEnter={e=>e.currentTarget.style.background='rgba(0,180,216,0.08)'}
                 onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
-                <span style={{color:'var(--cyan)',fontSize:'0.85rem'}}>🔎</span>
-                <span style={{fontSize:'0.84rem'}}>{s}</span>
+                <span style={{color:'var(--cyan)'}}>🔎</span><span style={{fontSize:'0.84rem'}}>{s}</span>
               </div>
             ))}
           </div>
         )}
       </div>
 
-      {/* Quick chips */}
       <div className="fbar" style={{marginBottom:'0.8rem'}}>
-        {['Mumbai','Singapore','Dubai','Rotterdam','Colombo','Karachi','Fujairah'].map(p=>(
-          <button key={p} className={`fbtn ${q===p?'active':''}`} onClick={()=>{setQ(p);doSearch(p);}}>{p}</button>
+        {['Mumbai','Singapore','Dubai','Rotterdam','Colombo','Karachi','Fujairah','Shanghai'].map(p=>(
+          <button key={p} className={`fbtn ${q===p?'active':''}`} onClick={()=>{setQ(p);liveSearch(p);}}>{p}</button>
         ))}
       </div>
 
-      {/* State: initial prompt */}
-      {!searched&&results.length===0&&(
-        <div className="empty">
-          <div className="empty-icon">🛤</div>
-          <div className="empty-t">Search Route Files</div>
-          <div className="empty-d">Type a port name, route name or keyword above and press Search</div>
-        </div>
-      )}
+      {!searched&&!searching&&<div className="empty"><div className="empty-icon">🛤</div><div className="empty-t">Search Route Files</div><div className="empty-d">Searches live from database — type a port name or keyword</div></div>}
+      {searching&&<div className="loading"><div className="spin"/><span>Searching live database…</span></div>}
+      {searched&&!searching&&results.length===0&&<div className="empty"><div className="empty-icon">🔍</div><div className="empty-t">No Routes Found</div><div className="empty-d">Try different keywords or partial port name</div></div>}
 
-      {/* State: no results */}
-      {searched&&results.length===0&&(
-        <div className="empty">
-          <div className="empty-icon">🔍</div>
-          <div className="empty-t">No Routes Found</div>
-          <div className="empty-d">Try "Mumbai", "MUM", "Singapore" or partial port name</div>
-        </div>
-      )}
-
-      {/* Results grid */}
       {results.length>0&&(
         <div className="files-grid">
           {results.map((r,i)=>(
@@ -2543,12 +2374,10 @@ function RoutesPage({routes,sheetRoutes,searchQuery,notify,user,setTab}){
               {getPort(r)&&<div className="file-port">📍 {getPort(r)}</div>}
               <div className="file-tags">
                 <span className="ftag tag-rtz">Route File</span>
-                <span className="ftag" style={{background:'rgba(0,200,150,0.08)',color:'var(--green)',border:'1px solid rgba(0,200,150,0.18)'}}>Live Sheet</span>
+                <span className="ftag" style={{background:'rgba(0,212,255,0.06)',color:'var(--cyan)',border:'1px solid rgba(0,212,255,0.15)'}}>Live</span>
               </div>
-              {user
-                ?<button className="dl-btn" onClick={()=>handleDL(r)}>⬇ Download</button>
-                :<button className="login-req" onClick={()=>setTab('login')}>🔐 Login to Download</button>
-              }
+              {user?<button className="dl-btn" onClick={()=>handleDL(r)}>⬇ Download</button>
+                   :<button className="login-req" onClick={()=>setTab('login')}>🔐 Login to Download</button>}
             </div>
           ))}
         </div>
@@ -2557,263 +2386,187 @@ function RoutesPage({routes,sheetRoutes,searchQuery,notify,user,setTab}){
   );
 }
 
-
-// ─── CHARTS PAGE ──────────────────────────────────────────────────────────────
 function ChartsPage({charts,sheetCharts,notify,user,setTab,isAdmin}){
   const [selBrand,setSelBrand]=useState(null);
   const [q,setQ]=useState('');
+  const [globalQ,setGlobalQ]=useState('');
+  const [globalResults,setGlobalResults]=useState([]);
+  const [globalSearching,setGlobalSearching]=useState(false);
+  const [globalSearched,setGlobalSearched]=useState(false);
   const [showSugg,setShowSugg]=useState(false);
+  const debounceRef=useRef(null);
 
-  // Normalize sheet chart rows once
-  const normalizedSheet=useMemo(()=>
-    (sheetCharts||[]).map((r,i)=>normalizeSheetRow(r,i,'sc'))
-  ,[sheetCharts]);
+  const CHART_TABS=['Sheet1','Charts','ECDIS Charts','Sheet2','Sheet3'];
 
-  // Merge Firebase + Sheet (de-dupe by fileName)
-  const allCharts=useMemo(()=>{
-    const fbNames=new Set(charts.map(c=>c.fileName?.toLowerCase()));
-    const extra=normalizedSheet.filter(c=>c.fileName&&!fbNames.has(c.fileName.toLowerCase()));
-    return[...charts,...extra];
-  },[charts,normalizedSheet]);
-
-  // Model-number → brand aliases extracted from ECDIS_BRANDS.models
-  const MODEL_ALIASES = useMemo(()=>{
-    const map=[];
-    ECDIS_BRANDS.forEach(b=>{
-      // e.g. "FMD-3200 / FMD-3300" → ["fmd3200","fmd3300","fmd-3200","fmd-3300"]
-      const tokens=(b.models||'').split(/[\s/,]+/).map(t=>t.trim().toLowerCase()).filter(Boolean);
-      tokens.forEach(t=>{ if(t.length>2) map.push({token:t,id:b.id}); });
-      // Also add id and name
-      map.push({token:b.name.toLowerCase(),id:b.id});
-      map.push({token:b.id,id:b.id});
-      // Extra common abbreviations
-      if(b.id==='jrc')    map.push({token:'jan',id:'jrc'});
-      if(b.id==='furuno') map.push({token:'fmd',id:'furuno'},{token:'furuno',id:'furuno'});
-      if(b.id==='transas'||b.id==='wartsila') map.push({token:'navisailor',id:'transas'},{token:'navi-sailor',id:'transas'},{token:'wartsila',id:'transas'},{token:'wärtsilä',id:'transas'});
-      if(b.id==='sperry') map.push({token:'visionmaster',id:'sperry'},{token:'vision master',id:'sperry'});
-      if(b.id==='tokimec'||b.id==='jmr') map.push({token:'jmr',id:'tokimec'});
-      if(b.id==='danelec') map.push({token:'dm800',id:'danelec'},{token:'dm-800',id:'danelec'});
-      if(b.id==='kongsberg') map.push({token:'kbridge',id:'kongsberg'},{token:'k-bridge',id:'kongsberg'});
-      if(b.id==='raytheon') map.push({token:'anschutz',id:'raytheon'},{token:'anschütz',id:'raytheon'});
-    });
-    return map;
-  },[]);
-
-  // Detect brand for a chart (works for both Firebase and sheet data)
-  const detectBrand=(c)=>{
-    const hay=[c.brand,c.brandId,c.model,c.keywords,c.fileName,c.portName]
-      .filter(Boolean).join(' ').toLowerCase().replace(/[\s_]/g,'');
-    // First try direct brand name / id match
-    const direct=ECDIS_BRANDS.find(b=>
-      hay.includes(b.name.toLowerCase().replace(/[\s_]/g,''))||hay.includes(b.id)
-    );
-    if(direct) return direct;
-    // Then try model-number / alias match
-    for(const {token,id} of MODEL_ALIASES){
-      if(hay.includes(token.replace(/[\s_-]/g,''))){
-        return ECDIS_BRANDS.find(b=>b.id===id)||null;
-      }
-    }
-    return null;
+  // ── Global live search across ALL chart models ────────────────────────────
+  const doGlobalSearch=async(sq)=>{
+    const s=(sq||globalQ).trim();
+    if(!s||s.length<2) return;
+    setGlobalSearching(true);setGlobalSearched(true);setSelBrand(null);
+    try{
+      const res=await searchSheetLive(CHART_SHEET_ID_2,s,CHART_TABS,50);
+      setGlobalResults(res);
+    }catch(e){notify('Search error: '+e.message,'error');}
+    setGlobalSearching(false);
   };
 
-  const brandCount=id=>{
-    const b=ECDIS_BRANDS.find(x=>x.id===id);
-    if(!b) return 0;
-    return allCharts.filter(c=>{
-      const d=detectBrand(c);
-      return d?.id===id||c.brandId===id||c.brand===b.name;
-    }).length;
+  const handleGlobalChange=e=>{
+    const v=e.target.value;setGlobalQ(v);setGlobalResults([]);setGlobalSearched(false);
+    clearTimeout(debounceRef.current);
+    if(v.trim().length>=2) debounceRef.current=setTimeout(()=>doGlobalSearch(v),500);
   };
+
+  // ── Per-brand live search ─────────────────────────────────────────────────
+  const [brandResults,setBrandResults]=useState([]);
+  const [brandSearching,setBrandSearching]=useState(false);
+  const debRef2=useRef(null);
 
   const sb=ECDIS_BRANDS.find(b=>b.id===selBrand);
 
-  // Charts that belong to selected brand (or ALL sheet charts if 'all-sheet' selected)
-  const brandCharts=useMemo(()=>{
-    if(!selBrand) return[];
-    if(selBrand==='all-sheet') return normalizedSheet;
-    const b=ECDIS_BRANDS.find(x=>x.id===selBrand);
-    return allCharts.filter(c=>{
-      const d=detectBrand(c);
-      return d?.id===selBrand||c.brandId===selBrand||c.brand===b?.name;
-    });
-  // eslint-disable-next-line
-  },[selBrand,allCharts,normalizedSheet]);
-
-  // Suggestions for chart search within brand
-  const suggestions=useMemo(()=>{
-    if(!q.trim()||q.length<2) return[];
-    const ql=q.toLowerCase();
-    const seen=new Set();
-    const hits=[];
-    brandCharts.forEach(c=>{
-      [c.fileName,c.portName,c.region].filter(Boolean).forEach(s=>{
-        if(s.toLowerCase().includes(ql)&&!seen.has(s.toLowerCase())){
-          seen.add(s.toLowerCase());hits.push(s);
-        }
-      });
-    });
-    return hits.slice(0,8);
-  },[q,brandCharts]);
-
-  const filtered=brandCharts.filter(c=>smartMatch(c,q));
-
-  const handleDL=async(c)=>{
-    if(!user){notify('🔐 Login required','error');setTab('login');return;}
-    if(!c.fileUrl){notify('File link not set. Contact admin.','error');return;}
-    notify(`⏳ Preparing download: ${c.fileName}…`,'success');
+  const doBrandSearch=async(sq,brand)=>{
+    const s=(sq||q).trim();
+    const b=brand||sb;
+    if(!b) return;
+    setBrandSearching(true);
     try{
-      let url=c.fileUrl;
-      const gdMatch=url.match(/\/d\/([a-zA-Z0-9_-]+)/);
-      if(gdMatch){url=`https://drive.google.com/uc?export=download&id=${gdMatch[1]}`;}
-      const resp=await fetch(url,{mode:'cors'});
-      if(!resp.ok)throw new Error('fetch failed');
-      const blob=await resp.blob();
-      const a=document.createElement('a');
-      a.href=URL.createObjectURL(blob);
-      a.download=c.fileName||(gdMatch?gdMatch[1]+'.000':'download');
-      a.click();URL.revokeObjectURL(a.href);
-      notify(`✅ Downloaded: ${c.fileName}`,'success');
-    }catch{
-      window.open(c.fileUrl,'_blank');
-      notify(`Opened: ${c.fileName} — save the file from browser`,'success');
-    }
+      const res=await searchSheetLive(CHART_SHEET_ID_2,(s?s+' ':'')+b.name,CHART_TABS,50);
+      setBrandResults(res.filter(r=>{
+        const hay=Object.values(r).join(' ').toLowerCase();
+        return hay.includes(b.name.toLowerCase())||hay.includes(b.id);
+      }));
+    }catch{setBrandResults([]);}
+    setBrandSearching(false);
   };
 
-  const pickSugg=(s)=>{setQ(s);setShowSugg(false);};
+  useEffect(()=>{
+    if(selBrand){setQ('');setBrandResults([]);doBrandSearch('',ECDIS_BRANDS.find(b=>b.id===selBrand));}
+  },[selBrand]);
+
+  const handleBrandQ=e=>{
+    const v=e.target.value;setQ(v);
+    clearTimeout(debRef2.current);
+    debRef2.current=setTimeout(()=>doBrandSearch(v),500);
+  };
+
+  const handleDL=async(c)=>{
+    if(!user){notify('Login required','error');setTab('login');return;}
+    const url=c['File URL']||c.fileUrl||c['Drive Link']||
+      Object.values(c).find(v=>typeof v==='string'&&v.includes('drive.google'));
+    if(!url){notify('No download link','error');return;}
+    notify('⬇ Downloading…','success');
+    try{
+      const gd=url.match(/\/d\/([a-zA-Z0-9_-]+)/);
+      const direct=gd?`https://drive.google.com/uc?export=download&id=${gd[1]}`:url;
+      const res=await fetch(direct);
+      if(!res.ok)throw new Error('fetch');
+      const blob=await res.blob();
+      const fname=c['File Name']||c.fileName||'chart';
+      const a=document.createElement('a');
+      a.href=URL.createObjectURL(blob);a.download=fname;
+      document.body.appendChild(a);a.click();document.body.removeChild(a);
+      URL.revokeObjectURL(a.href);
+      notify('✅ Downloaded','success');
+    }catch{window.open(url,'_blank');notify('Opened in browser — save the file','success');}
+  };
+
+  const getName=r=>r['File Name']||r.fileName||r['Chart Name']||Object.values(r).find(v=>v&&typeof v==='string'&&v.length>2&&!v.startsWith('http'))||'Chart File';
+  const getBrand=r=>{
+    const hay=Object.values(r).join(' ').toLowerCase();
+    return ECDIS_BRANDS.find(b=>hay.includes(b.name.toLowerCase())||hay.includes(b.id))||null;
+  };
+
+  const ResultCard=({r})=>{
+    const b=getBrand(r);
+    return(
+      <div className="file-card">
+        <div className="file-icon">📊</div>
+        <div className="file-name">{getName(r)}</div>
+        {b&&<div style={{fontSize:'0.7rem',color:b.color,marginBottom:4}}>{b.emoji} {b.name}</div>}
+        <div className="file-tags">
+          <span className="ftag tag-chart">Chart File</span>
+          <span className="ftag" style={{background:'rgba(0,212,255,0.06)',color:'var(--cyan)',border:'1px solid rgba(0,212,255,0.15)'}}>Live</span>
+        </div>
+        {user?<button className="dl-btn" onClick={()=>handleDL(r)}>⬇ Download</button>
+             :<button className="login-req" onClick={()=>setTab('login')}>🔐 Login to Download</button>}
+      </div>
+    );
+  };
 
   return(
     <div className="section">
-      {!selBrand?(
+      {/* ── GLOBAL SEARCH ── */}
+      <div className="sec-hdr">
+        <div className="sec-title">📊 ECDIS Charts</div>
+        {globalSearched&&<span className="badge badge-gold">{globalResults.length} results</span>}
+      </div>
+
+      <div style={{marginBottom:'1rem'}}>
+        <div style={{display:'flex',gap:8,marginBottom:6}}>
+          <div className="siw" style={{flex:1}}>
+            <span className="si-ic">🔍</span>
+            <input className="si" style={{paddingLeft:42}}
+              placeholder="Search ALL ECDIS user charts — port, model, file name…"
+              value={globalQ} onChange={handleGlobalChange}
+              onKeyDown={e=>e.key==='Enter'&&doGlobalSearch()}/>
+          </div>
+          <button className="btn btn-gold" style={{padding:'0 14px'}} onClick={()=>doGlobalSearch()}>Search</button>
+          {globalQ&&<button className="btn btn-secondary" onClick={()=>{setGlobalQ('');setGlobalResults([]);setGlobalSearched(false);}}>✕</button>}
+        </div>
+        {globalSearching&&<div className="loading" style={{padding:'8px 0'}}><div className="spin"/><span>Searching all charts…</span></div>}
+        {globalSearched&&!globalSearching&&globalResults.length===0&&<div style={{color:'var(--text3)',fontSize:'0.78rem',padding:'6px 0',textAlign:'center'}}>No charts found — try different keywords</div>}
+        {globalResults.length>0&&(
+          <div className="files-grid" style={{marginTop:8}}>
+            {globalResults.map((r,i)=><ResultCard key={i} r={r}/>)}
+          </div>
+        )}
+      </div>
+
+      <div style={{borderTop:'1px solid var(--border)',paddingTop:'1rem'}}>
+        <div style={{fontSize:'0.72rem',color:'var(--text3)',marginBottom:'0.8rem',textAlign:'center',letterSpacing:'0.06em',textTransform:'uppercase'}}>— Or browse by ECDIS model —</div>
+      </div>
+
+      {/* ── MODEL BROWSER ── */}
+      {!selBrand&&(
+        <div className="brand-grid">
+          {ECDIS_BRANDS.map(b=>(
+            <div key={b.id} className="brand-card" style={{borderColor:b.color+'44'}} onClick={()=>{setSelBrand(b.id);setGlobalQ('');setGlobalResults([]);setGlobalSearched(false);}}>
+              <div className="brand-emoji">{b.emoji}</div>
+              <div className="brand-name" style={{color:b.color}}>{b.name}</div>
+              <div className="brand-models">{b.models}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {selBrand&&(
         <>
-          <div className="sec-hdr">
-            <div className="sec-title">📊 ECDIS Chart Files</div>
-            <span className="badge badge-gold">{ECDIS_BRANDS.length} Brands · {allCharts.length} charts</span>
-          </div>
-          <div className="info-box">
-            <strong style={{color:'var(--cyan)'}}>Step 1:</strong> Select your ECDIS brand →&nbsp;
-            <strong style={{color:'var(--cyan)'}}>Step 2:</strong> Search by port or region →&nbsp;
-            <strong style={{color:'var(--cyan)'}}>Step 3:</strong> Download chart file
-          </div>
-          {!user&&<div className="warn-box">🔐 Login required to download. <span style={{cursor:'pointer',textDecoration:'underline'}} onClick={()=>setTab('login')}>Register free →</span></div>}
-          <div className="brand-grid">
-            {ECDIS_BRANDS.map(b=>{
-              const cnt=brandCount(b.id);
-              return(
-                <div key={b.id} className={`brand-card ${selBrand===b.id?'sel':''}`}
-                  style={{borderColor:cnt>0?b.color+'66':'var(--border)'}} onClick={()=>{setSelBrand(b.id);setQ('');}}>
-                  <div className="brand-emoji">{b.emoji}</div>
-                  <div className="brand-name" style={{color:cnt>0?b.color:'var(--text2)'}}>{b.name}</div>
-                  <div className="brand-models">{b.models}</div>
-                  <div className="brand-count" style={{color:cnt>0?'var(--green)':'var(--text3)'}}>
-                    {cnt>0?`${cnt} chart${cnt>1?'s':''}  ✅`:'No charts yet'}
-                  </div>
-                </div>
-              );
-            })}
-            {/* All Sheet Charts — admin only */}
-            {isAdmin&&normalizedSheet.length>0&&(
-              <div className="brand-card" style={{borderColor:'rgba(0,200,150,0.4)',gridColumn:'1/-1',display:'flex',flexDirection:'row',alignItems:'center',gap:14,padding:'12px 16px'}}
-                onClick={()=>{setSelBrand('all-sheet');setQ('');}}>
-                <div style={{fontSize:'1.6rem'}}>🔄</div>
-                <div style={{flex:1}}>
-                  <div style={{fontFamily:'Orbitron,monospace',fontSize:'0.78rem',fontWeight:700,color:'var(--green)'}}>All Google Sheet Charts</div>
-                  <div style={{fontSize:'0.68rem',color:'var(--text2)',marginTop:2}}>Browse all {normalizedSheet.length} charts from your live Google Sheet — regardless of brand</div>
-                </div>
-                <span className="badge" style={{background:'rgba(0,200,150,0.15)',color:'var(--green)',border:'1px solid rgba(0,200,150,0.3)'}}>{normalizedSheet.length} charts ✅</span>
-              </div>
-            )}
-          </div>
-        </>
-      ):(
-        <>
-          <div style={{display:'flex',alignItems:'center',gap:12,marginBottom:'1.2rem',flexWrap:'wrap'}}>
-            <button className="btn btn-secondary" onClick={()=>{setSelBrand(null);setQ('');}}>← Back</button>
-            <span style={{fontSize:'1.4rem'}}>{selBrand==='all-sheet'?'🔄':sb?.emoji}</span>
+          <div style={{display:'flex',alignItems:'center',gap:12,marginBottom:'1rem',flexWrap:'wrap'}}>
+            <button className="btn btn-secondary" onClick={()=>{setSelBrand(null);setBrandResults([]);setQ('');}}>← Back</button>
+            <span style={{fontSize:'1.4rem'}}>{sb?.emoji}</span>
             <div>
-              <div style={{fontFamily:'Orbitron,monospace',fontSize:'0.88rem',fontWeight:700,color:selBrand==='all-sheet'?'var(--green)':sb?.color}}>
-                {selBrand==='all-sheet'?'All Google Sheet Charts':sb?.name}
-              </div>
-              <div style={{fontSize:'0.7rem',color:'var(--text2)'}}>{selBrand==='all-sheet'?'All charts from your live sheet':sb?.models}</div>
+              <div style={{fontFamily:'Orbitron,monospace',fontSize:'0.88rem',fontWeight:700,color:sb?.color}}>{sb?.name}</div>
+              <div style={{fontSize:'0.7rem',color:'var(--text2)'}}>{sb?.models}</div>
             </div>
-            <span className="badge badge-gold">{brandCharts.length} chart files</span>
           </div>
-          {!user&&<div className="warn-box">🔐 Login required. <span style={{cursor:'pointer',textDecoration:'underline'}} onClick={()=>setTab('login')}>Login / Register →</span></div>}
-
-          {/* SEARCH WITH SUGGESTIONS */}
-          <div style={{position:'relative',marginBottom:'1rem'}}>
-            <div style={{display:'flex',gap:8}}>
-              <div className="siw" style={{flex:1}}>
-                <span className="si-ic">🔍</span>
-                <input
-                  className="si"
-                  style={{paddingLeft:40}}
-                  placeholder={`Search port, region, file name for ${sb?.name}…`}
-                  value={q}
-                  autoFocus
-                  onChange={e=>{setQ(e.target.value);setShowSugg(true);}}
-                  onFocus={()=>setShowSugg(true)}
-                  onBlur={()=>setTimeout(()=>setShowSugg(false),180)}
-                />
-              </div>
-              {q&&<button className="btn btn-secondary" onClick={()=>{setQ('');setShowSugg(false);}}>✕</button>}
+          <div style={{display:'flex',gap:8,marginBottom:'0.8rem'}}>
+            <div className="siw" style={{flex:1}}>
+              <span className="si-ic">🔍</span>
+              <input className="si" style={{paddingLeft:42}} autoFocus
+                placeholder={`Search ${sb?.name} charts by port or file name…`}
+                value={q} onChange={handleBrandQ}
+                onKeyDown={e=>e.key==='Enter'&&doBrandSearch(q)}/>
             </div>
-            {showSugg&&suggestions.length>0&&(
-              <div style={{position:'absolute',top:'100%',left:0,right:0,zIndex:300,
-                background:'var(--card)',border:'1px solid var(--border)',borderRadius:10,
-                boxShadow:'0 8px 28px rgba(0,0,0,0.5)',marginTop:4,overflow:'hidden'}}>
-                {suggestions.map((s,i)=>(
-                  <div key={i}
-                    onMouseDown={()=>pickSugg(s)}
-                    style={{padding:'10px 14px',cursor:'pointer',display:'flex',alignItems:'center',gap:10,
-                      borderBottom:'1px solid rgba(255,255,255,0.04)',transition:'background 0.15s'}}
-                    onMouseEnter={e=>e.currentTarget.style.background='rgba(240,165,0,0.08)'}
-                    onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
-                    <span style={{color:'var(--gold)',fontSize:'0.85rem'}}>🔎</span>
-                    <span style={{fontSize:'0.84rem'}}>{s}</span>
-                  </div>
-                ))}
-              </div>
-            )}
+            {q&&<button className="btn btn-secondary" onClick={()=>{setQ('');doBrandSearch('');}}>✕</button>}
           </div>
-
-          {filtered.length===0
-            ?<div className="empty">
-              <div className="empty-icon">{selBrand==='all-sheet'?'🔄':sb?.emoji}</div>
-              <div className="empty-t">{brandCharts.length===0?'No Charts Available':'No Results'}</div>
-              <div className="empty-d">{brandCharts.length===0?'Admin will upload charts soon.':'Try a different port name or keyword.'}</div>
-            </div>
-            :<div className="files-grid">{filtered.map(c=>{
-              const brand=detectBrand(c)||sb;
-              return(
-                <div key={c.id} className="file-card">
-                  <div className="file-icon">📊</div>
-                  <div className="file-name">{c.fileName}</div>
-                  {c.portName&&<div className="file-port">⚓ {c.portName}</div>}
-                  {c.model&&<div style={{fontSize:'0.72rem',color:'#A78BFA',marginBottom:6}}>🖥 Model: {c.model}</div>}
-                  <div className="file-tags">
-                    <span className="ftag tag-chart">Chart File</span>
-                    <span className="ftag tag-brand" style={{color:brand?.color}}>{brand?.emoji} {c.brand||brand?.name}</span>
-                    {c.region&&<span className="ftag tag-rtz">{c.region}</span>}
-                    {c.source==='sheet'&&<span className="ftag" style={{background:'rgba(0,200,150,0.1)',color:'var(--green)',border:'1px solid rgba(0,200,150,0.2)'}}>Live Sheet</span>}
-                  </div>
-                  {user
-                    ?<button className="dl-btn" onClick={()=>handleDL(c)} disabled={!c.fileUrl}>
-                      {c.fileUrl?'⬇ Download Chart File':'❌ Link Not Set'}
-                    </button>
-                    :<button className="login-req" onClick={()=>setTab('login')}>🔐 Login to Download</button>
-                  }
-                </div>
-              );
-            })}</div>
-          }
+          {brandSearching&&<div className="loading"><div className="spin"/><span>Searching {sb?.name} charts…</span></div>}
+          {!brandSearching&&brandResults.length===0&&<div className="empty"><div className="empty-icon">{sb?.emoji}</div><div className="empty-t">No Charts Found</div><div className="empty-d">Try a port name or leave blank to see all {sb?.name} charts</div></div>}
+          {brandResults.length>0&&<div className="files-grid">{brandResults.map((r,i)=><ResultCard key={i} r={r}/>)}</div>}
         </>
       )}
     </div>
   );
 }
 
-// ─── LOGIN PAGE ───────────────────────────────────────────────────────────────
 function LoginPage({notify,onLogin}){
   const [mode,setMode]=useState('login');
   const [email,setEmail]=useState('');const [pass,setPass]=useState('');
@@ -4231,12 +3984,13 @@ export default function App(){
   const [isBlocked,setIsBlocked]=useState(false);
   const [routes,setRoutes]=useState([]);
   const [charts,setCharts]=useState([]);
-  const [loading,setLoading]=useState(true);
-  // Google Sheet live data (separate)
+  const [authChecked,setAuthChecked]=useState(false); // prevents flicker
+  const [loading,setLoading]=useState(false);
+  // Google Sheet live data — only ports preloaded, routes/charts searched live
   const [sheetRoutes,setSheetRoutes]=useState([]);
   const [sheetCharts,setSheetCharts]=useState([]);
   const [sheetLoading,setSheetLoading]=useState(false);
-  const [portsDb,setPortsDb]=useState(PORTS_DB); // reactive port list — updates when sheet loads
+  const [portsDb,setPortsDb]=useState(PORTS_DB);
 
   const isAdmin = user?.email===ADMIN_EMAIL;
 
@@ -4281,6 +4035,8 @@ export default function App(){
 
   useEffect(()=>{fetchSheets();},[]);
   useEffect(()=>{
+    // Set Firebase auth to persist across browser refresh
+    setPersistence(auth, browserLocalPersistence).catch(()=>{});
     const unsub=onAuthStateChanged(auth,async u=>{
       setUser(u);
       if(u){
@@ -4289,26 +4045,19 @@ export default function App(){
           if(snap.exists()){
             const profile={id:snap.id,...snap.data()};
             if(profile.blocked){
-              // Auto logout blocked user
               setIsBlocked(true);
               await signOut(auth);
-              setUser(null);
-              setUserProfile(null);
-              return;
+              setUser(null);setUserProfile(null);
+              setAuthChecked(true);return;
             }
-            setIsBlocked(false);
-            setUserProfile(profile);
-          } else {
-            setIsBlocked(false);
-            setUserProfile(null);
-          }
+            setIsBlocked(false);setUserProfile(profile);
+          }else{setIsBlocked(false);setUserProfile(null);}
         }catch{setUserProfile(null);setIsBlocked(false);}
-      }else{
-        setUserProfile(null);
-        // Don't reset isBlocked here — we want to keep showing the warning
-      }
+      }else{setUserProfile(null);}
+      setAuthChecked(true);
     });
     return()=>unsub();
+  },[]);
   },[]);
   useEffect(()=>{
     // Don't pre-load all routes/charts — too slow with 20000+ files
@@ -4346,6 +4095,15 @@ export default function App(){
   return(
     <>
       <style>{S}</style>
+      {/* AUTH CHECK LOADING — prevents flicker/login loop on refresh */}
+      {!authChecked&&(
+        <div style={{position:'fixed',inset:0,background:'var(--bg)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:9999}}>
+          <div style={{textAlign:'center'}}>
+            <div className="spin" style={{width:40,height:40,margin:'0 auto 1rem'}}/>
+            <div style={{fontFamily:'Orbitron,monospace',fontSize:'0.78rem',color:'var(--cyan)'}}>NAVISPHERE<span style={{color:'var(--cyan)'}}>X</span></div>
+          </div>
+        </div>
+      )}
       <div className="grid-bg"/>
       <div className="app">
         {/* NAV */}
@@ -4423,8 +4181,8 @@ export default function App(){
         <div style={{flex:1,display:'flex',flexDirection:'column',minHeight:0,overflow:isPlannerFull?'hidden':'auto'}}>
           {loading&&<div className="loading"><div className="spin"/><span>Connecting to Firebase…</span></div>}
           {!loading&&tab==='home'    &&<HomePage routes={routes} charts={charts} onSearch={handleSearch} setTab={switchTab} user={user} portsDb={portsDb}/>}
-          {!loading&&tab==='routes'  &&<RoutesPage routes={routes} sheetRoutes={sheetRoutes} searchQuery={searchQ} notify={notify} user={user} setTab={switchTab}/>}
-          {!loading&&tab==='charts'  &&<ChartsPage charts={charts} sheetCharts={sheetCharts} notify={notify} user={user} setTab={switchTab} isAdmin={isAdmin}/>}
+          {!loading&&tab==='routes'  &&<RoutesPage searchQuery={searchQ} notify={notify} user={user} setTab={switchTab}/>}
+          {!loading&&tab==='charts'  &&<ChartsPage notify={notify} user={user} setTab={switchTab} isAdmin={isAdmin}/>}
           {!loading&&tab==='planner' &&<RoutePlannerPage notify={notify} sheetRoutes={[...routes,...sheetRoutes]} portsDb={portsDb}/>}
           {!loading&&tab==='ports'   &&<PortSearchPage portsDb={portsDb} sheetLoading={sheetLoading} refreshSheets={fetchSheets}/>}
           {!loading&&tab==='library' &&<MaritimeLibraryPage setTab={switchTab}/>}
