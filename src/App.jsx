@@ -1043,6 +1043,79 @@ const S = `
   .leg-item{display:flex;align-items:center;gap:6px;margin-bottom:3px;}
   .leg-dot{width:10px;height:10px;border-radius:2px;flex-shrink:0;}
   .map-controls{position:absolute;top:10px;right:10px;z-index:400;display:flex;flex-direction:column;gap:5px;}
+  <div className="map-controls">
+  <button 
+    className={`map-ctrl-btn ${showBathymetry ? 'active' : ''}`}
+    onClick={() => setShowBathymetry(!showBathymetry)}
+    style={{
+      borderColor: showBathymetry ? 'var(--cyan)' : 'var(--border)',
+      color: showBathymetry ? 'var(--cyan)' : 'var(--text)'
+    }}
+  >
+    {showBathymetry ? '🌊 Depth ON' : '🌊 Depth OFF'}
+  </button>
+
+  {showBathymetry && (
+    <div style={{
+      background: 'rgba(4,12,26,0.95)',
+      border: '1px solid var(--border)',
+      borderRadius: 8,
+      padding: '8px 10px',
+      fontSize: '0.7rem'
+    }}>
+      <div style={{color: 'var(--text2)', marginBottom: 4}}>Vessel Draft</div>
+      <div style={{display: 'flex', alignItems: 'center', gap: 6}}>
+        <button 
+          onClick={() => setVesselDraft(Math.max(5, vesselDraft - 1))}
+          style={{
+            background: 'var(--cyan)',
+            border: 'none',
+            borderRadius: 4,
+            color: '#000',
+            cursor: 'pointer',
+            padding: '2px 6px',
+            fontSize: '0.7rem',
+            fontWeight: 'bold'
+          }}
+        >
+          -
+        </button>
+        <span style={{
+          color: 'var(--cyan)',
+          fontFamily: 'Orbitron,monospace',
+          fontSize: '0.8rem',
+          fontWeight: 'bold',
+          minWidth: 35,
+          textAlign: 'center'
+        }}>
+          {vesselDraft}m
+        </span>
+        <button 
+          onClick={() => setVesselDraft(Math.min(25, vesselDraft + 1))}
+          style={{
+            background: 'var(--cyan)',
+            border: 'none',
+            borderRadius: 4,
+            color: '#000',
+            cursor: 'pointer',
+            padding: '2px 6px',
+            fontSize: '0.7rem',
+            fontWeight: 'bold'
+          }}
+        >
+          +
+        </button>
+      </div>
+      <div style={{
+        color: 'var(--text3)',
+        fontSize: '0.6rem',
+        marginTop: 3
+      }}>
+        Safety: {vesselDraft + 3}m
+      </div>
+    </div>
+  )}
+</div>
   .map-ctrl-btn{padding:6px 10px;background:rgba(4,12,26,0.9);border:1px solid var(--border);
     border-radius:8px;color:var(--text);font-size:0.72rem;cursor:pointer;transition:all 0.2s;white-space:nowrap;}
   .map-ctrl-btn:hover{border-color:var(--cyan);color:var(--cyan);}
@@ -1209,14 +1282,16 @@ function normalizeSheetRow(row, idx, tag){
   return{id:`${tag}-${idx}`,fileName,fileUrl,portName,keywords:allKw,type,brand,model,region,source:'sheet'};
 }
 
-// ─── MAP VIEW ─────────────────────────────────────────────────────────────────
+// ─── MAP VIEW ───────────────────────────────────────── ─────────────────────────────────────────────────────────────────
 function MapView({waypoints,setWaypoints,overlays,playing,setPlaying,speed,onMapClick,mapMode}){
   const containerRef=useRef(null);
   const mapRef=useRef(null);
-  const layersRef=useRef({route:null,markers:[],zones:{},ship:null,trail:null,baseTile:null,seamarkTile:null});
+  const layersRef=useRef({route:null,markers:[],zones:{},ship:null,trail:null,bathymetry:null});
   const animRef=useRef(null);
   const animIdxRef=useRef(0);
   const animPtsRef=useRef([]);
+  const [showBathymetry, setShowBathymetry] = useState(true);
+  const [vesselDraft, setVesselDraft] = useState(12);
   const [ready,setReady]=useState(false);
 
   const MAP_TILES={
@@ -1253,6 +1328,35 @@ function MapView({waypoints,setWaypoints,overlays,playing,setPlaying,speed,onMap
     setReady(true);
   };
 
+  // ═══ BATHYMETRY LAYER FUNCTION ═══
+  const addBathymetryLayer = () => {
+    if (!mapRef.current || !window.L) return;
+    const L = window.L;
+    const map = mapRef.current;
+    const lrs = layersRef.current;
+
+    if (lrs.bathymetry) {
+      lrs.bathymetry.remove();
+      lrs.bathymetry = null;
+    }
+
+    if (!showBathymetry) return;
+
+    const gebcoLayer = L.tileLayer.wms('https://www.gebco.net/data_and_products/gebco_web_services/web_map_service/mapserv', {
+      layers: 'GEBCO_LATEST',
+      format: 'image/png',
+      transparent: true,
+      opacity: 0.6,
+      attribution: '© GEBCO',
+      maxZoom: 12
+    });
+
+    const bathymetryGroup = L.layerGroup([gebcoLayer]);
+    bathymetryGroup.addTo(map);
+    
+    lrs.bathymetry = bathymetryGroup;
+  };
+
   useEffect(()=>{
     if(window.L){initMap();return;}
     if(!document.getElementById('lcss')){
@@ -1270,6 +1374,12 @@ function MapView({waypoints,setWaypoints,overlays,playing,setPlaying,speed,onMap
       if(mapRef.current){mapRef.current.remove();mapRef.current=null;}
     };
   },[]);
+
+  // Update bathymetry when settings change
+  useEffect(() => {
+    if (!ready) return;
+    addBathymetryLayer();
+  }, [showBathymetry, vesselDraft, ready]);
 
   // Update route on map
   useEffect(()=>{
@@ -1369,8 +1479,120 @@ function MapView({waypoints,setWaypoints,overlays,playing,setPlaying,speed,onMap
       {!ready&&<div style={{position:'absolute',inset:0,display:'flex',alignItems:'center',justifyContent:'center',background:'var(--bg2)',zIndex:10}}>
         <div className="loading"><div className="spin"/><span>Loading nautical map…</span></div>
       </div>}
-      {activeOverlays.length>0&&(
+      
+      <div className="map-controls">
+        <button 
+          className={`map-ctrl-btn ${showBathymetry ? 'active' : ''}`}
+          onClick={() => setShowBathymetry(!showBathymetry)}
+          style={{
+            borderColor: showBathymetry ? 'var(--cyan)' : 'var(--border)',
+            color: showBathymetry ? 'var(--cyan)' : 'var(--text)'
+          }}
+        >
+          {showBathymetry ? '🌊 Depth ON' : '🌊 Depth OFF'}
+        </button>
+
+        {showBathymetry && (
+          <div style={{
+            background: 'rgba(4,12,26,0.95)',
+            border: '1px solid var(--border)',
+            borderRadius: 8,
+            padding: '8px 10px',
+            fontSize: '0.7rem'
+          }}>
+            <div style={{color: 'var(--text2)', marginBottom: 4}}>Vessel Draft</div>
+            <div style={{display: 'flex', alignItems: 'center', gap: 6}}>
+              <button 
+                onClick={() => setVesselDraft(Math.max(5, vesselDraft - 1))}
+                style={{
+                  background: 'var(--cyan)',
+                  border: 'none',
+                  borderRadius: 4,
+                  color: '#000',
+                  cursor: 'pointer',
+                  padding: '2px 6px',
+                  fontSize: '0.7rem',
+                  fontWeight: 'bold'
+                }}
+              >
+                -
+              </button>
+              <span style={{
+                color: 'var(--cyan)',
+                fontFamily: 'Orbitron,monospace',
+                fontSize: '0.8rem',
+                fontWeight: 'bold',
+                minWidth: 35,
+                textAlign: 'center'
+              }}>
+                {vesselDraft}m
+              </span>
+              <button 
+                onClick={() => setVesselDraft(Math.min(25, vesselDraft + 1))}
+                style={{
+                  background: 'var(--cyan)',
+                  border: 'none',
+                  borderRadius: 4,
+                  color: '#000',
+                  cursor: 'pointer',
+                  padding: '2px 6px',
+                  fontSize: '0.7rem',
+                  fontWeight: 'bold'
+                }}
+              >
+                +
+              </button>
+            </div>
+            <div style={{
+              color: 'var(--text3)',
+              fontSize: '0.6rem',
+              marginTop: 3
+            }}>
+              Safety: {vesselDraft + 3}m
+            </div>
+          </div>
+        )}
+      </div>
+
+      {(activeOverlays.length > 0 || showBathymetry) && (
         <div className="map-legend">
+          {showBathymetry && (
+            <>
+              <div style={{
+                fontFamily: 'Orbitron,monospace',
+                fontSize: '0.65rem',
+                color: 'var(--cyan)',
+                marginBottom: 6,
+                paddingBottom: 4,
+                borderBottom: '1px solid var(--border)'
+              }}>
+                🌊 DEPTH ZONES
+              </div>
+              <div className="leg-item">
+                <div className="leg-dot" style={{background: '#001f3f', border: '1px solid #00B4D8'}}/>
+                <span style={{color: 'var(--text2)', fontSize: '0.65rem'}}>Deep (&gt;200m)</span>
+              </div>
+              <div className="leg-item">
+                <div className="leg-dot" style={{background: '#0074D9'}}/>
+                <span style={{color: 'var(--text2)', fontSize: '0.65rem'}}>Medium (30-200m)</span>
+              </div>
+              <div className="leg-item">
+                <div className="leg-dot" style={{background: '#39CCCC'}}/>
+                <span style={{color: 'var(--text2)', fontSize: '0.65rem'}}>Shallow (10-30m)</span>
+              </div>
+              <div className="leg-item">
+                <div className="leg-dot" style={{background: '#FF6B6B'}}/>
+                <span style={{color: 'var(--text2)', fontSize: '0.65rem'}}>Danger (&lt;{vesselDraft + 3}m)</span>
+              </div>
+              {activeOverlays.length > 0 && (
+                <div style={{
+                  height: 1,
+                  background: 'var(--border)',
+                  margin: '6px 0'
+                }}/>
+              )}
+            </>
+          )}
           {activeOverlays.map(([k])=>(
             <div key={k} className="leg-item">
               <div className="leg-dot" style={{background:legendColors[k]}}/>
@@ -1382,7 +1604,6 @@ function MapView({waypoints,setWaypoints,overlays,playing,setPlaying,speed,onMap
     </div>
   );
 }
-
 // ─── ETA CALCULATOR ───────────────────────────────────────────────────────────
 function ETACalculator({totalNM}){
   const [mode,setMode]=useState('speed');
