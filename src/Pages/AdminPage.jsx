@@ -135,8 +135,6 @@ return(
 <div className=“s-item” onClick={()=>signOut(auth)}><span>🚪</span>Logout</div>
 </div>
 </div>
-
-```
     <div className="adm-content">
 
       {section==='dashboard'&&(
@@ -506,9 +504,8 @@ return(
     </div>
   </div>
 </div>
-```
-
 );
 }
 
-─────────────────────────────────────────────────────────────
+export default AdminPage;
+──────────────────────────────────────────────────────────
