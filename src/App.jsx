@@ -36,7 +36,7 @@ import NavModePage         from "./Pages/NavModePage";
 import PortSearchPage      from "./Pages/PortSearchPage";
 import MaritimeLibraryPage from "./Pages/MaritimeLibraryPage";
 
-// ── Main App shell ─────────────────────────────────────────────────────────
+// ── Main App shell (~150 lines) ─────────────────────────────────────────────
 export default function App(){
   const [tab,setTab]=useState('home');
   const [searchQ,setSearchQ]=useState('');
@@ -47,8 +47,9 @@ export default function App(){
   const [isBlocked,setIsBlocked]=useState(false);
   const [routes,setRoutes]=useState([]);
   const [charts,setCharts]=useState([]);
-  const [authChecked,setAuthChecked]=useState(false);
+  const [authChecked,setAuthChecked]=useState(false); // prevents flicker
   const [loading,setLoading]=useState(false);
+  // Google Sheet live data — only ports preloaded, routes/charts searched live
   const [sheetRoutes,setSheetRoutes]=useState([]);
   const [sheetCharts,setSheetCharts]=useState([]);
   const [sheetLoading,setSheetLoading]=useState(false);
@@ -87,6 +88,7 @@ export default function App(){
             else seedMap.set(p.id,{...seedMap.get(p.id),...p});
           });
           const merged=[...seedMap.values()];
+          PORTS_DB=merged;
           setPortsDb([...merged]);
           console.log(`Loaded ${merged.length} ports from sheet`);
         }
@@ -97,6 +99,7 @@ export default function App(){
   useEffect(()=>{fetchSheets();},[]);
 
   useEffect(()=>{
+    // Set Firebase auth to persist across browser refresh
     setPersistence(auth, browserLocalPersistence).catch(()=>{});
     const unsub=onAuthStateChanged(auth,async u=>{
       setUser(u);
@@ -121,6 +124,8 @@ export default function App(){
   },[]);
 
   useEffect(()=>{
+    // Don't pre-load all routes/charts — too slow with 20000+ files
+    // Data is fetched on-demand when user searches in RoutesPage/ChartsPage
     setLoading(false);
   },[]);
 
@@ -137,20 +142,24 @@ export default function App(){
 
   const handleSearch=(q)=>{setSearchQ(q);setTab('routes');setMenuOpen(false);};
   const switchTab=k=>{
+    // Gate: require login for everything except home, login
     if(!user && k!=='home' && k!=='login'){
       setTab('login');
       setMenuOpen(false);
+      // Store intended tab to redirect after login
       sessionStorage.setItem('intendedTab', k);
       return;
     }
     setTab(k);setMenuOpen(false);
   };
 
+  // Planner needs full height
   const isPlannerFull=tab==='planner'||tab==='navmode';
 
   return(
     <>
       <style>{S}</style>
+      {/* AUTH CHECK LOADING — prevents flicker/login loop on refresh */}
       {!authChecked&&(
         <div style={{position:'fixed',inset:0,background:'var(--bg)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:9999}}>
           <div style={{textAlign:'center'}}>
@@ -245,6 +254,7 @@ export default function App(){
           {!loading&&tab==='navmode' &&<NavModePage notify={notify} sheetRoutes={[...routes,...sheetRoutes]} portsDb={portsDb} setTab={switchTab}/>}
           {!loading&&tab==='login'   &&<LoginPage notify={notify} onLogin={(u,redirectTo)=>{setUser(u);setTab(redirectTo||'home');}}/>}
 
+          {/* Login gate for unauthenticated users on protected tabs */}
           {!loading&&!user&&tab!=='home'&&tab!=='login'&&(
             <div style={{display:'flex',flex:1,alignItems:'center',justifyContent:'center',padding:'2rem'}}>
               <div style={{maxWidth:380,width:'100%',background:'var(--card)',border:'1px solid var(--border2)',
