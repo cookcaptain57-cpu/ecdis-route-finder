@@ -192,5 +192,5 @@ return (
 
 );
 }
-
+export default LoginPage;
 
