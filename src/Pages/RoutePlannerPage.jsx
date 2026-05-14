@@ -505,4 +505,4 @@ color: mapMode === m ? ‘white’ : ‘var(–text2)’, transition: ‘all 0.2
 );
 }
 
-
+export default RoutePlannerPage;
