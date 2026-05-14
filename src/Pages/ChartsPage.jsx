@@ -226,4 +226,5 @@ return (
 );
 }
 
+export default ChartsPage;
 
