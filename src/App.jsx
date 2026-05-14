@@ -69,7 +69,6 @@ fetch(`https://opensheet.elk.sh/1ILzyQODb4Ig2mdq9auZ7aJOfdKBBM01t192VE59WbCE/${t
 ),Promise.reject()
 ).catch(()=>[]);
 
-```
 Promise.all([fetchRouteSheet(),fetchChartSheet(),fetchPortsFromSheet()])
   .then(([d1,d2,d3])=>{
     setSheetRoutes(Array.isArray(d1)?d1:[]);
@@ -94,7 +93,6 @@ Promise.all([fetchRouteSheet(),fetchChartSheet(),fetchPortsFromSheet()])
     }
   }).catch(e=>console.log('Sheet fetch error',e))
   .finally(()=>setSheetLoading(false));
-```
 
 };
 
@@ -108,7 +106,7 @@ if(u){
 try{
 const snap=await getDoc(doc(db,‘users’,u.uid));
 if(snap.exists()){
-const profile={id:snap.id,…snap.data()};
+const profile={id:snap.id,...snap.data()};
 if(profile.blocked){
 setIsBlocked(true);
 await signOut(auth);
@@ -136,7 +134,7 @@ const TABS=[
 {k:‘navmode’, i:‘🧭’, l:‘Nav Mode’, cls:‘green’},
 {k:‘ports’,   i:‘⚓’, l:‘Ports Database’},
 {k:‘library’, i:‘📖’, l:‘Maritime Library’},
-…(isAdmin?[{k:‘admin’,i:‘🛡’,l:‘Admin’}]:[]),
+...(isAdmin?[{k:‘admin’,i:‘🛡’,l:‘Admin’}]:[]),
 ];
 
 const handleSearch=(q)=>{setSearchQ(q);setTab(‘routes’);setMenuOpen(false);};
@@ -156,10 +154,10 @@ return(
 <>
 <style>{S}</style>
 {!authChecked&&(
-<div style={{position:‘fixed’,inset:0,background:‘var(–bg)’,display:‘flex’,alignItems:‘center’,justifyContent:‘center’,zIndex:9999}}>
+<div style={{position:‘fixed’,inset:0,background:‘var(--bg)’,display:‘flex’,alignItems:‘center’,justifyContent:‘center’,zIndex:9999}}>
 <div style={{textAlign:‘center’}}>
 <div className=“spin” style={{width:40,height:40,margin:‘0 auto 1rem’}}/>
-<div style={{fontFamily:‘Orbitron,monospace’,fontSize:‘0.78rem’,color:‘var(–cyan)’}}>NAVISPHERE<span style={{color:‘var(–cyan)’}}>X</span></div>
+<div style={{fontFamily:‘Orbitron,monospace’,fontSize:‘0.78rem’,color:‘var(--cyan)’}}>NAVISPHERE<span style={{color:‘var(--cyan)’}}>X</span></div>
 </div>
 </div>
 )}
@@ -170,7 +168,7 @@ return(
 <div className=“nav-brand” onClick={()=>switchTab(‘home’)} style={{cursor:‘pointer’}}>
 <div className="nav-logo">🧭</div>
 <div>
-<div className="nav-title">NAVISPHERE<span style={{color:‘var(–cyan)’}}>X</span></div>
+<div className="nav-title">NAVISPHERE<span style={{color:‘var(--cyan)’}}>X</span></div>
 <div className="nav-sub">MARINE</div>
 </div>
 </div>
@@ -193,7 +191,6 @@ return(
 </div>
 </nav>
 
-```
     {/* MOBILE MENU */}
     <div className={`mob-menu ${menuOpen?'open':''}`}>
       {TABS.map(t=><button key={t.k} className={`mtab ${tab===t.k?'active':''}`} onClick={()=>switchTab(t.k)}>{t.i} {t.l}</button>)}
@@ -282,7 +279,6 @@ return(
     {notif&&<Notif key={notif.key} msg={notif.msg} type={notif.type} onClose={()=>setNotif(null)}/>}
   </div>
 </>
-```
 
 );
 }
