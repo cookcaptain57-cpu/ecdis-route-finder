@@ -1,5 +1,5 @@
 /* ════════════════════════════════════════════════════════
-   MapView.jsx (ECDIS UPGRADED CORE)
+   MapView.jsx — TRUE ECDIS MASTER (MERGED)
 ════════════════════════════════════════════════════════ */
 
 import { useEffect, useRef, useState } from "react";
@@ -7,8 +7,8 @@ import { useEffect, useRef, useState } from "react";
 export default function MapView({
   waypoints = [],
   onMapClick,
-  shipPosition = null,   // ✅ ADD (NavMode support)
-  navMode = false
+  shipPosition = null,
+  navMode = false,
 }) {
   const mapRef = useRef(null);
   const containerRef = useRef(null);
@@ -16,9 +16,7 @@ export default function MapView({
   const routeRef = useRef(null);
   const shipRef = useRef(null);
   const [ready, setReady] = useState(false);
-  const [watchMode] = useState(navMode ? "NAV ACTIVE" : "PLANNING");
 
-  // ───────── ENC STYLE DEPTH MODEL ─────────
   const depth = (lat, lng) => {
     const v = Math.abs(Math.sin(lat * 0.1) * Math.cos(lng * 0.1));
     return 10 + v * 6000;
@@ -32,7 +30,6 @@ export default function MapView({
     return "#0a84ff";
   };
 
-  // ───────── INIT MAP ─────────
   const init = () => {
     if (mapRef.current) return;
 
@@ -47,13 +44,10 @@ export default function MapView({
 
     mapRef.current = map;
 
-    // BASE MAP
     layersRef.current.base = L.tileLayer(
-      "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
-      { attribution: "ECDIS SIMULATION" }
+      "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
     ).addTo(map);
 
-    // SEAMARK
     layersRef.current.seamark = L.tileLayer(
       "https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png",
       { opacity: 0.6 }
@@ -65,7 +59,7 @@ export default function MapView({
       L.popup()
         .setLatLng(e.latlng)
         .setContent(`
-          <div style="font-family: monospace; font-size:12px">
+          <div style="font-family:monospace;font-size:12px">
             ⚓ ECDIS SOUNDING<br/>
             Depth: <b>${d.toFixed(0)} m</b><br/>
             ${d < 30 ? "⚠ SHALLOW WATER" : "✓ SAFE WATER"}
@@ -79,44 +73,43 @@ export default function MapView({
     setReady(true);
   };
 
-  // ───────── ROUTE RENDER (CRITICAL FIX) ─────────
+  // ───── ROUTE + DEPTH AWARE RENDER ─────
   useEffect(() => {
     if (!ready || !window.L || !mapRef.current) return;
 
     const L = window.L;
     const map = mapRef.current;
 
-    // clear old route
-    if (routeRef.current) {
-      routeRef.current.remove();
-    }
-
+    if (routeRef.current) routeRef.current.remove();
     if (!waypoints.length) return;
 
     const latlngs = waypoints.map((w) => [w.lat, w.lon]);
 
-    // main route
     const routeLine = L.polyline(latlngs, {
       color: "#00B4D8",
       weight: 3,
       opacity: 0.9,
     });
 
-    // safety corridor (ECDIS XTE SIMULATION)
     const corridor = L.polyline(latlngs, {
       color: "#1565C0",
       weight: 10,
       opacity: 0.12,
     });
 
-    // waypoints
-    const wpMarkers = waypoints.map((w, i) =>
-      L.circleMarker([w.lat, w.lon], {
+    const wpMarkers = waypoints.map((w, i) => {
+      const d = depth(w.lat, w.lon);
+
+      return L.circleMarker([w.lat, w.lon], {
         radius: 5,
-        color: "#00C896",
+        color: encColor(d),
         fillOpacity: 1,
-      }).bindPopup(`WP ${i + 1}`)
-    );
+      }).bindPopup(
+        `WP ${i + 1}<br/>Depth: ${d.toFixed(0)}m<br/>${
+          d < 25 ? "⚠ UNSAFE" : "✓ SAFE"
+        }`
+      );
+    });
 
     routeRef.current = L.layerGroup([
       corridor,
@@ -127,9 +120,13 @@ export default function MapView({
     map.fitBounds(routeLine.getBounds(), {
       padding: [50, 50],
     });
+
+    // safety alert
+    const unsafe = waypoints.some((w) => depth(w.lat, w.lon) < 25);
+    if (unsafe) console.warn("⚠ ECDIS ALERT: Shallow water detected");
   }, [waypoints, ready]);
 
-  // ───────── SHIP POSITION (NAV MODE FIX) ─────────
+  // ───── SHIP NAVIGATION ─────
   useEffect(() => {
     if (!ready || !shipPosition || !window.L) return;
 
@@ -154,7 +151,7 @@ export default function MapView({
     }
   }, [shipPosition, ready]);
 
-  // ───────── BATHY GRID (OPTIMIZED FIX) ─────────
+  // ───── BATHY GRID ─────
   useEffect(() => {
     if (!ready || !window.L) return;
 
@@ -189,7 +186,7 @@ export default function MapView({
     layersRef.current.bathy = group;
   }, [ready]);
 
-  // ───────── LOAD LEAFLET ─────────
+  // ───── INIT ─────
   useEffect(() => {
     if (window.L) return init();
 
@@ -208,14 +205,12 @@ export default function MapView({
 
   return (
     <div className="ecdis-container">
-      {/* TOP BAR */}
       <div className="ecdis-topbar">
         <div>⚓ ECDIS SIMULATOR</div>
-        <div>MODE: {watchMode}</div>
-        <div>STATUS: NAV OK</div>
+        <div>MODE: {navMode ? "NAV ACTIVE" : "PLANNING"}</div>
+        <div>STATUS: OK</div>
       </div>
 
-      {/* MAP */}
       <div ref={containerRef} className="ecdis-map" />
     </div>
   );
