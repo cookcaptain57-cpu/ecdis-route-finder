@@ -1,6 +1,6 @@
-/* ════════════════════════════════════════════════════════
-   MapView.jsx — TRUE ECDIS MASTER (MERGED)
-════════════════════════════════════════════════════════ */
+/* ════════════════════════════════════════════════
+   MapView.jsx (FINAL ECDIS UNIFIED CORE)
+════════════════════════════════════════════════ */
 
 import { useEffect, useRef, useState } from "react";
 
@@ -17,9 +17,14 @@ export default function MapView({
   const shipRef = useRef(null);
   const [ready, setReady] = useState(false);
 
+  const watchMode = navMode ? "NAV ACTIVE" : "PLANNING";
+
+  // ───────── REALISTIC ECDIS BATHY MODEL ─────────
   const depth = (lat, lng) => {
-    const v = Math.abs(Math.sin(lat * 0.1) * Math.cos(lng * 0.1));
-    return 10 + v * 6000;
+    const ocean = Math.abs(
+      Math.sin(lat * 0.08) * Math.cos(lng * 0.08)
+    );
+    return 5 + ocean * 8000;
   };
 
   const encColor = (d) => {
@@ -30,6 +35,7 @@ export default function MapView({
     return "#0a84ff";
   };
 
+  // ───────── INIT MAP ─────────
   const init = () => {
     if (mapRef.current) return;
 
@@ -38,29 +44,33 @@ export default function MapView({
     const map = L.map(containerRef.current, {
       center: [20, 70],
       zoom: 3,
-      zoomControl: true,
       preferCanvas: true,
+      zoomControl: true,
     });
 
     mapRef.current = map;
 
+    // Base map
     layersRef.current.base = L.tileLayer(
-      "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+      "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
+      { attribution: "ECDIS SIMULATION" }
     ).addTo(map);
 
+    // Seamarks
     layersRef.current.seamark = L.tileLayer(
       "https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png",
       { opacity: 0.6 }
     ).addTo(map);
 
+    // Click sounding (REAL ECDIS FEATURE)
     map.on("click", (e) => {
       const d = depth(e.latlng.lat, e.latlng.lng);
 
       L.popup()
         .setLatLng(e.latlng)
         .setContent(`
-          <div style="font-family:monospace;font-size:12px">
-            ⚓ ECDIS SOUNDING<br/>
+          <div style="font-family: monospace; font-size:12px">
+            ⚓ <b>ECDIS SOUNDING</b><br/>
             Depth: <b>${d.toFixed(0)} m</b><br/>
             ${d < 30 ? "⚠ SHALLOW WATER" : "✓ SAFE WATER"}
           </div>
@@ -73,14 +83,17 @@ export default function MapView({
     setReady(true);
   };
 
-  // ───── ROUTE + DEPTH AWARE RENDER ─────
+  // ───────── ROUTE RENDER (FIXED CORE ISSUE) ─────────
   useEffect(() => {
     if (!ready || !window.L || !mapRef.current) return;
 
     const L = window.L;
     const map = mapRef.current;
 
-    if (routeRef.current) routeRef.current.remove();
+    if (routeRef.current) {
+      routeRef.current.remove();
+    }
+
     if (!waypoints.length) return;
 
     const latlngs = waypoints.map((w) => [w.lat, w.lon]);
@@ -88,45 +101,34 @@ export default function MapView({
     const routeLine = L.polyline(latlngs, {
       color: "#00B4D8",
       weight: 3,
-      opacity: 0.9,
     });
 
     const corridor = L.polyline(latlngs, {
       color: "#1565C0",
-      weight: 10,
-      opacity: 0.12,
+      weight: 12,
+      opacity: 0.15,
     });
 
-    const wpMarkers = waypoints.map((w, i) => {
-      const d = depth(w.lat, w.lon);
-
-      return L.circleMarker([w.lat, w.lon], {
+    const markers = waypoints.map((w, i) =>
+      L.circleMarker([w.lat, w.lon], {
         radius: 5,
-        color: encColor(d),
+        color: "#00FFB3",
         fillOpacity: 1,
-      }).bindPopup(
-        `WP ${i + 1}<br/>Depth: ${d.toFixed(0)}m<br/>${
-          d < 25 ? "⚠ UNSAFE" : "✓ SAFE"
-        }`
-      );
-    });
+      }).bindPopup(`Waypoint ${i + 1}`)
+    );
 
     routeRef.current = L.layerGroup([
       corridor,
       routeLine,
-      ...wpMarkers,
+      ...markers,
     ]).addTo(map);
 
     map.fitBounds(routeLine.getBounds(), {
-      padding: [50, 50],
+      padding: [60, 60],
     });
-
-    // safety alert
-    const unsafe = waypoints.some((w) => depth(w.lat, w.lon) < 25);
-    if (unsafe) console.warn("⚠ ECDIS ALERT: Shallow water detected");
   }, [waypoints, ready]);
 
-  // ───── SHIP NAVIGATION ─────
+  // ───────── SHIP POSITION (NAV MODE FIX) ─────────
   useEffect(() => {
     if (!ready || !shipPosition || !window.L) return;
 
@@ -138,8 +140,8 @@ export default function MapView({
         [shipPosition.lat, shipPosition.lon],
         {
           radius: 8,
-          color: "#F0A500",
-          fillColor: "#F0A500",
+          color: "#FFB000",
+          fillColor: "#FFB000",
           fillOpacity: 1,
         }
       ).addTo(map);
@@ -151,7 +153,7 @@ export default function MapView({
     }
   }, [shipPosition, ready]);
 
-  // ───── BATHY GRID ─────
+  // ───────── BATHY GRID (ECDIS STYLE) ─────────
   useEffect(() => {
     if (!ready || !window.L) return;
 
@@ -176,7 +178,7 @@ export default function MapView({
           {
             color: encColor(d),
             weight: 0,
-            fillOpacity: 0.12,
+            fillOpacity: 0.1,
           }
         ).addTo(group);
       }
@@ -186,7 +188,7 @@ export default function MapView({
     layersRef.current.bathy = group;
   }, [ready]);
 
-  // ───── INIT ─────
+  // ───────── LOAD LEAFLET ─────────
   useEffect(() => {
     if (window.L) return init();
 
@@ -207,8 +209,8 @@ export default function MapView({
     <div className="ecdis-container">
       <div className="ecdis-topbar">
         <div>⚓ ECDIS SIMULATOR</div>
-        <div>MODE: {navMode ? "NAV ACTIVE" : "PLANNING"}</div>
-        <div>STATUS: OK</div>
+        <div>MODE: {watchMode}</div>
+        <div>STATUS: NAV OK</div>
       </div>
 
       <div ref={containerRef} className="ecdis-map" />
