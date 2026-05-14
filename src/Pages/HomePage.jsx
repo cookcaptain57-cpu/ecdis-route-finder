@@ -339,4 +339,5 @@ userSelect: ‘none’, pointerEvents: ‘none’
 );
 }
 
+export default HomePage;
 
