@@ -2,8 +2,8 @@
 
 import { useState, useEffect, useMemo } from "react";
 import { PORTS_DB } from "../constants";
-import { buildAutoRoute, recalcWaypoints, totalRouteNM } from "../routing";
-import { parseRTZ } from "../utils";
+import { buildAutoRoute } from "../routing";
+import { recalcWaypoints, totalRouteNM, parseRTZ } from "../utils";
 import MapView from "../components/MapView";
 import ETACalculator from "../components/ETACalculator";
 
@@ -107,9 +107,7 @@ function RoutePlannerPage({ notify, sheetRoutes = [], portsDb = [] }) {
     setRouteName(`${f.name} → ${t.name}`);
 
     notify(
-      `Route generated: ${wps.length} waypoints — ${totalRouteNM(wps).toFixed(
-        0
-      )} NM`,
+      `Route generated: ${wps.length} waypoints — ${totalRouteNM(wps).toFixed(0)} NM`,
       "success"
     );
   };
