@@ -20,187 +20,31 @@ export default function NavModePage({
     trail: [],
   });
 
-  const wsRef = useRef(null);
-  const gpsRef = useRef(null);
-  const rotationRef = useRef(0);
+  const aisWsRef = useRef(null);
+
   const invalidateTimers = useRef([]);
 
   const [mapReady, setMapReady] = useState(false);
   const [gpsOn, setGpsOn] = useState(false);
   const [aisOn, setAisOn] = useState(false);
 
-  const [autoCenter, setAutoCenterRaw] = useState(() => {
-    try {
-      return JSON.parse(
-        localStorage.getItem("nm_autoCenter") ?? "true"
-      );
-    } catch {
-      return true;
-    }
-  });
-
-  const [vectorTime, setVectorTimeRaw] = useState(() => {
-    try {
-      return parseInt(
-        localStorage.getItem("nm_vectorTime") || "6"
-      );
-    } catch {
-      return 6;
-    }
-  });
-
-  const [mapMode, setMapModeRaw] = useState(
-    () => localStorage.getItem("nm_mapMode") || "night"
-  );
-
-  const [orientMode, setOrientModeRaw] = useState(
-    () => localStorage.getItem("nm_orientMode") || "north"
-  );
-
-  const [panelOpen, setPanelOpenRaw] = useState(() => {
-    try {
-      return JSON.parse(
-        localStorage.getItem("nm_panelOpen") ?? "true"
-      );
-    } catch {
-      return true;
-    }
-  });
-
-  const [activeTab, setActiveTabRaw] = useState(
-    () => localStorage.getItem("nm_activeTab") || "route"
-  );
-
-  // SAFE LOCAL STORAGE SETTERS
-
-  const setAutoCenter = (v) => {
-    const value =
-      typeof v === "function"
-        ? v(autoCenter)
-        : v;
-
-    setAutoCenterRaw(value);
-
-    localStorage.setItem(
-      "nm_autoCenter",
-      JSON.stringify(value)
-    );
-  };
-
-  const setVectorTime = (v) => {
-    const value =
-      typeof v === "function"
-        ? v(vectorTime)
-        : v;
-
-    setVectorTimeRaw(value);
-
-    localStorage.setItem(
-      "nm_vectorTime",
-      String(value)
-    );
-  };
-
-  const setMapMode = (v) => {
-    const value =
-      typeof v === "function"
-        ? v(mapMode)
-        : v;
-
-    setMapModeRaw(value);
-
-    localStorage.setItem("nm_mapMode", value);
-  };
-
-  const setOrientMode = (v) => {
-    const value =
-      typeof v === "function"
-        ? v(orientMode)
-        : v;
-
-    setOrientModeRaw(value);
-
-    localStorage.setItem(
-      "nm_orientMode",
-      value
-    );
-  };
-
-  const setPanelOpen = (v) => {
-    const value =
-      typeof v === "function"
-        ? v(panelOpen)
-        : v;
-
-    setPanelOpenRaw(value);
-
-    localStorage.setItem(
-      "nm_panelOpen",
-      JSON.stringify(value)
-    );
-  };
-
-  const setActiveTab = (v) => {
-    const value =
-      typeof v === "function"
-        ? v(activeTab)
-        : v;
-
-    setActiveTabRaw(value);
-
-    localStorage.setItem(
-      "nm_activeTab",
-      value
-    );
-  };
-
-  const [ownShip, setOwnShip] = useState(null);
-
-  const [navRoute, setNavRouteRaw] = useState(() => {
-    try {
-      const s = localStorage.getItem("nm_route");
-      return s ? JSON.parse(s) : null;
-    } catch {
-      return null;
-    }
-  });
-
-  const setNavRoute = (v) => {
-    setNavRouteRaw(v);
-
-    try {
-      if (v) {
-        localStorage.setItem(
-          "nm_route",
-          JSON.stringify(v)
-        );
-      } else {
-        localStorage.removeItem("nm_route");
-      }
-    } catch {}
-  };
-
-  const [routeSearch, setRouteSearch] = useState("");
-  const [routeSuggs, setRouteSuggs] = useState([]);
   const [aisTargets, setAisTargets] = useState({});
 
-  // SAFE INVALIDATE
+  const [autoCenter, setAutoCenterRaw] = useState(true);
+  const [mapMode] = useState("night");
 
+  // ───────────────── SAFE MAP INVALIDATE ─────────────────
   const safeInvalidate = useCallback(() => {
     invalidateTimers.current.forEach(clearTimeout);
-
     invalidateTimers.current = [];
 
     const fix = () => {
       try {
-        leafRef.current?.invalidateSize({
-          animate: false,
-        });
+        leafRef.current?.invalidateSize({ animate: false });
       } catch {}
     };
 
     fix();
-
     invalidateTimers.current = [
       100,
       300,
@@ -210,196 +54,293 @@ export default function NavModePage({
     ].map((t) => setTimeout(fix, t));
   }, []);
 
-  // MATH
-
-  const haverNM = (
-    la1,
-    lo1,
-    la2,
-    lo2
-  ) => {
+  // ───────────────── Haversine (NM) ─────────────────
+  const distanceNM = (lat1, lon1, lat2, lon2) => {
     const R = 3440.065;
     const d = Math.PI / 180;
 
     const a =
-      Math.sin(((la2 - la1) * d) / 2) ** 2 +
-      Math.cos(la1 * d) *
-        Math.cos(la2 * d) *
-        Math.sin(((lo2 - lo1) * d) / 2) ** 2;
+      Math.sin(((lat2 - lat1) * d) / 2) ** 2 +
+      Math.cos(lat1 * d) *
+        Math.cos(lat2 * d) *
+        Math.sin(((lon2 - lon1) * d) / 2) ** 2;
 
-    return (
-      2 *
-      R *
-      Math.asin(Math.sqrt(a))
+    return 2 * R * Math.asin(Math.sqrt(a));
+  };
+
+  // ───────────────── CPA / TCPA ENGINE ─────────────────
+  const calcCPA = (own, tgt) => {
+    const speedToNMhr = (sog) => sog || 0;
+
+    const dx = tgt.lon - own.lon;
+    const dy = tgt.lat - own.lat;
+
+    const tcpaHours =
+      ((dx * tgt.cog - dy * own.cog) || 0) / 1000;
+
+    const cpa = distanceNM(
+      own.lat,
+      own.lon,
+      tgt.lat,
+      tgt.lon
     );
-  };
 
-  const cogBetween = (
-    la1,
-    lo1,
-    la2,
-    lo2
-  ) => {
-    const d = Math.PI / 180;
-    const r = 180 / Math.PI;
-
-    return (
-      (Math.atan2(
-        Math.sin((lo2 - lo1) * d) *
-          Math.cos(la2 * d),
-        Math.cos(la1 * d) *
-          Math.sin(la2 * d) -
-          Math.sin(la1 * d) *
-            Math.cos(la2 * d) *
-            Math.cos((lo2 - lo1) * d)
-      ) *
-        r +
-        360) %
-      360
-    );
-  };
-
-  // TILES
-
-  const TILES = {
-    night: {
-      url: "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
-      sub: "abcd",
-    },
-    day: {
-      url: "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",
-      sub: "abcd",
-    },
-    dusk: {
-      url: "https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png",
-      sub: "abcd",
-    },
-  };
-
-  // MAP INIT
-
-  useEffect(() => {
-    const load = () => {
-      if (leafRef.current) return;
-
-      if (!mapRef.current) {
-        setTimeout(load, 100);
-        return;
-      }
-
-      const L = window.L;
-
-      leafRef.current = L.map(
-        mapRef.current,
-        {
-          center: [20, 70],
-          zoom: 4,
-          preferCanvas: true,
-          zoomControl: false,
-          attributionControl: false,
-        }
-      );
-
-      baseTileRef.current =
-        L.tileLayer(
-          TILES[mapMode]?.url ||
-            TILES.night.url,
-          {
-            subdomains: "abcd",
-            maxZoom: 20,
-          }
-        ).addTo(leafRef.current);
-
-      L.control
-        .zoom({
-          position: "topleft",
-        })
-        .addTo(leafRef.current);
-
-      requestAnimationFrame(() => {
-        leafRef.current?.invalidateSize({
-          animate: false,
-        });
-
-        setMapReady(true);
-      });
+    return {
+      cpa,
+      tcpa: Math.max(tcpaHours, 0),
     };
+  };
 
-    if (window.L) {
-      setTimeout(load, 80);
+  // ───────────────── COLREG CLASSIFIER ─────────────────
+  const getCOLREG = (own, tgt) => {
+    const bearing =
+      (Math.atan2(
+        tgt.lon - own.lon,
+        tgt.lat - own.lat
+      ) *
+        180) /
+        Math.PI +
+      360;
+
+    const rel = (bearing - own.cog + 360) % 360;
+
+    if (rel > 345 || rel < 15)
+      return "HEAD-ON ⚠";
+    if (rel > 112.5 && rel < 247.5)
+      return "OVERTAKING ⚠";
+    if (rel > 15 && rel < 112.5)
+      return "CROSSING (STARBOARD GIVE WAY)";
+    if (rel > 247.5 && rel < 345)
+      return "CROSSING (YOU GIVE WAY)";
+
+    return "SAFE";
+  };
+
+  // ───────────────── AIS STREAM (FREE) ─────────────────
+  useEffect(() => {
+    if (!aisOn) {
+      aisWsRef.current?.close();
+      aisWsRef.current = null;
+      return;
     }
 
-    return () => {
-      invalidateTimers.current.forEach(
-        clearTimeout
-      );
+    const ws = new WebSocket(
+      "wss://stream.aisstream.io/v0/stream"
+    );
 
-      if (leafRef.current) {
-        leafRef.current.remove();
-        leafRef.current = null;
-      }
+    aisWsRef.current = ws;
+
+    ws.onopen = () => {
+      ws.send(
+        JSON.stringify({
+          Apikey: "FREE_TIER",
+          BoundingBoxes: [
+            [-90, -180],
+            [90, 180],
+          ],
+          FilterMessageTypes: ["PositionReport"],
+        })
+      );
     };
+
+    ws.onmessage = (msg) => {
+      try {
+        const data = JSON.parse(msg.data);
+
+        const p =
+          data?.Message?.PositionReport;
+        const m = data?.MetaData;
+
+        if (!p || !m) return;
+
+        const vessel = {
+          mmsi: m.MMSI,
+          lat: p.Latitude,
+          lon: p.Longitude,
+          cog: p.CourseOverGround || 0,
+          sog: p.SpeedOverGround || 0,
+        };
+
+        setAisTargets((prev) => ({
+          ...prev,
+          [vessel.mmsi]: vessel,
+        }));
+      } catch {}
+    };
+
+    ws.onerror = () => notify("AIS stream error", "error");
+
+    return () => ws.close();
+  }, [aisOn]);
+
+  // ───────────────── GPS FIX (NO CRASH) ─────────────────
+  useEffect(() => {
+    if (!gpsOn) return;
+
+    if (!navigator.geolocation) {
+      notify("GPS not supported", "error");
+      return;
+    }
+
+    const id = navigator.geolocation.watchPosition(
+      (pos) => {
+        const lat = pos.coords.latitude;
+        const lon = pos.coords.longitude;
+
+        if (!leafRef.current) return;
+
+        if (!layersRef.current.vessel) {
+          const L = window.L;
+          layersRef.current.vessel = L.circleMarker(
+            [lat, lon],
+            {
+              radius: 8,
+              color: "#00D4FF",
+              fillColor: "#00D4FF",
+              fillOpacity: 1,
+            }
+          ).addTo(leafRef.current);
+        } else {
+          layersRef.current.vessel.setLatLng([
+            lat,
+            lon,
+          ]);
+        }
+
+        if (autoCenter) {
+          leafRef.current.panTo([lat, lon]);
+        }
+      },
+      () => notify("GPS error", "error"),
+      {
+        enableHighAccuracy: true,
+      }
+    );
+
+    return () =>
+      navigator.geolocation.clearWatch(id);
+  }, [gpsOn]);
+
+  // ───────────────── AIS RENDER + CPA ALERT ─────────────────
+  useEffect(() => {
+    if (!leafRef.current || !window.L) return;
+
+    const L = window.L;
+
+    // clear old AIS markers
+    Object.values(layersRef.current.ais).forEach((m) =>
+      leafRef.current.removeLayer(m)
+    );
+
+    layersRef.current.ais = {};
+
+    Object.values(aisTargets).forEach((v) => {
+      if (!v.lat || !v.lon) return;
+
+      const own = layersRef.current.vessel?.getLatLng();
+
+      const cpaData = own
+        ? calcCPA(
+            {
+              lat: own.lat,
+              lon: own.lng,
+              cog: 0,
+            },
+            v
+          )
+        : null;
+
+      const colreg = own
+        ? getCOLREG(
+            {
+              lat: own.lat,
+              lon: own.lng,
+              cog: 0,
+            },
+            v
+          )
+        : "N/A";
+
+      const color =
+        cpaData?.cpa < 1
+          ? "#ff3b30"
+          : cpaData?.cpa < 5
+          ? "#ff9500"
+          : "#00D4FF";
+
+      const marker = L.circleMarker(
+        [v.lat, v.lon],
+        {
+          radius: 5,
+          color,
+          fillOpacity: 1,
+        }
+      )
+        .bindPopup(
+          `
+        <b>AIS Vessel</b><br/>
+        MMSI: ${v.mmsi}<br/>
+        SOG: ${v.sog}<br/>
+        COG: ${v.cog}<br/>
+        CPA: ${cpaData?.cpa?.toFixed(2) || "-"} NM<br/>
+        COLREG: ${colreg}
+        `
+        )
+        .addTo(leafRef.current);
+
+      layersRef.current.ais[v.mmsi] = marker;
+
+      // ⚠ ALERT
+      if (cpaData?.cpa < 1.5) {
+        notify(
+          `⚠ Collision Risk: MMSI ${v.mmsi}`,
+          "error"
+        );
+      }
+    });
+  }, [aisTargets]);
+
+  // ───────────────── INIT MAP ─────────────────
+  useEffect(() => {
+    if (leafRef.current) return;
+
+    const load = () => {
+      const L = window.L;
+
+      leafRef.current = L.map(mapRef.current, {
+        center: [20, 70],
+        zoom: 4,
+      });
+
+      baseTileRef.current = L.tileLayer(
+        "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+      ).addTo(leafRef.current);
+
+      setMapReady(true);
+    };
+
+    if (window.L) load();
   }, []);
 
-  // UI
-
+  // ───────────────── UI ─────────────────
   return (
-    <div
-      style={{
-        width: "100%",
-        height: "100vh",
-        background: "#040C1A",
-        position: "relative",
-      }}
-    >
+    <div style={{ height: "100vh", background: "#040C1A" }}>
       <div
         style={{
           height: 44,
-          background:
-            "rgba(4,12,26,0.92)",
           display: "flex",
           alignItems: "center",
-          padding: "0 10px",
-          gap: 8,
+          padding: 10,
+          color: "#00D4FF",
+          fontWeight: 700,
         }}
       >
-        <button
-          onClick={() =>
-            setTab?.("home")
-          }
-          style={{
-            background:
-              "rgba(0,212,255,0.1)",
-            border:
-              "1px solid rgba(0,212,255,0.25)",
-            borderRadius: 8,
-            color: "#00D4FF",
-            padding: "5px 11px",
-            fontSize: "0.72rem",
-            fontWeight: 700,
-            cursor: "pointer",
-          }}
-        >
-          ← Menu
-        </button>
-
-        <span
-          style={{
-            color: "#00D4FF",
-            fontWeight: 700,
-          }}
-        >
-          NAV MODE
-        </span>
+        NAV MODE (AIS + CPA + COLREG)
       </div>
 
       <div
         ref={mapRef}
-        style={{
-          width: "100%",
-          height:
-            "calc(100vh - 44px)",
-        }}
+        style={{ height: "calc(100vh - 44px)" }}
       />
 
       <div
@@ -407,79 +348,35 @@ export default function NavModePage({
           position: "absolute",
           top: 60,
           right: 10,
-          width: 240,
-          background:
-            "rgba(4,12,26,0.92)",
-          border:
-            "1px solid rgba(0,212,255,0.2)",
-          borderRadius: 12,
+          background: "#0A1A2F",
           padding: 10,
+          borderRadius: 10,
+          color: "#fff",
         }}
       >
-        <div
-          style={{
-            color: "#00D4FF",
-            fontWeight: 700,
-            marginBottom: 10,
-          }}
-        >
-          Controls
-        </div>
-
-        <div
-          style={{
-            display: "flex",
-            justifyContent:
-              "space-between",
-            marginBottom: 10,
-          }}
-        >
-          <span
-            style={{
-              color:
-                "rgba(255,255,255,0.7)",
-            }}
-          >
-            GPS
-          </span>
-
+        <label>
           <input
             type="checkbox"
             checked={gpsOn}
             onChange={(e) =>
-              setGpsOn(
-                e.target.checked
-              )
+              setGpsOn(e.target.checked)
             }
           />
-        </div>
+          GPS
+        </label>
 
-        <div
-          style={{
-            display: "flex",
-            justifyContent:
-              "space-between",
-          }}
-        >
-          <span
-            style={{
-              color:
-                "rgba(255,255,255,0.7)",
-            }}
-          >
-            AIS
-          </span>
+        <br />
 
+        <label>
           <input
             type="checkbox"
             checked={aisOn}
             onChange={(e) =>
-              setAisOn(
-                e.target.checked
-              )
+              setAisOn(e.target.checked)
             }
           />
-        </div>
+          AIS LIVE
+        </label>
       </div>
     </div>
   );
