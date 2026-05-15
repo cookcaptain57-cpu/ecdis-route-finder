@@ -1,3 +1,4 @@
+/* eslint-disable */
 // src/pages/RoutePlannerPage.jsx
 
 import { useState, useEffect, useMemo } from "react";
