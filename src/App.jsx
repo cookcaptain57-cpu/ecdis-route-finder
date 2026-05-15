@@ -18,7 +18,7 @@ import { ADMIN_EMAIL, PORTS_DB as INITIAL_PORTS_DB } from "./constants";
 import { fetchChartSheet, fetchPortsFromSheet } from "./sheets";
 
 // ── Utilities ───────────────────────────────────────────────────────────────
-import { normalizePortRow } from "./utils";
+import { normalizePortRow } from "./sheets";
 
 // ── Styles ──────────────────────────────────────────────────────────────────
 import { S } from "./styles";
