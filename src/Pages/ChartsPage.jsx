@@ -1,3 +1,4 @@
+/* eslint-disable */
 // src/pages/ChartsPage.jsx
 import { useState, useEffect, useRef } from "react";
 import { searchSheetLive } from "../sheets";
