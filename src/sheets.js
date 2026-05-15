@@ -20,7 +20,7 @@ const parseLat = (str) => {
   if (!isNaN(dec) && !str.includes("°")) return dec;
 
   const m = str.match(
-    /(\d+)[°\s]+(\d+)[’'\s]+([0-9.]+)[”"\s]*([NSEW])?/i
+    /(\d+)[°\s]+(\d+)[''\s]+([0-9.]+)[""\s]*([NSEW])?/i
   );
 
   if (m) {
@@ -114,12 +114,7 @@ export const searchSheetLive = async (
   for (const tab of tabNames) {
     try {
       const rows = await fetchSheetCSV(sheetId, tab);
-
-      allRows = [
-        ...allRows,
-        ...rows.map((r) => ({ ...r, _tab: tab })),
-      ];
-
+      allRows = [...allRows, ...rows.map((r) => ({ ...r, _tab: tab }))];
       if (allRows.length > 5000) break;
     } catch {
       continue;
@@ -144,7 +139,8 @@ export const API_1 =
   "https://opensheet.elk.sh/1ILzyQODb4Ig2mdq9auZ7aJOfdKBBM01t192VE59WbCE/Sheet1";
 
 // ─────────────────────────────────────────────
-// CHART SHEET FALLBACK
+// CHART SHEET — FIX: Promise.any (parallel, first success wins)
+// Previously: sequential .catch() chain — waited for each failure
 // ─────────────────────────────────────────────
 const CHART_SHEET_ID =
   "1zuZxqUSFtxzg-E8CkTGj01YehhXCZIPodCisCicpxRA";
@@ -159,124 +155,59 @@ const CHART_TABS = [
   "Sheet2",
 ];
 
-export const fetchChartSheet = () =>
-  CHART_TABS.reduce(
-    (chain, tab) =>
-      chain.catch(() =>
-        fetch(
-          `https://opensheet.elk.sh/${CHART_SHEET_ID}/${tab}`
-        )
-          .then((r) => {
-            if (!r.ok) throw new Error();
-            return r.json();
-          })
-          .then((d) => {
-            if (!Array.isArray(d) || d.length === 0)
-              throw new Error();
-            return d;
-          })
-      ),
-    Promise.reject()
-  ).catch(() => []);
+export const fetchChartSheet = () => {
+  const attempts = CHART_TABS.map((tab) =>
+    fetch(`https://opensheet.elk.sh/${CHART_SHEET_ID}/${tab}`)
+      .then((r) => { if (!r.ok) throw new Error(); return r.json(); })
+      .then((d) => {
+        if (!Array.isArray(d) || d.length === 0) throw new Error();
+        return d;
+      })
+  );
+  // All 7 tabs fire at once — whichever responds first with data wins
+  return Promise.any(attempts).catch(() => []);
+};
 
 // ─────────────────────────────────────────────
-// PORTS SHEET
+// PORTS SHEET — FIX: Parallel fetch + fixed CSV bug (was fetching but never returning)
+// Previously: CSV fetched but result was never used; opensheet was sequential fallback
+// Now: both methods race in parallel, first valid result wins
 // ─────────────────────────────────────────────
 const PORTS_SHEET_ID =
   "1BFpUuo-nqS3MaUTtANtKT4CFem-X3nZJYGRADZtuIdk";
 
-export const fetchPortsFromSheet = async () => {
+export const fetchPortsFromSheet = () => {
   const TAB = "PORTDATA";
-  let csv = null;
 
-  // Method 1: CSV
-  try {
-    const url =
-      `https://docs.google.com/spreadsheets/d/${PORTS_SHEET_ID}/gviz/tq?tqx=out:csv&sheet=` +
-      TAB;
+  // Method 1: Google gviz CSV (fast, official)
+  const csvFetch = fetch(
+    `https://docs.google.com/spreadsheets/d/${PORTS_SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${TAB}`
+  )
+    .then((r) => { if (!r.ok) throw new Error("gviz failed"); return r.text(); })
+    .then((text) => {
+      const rows = csvToRows(text);
+      if (!rows.length) throw new Error("gviz empty");
+      // Return raw rows — App.jsx normalizes with normalizePortRow
+      return rows;
+    });
 
-    const r = await fetch(url);
-    if (r.ok) csv = await r.text();
-  } catch (e) {
-    console.warn("gviz failed:", e.message);
-  }
+  // Method 2: opensheet JSON (backup)
+  const openSheetFetch = fetch(
+    `https://opensheet.elk.sh/${PORTS_SHEET_ID}/${TAB}`
+  )
+    .then((r) => { if (!r.ok) throw new Error("opensheet failed"); return r.json(); })
+    .then((data) => {
+      if (!Array.isArray(data) || !data.length)
+        throw new Error("opensheet empty");
+      // Return raw JSON rows — App.jsx normalizes with normalizePortRow
+      return data;
+    });
 
-  // Method 2: opensheet
-  if (!csv) {
-    try {
-      const url =
-        `https://opensheet.elk.sh/${PORTS_SHEET_ID}/${TAB}`;
-
-      const r = await fetch(url);
-      if (r.ok) {
-        const data = await r.json();
-
-        if (Array.isArray(data) && data.length) {
-          const rows = data
-            .map((row) => {
-              const keys = Object.keys(row);
-
-              const findKey = (...searches) =>
-                keys.find((k) =>
-                  searches.some((s) =>
-                    k
-                      .toLowerCase()
-                      .replace(/[\s_]/g, "")
-                      .includes(s)
-                  )
-                );
-
-              const locodeKey = findKey(
-                "portcode",
-                "locode",
-                "code"
-              );
-              const nameKey = findKey(
-                "portname",
-                "name",
-                "port"
-              );
-              const countryKey = findKey("country");
-              const latKey = findKey("lat", "latitude");
-              const lonKey = findKey("lon", "lng", "longitude");
-
-              const locode = String(
-                row[locodeKey] || ""
-              ).trim();
-              const name = String(row[nameKey] || "").trim();
-              const country = String(
-                row[countryKey] || ""
-              ).trim();
-
-              const lat = parseLat(row[latKey]);
-              const lon = parseLon(row[lonKey]);
-
-              if (!name || !locode || isNaN(lat) || isNaN(lon))
-                return null;
-
-              return {
-                id: locode.toUpperCase(),
-                name,
-                city: name,
-                country,
-                lat,
-                lon,
-                keywords:
-                  (name + " " + country + " " + locode).toLowerCase(),
-              };
-            })
-            .filter(Boolean);
-
-          if (rows.length) return rows;
-        }
-      }
-    } catch (e) {
-      console.warn("opensheet failed:", e.message);
-    }
-  }
-
-  console.warn("All port fetch methods failed");
-  return [];
+  // Both race — first valid response wins, no waiting for failures
+  return Promise.any([csvFetch, openSheetFetch]).catch(() => {
+    console.warn("⚠️ All port fetch methods failed");
+    return [];
+  });
 };
 
 // ─────────────────────────────────────────────
@@ -291,7 +222,6 @@ export function normalizeSheetRow(row, idx, tag) {
           .replace(/[\s_-]/g, "")
           .includes(k.toLowerCase().replace(/[\s_-]/g, ""))
       );
-
       if (col && row[col]) return String(row[col]).trim();
     }
     return "";
@@ -306,24 +236,12 @@ export function normalizeSheetRow(row, idx, tag) {
     pick("portname", "port", "route", "description") || "";
 
   const keywords = pick("keywords", "tags") || "";
+  const type     = pick("type", "category") || "";
+  const brand    = pick("brand", "make") || "";
+  const model    = pick("model", "series") || "";
+  const region   = pick("region", "zone") || "";
 
-  const type = pick("type", "category") || "";
-
-  const brand = pick("brand", "make") || "";
-
-  const model = pick("model", "series") || "";
-
-  const region = pick("region", "zone") || "";
-
-  const allKw = [
-    fileName,
-    portName,
-    keywords,
-    type,
-    brand,
-    model,
-    region,
-  ]
+  const allKw = [fileName, portName, keywords, type, brand, model, region]
     .filter(Boolean)
     .join(" ")
     .toLowerCase();
@@ -350,7 +268,6 @@ export function normalizePortRow(row) {
           .replace(/[\s_-]/g, "")
           .includes(k.toLowerCase().replace(/[\s_-]/g, ""))
       );
-
       if (col && row[col]) return String(row[col]).trim();
     }
     return "";
