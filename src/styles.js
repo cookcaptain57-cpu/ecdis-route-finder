@@ -256,6 +256,4 @@ export const S = `
     border-radius:10px;
   }
 
-  .leaflet-popup-tip{background:#0B1D35;}
-`;
-`;
+  
