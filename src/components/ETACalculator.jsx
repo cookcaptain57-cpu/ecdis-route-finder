@@ -3,7 +3,8 @@
 // ════════════════════════════════════════════════════════════════
 
 import { useState, useEffect, useMemo } from "react";
-import { TIMEZONES, addHours, formatDateLocal } from "../constants";
+import { TIMEZONES } from "../constants";           // ✅
+import { addHours, formatDateLocal } from "../utils"; // ✅
 
 export default function ETACalculator({ totalNM }) {
   const [mode, setMode] = useState("speed");
