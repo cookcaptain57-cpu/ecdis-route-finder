@@ -1,17 +1,14 @@
 /* eslint-disable */
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
-import { auth, db } from "./firebase";
+import { auth, db } from "../firebase";
 import {
   collection, getDocs, addDoc, deleteDoc, doc, setDoc, serverTimestamp, getDoc, query, orderBy
 } from "firebase/firestore";
-
-// ✅ FIXED: Added missing Firebase Auth imports
 import { onAuthStateChanged, signInWithEmailAndPassword, signOut } from "firebase/auth";
 
-// ─── TODO: Import or define these constants from your constants/config file ───
-// import { ADMIN_EMAIL, ECDIS_BRANDS, ROUTE_TYPES, PORTS_DB } from "./constants";
-// import PortSearchPage from "./PortSearchPage";
-// ─────────────────────────────────────────────────────────────────────────────
+// ✅ FIXED: Uncommented and corrected import paths
+import { ADMIN_EMAIL, ECDIS_BRANDS, ROUTE_TYPES, PORTS_DB } from "../constants";
+import PortSearchPage from "./PortSearchPage";
 
 // ─── AdminPage ─────────────────────────────────────────────────────────────────
 function AdminPage({ notify, routes, setRoutes, charts, setCharts, sheetRoutes, sheetCharts, refreshSheets, sheetLoading }) {
@@ -48,7 +45,6 @@ function AdminPage({ notify, routes, setRoutes, charts, setCharts, sheetRoutes, 
   const loadUsers = async () => {
     try {
       const snap = await getDocs(collection(db, 'users'));
-      // ✅ FIXED: spread operator … → ...
       setUsers(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     }
     catch { notify('Could not load users', 'error'); }
@@ -57,10 +53,8 @@ function AdminPage({ notify, routes, setRoutes, charts, setCharts, sheetRoutes, 
   const saveRoute = async () => {
     if (!nr.fileName || !nr.fileUrl) { notify('File name and Google Drive link are required', 'error'); return; }
     try {
-      // ✅ FIXED: spread operator … → ...
       const data = { ...nr, keywords: (nr.keywords + ' ' + nr.fileName + ' ' + nr.portName).toLowerCase().trim(), uploadedAt: serverTimestamp() };
       const ref = await addDoc(collection(db, 'routes'), data);
-      // ✅ FIXED: spread operator … → ...
       setRoutes(r => [...r, { id: ref.id, ...data }]);
       setNr({ fileName: '', fileUrl: '', portName: '', keywords: '', type: 'Ocean' });
       notify('Route saved ✅', 'success');
@@ -71,10 +65,8 @@ function AdminPage({ notify, routes, setRoutes, charts, setCharts, sheetRoutes, 
     if (!nc.fileName || !nc.fileUrl || !nc.portName) { notify('File name, port name and link required', 'error'); return; }
     const brandName = ECDIS_BRANDS.find(b => b.id === nc.brand)?.name || nc.brand;
     try {
-      // ✅ FIXED: spread operator … → ...
       const data = { ...nc, brand: brandName, brandId: nc.brand, keywords: (nc.keywords + ' ' + nc.portName + ' ' + brandName + ' ' + nc.fileName).toLowerCase().trim(), uploadedAt: serverTimestamp() };
       const ref = await addDoc(collection(db, 'charts'), data);
-      // ✅ FIXED: spread operator … → ...
       setCharts(c => [...c, { id: ref.id, ...data }]);
       setNc({ fileName: '', fileUrl: '', portName: '', brand: 'furuno', region: '', keywords: '' });
       notify('Chart saved ✅', 'success');
@@ -94,7 +86,6 @@ function AdminPage({ notify, routes, setRoutes, charts, setCharts, sheetRoutes, 
   const blockUser = async (u) => {
     try {
       await setDoc(doc(db, 'users', u.id), { blocked: true, blockedAt: serverTimestamp() }, { merge: true });
-      // ✅ FIXED: spread operator … → ...
       setUsers(us => us.map(x => x.id === u.id ? { ...x, blocked: true } : x));
       notify(`⛔ ${u.name || u.email} blocked`, 'success');
     } catch { notify('Failed to block user', 'error'); }
@@ -103,7 +94,6 @@ function AdminPage({ notify, routes, setRoutes, charts, setCharts, sheetRoutes, 
   const unblockUser = async (u) => {
     try {
       await setDoc(doc(db, 'users', u.id), { blocked: false, blockedAt: null }, { merge: true });
-      // ✅ FIXED: spread operator … → ...
       setUsers(us => us.map(x => x.id === u.id ? { ...x, blocked: false } : x));
       notify(`✅ ${u.name || u.email} unblocked`, 'success');
     } catch { notify('Failed to unblock user', 'error'); }
@@ -113,7 +103,6 @@ function AdminPage({ notify, routes, setRoutes, charts, setCharts, sheetRoutes, 
     <div className="auth-wrap">
       <div className="auth-card">
         <div className="auth-logo">
-          {/* ✅ FIXED: var(--gold) and var(--gold2) em dash → double dash */}
           <div className="auth-icon" style={{ background: 'linear-gradient(135deg,var(--gold),var(--gold2))' }}>🛡</div>
           <div className="auth-title">Admin Portal</div>
           <div className="auth-sub">NavisphereX Marine — Admin Only</div>
@@ -127,7 +116,6 @@ function AdminPage({ notify, routes, setRoutes, charts, setCharts, sheetRoutes, 
           <input className="fi" type="password" placeholder="••••••••" value={pass} onChange={e => setPass(e.target.value)} onKeyDown={e => e.key === 'Enter' && login()} />
         </div>
         {err && <div className="err-box">{err}</div>}
-        {/* ✅ FIXED: var(--gold) and var(--gold2) */}
         <button className="submit-btn" style={{ background: 'linear-gradient(135deg,var(--gold),var(--gold2))', color: '#000' }} onClick={login} disabled={loading}>
           {loading ? 'Logging in…' : '🛡 ADMIN LOGIN'}
         </button>
@@ -149,11 +137,11 @@ function AdminPage({ notify, routes, setRoutes, charts, setCharts, sheetRoutes, 
 
   const GDriveHelp = () => (
     <div className="info-box" style={{ fontSize: '0.74rem' }}>
-      📁 <strong style={{ color: 'var(--text)' }}>Google Drive Link Guide:</strong><br />  {/* ✅ FIXED: var(--text) */}
+      📁 <strong style={{ color: 'var(--text)' }}>Google Drive Link Guide:</strong><br />
       1. Upload file to <strong>drive.google.com</strong> (ecdisroutes@gmail.com)<br />
       2. Right click → Share → Anyone with link<br />
-      3. Copy link: <code style={{ color: 'var(--cyan)' }}>drive.google.com/file/d/ID/view</code><br />  {/* ✅ FIXED */}
-      4. Convert to: <code style={{ color: 'var(--green)' }}>drive.google.com/uc?export=download&id=ID</code>  {/* ✅ FIXED */}
+      3. Copy link: <code style={{ color: 'var(--cyan)' }}>drive.google.com/file/d/ID/view</code><br />
+      4. Convert to: <code style={{ color: 'var(--green)' }}>drive.google.com/uc?export=download&id=ID</code>
     </div>
   );
 
@@ -171,7 +159,6 @@ function AdminPage({ notify, routes, setRoutes, charts, setCharts, sheetRoutes, 
           </div>
           <div>
             <div className="s-label">Account</div>
-            {/* ✅ FIXED: var(--text3) */}
             <div className="s-item" style={{ fontSize: '0.7rem', color: 'var(--text3)' }}><span>👥</span>{user.email}</div>
             <div className="s-item" onClick={() => signOut(auth)}><span>🚪</span>Logout</div>
           </div>
@@ -352,7 +339,7 @@ function AdminPage({ notify, routes, setRoutes, charts, setCharts, sheetRoutes, 
                 </div>
               </div>
               <div className="info-box" style={{ fontSize: '0.74rem' }}>
-                📡 <strong style={{ color: 'var(--text)' }}>Live Google Sheet Database</strong> — auto-refreshes from your Google Sheet via App Script. Click <strong>Sync Now</strong> to pull the latest data. Rows appear here as soon as you add them to the sheet.<br />
+                📡 <strong style={{ color: 'var(--text)' }}>Live Google Sheet Database</strong> — auto-refreshes from your Google Sheet via App Script. Click <strong>Sync Now</strong> to pull the latest data.<br />
                 <span style={{ color: 'var(--cyan)' }}>Sheet ID: 1ILzyQODb4Ig2mdq9auZ7aJOfdKBBM01t192VE59WbCE</span>
               </div>
               {sheetLoading
@@ -388,7 +375,7 @@ function AdminPage({ notify, routes, setRoutes, charts, setCharts, sheetRoutes, 
                   </div>
               }
               <div style={{ marginTop: '1rem', padding: '0.9rem', background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 10, fontSize: '0.76rem', color: 'var(--text2)' }}>
-                💡 <strong style={{ color: 'var(--gold)' }}>How to add routes:</strong> Open your Google Sheet → Add a new row with file name, Google Drive link, port name, type, keywords → The sheet auto-updates via App Script → Click <strong>Sync Now</strong> to reflect here.
+                💡 <strong style={{ color: 'var(--gold)' }}>How to add routes:</strong> Open your Google Sheet → Add a new row → Click <strong>Sync Now</strong> to reflect here.
               </div>
             </>
           )}
@@ -405,7 +392,7 @@ function AdminPage({ notify, routes, setRoutes, charts, setCharts, sheetRoutes, 
                 </div>
               </div>
               <div className="info-box" style={{ fontSize: '0.74rem' }}>
-                📡 <strong style={{ color: 'var(--text)' }}>Live Google Sheet Database</strong> — includes ECDIS model info. Auto-refreshes from your Google Drive / App Script pipeline.<br />
+                📡 <strong style={{ color: 'var(--text)' }}>Live Google Sheet Database</strong> — includes ECDIS model info.<br />
                 <span style={{ color: 'var(--gold)' }}>Sheet ID: 1zuZxqUSFtxzg-E8CkTGj01YehhXCZIPodCisCicpxRA</span>
               </div>
               {sheetLoading
@@ -413,7 +400,6 @@ function AdminPage({ notify, routes, setRoutes, charts, setCharts, sheetRoutes, 
                 : sheetCharts.length === 0
                   ? <div className="empty"><div className="empty-icon">📊</div><div className="empty-t">No Rows Found</div><div className="empty-d">Add rows to your ECDIS Charts Google Sheet and click Sync Now</div></div>
                   : <>
-                    {/* Brand summary cards */}
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(120px,1fr))', gap: 6, marginBottom: '1rem' }}>
                       {ECDIS_BRANDS.map(b => {
                         const brandCol = Object.keys(sheetCharts[0] || {}).find(k => k.toLowerCase().includes('brand') || k.toLowerCase().includes('ecdis'));
@@ -464,7 +450,7 @@ function AdminPage({ notify, routes, setRoutes, charts, setCharts, sheetRoutes, 
                   </>
               }
               <div style={{ marginTop: '1rem', padding: '0.9rem', background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 10, fontSize: '0.76rem', color: 'var(--text2)' }}>
-                💡 <strong style={{ color: 'var(--gold)' }}>How to add charts:</strong> Open your ECDIS Charts Google Sheet → Add a row with file name, brand, ECDIS model, port, Google Drive link → App Script updates the sheet → Click <strong>Sync Now</strong> here.
+                💡 <strong style={{ color: 'var(--gold)' }}>How to add charts:</strong> Open your ECDIS Charts Google Sheet → Add a row → Click <strong>Sync Now</strong> here.
               </div>
             </>
           )}
@@ -501,7 +487,7 @@ function AdminPage({ notify, routes, setRoutes, charts, setCharts, sheetRoutes, 
                 </div>
               </div>
               <div className="info-box">
-                🛡 <strong style={{ color: 'var(--text)' }}>Access Control</strong> — Block suspicious users instantly. Blocked users are auto-logged out and shown a warning with your contact info when they try to login again.
+                🛡 <strong style={{ color: 'var(--text)' }}>Access Control</strong> — Block suspicious users instantly. Blocked users are auto-logged out and shown a warning when they try to login again.
               </div>
               {users.length === 0
                 ? <div className="empty"><div className="empty-icon">👥</div><div className="empty-t">No Users Yet</div><div className="empty-d">Users appear here after they register</div></div>
