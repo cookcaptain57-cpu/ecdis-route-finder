@@ -1,6 +1,6 @@
 /* eslint-disable */
 // src/pages/ChartsPage.jsx
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { searchSheetLive } from "../sheets";
 import { ECDIS_BRANDS } from "../constants";
 
@@ -14,7 +14,6 @@ function ChartsPage({ charts, sheetCharts, notify, user, setTab, isAdmin }) {
   const [globalResults, setGlobalResults] = useState([]);
   const [globalSearching, setGlobalSearching] = useState(false);
   const [globalSearched, setGlobalSearched] = useState(false);
-  const [showSugg, setShowSugg] = useState(false);
   const debounceRef = useRef(null);
 
   const CHART_TABS = ['Sheet1', 'Charts', 'ECDIS Charts', 'Sheet2', 'Sheet3'];
@@ -44,7 +43,8 @@ function ChartsPage({ charts, sheetCharts, notify, user, setTab, isAdmin }) {
 
   const sb = ECDIS_BRANDS.find(b => b.id === selBrand);
 
-  const doBrandSearch = async (sq, brand) => {
+  // ✅ FIXED: wrapped in useCallback so it can be a stable dependency for useEffect
+  const doBrandSearch = useCallback(async (sq, brand) => {
     const s = (sq || q).trim();
     const b = brand || sb;
     if (!b) return;
@@ -57,14 +57,15 @@ function ChartsPage({ charts, sheetCharts, notify, user, setTab, isAdmin }) {
       }));
     } catch { setBrandResults([]); }
     setBrandSearching(false);
-  };
+  }, [q, sb]);
 
+  // ✅ FIXED: doBrandSearch added to dependency array
   useEffect(() => {
     if (selBrand) {
       setQ(''); setBrandResults([]);
       doBrandSearch('', ECDIS_BRANDS.find(b => b.id === selBrand));
     }
-  }, [selBrand]);
+  }, [selBrand, doBrandSearch]);
 
   const handleBrandQ = e => {
     const v = e.target.value; setQ(v);
@@ -79,7 +80,6 @@ function ChartsPage({ charts, sheetCharts, notify, user, setTab, isAdmin }) {
     if (!url) { notify('No download link', 'error'); return; }
     notify('⬇ Downloading…', 'success');
     try {
-      // ✅ FIXED: escaped forward slashes in regex
       const gd = url.match(/\/d\/([a-zA-Z0-9_-]+)/);
       const direct = gd ? `https://drive.google.com/uc?export=download&id=${gd[1]}` : url;
       const res = await fetch(direct);
@@ -113,7 +113,6 @@ function ChartsPage({ charts, sheetCharts, notify, user, setTab, isAdmin }) {
         {b && <div style={{ fontSize: '0.7rem', color: b.color, marginBottom: 4 }}>{b.emoji} {b.name}</div>}
         <div className="file-tags">
           <span className="ftag tag-chart">Chart File</span>
-          {/* ✅ FIXED: var(--cyan) em dash → double dash */}
           <span className="ftag" style={{ background: 'rgba(0,212,255,0.06)', color: 'var(--cyan)', border: '1px solid rgba(0,212,255,0.15)' }}>Live</span>
         </div>
         {user
