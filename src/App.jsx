@@ -6,7 +6,7 @@ import { signOut, onAuthStateChanged, setPersistence, browserLocalPersistence } 
 import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
 
 import { PORTS_DB, ADMIN_EMAIL, normalizePortRow } from "./constants";
-import { fetchChartSheet, fetchPortsFromSheet } from "./sheets";
+import { fetchChartSheet, fetchPortsFromSheet, clearSheetCache } from "./sheets";
 
 // Pages
 import Footer from "./components/Footer";
@@ -200,9 +200,19 @@ const S = `
   .leaflet-container{background:#040C1A !important;}
   .leaflet-popup-content-wrapper{background:#0B1D35;border:1px solid #1A3A5C;color:#E2EBF8;border-radius:10px;}
   .leaflet-popup-tip{background:#0B1D35;}
+  .adm-layout{display:flex;min-height:calc(100vh - 60px);}
+  .adm-sidebar{width:200px;flex-shrink:0;background:var(--card);border-right:1px solid var(--border);padding:1rem;display:flex;flex-direction:column;gap:4px;}
+  .adm-content{flex:1;padding:1.2rem;overflow-y:auto;max-width:900px;}
+  .adm-mob-tabs{display:none;flex-wrap:wrap;gap:4px;padding:0.6rem;border-bottom:1px solid var(--border);background:var(--card);}
+  @media(max-width:800px){.adm-sidebar{display:none;}.adm-mob-tabs{display:flex;}.adm-content{padding:0.8rem;}}
+  .amtab{padding:5px 10px;border-radius:7px;border:1px solid var(--border);background:transparent;color:var(--text2);font-family:'Exo 2',sans-serif;font-size:0.7rem;cursor:pointer;transition:all 0.2s;}
+  .amtab.active{background:rgba(0,180,216,0.12);border-color:rgba(0,180,216,0.3);color:var(--cyan);}
+  .s-label{font-size:0.58rem;text-transform:uppercase;letter-spacing:0.12em;color:var(--text3);margin-bottom:6px;padding:0 4px;}
+  .s-item{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;cursor:pointer;font-size:0.76rem;color:var(--text2);transition:all 0.2s;margin-bottom:2px;}
+  .s-item:hover{background:rgba(255,255,255,0.05);color:var(--text);}
+  .s-item.active{background:rgba(0,180,216,0.1);color:var(--cyan);}
+  .s-item span{font-size:1rem;}
 `;
-
-
 
 // ─── MAIN APP ─────────────────────────────────────────────────────────────────
 export default function App() {
@@ -213,8 +223,8 @@ export default function App() {
   const [user, setUser] = useState(null);
   const [userProfile, setUserProfile] = useState(null);
   const [isBlocked, setIsBlocked] = useState(false);
-  const [routes] = useState([]);
-  const [charts] = useState([]);
+  const [routes, setRoutes] = useState([]);   // ✅ FIXED: added setRoutes
+  const [charts, setCharts] = useState([]);   // ✅ FIXED: added setCharts
   const [authChecked, setAuthChecked] = useState(false);
   const [sheetRoutes, setSheetRoutes] = useState([]);
   const [sheetCharts, setSheetCharts] = useState([]);
@@ -254,6 +264,9 @@ export default function App() {
       }).catch(e => console.log('Sheet fetch error', e))
       .finally(() => setSheetLoading(false));
   };
+
+  // ✅ NEW: Force refresh — clears localStorage cache then fetches fresh from Sheets
+  const forceRefreshSheets = () => { clearSheetCache(); fetchSheets(); };
 
   useEffect(() => { fetchSheets(); }, []);
 
@@ -361,12 +374,20 @@ export default function App() {
           {tab === 'routes'  && <RoutesPage searchQuery={searchQ} notify={notify} user={user} setTab={switchTab} />}
           {tab === 'charts'  && <ChartsPage notify={notify} user={user} setTab={switchTab} isAdmin={isAdmin} />}
           {tab === 'planner' && <RoutePlannerPage notify={notify} sheetRoutes={[...routes, ...sheetRoutes]} portsDb={portsDb} />}
-          {tab === 'ports'   && <PortSearchPage portsDb={portsDb} sheetLoading={sheetLoading} refreshSheets={fetchSheets} />}
+          {tab === 'ports'   && <PortSearchPage portsDb={portsDb} sheetLoading={sheetLoading} refreshSheets={forceRefreshSheets} />}
           {tab === 'library' && <MaritimeLibraryPage setTab={switchTab} />}
           {tab === 'navmode' && <NavModePage notify={notify} sheetRoutes={[...routes, ...sheetRoutes]} portsDb={portsDb} setTab={switchTab} />}
           {tab === 'login'   && <LoginPage notify={notify} onLogin={(u, redirectTo) => { setUser(u); setTab(redirectTo || 'home'); }} />}
           {tab === 'admin'   && (isAdmin
-            ? <AdminPage notify={notify} sheetRoutes={sheetRoutes} sheetCharts={sheetCharts} refreshSheets={fetchSheets} sheetLoading={sheetLoading} />
+            ? <AdminPage
+                notify={notify}
+                routes={routes}         setRoutes={setRoutes}
+                charts={charts}         setCharts={setCharts}
+                sheetRoutes={sheetRoutes}
+                sheetCharts={sheetCharts}
+                refreshSheets={forceRefreshSheets}
+                sheetLoading={sheetLoading}
+              />
             : <div className="section"><div className="empty"><div className="empty-icon">🔒</div><div className="empty-t">Admin Access Only</div></div></div>
           )}
           {!user && tab !== 'home' && tab !== 'login' && (
