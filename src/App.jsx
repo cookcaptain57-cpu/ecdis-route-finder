@@ -6,7 +6,7 @@ import { signOut, onAuthStateChanged, setPersistence, browserLocalPersistence } 
 import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
 
 import { PORTS_DB, ADMIN_EMAIL, normalizePortRow } from "./constants";
-import { fetchChartSheet, fetchPortsFromSheet, clearSheetCache } from "./sheets";
+import { fetchRouteSheet, fetchChartSheet, fetchPortsFromSheet, clearSheetCache } from "./sheets";
 
 // Pages
 import Footer from "./components/Footer";
@@ -223,8 +223,8 @@ export default function App() {
   const [user, setUser] = useState(null);
   const [userProfile, setUserProfile] = useState(null);
   const [isBlocked, setIsBlocked] = useState(false);
-  const [routes, setRoutes] = useState([]);   // ✅ FIXED: added setRoutes
-  const [charts, setCharts] = useState([]);   // ✅ FIXED: added setCharts
+  const [routes, setRoutes] = useState([]);
+  const [charts, setCharts] = useState([]);
   const [authChecked, setAuthChecked] = useState(false);
   const [sheetRoutes, setSheetRoutes] = useState([]);
   const [sheetCharts, setSheetCharts] = useState([]);
@@ -234,17 +234,9 @@ export default function App() {
   const isAdmin = user?.email === ADMIN_EMAIL;
   const notify = (msg, type = 'success') => setNotif({ msg, type, key: Date.now() });
 
+  // ─── fetchSheets: reads from IDB cache first, network only if empty ────────
   const fetchSheets = () => {
     setSheetLoading(true);
-    const ROUTE_TABS = ["Sheet1", "Routes", "Route", "Data", "Sheet2"];
-    const fetchRouteSheet = () => ROUTE_TABS.reduce(
-      (chain, t) => chain.catch(() =>
-        fetch(`https://opensheet.elk.sh/1ILzyQODb4Ig2mdq9auZ7aJOfdKBBM01t192VE59WbCE/${t}`)
-          .then(r => { if (!r.ok) throw new Error(); return r.json(); })
-          .then(d => { if (!Array.isArray(d) || d.length === 0) throw new Error(); return d; })
-      ), Promise.reject()
-    ).catch(() => []);
-
     Promise.all([fetchRouteSheet(), fetchChartSheet(), fetchPortsFromSheet()])
       .then(([d1, d2, d3]) => {
         setSheetRoutes(Array.isArray(d1) ? d1 : []);
@@ -265,8 +257,9 @@ export default function App() {
       .finally(() => setSheetLoading(false));
   };
 
-  // ✅ NEW: Force refresh — clears localStorage cache then fetches fresh from Sheets
-  const forceRefreshSheets = () => { clearSheetCache(); fetchSheets(); };
+  // ─── forceRefreshSheets: clears IDB first, then fetches fresh from network ─
+  // await ensures IDB is fully cleared before fetchSheets() starts
+  const forceRefreshSheets = async () => { await clearSheetCache(); fetchSheets(); };
 
   useEffect(() => { fetchSheets(); }, []);
 
