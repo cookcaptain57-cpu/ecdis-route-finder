@@ -2,6 +2,7 @@
 // src/pages/PortSearchPage.jsx
 import { useState, useEffect, useRef } from "react";
 import { PORTS_DB } from "../constants";
+import { fetchPortsFromSheet } from "../sheets"; // NEW: IDB port loader
 
 function PortSearchPage({ portsDb = [], sheetLoading, refreshSheets }) {
   const [q, setQ] = useState('');
@@ -9,7 +10,19 @@ function PortSearchPage({ portsDb = [], sheetLoading, refreshSheets }) {
   const [sugg, setSugg] = useState([]);
   const [showSugg, setShowSugg] = useState(false);
   const wRef = useRef();
-  const db = portsDb.length > 0 ? portsDb : PORTS_DB;
+
+  // NEW: load ports from IDB on mount — fetchPortsFromSheet returns IDB data
+  // instantly if already cached, or fetches+caches on first load.
+  // Priority: idbPorts → portsDb prop → hardcoded PORTS_DB (existing fallback unchanged)
+  const [idbPorts, setIdbPorts] = useState([]);
+  useEffect(() => {
+    fetchPortsFromSheet().then(rows => {
+      if (rows && rows.length > 0) setIdbPorts(rows);
+    });
+  }, []);
+
+  // CHANGED: idbPorts is now preferred source; existing prop/constant fallback preserved
+  const db = idbPorts.length > 0 ? idbPorts : portsDb.length > 0 ? portsDb : PORTS_DB;
 
   useEffect(() => {
     const h = e => { if (!wRef.current?.contains(e.target)) setShowSugg(false); };
