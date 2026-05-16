@@ -9,6 +9,8 @@ import { PORTS_DB, ADMIN_EMAIL, normalizePortRow } from "./constants";
 import { fetchChartSheet, fetchPortsFromSheet } from "./sheets";
 
 // Pages
+import Footer from "./components/Footer";
+import Notif  from "./components/Notif";
 import HomePage             from "./Pages/HomePage";
 import RoutesPage           from "./Pages/RoutesPage";
 import ChartsPage           from "./Pages/ChartsPage";
@@ -200,28 +202,7 @@ const S = `
   .leaflet-popup-tip{background:#0B1D35;}
 `;
 
-// ─── NOTIFICATION ─────────────────────────────────────────────────────────────
-function Notif({ msg, type, onClose }) {
-  useEffect(() => { const t = setTimeout(onClose, 4000); return () => clearTimeout(t); }, []);
-  return <div className={`notif notif-${type}`}>{type === "success" ? "✅" : type === "error" ? "❌" : "ℹ️"} {msg}</div>;
-}
 
-function Footer() {
-  return (
-    <footer className="footer">
-      <div>
-        <div className="footer-brand">Owner: <span>Manish Bharti</span></div>
-        <div className="footer-copy">© 2024 NavisphereX Marine · Maritime Navigation System</div>
-      </div>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-        <span style={{ fontSize: "0.74rem", color: "var(--text2)" }}>Follow for more maritime updates:</span>
-        <a className="ig-btn" href="https://instagram.com/manish_the_navigator" target="_blank" rel="noreferrer">
-          📷 @manish_the_navigator
-        </a>
-      </div>
-    </footer>
-  );
-}
 
 // ─── MAIN APP ─────────────────────────────────────────────────────────────────
 export default function App() {
