@@ -6,7 +6,6 @@ import {
 } from "firebase/firestore";
 import { onAuthStateChanged, signInWithEmailAndPassword, signOut } from "firebase/auth";
 
-// ✅ FIXED: Uncommented and corrected import paths
 import { ADMIN_EMAIL, ECDIS_BRANDS, ROUTE_TYPES, PORTS_DB } from "../constants";
 import PortSearchPage from "./PortSearchPage";
 
@@ -470,7 +469,7 @@ function AdminPage({ notify, routes, setRoutes, charts, setCharts, sheetRoutes, 
                 📡 Syncs all 3000+ ports from your Google Sheet into the Port Search and Route Planner. Click <strong>Sync Port Database</strong> to reload all port data from your sheet.
                 <br /><span style={{ color: 'var(--cyan)', fontSize: '0.72rem' }}>Sheet ID: 1BFpUuo-nqS3MaUTtANtKT4CFem-X3nZJYGRADZtuIdk</span>
               </div>
-              <PortSearchPage portsDb={sheetRoutes.length > 0 ? PORTS_DB : []} sheetLoading={sheetLoading} refreshSheets={refreshSheets} />
+              <PortSearchPage portsDb={PORTS_DB} sheetLoading={sheetLoading} refreshSheets={refreshSheets} />
             </>
           )}
 
