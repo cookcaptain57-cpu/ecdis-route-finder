@@ -5,25 +5,60 @@ export const ROUTE_SHEET_ID = '1ILzyQODb4Ig2mdq9auZ7aJOfdKBBM01t192VE59WbCE';
 export const CHART_SHEET_ID = '1zuZxqUSFtxzg-E8CkTGj01YehhXCZIPodCisCicpxRA';
 export const PORTS_SHEET_ID = '1BFpUuo-nqS3MaUTtANtKT4CFem-X3nZJYGRADZtuIdk';
 
-// ─── localStorage cache keys ───────────────────────────────────────────────
-const LS_ROUTES = 'mnav_sheet_routes';
-const LS_CHARTS = 'mnav_sheet_charts';
-const LS_PORTS  = 'mnav_sheet_ports';
+// ─── IndexedDB config ──────────────────────────────────────────────────────
+const IDB_NAME   = 'mnav_cache';
+const IDB_VER    = 1;
+const IDB_STORE  = 'sheets';
+const IDB_ROUTES = 'mnav_sheet_routes';
+const IDB_CHARTS = 'mnav_sheet_charts';
+const IDB_PORTS  = 'mnav_sheet_ports';
 
-function _lsRead(key) {
-  try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : null; }
-  catch { return null; }
-}
-
-function _lsWrite(key, data) {
-  try { localStorage.setItem(key, JSON.stringify(data)); } catch {}
-}
-
-export const clearSheetCache = () => {
-  [LS_ROUTES, LS_CHARTS, LS_PORTS].forEach(k => {
-    try { localStorage.removeItem(k); } catch {}
+function _idbOpen() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(IDB_NAME, IDB_VER);
+    req.onupgradeneeded = e => e.target.result.createObjectStore(IDB_STORE);
+    req.onsuccess       = e => resolve(e.target.result);
+    req.onerror         = e => reject(e.target.error);
   });
-};
+}
+
+async function _idbRead(key) {
+  try {
+    const db = await _idbOpen();
+    return new Promise((resolve, reject) => {
+      const req = db.transaction(IDB_STORE, 'readonly').objectStore(IDB_STORE).get(key);
+      req.onsuccess = e => resolve(e.target.result ?? null);
+      req.onerror   = e => reject(e.target.error);
+    });
+  } catch { return null; }
+}
+
+async function _idbWrite(key, data) {
+  try {
+    const db = await _idbOpen();
+    return new Promise((resolve, reject) => {
+      const req = db.transaction(IDB_STORE, 'readwrite').objectStore(IDB_STORE).put(data, key);
+      req.onsuccess = () => resolve();
+      req.onerror   = e => reject(e.target.error);
+    });
+  } catch {}
+}
+
+async function _idbClear() {
+  try {
+    const db = await _idbOpen();
+    return new Promise((resolve, reject) => {
+      const tx    = db.transaction(IDB_STORE, 'readwrite');
+      const store = tx.objectStore(IDB_STORE);
+      [IDB_ROUTES, IDB_CHARTS, IDB_PORTS].forEach(k => store.delete(k));
+      tx.oncomplete = () => resolve();
+      tx.onerror    = e => reject(e.target.error);
+    });
+  } catch {}
+}
+
+// ─── Public cache clear — called by Admin "Sync Now" ──────────────────────
+export const clearSheetCache = () => _idbClear();
 
 // ─── Simple in-memory cache (5 min TTL) ───────────────────────────────────
 export const searchCache = new Map();
@@ -75,28 +110,11 @@ export const searchSheetLive = async (sheetId, query, tabNames = ['Sheet1'], max
   return results;
 };
 
-// ─── fetchChartSheet — localStorage cache added ────────────────────────────
-const CHART_TABS = ['Sheet1', 'Charts', 'ECDIS Charts', 'Routes', 'Chart', 'Data', 'Sheet2'];
-export const fetchChartSheet = () => {
-  const cached = _lsRead(LS_CHARTS);
-  if (cached && Array.isArray(cached) && cached.length > 0) return Promise.resolve(cached);
-  return CHART_TABS.reduce(
-    (chain, tab) =>
-      chain.catch(() =>
-        fetch(`https://opensheet.elk.sh/${CHART_SHEET_ID}/${tab}`)
-          .then(r => { if (!r.ok) throw new Error(); return r.json(); })
-          .then(d => { if (!Array.isArray(d) || d.length === 0) throw new Error(); return d; })
-      ),
-    Promise.reject()
-  ).then(d => { _lsWrite(LS_CHARTS, d); return d; })
-   .catch(() => []);
-};
-
-// ─── fetchRouteSheet — localStorage cache added ────────────────────────────
-export const fetchRouteSheet = () => {
-  const cached = _lsRead(LS_ROUTES);
-  if (cached && Array.isArray(cached) && cached.length > 0) return Promise.resolve(cached);
-  const ROUTE_TABS = ['Sheet1', 'Routes', 'Route', 'Data', 'Sheet2'];
+// ─── fetchRouteSheet — IDB cache, fetch only if empty ─────────────────────
+const ROUTE_TABS = ['Sheet1', 'Routes', 'Route', 'Data', 'Sheet2'];
+export const fetchRouteSheet = async () => {
+  const cached = await _idbRead(IDB_ROUTES);
+  if (cached && Array.isArray(cached) && cached.length > 0) return cached;
   return ROUTE_TABS.reduce(
     (chain, tab) =>
       chain.catch(() =>
@@ -105,13 +123,30 @@ export const fetchRouteSheet = () => {
           .then(d => { if (!Array.isArray(d) || d.length === 0) throw new Error(); return d; })
       ),
     Promise.reject()
-  ).then(d => { _lsWrite(LS_ROUTES, d); return d; })
+  ).then(async d => { await _idbWrite(IDB_ROUTES, d); return d; })
    .catch(() => []);
 };
 
-// ─── fetchPortsFromSheet — localStorage cache added ───────────────────────
+// ─── fetchChartSheet — IDB cache, fetch only if empty ─────────────────────
+const CHART_TABS = ['Sheet1', 'Charts', 'ECDIS Charts', 'Routes', 'Chart', 'Data', 'Sheet2'];
+export const fetchChartSheet = async () => {
+  const cached = await _idbRead(IDB_CHARTS);
+  if (cached && Array.isArray(cached) && cached.length > 0) return cached;
+  return CHART_TABS.reduce(
+    (chain, tab) =>
+      chain.catch(() =>
+        fetch(`https://opensheet.elk.sh/${CHART_SHEET_ID}/${tab}`)
+          .then(r => { if (!r.ok) throw new Error(); return r.json(); })
+          .then(d => { if (!Array.isArray(d) || d.length === 0) throw new Error(); return d; })
+      ),
+    Promise.reject()
+  ).then(async d => { await _idbWrite(IDB_CHARTS, d); return d; })
+   .catch(() => []);
+};
+
+// ─── fetchPortsFromSheet — IDB cache, fetch only if empty ─────────────────
 export const fetchPortsFromSheet = async () => {
-  const cached = _lsRead(LS_PORTS);
+  const cached = await _idbRead(IDB_PORTS);
   if (cached && Array.isArray(cached) && cached.length > 0) return cached;
 
   const url = `https://docs.google.com/spreadsheets/d/${PORTS_SHEET_ID}/gviz/tq?tqx=out:csv&sheet=PORTDATA`;
@@ -137,21 +172,23 @@ export const fetchPortsFromSheet = async () => {
       }
       vals.push(cur.trim());
       const countryCode = (vals[0] || '').replace(/"/g, '').trim();
-      const locode = (vals[1] || '').replace(/"/g, '').trim();
-      const portName = (vals[colC] || '').replace(/"/g, '').trim();
-      const lat = colLat >= 0 ? parseFloat(vals[colLat] || '') : NaN;
-      const lon = colLon >= 0 ? parseFloat(vals[colLon] || '') : NaN;
+      const locode      = (vals[1] || '').replace(/"/g, '').trim();
+      const portName    = (vals[colC] || '').replace(/"/g, '').trim();
+      const lat         = colLat >= 0 ? parseFloat(vals[colLat] || '') : NaN;
+      const lon         = colLon >= 0 ? parseFloat(vals[colLon] || '') : NaN;
       if (!portName || !locode) continue;
       const fullLocode = locode.length <= 3 ? (countryCode + locode) : locode;
       rows.push({
-        id: fullLocode.toUpperCase(),
-        name: portName, city: portName, country: countryCode,
-        lat: isNaN(lat) ? null : lat,
-        lon: isNaN(lon) ? null : lon,
+        id:       fullLocode.toUpperCase(),
+        name:     portName,
+        city:     portName,
+        country:  countryCode,
+        lat:      isNaN(lat) ? null : lat,
+        lon:      isNaN(lon) ? null : lon,
         keywords: (portName + ' ' + countryCode + ' ' + fullLocode).toLowerCase(),
       });
     }
-    _lsWrite(LS_PORTS, rows);
+    await _idbWrite(IDB_PORTS, rows);
     return rows;
   } catch (e) {
     console.warn('Port sheet fetch failed:', e.message);
