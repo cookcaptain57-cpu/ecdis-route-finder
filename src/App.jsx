@@ -9,15 +9,15 @@ import { PORTS_DB, ADMIN_EMAIL, normalizePortRow } from "./constants";
 import { fetchChartSheet, fetchPortsFromSheet } from "./sheets";
 
 // Pages
-import HomePage             from "./pages/HomePage";
-import RoutesPage           from "./pages/RoutesPage";
-import ChartsPage           from "./pages/ChartsPage";
-import RoutePlannerPage     from "./pages/RoutePlannerPage";
-import PortSearchPage       from "./pages/PortSearchPage";
-import LoginPage            from "./pages/LoginPage";
-import NavModePage          from "./pages/NavModePage";
-import MaritimeLibraryPage  from "./pages/MaritimeLibraryPage";
-import AdminPage            from "./pages/AdminPage";
+import HomePage             from "./Pages/HomePage";
+import RoutesPage           from "./Pages/RoutesPage";
+import ChartsPage           from "./Pages/ChartsPage";
+import RoutePlannerPage     from "./Pages/RoutePlannerPage";
+import PortSearchPage       from "./Pages/PortSearchPage";
+import LoginPage            from "./Pages/LoginPage";
+import NavModePage          from "./Pages/NavModePage";
+import MaritimeLibraryPage  from "./Pages/MaritimeLibraryPage";
+import AdminPage            from "./Pages/AdminPage";
 
 // ─── STYLES ───────────────────────────────────────────────────────────────────
 const S = `
