@@ -5,7 +5,27 @@ export const ROUTE_SHEET_ID = '1ILzyQODb4Ig2mdq9auZ7aJOfdKBBM01t192VE59WbCE';
 export const CHART_SHEET_ID = '1zuZxqUSFtxzg-E8CkTGj01YehhXCZIPodCisCicpxRA';
 export const PORTS_SHEET_ID = '1BFpUuo-nqS3MaUTtANtKT4CFem-X3nZJYGRADZtuIdk';
 
-// Simple in-memory cache (5 min TTL)
+// ─── localStorage cache keys ───────────────────────────────────────────────
+const LS_ROUTES = 'mnav_sheet_routes';
+const LS_CHARTS = 'mnav_sheet_charts';
+const LS_PORTS  = 'mnav_sheet_ports';
+
+function _lsRead(key) {
+  try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : null; }
+  catch { return null; }
+}
+
+function _lsWrite(key, data) {
+  try { localStorage.setItem(key, JSON.stringify(data)); } catch {}
+}
+
+export const clearSheetCache = () => {
+  [LS_ROUTES, LS_CHARTS, LS_PORTS].forEach(k => {
+    try { localStorage.removeItem(k); } catch {}
+  });
+};
+
+// ─── Simple in-memory cache (5 min TTL) ───────────────────────────────────
 export const searchCache = new Map();
 
 export const csvToRows = (csv) => {
@@ -55,9 +75,12 @@ export const searchSheetLive = async (sheetId, query, tabNames = ['Sheet1'], max
   return results;
 };
 
+// ─── fetchChartSheet — localStorage cache added ────────────────────────────
 const CHART_TABS = ['Sheet1', 'Charts', 'ECDIS Charts', 'Routes', 'Chart', 'Data', 'Sheet2'];
-export const fetchChartSheet = () =>
-  CHART_TABS.reduce(
+export const fetchChartSheet = () => {
+  const cached = _lsRead(LS_CHARTS);
+  if (cached && Array.isArray(cached) && cached.length > 0) return Promise.resolve(cached);
+  return CHART_TABS.reduce(
     (chain, tab) =>
       chain.catch(() =>
         fetch(`https://opensheet.elk.sh/${CHART_SHEET_ID}/${tab}`)
@@ -65,9 +88,14 @@ export const fetchChartSheet = () =>
           .then(d => { if (!Array.isArray(d) || d.length === 0) throw new Error(); return d; })
       ),
     Promise.reject()
-  ).catch(() => []);
+  ).then(d => { _lsWrite(LS_CHARTS, d); return d; })
+   .catch(() => []);
+};
 
+// ─── fetchRouteSheet — localStorage cache added ────────────────────────────
 export const fetchRouteSheet = () => {
+  const cached = _lsRead(LS_ROUTES);
+  if (cached && Array.isArray(cached) && cached.length > 0) return Promise.resolve(cached);
   const ROUTE_TABS = ['Sheet1', 'Routes', 'Route', 'Data', 'Sheet2'];
   return ROUTE_TABS.reduce(
     (chain, tab) =>
@@ -77,10 +105,15 @@ export const fetchRouteSheet = () => {
           .then(d => { if (!Array.isArray(d) || d.length === 0) throw new Error(); return d; })
       ),
     Promise.reject()
-  ).catch(() => []);
+  ).then(d => { _lsWrite(LS_ROUTES, d); return d; })
+   .catch(() => []);
 };
 
+// ─── fetchPortsFromSheet — localStorage cache added ───────────────────────
 export const fetchPortsFromSheet = async () => {
+  const cached = _lsRead(LS_PORTS);
+  if (cached && Array.isArray(cached) && cached.length > 0) return cached;
+
   const url = `https://docs.google.com/spreadsheets/d/${PORTS_SHEET_ID}/gviz/tq?tqx=out:csv&sheet=PORTDATA`;
   try {
     const r = await fetch(url);
@@ -118,6 +151,7 @@ export const fetchPortsFromSheet = async () => {
         keywords: (portName + ' ' + countryCode + ' ' + fullLocode).toLowerCase(),
       });
     }
+    _lsWrite(LS_PORTS, rows);
     return rows;
   } catch (e) {
     console.warn('Port sheet fetch failed:', e.message);
