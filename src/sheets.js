@@ -88,12 +88,32 @@ export const fetchSheetCSV = async (sheetId, tabName = 'Sheet1') => {
   return csvToRows(await res.text());
 };
 
+// ─── searchSheetLive — CHANGED: checks IDB first, falls back to network ───
 export const searchSheetLive = async (sheetId, query, tabNames = ['Sheet1'], maxResults = 50) => {
   if (!query || query.trim().length < 2) return [];
   const ql = query.toLowerCase().trim();
   const cacheKey = `${sheetId}:${ql}`;
   const cached = searchCache.get(cacheKey);
   if (cached && Date.now() - cached.ts < 300000) return cached.data;
+
+  // NEW: IDB-first — if this sheet's data is already cached locally, search it
+  // instantly without any network call. Falls through to network only if IDB empty.
+  const idbKey = sheetId === ROUTE_SHEET_ID ? IDB_ROUTES
+               : sheetId === CHART_SHEET_ID ? IDB_CHARTS
+               : null;
+  if (idbKey) {
+    const idbData = await _idbRead(idbKey);
+    if (idbData && Array.isArray(idbData) && idbData.length > 0) {
+      const results = idbData.filter(r => {
+        const hay = Object.values(r).filter(Boolean).join(' ').toLowerCase();
+        return hay.includes(ql);
+      }).slice(0, maxResults);
+      searchCache.set(cacheKey, { data: results, ts: Date.now() });
+      return results;
+    }
+  }
+
+  // EXISTING: network loop — runs only when IDB is empty (first load / after cache clear)
   let allRows = [];
   for (const tab of tabNames) {
     try {
@@ -110,38 +130,46 @@ export const searchSheetLive = async (sheetId, query, tabNames = ['Sheet1'], max
   return results;
 };
 
-// ─── fetchRouteSheet — IDB cache, fetch only if empty ─────────────────────
+// ─── fetchRouteSheet — CHANGED: parallel Google-direct fetch via Promise.any ─
+// Old: sequential reduce().catch() chain calling opensheet.elk.sh (slow 3rd party)
+// New: all tabs fired in parallel via fetchSheetCSV (Google direct); first tab
+//      that returns non-empty data wins. IDB cache logic unchanged.
 const ROUTE_TABS = ['Sheet1', 'Routes', 'Route', 'Data', 'Sheet2'];
 export const fetchRouteSheet = async () => {
   const cached = await _idbRead(IDB_ROUTES);
   if (cached && Array.isArray(cached) && cached.length > 0) return cached;
-  return ROUTE_TABS.reduce(
-    (chain, tab) =>
-      chain.catch(() =>
-        fetch(`https://opensheet.elk.sh/${ROUTE_SHEET_ID}/${tab}`)
-          .then(r => { if (!r.ok) throw new Error(); return r.json(); })
-          .then(d => { if (!Array.isArray(d) || d.length === 0) throw new Error(); return d; })
-      ),
-    Promise.reject()
-  ).then(async d => { await _idbWrite(IDB_ROUTES, d); return d; })
-   .catch(() => []);
+  try {
+    const d = await Promise.any(
+      ROUTE_TABS.map(tab =>
+        fetchSheetCSV(ROUTE_SHEET_ID, tab)
+          .then(rows => { if (!rows || rows.length === 0) throw new Error('empty'); return rows; })
+      )
+    );
+    await _idbWrite(IDB_ROUTES, d);
+    return d;
+  } catch {
+    return [];
+  }
 };
 
-// ─── fetchChartSheet — IDB cache, fetch only if empty ─────────────────────
+// ─── fetchChartSheet — CHANGED: parallel Google-direct fetch via Promise.any ─
+// Same fix as fetchRouteSheet above.
 const CHART_TABS = ['Sheet1', 'Charts', 'ECDIS Charts', 'Routes', 'Chart', 'Data', 'Sheet2'];
 export const fetchChartSheet = async () => {
   const cached = await _idbRead(IDB_CHARTS);
   if (cached && Array.isArray(cached) && cached.length > 0) return cached;
-  return CHART_TABS.reduce(
-    (chain, tab) =>
-      chain.catch(() =>
-        fetch(`https://opensheet.elk.sh/${CHART_SHEET_ID}/${tab}`)
-          .then(r => { if (!r.ok) throw new Error(); return r.json(); })
-          .then(d => { if (!Array.isArray(d) || d.length === 0) throw new Error(); return d; })
-      ),
-    Promise.reject()
-  ).then(async d => { await _idbWrite(IDB_CHARTS, d); return d; })
-   .catch(() => []);
+  try {
+    const d = await Promise.any(
+      CHART_TABS.map(tab =>
+        fetchSheetCSV(CHART_SHEET_ID, tab)
+          .then(rows => { if (!rows || rows.length === 0) throw new Error('empty'); return rows; })
+      )
+    );
+    await _idbWrite(IDB_CHARTS, d);
+    return d;
+  } catch {
+    return [];
+  }
 };
 
 // ─── fetchPortsFromSheet — IDB cache, fetch only if empty ─────────────────
@@ -157,11 +185,36 @@ export const fetchPortsFromSheet = async () => {
     const lines = csv.trim().split('\n');
     if (lines.length < 2) return [];
     const headers = lines[0].split(',').map(h => h.replace(/"/g, '').trim().toLowerCase());
-    const colC = headers.indexOf('port name') >= 0 ? headers.indexOf('port name') :
-      headers.indexOf('portname') >= 0 ? headers.indexOf('portname') :
-        headers.indexOf('name') >= 0 ? headers.indexOf('name') : 2;
+
+    // Confirmed sheet column layout:
+    //   0 → PORT CODE UNLCODE  (full LOCODE e.g. "INMUM")
+    //   1 → PORT NAME          (e.g. "Mumbai")
+    //   2 → COUNTRY            (e.g. "India")
+    //   3 → LATTITUDE          (DMS format e.g. 42°32'60.0"N — note double-T typo in sheet)
+    //   4 → LONGITUDE          (DMS format e.g. 1°34'48.0"E)
+    //
+    // colLat: 'lattitude'.includes('lat') → true, still found correctly despite typo
     const colLat = headers.findIndex(h => h.includes('lat'));
     const colLon = headers.findIndex(h => h.includes('lon') || h.includes('lng'));
+
+    // NEW: DMS parser — coordinates in sheet are Degrees°Minutes'Seconds"Direction
+    // parseFloat("42°32'60.0N") would return 42 (stops at °), losing all precision.
+    // This converts correctly: 42°32'60.0"N → 42 + 32/60 + 60/3600 = 42.5500°
+    const parseDMS = (str) => {
+      if (!str) return NaN;
+      const s = str.replace(/"/g, '').trim();
+      // Try plain decimal first (handles any future decimal-format rows)
+      const dec = parseFloat(s);
+      if (!isNaN(dec) && !s.includes('°')) return dec;
+      // DMS: degrees°minutes'seconds"direction — e.g. 42°32'60.0"N or 42°32'60.0N
+      const m = s.match(/(\d+)[°](\d+)[']([0-9.]+)["]?\s*([NSEWnsew])?/);
+      if (!m) return NaN;
+      let decimal = parseFloat(m[1]) + parseFloat(m[2]) / 60 + parseFloat(m[3]) / 3600;
+      const dir = (m[4] || '').toUpperCase();
+      if (dir === 'S' || dir === 'W') decimal = -decimal;
+      return decimal;
+    };
+
     const rows = [];
     for (let i = 1; i < lines.length; i++) {
       const vals = []; let cur = ''; let inQ = false;
@@ -171,15 +224,29 @@ export const fetchPortsFromSheet = async () => {
         else cur += ch;
       }
       vals.push(cur.trim());
-      const countryCode = (vals[0] || '').replace(/"/g, '').trim();
-      const locode      = (vals[1] || '').replace(/"/g, '').trim();
-      const portName    = (vals[colC] || '').replace(/"/g, '').trim();
-      const lat         = colLat >= 0 ? parseFloat(vals[colLat] || '') : NaN;
-      const lon         = colLon >= 0 ? parseFloat(vals[colLon] || '') : NaN;
+
+      // CHANGED — correct column positions (old code read them in wrong order):
+      // vals[0] = PORT CODE UNLCODE → full LOCODE (was wrongly used as countryCode)
+      // vals[1] = PORT NAME         (was wrongly used as locode)
+      // vals[2] = COUNTRY           (was never read at all)
+      const locode      = (vals[0] || '').replace(/"/g, '').trim();
+      const portName    = (vals[1] || '').replace(/"/g, '').trim();
+      const countryCode = (vals[2] || '').replace(/"/g, '').trim();
+
+      // CHANGED — use parseDMS instead of parseFloat; coordinates are in DMS format
+      const lat = colLat >= 0 ? parseDMS(vals[colLat] || '') : NaN;
+      const lon = colLon >= 0 ? parseDMS(vals[colLon] || '') : NaN;
+
       if (!portName || !locode) continue;
-      const fullLocode = locode.length <= 3 ? (countryCode + locode) : locode;
+
+      // CHANGED — locode from vals[0] is already the full LOCODE (e.g. "INMUM")
+      // Old code tried to combine countryCode+locode when locode.length<=3, which
+      // was wrong because it was reading PORT NAME into locode (6+ chars → no combine
+      // → id became "MUMBAI" instead of "INMUM")
+      const fullLocode = locode.toUpperCase();
+
       rows.push({
-        id:       fullLocode.toUpperCase(),
+        id:       fullLocode,
         name:     portName,
         city:     portName,
         country:  countryCode,
