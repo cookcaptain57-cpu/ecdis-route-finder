@@ -259,49 +259,55 @@ export const S = `
   .leaflet-popup-tip{background:#0B1D35;}
 
   /* ════════════════════════════════════════════════════════
-     ─── FOOTER — DESKTOP & MOBILE WAVE DOCK (NEW) ──────────
+     ─── FOOTER DESKTOP + MOBILE WAVE DOCK (NEW) ────────────
      ════════════════════════════════════════════════════════ */
 
-  /* ─── DESKTOP FOOTER ───────────────────────── */
+  /* ─── DESKTOP FOOTER ─────────────────────────────────────
+     !important beats the original .footer{display:flex} so
+     both layouts are never visible at the same time.
+  ───────────────────────────────────────────────────────── */
   .footer-desktop{
-    display:none;
+    display:none !important;
   }
 
   @media(min-width:768px){
     .footer-desktop{
-      display:flex;
+      display:flex !important;
       flex-direction:row;
       flex-wrap:wrap;
       align-items:center;
       justify-content:space-between;
-      gap:8px;
+      gap:6px;
       background:linear-gradient(180deg,rgba(11,29,53,0.92),rgba(4,12,26,0.99));
       border-top:1px solid var(--border2);
       padding:0.85rem 1.6rem;
       backdrop-filter:blur(14px);
     }
 
-    /* hide mobile dock on desktop */
     .wave-dock{
-      display:none;
+      display:none !important;
     }
   }
 
+  /* copyright line */
   .footer-copy{
     font-size:0.68rem;
+    font-weight:300;
     color:var(--text3);
     letter-spacing:0.04em;
   }
 
+  /* disclaimer — same quiet style as copyright, one line below */
   .footer-disclaimer{
     width:100%;
     font-size:0.6rem;
+    font-weight:300;
     color:var(--text3);
-    font-style:italic;
-    text-align:center;
-    padding-top:6px;
-    margin-top:4px;
-    border-top:1px solid rgba(26,58,92,0.35);
+    font-style:normal;
+    text-align:left;
+    padding-top:5px;
+    margin-top:3px;
+    border-top:1px solid rgba(26,58,92,0.28);
     line-height:1.6;
     letter-spacing:0.02em;
   }
@@ -312,7 +318,6 @@ export const S = `
     overflow:hidden;
     background:linear-gradient(180deg,rgba(7,20,40,0.98),rgba(4,12,26,1));
     border-top:1px solid var(--border2);
-    /* respect iPhone home-bar */
     padding-bottom:env(safe-area-inset-bottom,0px);
     min-height:82px;
   }
@@ -348,39 +353,60 @@ export const S = `
     text-transform:uppercase;
   }
 
-  /* Instagram gradient button */
-  .dock-btn{
+  /* ── Instagram logo button ──────────────────────────────
+     Rounded-square gradient icon (real IG brand colours)
+     with white SVG camera inside, + "Follow" text beside.
+  ─────────────────────────────────────────────────────── */
+  .dock-ig-btn{
     display:flex;
     align-items:center;
-    gap:6px;
-    padding:7px 15px;
-    background:linear-gradient(135deg,#833ab4 0%,#fd1d1d 50%,#fcb045 100%);
-    border-radius:20px;
+    gap:8px;
+    text-decoration:none;
     color:#fff;
     font-size:0.72rem;
-    font-weight:600;
-    text-decoration:none;
-    letter-spacing:0.05em;
-    box-shadow:0 0 16px rgba(253,29,29,0.3),0 2px 8px rgba(0,0,0,0.4);
+    font-weight:500;
+    letter-spacing:0.04em;
+  }
+
+  .ig-icon-wrap{
+    width:36px;
+    height:36px;
+    border-radius:10px;
+    background:linear-gradient(
+      135deg,
+      #405de6 0%,
+      #5851db 15%,
+      #833ab4 30%,
+      #c13584 50%,
+      #e1306c 65%,
+      #fd1d1d 80%,
+      #f77737 90%,
+      #fcb045 100%
+    );
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    box-shadow:0 4px 14px rgba(193,53,132,0.45);
     transition:transform 0.2s,box-shadow 0.2s;
-    white-space:nowrap;
+    flex-shrink:0;
   }
 
-  .dock-btn:hover,
-  .dock-btn:active{
-    transform:scale(1.06);
-    box-shadow:0 0 26px rgba(253,29,29,0.55),0 4px 12px rgba(0,0,0,0.5);
+  .dock-ig-btn:hover .ig-icon-wrap,
+  .dock-ig-btn:active .ig-icon-wrap{
+    transform:scale(1.1);
+    box-shadow:0 6px 22px rgba(193,53,132,0.65);
   }
 
-  /* Disclaimer inside mobile dock */
+  /* disclaimer inside mobile dock — same weight as copyright */
   .dock-disclaimer{
     position:relative;
     z-index:10;
-    font-size:0.55rem;
+    font-size:0.58rem;
+    font-weight:300;
     color:var(--text3);
-    font-style:italic;
-    text-align:center;
-    padding:0 1rem 0.65rem;
+    font-style:normal;
+    text-align:left;
+    padding:0 1.2rem 0.7rem;
     line-height:1.6;
     letter-spacing:0.02em;
   }
