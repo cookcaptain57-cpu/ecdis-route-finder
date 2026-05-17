@@ -23,7 +23,8 @@ function greatCircle(lat1, lon1, lat2, lon2, n) {
 function MapView({ waypoints, setWaypoints, overlays, playing, setPlaying, speed, onMapClick, mapMode }) {
   const containerRef = useRef(null);
   const mapRef = useRef(null);
-  const layersRef = useRef({ route: null, markers: [], zones: {}, ship: null, trail: null, baseTile: null, seamarkTile: null });
+  // CHANGED: added gebcoTile: null to track GEBCO layer ref
+  const layersRef = useRef({ route: null, markers: [], zones: {}, ship: null, trail: null, baseTile: null, seamarkTile: null, gebcoTile: null });
   const animRef = useRef(null);
   const animIdxRef = useRef(0);
   const animPtsRef = useRef([]);
@@ -54,6 +55,12 @@ function MapView({ waypoints, setWaypoints, overlays, playing, setPlaying, speed
     layersRef.current.seamarkTile = L.tileLayer('https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png', { opacity: 0.55, maxZoom: 18 }).addTo(mapRef.current);
     mapRef.current.on('click', e => { onMapClick && onMapClick(e.latlng.lat, e.latlng.lng); });
     setReady(true);
+    // FIX: invalidateSize at multiple delays — Leaflet measures container at init time.
+    // In a flex/tab layout the container may be 0px tall at that moment, producing blank tiles.
+    // Calling invalidateSize after the browser has finished painting fixes this.
+    [100, 300, 600, 1200].forEach(t => setTimeout(() => {
+      try { mapRef.current?.invalidateSize({ animate: false }); } catch {}
+    }, t));
   };
 
   useEffect(() => {
@@ -67,10 +74,23 @@ function MapView({ waypoints, setWaypoints, overlays, playing, setPlaying, speed
       const s = document.createElement('script'); s.id = 'ljs';
       s.src = 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js';
       s.onload = initMap; document.head.appendChild(s);
-    } else { window.L && initMap(); }
+    } else {
+      // FIX: script tag exists but window.L may not be ready yet (loading race).
+      // Old code: window.L && initMap() — silently skipped if L not ready.
+      // New code: poll every 50ms until L is available, give up after 5s.
+      if (window.L) { initMap(); }
+      else {
+        const retry = setInterval(() => { if (window.L) { clearInterval(retry); initMap(); } }, 50);
+        setTimeout(() => clearInterval(retry), 5000);
+      }
+    }
     return () => {
       if (animRef.current) clearInterval(animRef.current);
       if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; }
+      // FIX: reset layersRef on unmount — without this, stale Leaflet object refs remain
+      // from the destroyed map. When the component remounts, the mapMode useEffect immediately
+      // calls lrs.baseTile.remove() on the dead object, throwing and breaking the new map.
+      layersRef.current = { route: null, markers: [], zones: {}, ship: null, trail: null, baseTile: null, seamarkTile: null, gebcoTile: null };
     };
   }, []);
 
@@ -150,9 +170,70 @@ function MapView({ waypoints, setWaypoints, overlays, playing, setPlaying, speed
     return () => { if (animRef.current) clearInterval(animRef.current); };
   }, [playing, speed, ready]);
 
+  // NEW: GEBCO bathymetry WMS overlay — toggled by overlays.gebco
+  // Uses GEBCO's official WMS service (free, no key). Shows colour-shaded depth zones:
+  // light blue = shallow shelf, dark blue = deep ocean. Renders at 55% opacity over base map.
+  useEffect(() => {
+    if (!ready || !window.L || !mapRef.current) return;
+    const L = window.L, map = mapRef.current, lrs = layersRef.current;
+    if (lrs.gebcoTile) { lrs.gebcoTile.remove(); lrs.gebcoTile = null; }
+    if (overlays?.gebco) {
+      lrs.gebcoTile = L.tileLayer.wms(
+        'https://www.gebco.net/data_and_products/gebco_web_services/web_map_service/mapserv',
+        {
+          layers: 'GEBCO_LATEST',
+          format: 'image/jpeg',
+          version: '1.3.0',
+          opacity: 0.55,
+          attribution: '© GEBCO — General Bathymetric Chart of the Oceans',
+          maxZoom: 18,
+        }
+      ).addTo(map);
+    }
+  }, [overlays?.gebco, ready]);
+
+  // NEW: Depth on click — when overlays.depthClick is on, any map click queries
+  // OpenTopoData (GEBCO 2020 dataset) for the depth/elevation at that coordinate
+  // and shows it in a Leaflet popup. Ocean depths are negative elevation values.
+  useEffect(() => {
+    if (!ready || !window.L || !mapRef.current) return;
+    const map = mapRef.current;
+    const L = window.L;
+
+    const handleDepthClick = async (e) => {
+      try {
+        const res = await fetch(
+          `https://api.opentopodata.org/v1/gebco2020?locations=${e.latlng.lat},${e.latlng.lng}`
+        );
+        const data = await res.json();
+        const elev = data?.results?.[0]?.elevation;
+        if (elev === undefined || elev === null) return;
+        const isOcean = elev <= 0;
+        const label = isOcean
+          ? `🌊 Depth: <b style="color:#00B4D8">${Math.abs(elev).toFixed(0)} m</b>`
+          : `⛰ Elevation: <b style="color:#00C896">${elev.toFixed(0)} m</b>`;
+        L.popup()
+          .setLatLng(e.latlng)
+          .setContent(
+            `<div style="font-size:12px;min-width:170px;line-height:1.6">
+              ${label}<br/>
+              <span style="color:#888;font-size:11px">
+                ${e.latlng.lat.toFixed(5)}°N&nbsp;&nbsp;${e.latlng.lng.toFixed(5)}°E
+              </span><br/>
+              <span style="color:#555;font-size:10px">Source: GEBCO 2020</span>
+            </div>`
+          )
+          .openOn(map);
+      } catch {}
+    };
+
+    if (overlays?.depthClick) map.on('click', handleDepthClick);
+    return () => map.off('click', handleDepthClick);
+  }, [overlays?.depthClick, ready]);
+
   const activeOverlays = Object.entries(overlays || {}).filter(([, v]) => v);
-  const legendColors = { eca: '#FF6B35', seca: '#FFB347', marpol: '#9B59B6', piracy: '#E74C3C', layover: '#3498DB' };
-  const legendNames = { eca: 'ECA', seca: 'SECA', marpol: 'MARPOL', piracy: 'Piracy', layover: 'Anchorage' };
+  const legendColors = { eca: '#FF6B35', seca: '#FFB347', marpol: '#9B59B6', piracy: '#E74C3C', layover: '#3498DB', gebco: '#00B4D8', depthClick: '#00C896' };
+  const legendNames  = { eca: 'ECA', seca: 'SECA', marpol: 'MARPOL', piracy: 'Piracy', layover: 'Anchorage', gebco: 'GEBCO Depth', depthClick: 'Depth Click' };
 
   return (
     <div className="planner-map">
