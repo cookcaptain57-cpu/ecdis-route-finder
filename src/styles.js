@@ -257,4 +257,171 @@ export const S = `
   }
 
   .leaflet-popup-tip{background:#0B1D35;}
+
+  /* ════════════════════════════════════════════════════════
+     ─── FOOTER — DESKTOP & MOBILE WAVE DOCK (NEW) ──────────
+     ════════════════════════════════════════════════════════ */
+
+  /* ─── DESKTOP FOOTER ───────────────────────── */
+  .footer-desktop{
+    display:none;
+  }
+
+  @media(min-width:768px){
+    .footer-desktop{
+      display:flex;
+      flex-direction:row;
+      flex-wrap:wrap;
+      align-items:center;
+      justify-content:space-between;
+      gap:8px;
+      background:linear-gradient(180deg,rgba(11,29,53,0.92),rgba(4,12,26,0.99));
+      border-top:1px solid var(--border2);
+      padding:0.85rem 1.6rem;
+      backdrop-filter:blur(14px);
+    }
+
+    /* hide mobile dock on desktop */
+    .wave-dock{
+      display:none;
+    }
+  }
+
+  .footer-copy{
+    font-size:0.68rem;
+    color:var(--text3);
+    letter-spacing:0.04em;
+  }
+
+  .footer-disclaimer{
+    width:100%;
+    font-size:0.6rem;
+    color:var(--text3);
+    font-style:italic;
+    text-align:center;
+    padding-top:6px;
+    margin-top:4px;
+    border-top:1px solid rgba(26,58,92,0.35);
+    line-height:1.6;
+    letter-spacing:0.02em;
+  }
+
+  /* ─── WAVE DOCK (MOBILE) ───────────────────────── */
+  .wave-dock{
+    position:relative;
+    overflow:hidden;
+    background:linear-gradient(180deg,rgba(7,20,40,0.98),rgba(4,12,26,1));
+    border-top:1px solid var(--border2);
+    /* respect iPhone home-bar */
+    padding-bottom:env(safe-area-inset-bottom,0px);
+    min-height:82px;
+  }
+
+  .wave-content{
+    position:relative;
+    z-index:10;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    padding:0.8rem 1.2rem 0.4rem;
+  }
+
+  .dock-left{
+    display:flex;
+    flex-direction:column;
+    gap:3px;
+  }
+
+  .dock-title{
+    font-family:'Orbitron',monospace;
+    font-size:0.82rem;
+    font-weight:700;
+    color:var(--cyan);
+    letter-spacing:0.1em;
+    text-shadow:0 0 12px rgba(0,180,216,0.5);
+  }
+
+  .dock-sub{
+    font-size:0.6rem;
+    color:var(--text2);
+    letter-spacing:0.1em;
+    text-transform:uppercase;
+  }
+
+  /* Instagram gradient button */
+  .dock-btn{
+    display:flex;
+    align-items:center;
+    gap:6px;
+    padding:7px 15px;
+    background:linear-gradient(135deg,#833ab4 0%,#fd1d1d 50%,#fcb045 100%);
+    border-radius:20px;
+    color:#fff;
+    font-size:0.72rem;
+    font-weight:600;
+    text-decoration:none;
+    letter-spacing:0.05em;
+    box-shadow:0 0 16px rgba(253,29,29,0.3),0 2px 8px rgba(0,0,0,0.4);
+    transition:transform 0.2s,box-shadow 0.2s;
+    white-space:nowrap;
+  }
+
+  .dock-btn:hover,
+  .dock-btn:active{
+    transform:scale(1.06);
+    box-shadow:0 0 26px rgba(253,29,29,0.55),0 4px 12px rgba(0,0,0,0.5);
+  }
+
+  /* Disclaimer inside mobile dock */
+  .dock-disclaimer{
+    position:relative;
+    z-index:10;
+    font-size:0.55rem;
+    color:var(--text3);
+    font-style:italic;
+    text-align:center;
+    padding:0 1rem 0.65rem;
+    line-height:1.6;
+    letter-spacing:0.02em;
+  }
+
+  /* ─── ANIMATED WAVES ───────────────────────── */
+  .wave{
+    position:absolute;
+    bottom:-24px;
+    left:-50%;
+    width:200%;
+    border-radius:43%;
+    animation:waveMove linear infinite;
+    pointer-events:none;
+  }
+
+  .wave1{
+    height:58px;
+    background:var(--cyan);
+    opacity:0.11;
+    animation-duration:5s;
+    bottom:-6px;
+  }
+
+  .wave2{
+    height:52px;
+    background:var(--blue);
+    opacity:0.08;
+    animation-duration:7.5s;
+    bottom:-14px;
+  }
+
+  .wave3{
+    height:46px;
+    background:var(--cyan);
+    opacity:0.05;
+    animation-duration:10s;
+    bottom:-22px;
+  }
+
+  @keyframes waveMove{
+    0%  {transform:rotate(0deg);}
+    100%{transform:rotate(360deg);}
+  }
 `;
