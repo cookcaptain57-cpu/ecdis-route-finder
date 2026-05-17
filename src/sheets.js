@@ -229,73 +229,79 @@ export const fetchPortsFromSheet = async () => {
     return [];
   }
 };─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-// HOW TO USE THIS FILE:
-// 1. Open your sheets.js
-// 2. Find the line: // ─── Maritime Library Sheet IDs ─────
-// 3. DELETE everything from that line to the very end of the file
-// 4. PASTE everything below this comment block at the end of sheets.js
-// ─────────────────────────────────────────────────────────────────────────────
-
 // ─── Maritime Library Sheet IDs ────────────────────────────────────────────
-export const LIBRARY_SHEET_ID  = ‘16FLiXlhpbHja6y7esH-UsWYB0JQoB5Kr_x5hqbiJIQw’;
-export const SOFTWARE_SHEET_ID = ‘1ckCXVUzubcHlCy76JZgAImGDQTRNBUEwn2uX1C237rw’;
+export const LIBRARY_SHEET_ID  = '16FLiXlhpbHja6y7esH-UsWYB0JQoB5Kr_x5hqbiJIQw';
+export const SOFTWARE_SHEET_ID = '1ckCXVUzubcHlCy76JZgAImGDQTRNBUEwn2uX1C237rw';
 
-const IDB_LIBRARY = ‘mnav_library’;
+const IDB_LIBRARY = 'mnav_library';
 
 // ─── fetchLibrarySheet — network first, then IDB cache ─────────────────────
-// Always tries network first. On success saves to IDB.
-// If network fails, falls back to IDB cache so page never goes blank.
 export const fetchLibrarySheet = async () => {
-// Helper to normalise rows from both sheets
-const normalise = (lib, sw) => {
-const libNorm = lib.map(r => ({
-category:    (r.category    || ‘’).trim(),
-title:       (r.title       || ‘’).trim(),
-url:         (r.url         || ‘’).trim(),
-downloadUrl: (r.downloadUrl || ‘’).trim(),
-fileId:      (r.fileId      || ‘’).trim(),
-mimeType:    ‘’,
-}));
-const swNorm = sw.map(r => ({
-category:    (r.category    || ‘SAILORS USEFUL SOFTWARE’).trim(),
-title:       (r.title       || ‘’).trim(),
-url:         (r.previewUrl  || r.url || ‘’).trim(),
-downloadUrl: (r.downloadUrl || ‘’).trim(),
-fileId:      (r.fileId      || ‘’).trim(),
-mimeType:    (r.mimeType    || ‘’).trim(),
-}));
-return [...libNorm, ...swNorm].filter(r => r.title && r.category);
-};
 
-// 1. Try network first
-try {
-const [libRes, swRes] = await Promise.allSettled([
-fetchSheetCSV(LIBRARY_SHEET_ID,  ‘Sheet1’),
-fetchSheetCSV(SOFTWARE_SHEET_ID, ‘Sheet1’),
-]);
-const lib = libRes.status === ‘fulfilled’ ? libRes.value : [];
-const sw  = swRes.status  === ‘fulfilled’ ? swRes.value  : [];
-const merged = normalise(lib, sw);
+  // Helper to normalise rows from both sheets
+  const normalise = (lib, sw) => {
 
+    const libNorm = lib.map(r => ({
+      category:    (r.category || '').trim(),
+      title:       (r.title || '').trim(),
+      url:         (r.url || '').trim(),
+      downloadUrl: (r.downloadUrl || '').trim(),
+      fileId:      (r.fileId || '').trim(),
+      mimeType:    '',
+    }));
 
-// Save to IDB only if we got real data
-if (merged.length > 0) {
-  try { await _idbWrite(IDB_LIBRARY, merged); } catch {}
-}
+    const swNorm = sw.map(r => ({
+      category:    (r.category || 'SAILORS USEFUL SOFTWARE').trim(),
+      title:       (r.title || '').trim(),
+      url:         (r.previewUrl || r.url || '').trim(),
+      downloadUrl: (r.downloadUrl || '').trim(),
+      fileId:      (r.fileId || '').trim(),
+      mimeType:    (r.mimeType || '').trim(),
+    }));
 
-// Return network data even if empty (so UI shows correct state)
-return merged;
+    return [...libNorm, ...swNorm].filter(r => r.title && r.category);
+  };
 
+  // 1. Try network first
+  try {
 
-} catch (networkErr) {
-console.warn(‘fetchLibrarySheet network failed, trying IDB cache:’, networkErr.message);
-}
+    const [libRes, swRes] = await Promise.allSettled([
+      fetchSheetCSV(LIBRARY_SHEET_ID, 'Sheet1'),
+      fetchSheetCSV(SOFTWARE_SHEET_ID, 'Sheet1'),
+    ]);
 
-// 2. Network failed — try IDB cache as fallback
-try {
-const cached = await _idbRead(IDB_LIBRARY);
-if (cached && Array.isArray(cached) && cached.length > 0) return cached;
-} catch {}
+    const lib = libRes.status === 'fulfilled' ? libRes.value : [];
+    const sw  = swRes.status === 'fulfilled' ? swRes.value : [];
 
-return [];
+    const merged = normalise(lib, sw);
+
+    // Save to IDB only if we got real data
+    if (merged.length > 0) {
+      try {
+        await idbSet(IDB_LIBRARY, merged);
+      } catch {}
+    }
+
+    return merged;
+
+  } catch (networkErr) {
+
+    console.warn(
+      'fetchLibrarySheet network failed, trying IDB cache:',
+      networkErr.message
+    );
+  }
+
+  // 2. Network failed — try IDB cache as fallback
+  try {
+
+    const cached = await idbGet(IDB_LIBRARY);
+
+    if (cached && Array.isArray(cached) && cached.length > 0) {
+      return cached;
+    }
+
+  } catch {}
+
+  return [];
 };
