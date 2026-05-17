@@ -1,6 +1,6 @@
 /* eslint-disable */
 
-// Instagram camera SVG — white strokes, matches official icon shape
+// Instagram camera SVG — white strokes on gradient bg (official icon style)
 const IgSvg = () => (
   <svg
     viewBox="0 0 24 24"
@@ -44,16 +44,16 @@ export default function Footer() {
           href="https://instagram.com/manish_the_navigator"
           target="_blank"
           rel="noreferrer"
-          aria-label="👆Contact Admin on Instagram"
+          aria-label="Contact Admin On Instagram"
         >
           <span className="ig-icon-wrap">
             <IgSvg />
           </span>
-          Follow
+          Contact Admin On Instagram
         </a>
       </div>
 
-      {/* ── Disclaimer — shown once, same on all screens ── */}
+      {/* ── Disclaimer — same small size as copyright ── */}
       <div className="footer-disclaimer">
         ⚠️ Content not to be used solely for navigation. Always verify with official sources.
       </div>
