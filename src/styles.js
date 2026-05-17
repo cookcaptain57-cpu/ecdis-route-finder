@@ -197,19 +197,73 @@ export const S = `
     backdrop-filter:blur(12px);
   }
 
-  /* ─── FOOTER (ECDIS TERMINAL STYLE) ───────────────────────── */
+  /* ─── FOOTER — unified, same on all screen sizes ────────
+     Added: position:relative + overflow:hidden so the wave
+     divs animate correctly inside this single container.
+  ───────────────────────────────────────────────────────── */
   .footer{
-    background:linear-gradient(180deg,rgba(11,29,53,0.9),rgba(4,12,26,0.98));
+    position:relative;
+    overflow:hidden;
+    background:linear-gradient(180deg,rgba(7,20,40,0.98),rgba(4,12,26,1));
     border-top:1px solid var(--border2);
-    padding:1rem 1.5rem;
+    padding:0.85rem 1.4rem 0.7rem;
+    display:flex;
+    flex-direction:column;
+    gap:0;
+    backdrop-filter:blur(14px);
+    padding-bottom:env(safe-area-inset-bottom,0.7rem);
+  }
+
+  /* ── brand + owner left side ── */
+  .footer-row{
+    position:relative;
+    z-index:10;
     display:flex;
     align-items:center;
     justify-content:space-between;
-    flex-wrap:wrap;
     gap:10px;
-    backdrop-filter:blur(12px);
   }
 
+  .footer-left{
+    display:flex;
+    flex-direction:column;
+    gap:3px;
+  }
+
+  .footer-brand{
+    font-family:'Orbitron',monospace;
+    font-size:0.78rem;
+    font-weight:700;
+    color:var(--text2);
+    letter-spacing:0.08em;
+  }
+
+  .footer-brand span{
+    color:var(--cyan);
+  }
+
+  .footer-copy{
+    font-size:0.62rem;
+    font-weight:300;
+    color:var(--text3);
+    letter-spacing:0.03em;
+  }
+
+  /* ── Disclaimer — once, small, same weight as copyright ── */
+  .footer-disclaimer{
+    position:relative;
+    z-index:10;
+    font-size:0.58rem;
+    font-weight:300;
+    color:var(--text3);
+    letter-spacing:0.02em;
+    line-height:1.6;
+    margin-top:6px;
+    padding-top:6px;
+    border-top:1px solid rgba(26,58,92,0.3);
+  }
+
+  /* ── Kept from original (used elsewhere) ── */
   .footer-status{
     display:flex;
     align-items:center;
@@ -232,17 +286,6 @@ export const S = `
     50%{opacity:0.4;}
   }
 
-  .footer-brand{
-    font-family:'Orbitron',monospace;
-    font-size:0.72rem;
-    color:var(--text2);
-    letter-spacing:0.08em;
-  }
-
-  .footer-brand span{
-    color:var(--cyan);
-  }
-
   /* ─── SCROLLBAR ───────────────────────── */
   ::-webkit-scrollbar{width:5px;}
   ::-webkit-scrollbar-thumb{background:var(--border2);border-radius:3px;}
@@ -259,104 +302,10 @@ export const S = `
   .leaflet-popup-tip{background:#0B1D35;}
 
   /* ════════════════════════════════════════════════════════
-     ─── FOOTER DESKTOP + MOBILE WAVE DOCK (NEW) ────────────
+     ─── INSTAGRAM BUTTON + ANIMATED WAVES (NEW) ────────────
      ════════════════════════════════════════════════════════ */
 
-  /* ─── DESKTOP FOOTER ─────────────────────────────────────
-     !important beats the original .footer{display:flex} so
-     both layouts are never visible at the same time.
-  ───────────────────────────────────────────────────────── */
-  .footer-desktop{
-    display:none !important;
-  }
-
-  @media(min-width:768px){
-    .footer-desktop{
-      display:flex !important;
-      flex-direction:row;
-      flex-wrap:wrap;
-      align-items:center;
-      justify-content:space-between;
-      gap:6px;
-      background:linear-gradient(180deg,rgba(11,29,53,0.92),rgba(4,12,26,0.99));
-      border-top:1px solid var(--border2);
-      padding:0.85rem 1.6rem;
-      backdrop-filter:blur(14px);
-    }
-
-    .wave-dock{
-      display:none !important;
-    }
-  }
-
-  /* copyright line */
-  .footer-copy{
-    font-size:0.68rem;
-    font-weight:300;
-    color:var(--text3);
-    letter-spacing:0.04em;
-  }
-
-  /* disclaimer — same quiet style as copyright, one line below */
-  .footer-disclaimer{
-    width:100%;
-    font-size:0.6rem;
-    font-weight:300;
-    color:var(--text3);
-    font-style:normal;
-    text-align:left;
-    padding-top:5px;
-    margin-top:3px;
-    border-top:1px solid rgba(26,58,92,0.28);
-    line-height:1.6;
-    letter-spacing:0.02em;
-  }
-
-  /* ─── WAVE DOCK (MOBILE) ───────────────────────── */
-  .wave-dock{
-    position:relative;
-    overflow:hidden;
-    background:linear-gradient(180deg,rgba(7,20,40,0.98),rgba(4,12,26,1));
-    border-top:1px solid var(--border2);
-    padding-bottom:env(safe-area-inset-bottom,0px);
-    min-height:82px;
-  }
-
-  .wave-content{
-    position:relative;
-    z-index:10;
-    display:flex;
-    align-items:center;
-    justify-content:space-between;
-    padding:0.8rem 1.2rem 0.4rem;
-  }
-
-  .dock-left{
-    display:flex;
-    flex-direction:column;
-    gap:3px;
-  }
-
-  .dock-title{
-    font-family:'Orbitron',monospace;
-    font-size:0.82rem;
-    font-weight:700;
-    color:var(--cyan);
-    letter-spacing:0.1em;
-    text-shadow:0 0 12px rgba(0,180,216,0.5);
-  }
-
-  .dock-sub{
-    font-size:0.6rem;
-    color:var(--text2);
-    letter-spacing:0.1em;
-    text-transform:uppercase;
-  }
-
-  /* ── Instagram logo button ──────────────────────────────
-     Rounded-square gradient icon (real IG brand colours)
-     with white SVG camera inside, + "Follow" text beside.
-  ─────────────────────────────────────────────────────── */
+  /* Instagram logo button — gradient rounded square + white SVG */
   .dock-ig-btn{
     display:flex;
     align-items:center;
@@ -366,6 +315,7 @@ export const S = `
     font-size:0.72rem;
     font-weight:500;
     letter-spacing:0.04em;
+    flex-shrink:0;
   }
 
   .ig-icon-wrap{
@@ -386,9 +336,8 @@ export const S = `
     display:flex;
     align-items:center;
     justify-content:center;
-    box-shadow:0 4px 14px rgba(193,53,132,0.45);
+    box-shadow:0 4px 14px rgba(193,53,132,0.4);
     transition:transform 0.2s,box-shadow 0.2s;
-    flex-shrink:0;
   }
 
   .dock-ig-btn:hover .ig-icon-wrap,
@@ -397,21 +346,7 @@ export const S = `
     box-shadow:0 6px 22px rgba(193,53,132,0.65);
   }
 
-  /* disclaimer inside mobile dock — same weight as copyright */
-  .dock-disclaimer{
-    position:relative;
-    z-index:10;
-    font-size:0.58rem;
-    font-weight:300;
-    color:var(--text3);
-    font-style:normal;
-    text-align:left;
-    padding:0 1.2rem 0.7rem;
-    line-height:1.6;
-    letter-spacing:0.02em;
-  }
-
-  /* ─── ANIMATED WAVES ───────────────────────── */
+  /* ─── ANIMATED WAVES (inside .footer) ──────────────────── */
   .wave{
     position:absolute;
     bottom:-24px;
@@ -420,26 +355,27 @@ export const S = `
     border-radius:43%;
     animation:waveMove linear infinite;
     pointer-events:none;
+    z-index:1;
   }
 
   .wave1{
-    height:58px;
+    height:55px;
     background:var(--cyan);
-    opacity:0.11;
+    opacity:0.10;
     animation-duration:5s;
     bottom:-6px;
   }
 
   .wave2{
-    height:52px;
+    height:50px;
     background:var(--blue);
-    opacity:0.08;
+    opacity:0.07;
     animation-duration:7.5s;
     bottom:-14px;
   }
 
   .wave3{
-    height:46px;
+    height:44px;
     background:var(--cyan);
     opacity:0.05;
     animation-duration:10s;
