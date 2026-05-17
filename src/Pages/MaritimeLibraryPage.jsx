@@ -2,6 +2,55 @@
 import { useState, useEffect } from "react";
 import { fetchLibrarySheet } from "../sheets";
 
+// ─── Smart viewer URL builder ─────────────────────────────────────────────
+// Returns { type, src } based on file type
+// type: 'pdf' | 'image' | 'office' | 'drive' | 'none'
+const getViewerInfo = (title = '', url = '', fileId = '', mimeType = '') => {
+  const t = title.toLowerCase();
+  const isPdf    = t.endsWith('.pdf') || mimeType.includes('pdf');
+  const isImage  = t.endsWith('.jpg') || t.endsWith('.jpeg') || t.endsWith('.png') || t.endsWith('.gif');
+  const isOffice = t.endsWith('.docx') || t.endsWith('.doc')  ||
+                   t.endsWith('.xlsx') || t.endsWith('.xls')  ||
+                   t.endsWith('.xlsm') || t.endsWith('.pptx') ||
+                   mimeType.includes('officedocument') || mimeType.includes('ms-excel');
+  const isNoPreview = t.endsWith('.zip') || t.endsWith('.exe') ||
+                      mimeType.includes('zip') || mimeType.includes('compressed') ||
+                      mimeType.includes('msdownload');
+
+  if (isNoPreview) return { type: 'none', src: '' };
+
+  // PDF.js viewer for PDFs — works on all mobile browsers
+  if (isPdf && fileId) {
+    const directUrl = `https://drive.google.com/uc?export=download&confirm=t&id=${fileId}`;
+    return {
+      type: 'pdf',
+      src:  `https://mozilla.github.io/pdf.js/web/viewer.html?file=${encodeURIComponent(directUrl)}`,
+    };
+  }
+
+  // Direct image tag for images
+  if (isImage && fileId) {
+    return {
+      type: 'image',
+      src:  `https://drive.google.com/uc?export=view&id=${fileId}`,
+    };
+  }
+
+  // Microsoft Office Online viewer for Office files
+  if (isOffice && fileId) {
+    const directUrl = `https://drive.google.com/uc?export=download&confirm=t&id=${fileId}`;
+    return {
+      type: 'office',
+      src:  `https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(directUrl)}`,
+    };
+  }
+
+  // Fallback: use the Google Drive preview URL directly
+  if (url) return { type: 'drive', src: url };
+
+  return { type: 'none', src: '' };
+};
+
 // ─── MARITIME LIBRARY PAGE ────────────────────────────────────────────────────
 function MaritimeLibraryPage({ setTab }) {
   const BOOKS = [
@@ -81,12 +130,13 @@ function MaritimeLibraryPage({ setTab }) {
   const cats = ['All', 'Safety', 'Environment', 'Navigation', 'Certification', 'ECDIS', 'Regulations', 'Security', 'Management', 'Labour'];
   const filtered = cat === 'All' ? BOOKS : BOOKS.filter(b => b.cat === cat);
 
-  // ── NEW: Library Files state ──────────────────────────────────────────────
-  const [libData,    setLibData]    = useState([]);
-  const [libLoading, setLibLoading] = useState(true);
-  const [libError,   setLibError]   = useState(null);
+  // ── Library Files state ───────────────────────────────────────────────────
+  const [libData,     setLibData]     = useState([]);
+  const [libLoading,  setLibLoading]  = useState(true);
+  const [libError,    setLibError]    = useState(null);
   const [openFolders, setOpenFolders] = useState(new Set());
-  const [previewFile, setPreviewFile] = useState(null); // { title, url, downloadUrl }
+  const [previewFile, setPreviewFile] = useState(null); // { title, url, downloadUrl, fileId, mimeType }
+  const [iframeError, setIframeError] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -108,6 +158,11 @@ function MaritimeLibraryPage({ setTab }) {
     return () => { cancelled = true; };
   }, []);
 
+  // Reset iframe error state when a new file is opened
+  useEffect(() => {
+    setIframeError(false);
+  }, [previewFile]);
+
   // Group rows by category, preserving insertion order
   const grouped = libData.reduce((acc, row) => {
     if (!acc[row.category]) acc[row.category] = [];
@@ -124,22 +179,22 @@ function MaritimeLibraryPage({ setTab }) {
     });
   };
 
-  // File icon based on title extension
+  // File icon based on title extension or mimeType
   const fileIcon = (title = '', mimeType = '') => {
     const t = title.toLowerCase();
-    if (t.endsWith('.pdf'))  return '📄';
+    if (t.endsWith('.pdf'))                                               return '📄';
     if (t.endsWith('.xlsx') || t.endsWith('.xls') || t.endsWith('.xlsm')) return '📊';
-    if (t.endsWith('.docx') || t.endsWith('.doc')) return '📝';
-    if (t.endsWith('.zip'))  return '🗜';
-    if (t.endsWith('.exe'))  return '⚙️';
-    if (t.endsWith('.jpg') || t.endsWith('.png') || t.endsWith('.jpeg')) return '🖼';
-    if (mimeType.includes('spreadsheet') || mimeType.includes('excel')) return '📊';
-    if (mimeType.includes('zip') || mimeType.includes('compressed'))    return '🗜';
-    if (mimeType.includes('msdownload')) return '⚙️';
+    if (t.endsWith('.docx') || t.endsWith('.doc'))                        return '📝';
+    if (t.endsWith('.zip'))                                               return '🗜';
+    if (t.endsWith('.exe'))                                               return '⚙️';
+    if (t.endsWith('.jpg') || t.endsWith('.png') || t.endsWith('.jpeg'))  return '🖼';
+    if (mimeType.includes('spreadsheet') || mimeType.includes('excel'))  return '📊';
+    if (mimeType.includes('zip') || mimeType.includes('compressed'))     return '🗜';
+    if (mimeType.includes('msdownload'))                                  return '⚙️';
     return '📄';
   };
 
-  // Category colour accent
+  // Colour accent per category
   const catColor = (catName) => {
     const map = {
       'IMO':                      '#60A5FA',
@@ -155,10 +210,80 @@ function MaritimeLibraryPage({ setTab }) {
     return map[catName] || 'var(--cyan)';
   };
 
+  // Build viewer for the modal
+  const renderViewer = (file) => {
+    if (!file) return null;
+    const viewer = getViewerInfo(file.title, file.url, file.fileId, file.mimeType);
+
+    // No preview available (zip, exe etc.)
+    if (viewer.type === 'none' || iframeError) {
+      return (
+        <div style={{
+          flex: 1, display: 'flex', flexDirection: 'column',
+          alignItems: 'center', justifyContent: 'center', gap: 16,
+          padding: '2rem', color: 'var(--text3)'
+        }}>
+          <span style={{ fontSize: '3rem' }}>{fileIcon(file.title, file.mimeType)}</span>
+          <p style={{ fontSize: '0.85rem', textAlign: 'center', color: 'var(--text2)' }}>
+            {iframeError
+              ? 'Preview could not load in this browser.'
+              : 'Preview is not available for this file type.'}
+          </p>
+          <p style={{ fontSize: '0.75rem', color: 'var(--text3)', textAlign: 'center' }}>
+            Use the Download button above to open this file.
+          </p>
+          {file.url && (
+            <a
+              href={file.url}
+              target="_blank"
+              rel="noreferrer"
+              style={{
+                padding: '8px 18px', borderRadius: 8, border: '1px solid var(--cyan)',
+                background: 'var(--cyan)15', color: 'var(--cyan)',
+                fontSize: '0.76rem', fontWeight: 600, textDecoration: 'none'
+              }}
+            >
+              🔗 Open in Google Drive
+            </a>
+          )}
+        </div>
+      );
+    }
+
+    // Image viewer
+    if (viewer.type === 'image') {
+      return (
+        <div style={{
+          flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
+          padding: '1rem', background: '#000', overflow: 'auto'
+        }}>
+          <img
+            src={viewer.src}
+            alt={file.title}
+            style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', borderRadius: 4 }}
+            onError={() => setIframeError(true)}
+          />
+        </div>
+      );
+    }
+
+    // PDF / Office / Drive iframe viewer
+    return (
+      <iframe
+        key={viewer.src}
+        src={viewer.src}
+        title={file.title}
+        style={{ flex: 1, border: 'none', width: '100%' }}
+        allow="autoplay"
+        onError={() => setIframeError(true)}
+      />
+    );
+  };
+
   return (
     <div className="section">
 
-      {/* ── NEW: Library Files Section ──────────────────────────────────── */}
+      {/* ── Library Files Section ────────────────────────────────────────── */}
       <div className="sec-hdr" style={{ marginBottom: '0.8rem' }}>
         <div className="sec-title">📁 Library Files</div>
         {!libLoading && !libError && (
@@ -199,15 +324,16 @@ function MaritimeLibraryPage({ setTab }) {
             const color  = catColor(catName);
             return (
               <div key={catName} style={{
-                background: 'var(--card)', border: `1px solid ${isOpen ? color : 'var(--border)'}`,
+                background: 'var(--card)',
+                border: `1px solid ${isOpen ? color : 'var(--border)'}`,
                 borderRadius: 12, overflow: 'hidden', transition: 'border-color 0.2s'
               }}>
                 {/* Folder header row */}
                 <div
                   onClick={() => toggleFolder(catName)}
                   style={{
-                    display: 'flex', alignItems: 'center', gap: 10, padding: '0.85rem 1rem',
-                    cursor: 'pointer', userSelect: 'none',
+                    display: 'flex', alignItems: 'center', gap: 10,
+                    padding: '0.85rem 1rem', cursor: 'pointer', userSelect: 'none',
                     background: isOpen ? `${color}0D` : 'transparent',
                     transition: 'background 0.2s'
                   }}
@@ -254,10 +380,17 @@ function MaritimeLibraryPage({ setTab }) {
                         <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
                           {file.url && (
                             <button
-                              onClick={() => setPreviewFile({ title: file.title, url: file.url, downloadUrl: file.downloadUrl })}
+                              onClick={() => setPreviewFile({
+                                title:       file.title,
+                                url:         file.url,
+                                downloadUrl: file.downloadUrl,
+                                fileId:      file.fileId,
+                                mimeType:    file.mimeType,
+                              })}
                               style={{
-                                padding: '4px 10px', borderRadius: 6, border: `1px solid ${color}40`,
-                                background: `${color}12`, color, fontSize: '0.68rem', fontWeight: 600,
+                                padding: '4px 10px', borderRadius: 6,
+                                border: `1px solid ${color}40`, background: `${color}12`,
+                                color, fontSize: '0.68rem', fontWeight: 600,
                                 cursor: 'pointer', transition: 'all 0.15s'
                               }}
                               onMouseEnter={e => e.currentTarget.style.background = `${color}25`}
@@ -268,14 +401,15 @@ function MaritimeLibraryPage({ setTab }) {
                           )}
                           {file.downloadUrl && (
                             <a
-                              href={file.downloadUrl}
+                              href={`https://drive.google.com/uc?export=download&confirm=t&id=${file.fileId}`}
                               target="_blank"
                               rel="noreferrer"
                               style={{
-                                padding: '4px 10px', borderRadius: 6, border: '1px solid var(--border)',
+                                padding: '4px 10px', borderRadius: 6,
+                                border: '1px solid var(--border)',
                                 background: 'rgba(255,255,255,0.05)', color: 'var(--text2)',
-                                fontSize: '0.68rem', fontWeight: 600, textDecoration: 'none',
-                                transition: 'all 0.15s', display: 'inline-block'
+                                fontSize: '0.68rem', fontWeight: 600,
+                                textDecoration: 'none', transition: 'all 0.15s', display: 'inline-block'
                               }}
                               onMouseEnter={e => { e.currentTarget.style.borderColor = color; e.currentTarget.style.color = color; }}
                               onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text2)'; }}
@@ -294,12 +428,12 @@ function MaritimeLibraryPage({ setTab }) {
         </div>
       )}
 
-      {/* ── NEW: Preview Modal ───────────────────────────────────────────── */}
+      {/* ── Preview Modal ────────────────────────────────────────────────── */}
       {previewFile && (
         <div
           onClick={() => setPreviewFile(null)}
           style={{
-            position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)',
+            position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.82)',
             zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center',
             padding: '1rem'
           }}
@@ -308,35 +442,50 @@ function MaritimeLibraryPage({ setTab }) {
             onClick={e => e.stopPropagation()}
             style={{
               background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 16,
-              width: '100%', maxWidth: 860, height: '88vh',
+              width: '100%', maxWidth: 900, height: '90vh',
               display: 'flex', flexDirection: 'column', overflow: 'hidden'
             }}
           >
-            {/* Modal header */}
+            {/* Modal header: filename + Download + Open in Drive + Close */}
             <div style={{
-              display: 'flex', alignItems: 'center', gap: 10, padding: '0.9rem 1.1rem',
-              borderBottom: '1px solid var(--border)', flexShrink: 0
+              display: 'flex', alignItems: 'center', gap: 10,
+              padding: '0.9rem 1.1rem', borderBottom: '1px solid var(--border)',
+              flexShrink: 0, flexWrap: 'wrap'
             }}>
-              <span style={{ fontSize: '1.1rem' }}>{fileIcon(previewFile.title)}</span>
+              <span style={{ fontSize: '1.1rem' }}>{fileIcon(previewFile.title, previewFile.mimeType)}</span>
               <span style={{
                 flex: 1, fontSize: '0.78rem', fontWeight: 600, color: 'var(--text1)',
-                wordBreak: 'break-word', lineHeight: 1.3
+                wordBreak: 'break-word', lineHeight: 1.3, minWidth: 100
               }}>
                 {previewFile.title}
               </span>
-              <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
-                {previewFile.downloadUrl && (
+              <div style={{ display: 'flex', gap: 8, flexShrink: 0, flexWrap: 'wrap' }}>
+                {previewFile.fileId && (
                   <a
-                    href={previewFile.downloadUrl}
+                    href={`https://drive.google.com/uc?export=download&confirm=t&id=${previewFile.fileId}`}
                     target="_blank"
                     rel="noreferrer"
                     style={{
                       padding: '5px 12px', borderRadius: 7, border: '1px solid var(--cyan)',
-                      background: 'var(--cyan)15', color: 'var(--cyan)', fontSize: '0.72rem',
-                      fontWeight: 600, textDecoration: 'none'
+                      background: 'var(--cyan)15', color: 'var(--cyan)',
+                      fontSize: '0.72rem', fontWeight: 600, textDecoration: 'none'
                     }}
                   >
                     ⬇ Download
+                  </a>
+                )}
+                {previewFile.url && (
+                  <a
+                    href={previewFile.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    style={{
+                      padding: '5px 12px', borderRadius: 7, border: '1px solid var(--border)',
+                      background: 'rgba(255,255,255,0.06)', color: 'var(--text2)',
+                      fontSize: '0.72rem', fontWeight: 600, textDecoration: 'none'
+                    }}
+                  >
+                    🔗 Drive
                   </a>
                 )}
                 <button
@@ -352,18 +501,15 @@ function MaritimeLibraryPage({ setTab }) {
               </div>
             </div>
 
-            {/* iframe */}
-            <iframe
-              src={previewFile.url}
-              title={previewFile.title}
-              style={{ flex: 1, border: 'none', width: '100%' }}
-              allow="autoplay"
-            />
+            {/* Smart document viewer */}
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+              {renderViewer(previewFile)}
+            </div>
           </div>
         </div>
       )}
 
-      {/* ── EXISTING: Maritime Knowledge Hub (untouched below) ──────────── */}
+      {/* ── EXISTING: Maritime Knowledge Hub (zero changes below) ───────── */}
       <div className="sec-hdr">
         <div className="sec-title">📚 Maritime Knowledge Hub</div>
         <span className="badge">{BOOKS.length} publications</span>
