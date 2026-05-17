@@ -36,40 +36,62 @@ function MapView({ waypoints, setWaypoints, overlays, playing, setPlaying, speed
     dusk:  { url: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager_nolabels/{z}/{x}/{y}{r}.png', attr: '© OpenStreetMap © CARTO', filter: 'sepia(40%) saturate(70%) brightness(70%)' },
   };
 
-  // CHANGED: merged GEBCO handling here — when gebco is ON, swap base to ESRI Ocean tiles
-  // (pre-rendered CDN tiles, loads in ~200ms). Old approach used GEBCO WMS which renders
-  // server-side on every request and takes 5–30s per tile set.
-  // Added overlays?.gebco to deps so this re-runs when the gebco toggle changes.
+  // CHANGED: ECDIS-style depth display — no colour shading, depth values as numbers
+  //
+  // OLD behaviour (gebco ON):
+  //   Layer 1 → ESRI Ocean Base  (heavy blue/green colour shading)   ← user did NOT want this
+  //   Layer 2 → ESRI Ocean Reference (depth numbers, port names)
+  //
+  // NEW behaviour (gebco ON):
+  //   Layer 1 → Carto Voyager light basemap (clean white/chart background, no shading)
+  //   Layer 2 → ESRI Ocean Reference only   (depth soundings in metres at zoom ≥9,
+  //              shipping lanes, port labels — looks like ECDIS at higher zoom levels)
+  //   Layer 3 → OpenSeaMap at opacity 0.85  (seamarks, buoys, depth contours — more visible)
+  //
+  // ESRI Ocean Reference depth numbers appear at zoom 9+.
+  // Zoom in past zoom 9 to see individual metre values like a real ENC chart.
   useEffect(() => {
     if (!ready || !window.L || !mapRef.current) return;
     const L = window.L, map = mapRef.current, lrs = layersRef.current;
 
-    if (lrs.baseTile)  { lrs.baseTile.remove();  lrs.baseTile  = null; }
+    if (lrs.baseTile)    { lrs.baseTile.remove();    lrs.baseTile    = null; }
     if (lrs.seamarkTile) { lrs.seamarkTile.remove(); lrs.seamarkTile = null; }
-    if (lrs.gebcoTile) { lrs.gebcoTile.remove(); lrs.gebcoTile = null; }
+    if (lrs.gebcoTile)   { lrs.gebcoTile.remove();   lrs.gebcoTile   = null; }
 
     if (overlays?.gebco) {
-      // ESRI Ocean Base — colour-shaded bathymetry (blue = ocean depth, green/brown = land)
-      // Tiles are pre-rendered and cached on ESRI CDN. Browser caches them for 1 week.
+      // CHANGED: Light Carto Voyager base — white/chart-like background, no colour shading.
+      // Replaces ESRI Ocean Base which caused the blue/green depth shading the user didn't want.
       lrs.baseTile = L.tileLayer(
-        'https://server.arcgisonline.com/arcgis/rest/services/Ocean/World_Ocean_Base/MapServer/tile/{z}/{y}/{x}',
-        { maxZoom: 18, attribution: 'Tiles © Esri — GEBCO, NOAA, National Geographic' }
-      ).addTo(map);
-      // ESRI Ocean Reference — labels, port names, boundaries on top of the ocean base
-      lrs.gebcoTile = L.tileLayer(
-        'https://server.arcgisonline.com/arcgis/rest/services/Ocean/World_Ocean_Reference/MapServer/tile/{z}/{y}/{x}',
-        { maxZoom: 18, attribution: '' }
+        'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
+        { attribution: '© OpenStreetMap © CARTO', subdomains: 'abcd', maxZoom: 19 }
       ).addTo(map);
       if (containerRef.current) containerRef.current.style.filter = 'none';
+
+      // UNCHANGED url — ESRI Ocean Reference layer.
+      // This layer contains: depth soundings (metres) at zoom ≥9, shipping separation
+      // schemes, port names, maritime boundaries — the ECDIS-style info the user wants.
+      // opacity raised to 1.0 (was implicit 1.0 before, now explicit for clarity).
+      lrs.gebcoTile = L.tileLayer(
+        'https://server.arcgisonline.com/arcgis/rest/services/Ocean/World_Ocean_Reference/MapServer/tile/{z}/{y}/{x}',
+        { maxZoom: 18, attribution: 'Tiles © Esri — GEBCO, NOAA, National Geographic', opacity: 1.0 }
+      ).addTo(map);
     } else {
       const cfg = MAP_TILES[mapMode] || MAP_TILES.night;
       lrs.baseTile = L.tileLayer(cfg.url, { attribution: cfg.attr, subdomains: 'abcd', maxZoom: 19 }).addTo(map);
       if (containerRef.current) containerRef.current.style.filter = cfg.filter || 'none';
     }
 
-    // OpenSeaMap always on top — depth contours, buoys, nav marks
-    lrs.seamarkTile = L.tileLayer('https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png', { opacity: 0.55, maxZoom: 18 }).addTo(map);
-  }, [mapMode, ready, overlays?.gebco]);  // CHANGED: added overlays?.gebco
+    // CHANGED: OpenSeaMap opacity is now 0.85 when GEBCO/ECDIS mode is ON (was fixed 0.55).
+    // Higher opacity makes seamarks, buoys and depth contour lines more readable
+    // against the light chart background — closer to real ENC display.
+    // Reverts to 0.55 in normal (dark/dusk) map modes so marks don't overpower the basemap.
+    const seamarkOpacity = overlays?.gebco ? 0.85 : 0.55;
+    lrs.seamarkTile = L.tileLayer(
+      'https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png',
+      { opacity: seamarkOpacity, maxZoom: 18 }
+    ).addTo(map);
+
+  }, [mapMode, ready, overlays?.gebco]);
 
   const initMap = () => {
     if (mapRef.current || !containerRef.current) return;
@@ -187,9 +209,10 @@ function MapView({ waypoints, setWaypoints, overlays, playing, setPlaying, speed
     return () => { if (animRef.current) clearInterval(animRef.current); };
   }, [playing, speed, ready]);
 
-  // CHANGED: depth on click — now shows "⏳ Fetching depth…" popup immediately,
-  // then replaces content with result or error. Old code: silent catch {} meant
-  // user saw nothing for 3+ seconds, then nothing if fetch failed.
+  // Depth on click — shows "⏳ Fetching depth…" popup immediately,
+  // then replaces content with result or error.
+  // Uses opentopodata.org GEBCO 2020 dataset — CORS-safe, free, browser-compatible.
+  // Depth values are negative for ocean (converted to positive metres in display).
   useEffect(() => {
     if (!ready || !window.L || !mapRef.current) return;
     const map = mapRef.current;
