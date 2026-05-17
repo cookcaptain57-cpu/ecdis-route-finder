@@ -1,27 +1,27 @@
 /* eslint-disable */
-import { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { auth, db } from "../firebase";
 import {
-  collection, getDocs, addDoc, deleteDoc, doc, setDoc, serverTimestamp, getDoc, query, orderBy
+  collection, getDocs, addDoc, deleteDoc, doc, setDoc, serverTimestamp,
 } from "firebase/firestore";
 import { onAuthStateChanged, signInWithEmailAndPassword, signOut } from "firebase/auth";
-
 import { ADMIN_EMAIL, ECDIS_BRANDS, ROUTE_TYPES, PORTS_DB } from "../constants";
 import PortSearchPage from "./PortSearchPage";
 
-// ─── AdminPage ─────────────────────────────────────────────────────────────────
-function AdminPage({ notify, routes, setRoutes, charts, setCharts, sheetRoutes, sheetCharts, refreshSheets, sheetLoading }) {
-  const [user, setUser] = useState(null);
-  const [email, setEmail] = useState('');
-  const [pass, setPass] = useState('');
-  const [err, setErr] = useState('');
+function AdminPage({
+  notify, routes, setRoutes, charts, setCharts,
+  sheetRoutes, sheetCharts,
+  refreshSheets, refreshRoutes, refreshCharts, refreshPorts,
+  sheetLoading,
+}) {
+  const [user, setUser]       = useState(null);
+  const [email, setEmail]     = useState('');
+  const [pass, setPass]       = useState('');
+  const [err, setErr]         = useState('');
   const [loading, setLoading] = useState(false);
   const [section, setSection] = useState('dashboard');
-  const [users, setUsers] = useState([]);
-
-  // New route form
+  const [users, setUsers]     = useState([]);
   const [nr, setNr] = useState({ fileName: '', fileUrl: '', portName: '', keywords: '', type: 'Ocean' });
-  // New chart form
   const [nc, setNc] = useState({ fileName: '', fileUrl: '', portName: '', brand: 'furuno', region: '', keywords: '' });
 
   useEffect(() => { const u = onAuthStateChanged(auth, u => setUser(u)); return () => u(); }, []);
@@ -31,13 +31,8 @@ function AdminPage({ notify, routes, setRoutes, charts, setCharts, sheetRoutes, 
     setLoading(true); setErr('');
     try {
       const c = await signInWithEmailAndPassword(auth, email, pass);
-      if (c.user.email !== ADMIN_EMAIL) {
-        await signOut(auth);
-        setErr('❌ Access denied. This portal is for admins only.');
-        setLoading(false); return;
-      }
-    }
-    catch { setErr('Invalid credentials.'); }
+      if (c.user.email !== ADMIN_EMAIL) { await signOut(auth); setErr('❌ Access denied.'); setLoading(false); return; }
+    } catch { setErr('Invalid credentials.'); }
     setLoading(false);
   };
 
@@ -45,8 +40,7 @@ function AdminPage({ notify, routes, setRoutes, charts, setCharts, sheetRoutes, 
     try {
       const snap = await getDocs(collection(db, 'users'));
       setUsers(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-    }
-    catch { notify('Could not load users', 'error'); }
+    } catch { notify('Could not load users', 'error'); }
   };
 
   const saveRoute = async () => {
@@ -128,19 +122,18 @@ function AdminPage({ notify, routes, setRoutes, charts, setCharts, sheetRoutes, 
     { k: 'add-chart',    i: '📊', l: 'Add Chart' },
     { k: 'routes',       i: '📋', l: 'Manage Routes' },
     { k: 'charts',       i: '🗂', l: 'Manage Charts' },
-    { k: 'sheet-routes', i: '🔄', l: 'Sheet Routes' },
-    { k: 'sheet-charts', i: '🔄', l: 'Sheet Charts' },
-    { k: 'port-search',  i: '⚓', l: 'Port Search' },
+    { k: 'sheet-routes', i: '🔄', l: 'Sync Routes' },
+    { k: 'sheet-charts', i: '🔄', l: 'Sync Charts' },
+    { k: 'port-search',  i: '⚓', l: 'Sync Ports' },
     { k: 'users',        i: '👥', l: 'User Database' },
   ];
 
   const GDriveHelp = () => (
     <div className="info-box" style={{ fontSize: '0.74rem' }}>
       📁 <strong style={{ color: 'var(--text)' }}>Google Drive Link Guide:</strong><br />
-      1. Upload file to <strong>drive.google.com</strong> (ecdisroutes@gmail.com)<br />
-      2. Right click → Share → Anyone with link<br />
-      3. Copy link: <code style={{ color: 'var(--cyan)' }}>drive.google.com/file/d/ID/view</code><br />
-      4. Convert to: <code style={{ color: 'var(--green)' }}>drive.google.com/uc?export=download&id=ID</code>
+      1. Upload file to Google Drive → Right click → Share → Anyone with link<br />
+      2. Copy link: <code style={{ color: 'var(--cyan)' }}>drive.google.com/file/d/ID/view</code><br />
+      3. Convert to: <code style={{ color: 'var(--green)' }}>drive.google.com/uc?export=download&id=ID</code>
     </div>
   );
 
@@ -165,11 +158,17 @@ function AdminPage({ notify, routes, setRoutes, charts, setCharts, sheetRoutes, 
 
         <div className="adm-content">
 
+          {/* ─── DASHBOARD ─────────────────────────────────────────────── */}
           {section === 'dashboard' && (
             <>
               <div className="a-hdr">
                 <div className="a-title">📊 Dashboard</div>
-                <span style={{ fontSize: '0.72rem', color: 'var(--green)' }}>🔥 Firebase + Google Drive</span>
+                <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: '0.72rem', color: 'var(--green)' }}>🔥 Firebase + Google Drive</span>
+                  <button className="btn btn-primary" style={{ padding: '5px 12px', fontSize: '0.7rem' }} onClick={refreshSheets} disabled={sheetLoading}>
+                    {sheetLoading ? '⏳ Syncing…' : '🔄 Sync All from Sheet'}
+                  </button>
+                </div>
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(145px,1fr))', gap: '0.8rem', marginBottom: '1.4rem' }}>
                 {[
@@ -187,19 +186,16 @@ function AdminPage({ notify, routes, setRoutes, charts, setCharts, sheetRoutes, 
                   </div>
                 ))}
               </div>
-              <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: '1rem' }}>
-                <div style={{ fontFamily: 'Orbitron,monospace', fontSize: '0.78rem', marginBottom: '0.8rem', color: 'var(--gold)' }}>📋 How to Add Files</div>
-                {[
-                  '1. FIREBASE (manual): Upload .rtz or chart to Google Drive, get direct link → use Add Route / Add Chart',
-                  '2. GOOGLE SHEET (auto): Add rows to your Google Sheet → App Script syncs → click Sheet Routes or Sheet Charts',
-                  '3. Sheet data updates live — click Sync Now in Sheet sections to pull latest',
-                  '4. Firebase routes/charts need login to download — see User Database tab',
-                  '5. Google Sheet rows are shown as-is from the sheet data',
-                ].map((t, i) => <div key={i} style={{ padding: '7px 0', borderBottom: '1px solid var(--border)', fontSize: '0.79rem', color: 'var(--text2)' }}>{t}</div>)}
+              <div className="info-box">
+                <strong style={{ color: 'var(--gold)' }}>📋 How syncing works:</strong><br />
+                Upload files to Google Drive → App Script adds file name + link to Google Sheet automatically →
+                Come here and click <strong>Sync Routes / Sync Charts / Sync Ports</strong> →
+                Data saves to Firebase permanently → All users see updated data instantly. No repeated syncing needed.
               </div>
             </>
           )}
 
+          {/* ─── ADD ROUTE ─────────────────────────────────────────────── */}
           {section === 'add-route' && (
             <>
               <div className="a-hdr"><div className="a-title">🗺 Add RTZ Route</div></div>
@@ -207,7 +203,7 @@ function AdminPage({ notify, routes, setRoutes, charts, setCharts, sheetRoutes, 
               <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: '1.2rem' }}>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                   <div className="ff" style={{ gridColumn: '1/-1' }}>
-                    <label className="fl">📁 RTZ File Name * (exact name)</label>
+                    <label className="fl">📁 RTZ File Name *</label>
                     <input className="fi" placeholder="mumbaitosingapore.rtz" value={nr.fileName} onChange={e => setNr(r => ({ ...r, fileName: e.target.value }))} />
                   </div>
                   <div className="ff" style={{ gridColumn: '1/-1' }}>
@@ -225,7 +221,7 @@ function AdminPage({ notify, routes, setRoutes, charts, setCharts, sheetRoutes, 
                     </select>
                   </div>
                   <div className="ff" style={{ gridColumn: '1/-1' }}>
-                    <label className="fl">🔍 Search Keywords (space separated)</label>
+                    <label className="fl">🔍 Search Keywords</label>
                     <input className="fi" placeholder="mum sin india ocean" value={nr.keywords} onChange={e => setNr(r => ({ ...r, keywords: e.target.value }))} />
                   </div>
                 </div>
@@ -234,6 +230,7 @@ function AdminPage({ notify, routes, setRoutes, charts, setCharts, sheetRoutes, 
             </>
           )}
 
+          {/* ─── ADD CHART ─────────────────────────────────────────────── */}
           {section === 'add-chart' && (
             <>
               <div className="a-hdr"><div className="a-title">📊 Add Chart File</div></div>
@@ -244,11 +241,7 @@ function AdminPage({ notify, routes, setRoutes, charts, setCharts, sheetRoutes, 
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(100px,1fr))', gap: 5, marginBottom: 8 }}>
                     {ECDIS_BRANDS.map(b => (
                       <div key={b.id} onClick={() => setNc(c => ({ ...c, brand: b.id }))}
-                        style={{
-                          padding: '6px', borderRadius: 8, cursor: 'pointer', textAlign: 'center',
-                          border: `2px solid ${nc.brand === b.id ? b.color : 'var(--border)'}`,
-                          background: nc.brand === b.id ? b.color + '22' : 'transparent', transition: 'all 0.2s'
-                        }}>
+                        style={{ padding: '6px', borderRadius: 8, cursor: 'pointer', textAlign: 'center', border: `2px solid ${nc.brand === b.id ? b.color : 'var(--border)'}`, background: nc.brand === b.id ? b.color + '22' : 'transparent', transition: 'all 0.2s' }}>
                         <div style={{ fontSize: '1.2rem' }}>{b.emoji}</div>
                         <div style={{ fontSize: '0.6rem', fontWeight: 700, color: nc.brand === b.id ? b.color : 'var(--text2)', fontFamily: 'Orbitron,monospace' }}>{b.name}</div>
                       </div>
@@ -256,32 +249,18 @@ function AdminPage({ notify, routes, setRoutes, charts, setCharts, sheetRoutes, 
                   </div>
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-                  <div className="ff">
-                    <label className="fl">📁 Chart File Name *</label>
-                    <input className="fi" placeholder="mumbai_furuno.bin" value={nc.fileName} onChange={e => setNc(c => ({ ...c, fileName: e.target.value }))} />
-                  </div>
-                  <div className="ff">
-                    <label className="fl">⚓ Port Name *</label>
-                    <input className="fi" placeholder="Mumbai" value={nc.portName} onChange={e => setNc(c => ({ ...c, portName: e.target.value }))} />
-                  </div>
-                  <div className="ff" style={{ gridColumn: '1/-1' }}>
-                    <label className="fl">🔗 Google Drive Direct Download Link *</label>
-                    <input className="fi" placeholder="https://drive.google.com/uc?export=download&id=XXXX" value={nc.fileUrl} onChange={e => setNc(c => ({ ...c, fileUrl: e.target.value }))} />
-                  </div>
-                  <div className="ff">
-                    <label className="fl">Region</label>
-                    <input className="fi" placeholder="Arabian Sea" value={nc.region} onChange={e => setNc(c => ({ ...c, region: e.target.value }))} />
-                  </div>
-                  <div className="ff">
-                    <label className="fl">Extra Keywords</label>
-                    <input className="fi" placeholder="west coast india" value={nc.keywords} onChange={e => setNc(c => ({ ...c, keywords: e.target.value }))} />
-                  </div>
+                  <div className="ff"><label className="fl">📁 Chart File Name *</label><input className="fi" placeholder="mumbai_furuno.bin" value={nc.fileName} onChange={e => setNc(c => ({ ...c, fileName: e.target.value }))} /></div>
+                  <div className="ff"><label className="fl">⚓ Port Name *</label><input className="fi" placeholder="Mumbai" value={nc.portName} onChange={e => setNc(c => ({ ...c, portName: e.target.value }))} /></div>
+                  <div className="ff" style={{ gridColumn: '1/-1' }}><label className="fl">🔗 Google Drive Direct Download Link *</label><input className="fi" placeholder="https://drive.google.com/uc?export=download&id=XXXX" value={nc.fileUrl} onChange={e => setNc(c => ({ ...c, fileUrl: e.target.value }))} /></div>
+                  <div className="ff"><label className="fl">Region</label><input className="fi" placeholder="Arabian Sea" value={nc.region} onChange={e => setNc(c => ({ ...c, region: e.target.value }))} /></div>
+                  <div className="ff"><label className="fl">Extra Keywords</label><input className="fi" placeholder="west coast india" value={nc.keywords} onChange={e => setNc(c => ({ ...c, keywords: e.target.value }))} /></div>
                 </div>
                 <button className="btn btn-gold" onClick={saveChart}>✅ Save Chart to Firebase</button>
               </div>
             </>
           )}
 
+          {/* ─── MANAGE ROUTES ─────────────────────────────────────────── */}
           {section === 'routes' && (
             <>
               <div className="a-hdr"><div className="a-title">📋 Manage Routes</div><span className="badge">{routes.length}</span></div>
@@ -304,6 +283,7 @@ function AdminPage({ notify, routes, setRoutes, charts, setCharts, sheetRoutes, 
             </>
           )}
 
+          {/* ─── MANAGE CHARTS ─────────────────────────────────────────── */}
           {section === 'charts' && (
             <>
               <div className="a-hdr"><div className="a-title">🗂 Manage Charts</div><span className="badge badge-gold">{charts.length}</span></div>
@@ -326,205 +306,148 @@ function AdminPage({ notify, routes, setRoutes, charts, setCharts, sheetRoutes, 
             </>
           )}
 
+          {/* ─── SYNC ROUTES (Sheet → Firebase) ────────────────────────── */}
           {section === 'sheet-routes' && (
             <>
               <div className="a-hdr">
-                <div className="a-title">🔄 Google Sheet — ECDIS Routes</div>
+                <div className="a-title">🔄 Sync Routes — Sheet → Firebase</div>
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                  <span className="badge">{sheetRoutes.length} rows</span>
-                  <button className="btn btn-primary" style={{ padding: '5px 12px', fontSize: '0.72rem' }} onClick={refreshSheets} disabled={sheetLoading}>
-                    {sheetLoading ? '⏳ Syncing…' : '🔄 Sync Now'}
+                  <span className="badge">{sheetRoutes.length} in Firebase</span>
+                  {/* ✅ FIX: Only syncs routes, not everything */}
+                  <button className="btn btn-primary" style={{ padding: '5px 12px', fontSize: '0.72rem' }} onClick={refreshRoutes} disabled={sheetLoading}>
+                    {sheetLoading ? '⏳ Syncing…' : '🔄 Sync Routes Now'}
                   </button>
                 </div>
               </div>
               <div className="info-box" style={{ fontSize: '0.74rem' }}>
-                📡 <strong style={{ color: 'var(--text)' }}>Live Google Sheet Database</strong> — auto-refreshes from your Google Sheet via App Script. Click <strong>Sync Now</strong> to pull the latest data.<br />
-                <span style={{ color: 'var(--cyan)' }}>Sheet ID: 1ILzyQODb4Ig2mdq9auZ7aJOfdKBBM01t192VE59WbCE</span>
+                📡 Fetches route file names + Google Drive links from your Google Sheet and saves them permanently to Firebase.
+                All users will see updated routes immediately after sync.<br />
+                <span style={{ color: 'var(--cyan)' }}>Sheet ID: {'{ROUTE_SHEET_ID}'}</span>
               </div>
               {sheetLoading
-                ? <div className="loading"><div className="spin" /><span>Fetching from Google Sheet…</span></div>
+                ? <div className="loading"><div className="spin" /><span>Fetching routes from Google Sheet → Saving to Firebase…</span></div>
                 : sheetRoutes.length === 0
-                  ? <div className="empty"><div className="empty-icon">🗺</div><div className="empty-t">No Rows Found</div><div className="empty-d">Add rows to your Google Sheet and click Sync Now</div></div>
+                  ? <div className="empty"><div className="empty-icon">🗺</div><div className="empty-t">No Routes in Firebase Yet</div><div className="empty-d">Add rows to your Google Sheet then click Sync Routes Now</div></div>
                   : <div className="tw">
                     <table className="tbl">
-                      <thead>
-                        <tr>
-                          <th>#</th>
-                          {Object.keys(sheetRoutes[0] || {}).map(col => <th key={col}>{col}</th>)}
+                      <thead><tr><th>#</th>{Object.keys(sheetRoutes[0] || {}).map(col => <th key={col}>{col}</th>)}</tr></thead>
+                      <tbody>{sheetRoutes.map((row, i) => (
+                        <tr key={i}>
+                          <td style={{ color: 'var(--text3)', fontSize: '0.7rem' }}>{i + 1}</td>
+                          {Object.keys(sheetRoutes[0] || {}).map(col => (
+                            <td key={col} style={{ fontSize: '0.76rem', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {col.toLowerCase().includes('url') || col.toLowerCase().includes('link')
+                                ? row[col] ? <a href={row[col]} target="_blank" rel="noreferrer" style={{ color: 'var(--green)', fontSize: '0.7rem' }}>✅ Link</a> : <span style={{ color: 'var(--red)', fontSize: '0.7rem' }}>❌</span>
+                                : <span style={{ color: col.toLowerCase().includes('name') || col.toLowerCase().includes('file') ? 'var(--cyan)' : 'var(--text2)' }}>{row[col] || '—'}</span>}
+                            </td>
+                          ))}
                         </tr>
-                      </thead>
-                      <tbody>
-                        {sheetRoutes.map((row, i) => (
-                          <tr key={i}>
-                            <td style={{ color: 'var(--text3)', fontSize: '0.7rem' }}>{i + 1}</td>
-                            {Object.keys(sheetRoutes[0] || {}).map(col => (
-                              <td key={col} style={{ fontSize: '0.76rem', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                {col.toLowerCase().includes('url') || col.toLowerCase().includes('link')
-                                  ? row[col]
-                                    ? <a href={row[col]} target="_blank" rel="noreferrer" style={{ color: 'var(--green)', fontSize: '0.7rem' }}>✅ Link</a>
-                                    : <span style={{ color: 'var(--red)', fontSize: '0.7rem' }}>❌</span>
-                                  : <span style={{ color: col.toLowerCase().includes('name') || col.toLowerCase().includes('file') ? 'var(--cyan)' : 'var(--text2)' }}>{row[col] || '—'}</span>
-                                }
-                              </td>
-                            ))}
-                          </tr>
-                        ))}
-                      </tbody>
+                      ))}</tbody>
                     </table>
                   </div>
               }
-              <div style={{ marginTop: '1rem', padding: '0.9rem', background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 10, fontSize: '0.76rem', color: 'var(--text2)' }}>
-                💡 <strong style={{ color: 'var(--gold)' }}>How to add routes:</strong> Open your Google Sheet → Add a new row → Click <strong>Sync Now</strong> to reflect here.
-              </div>
             </>
           )}
 
+          {/* ─── SYNC CHARTS (Sheet → Firebase) ────────────────────────── */}
           {section === 'sheet-charts' && (
             <>
               <div className="a-hdr">
-                <div className="a-title">🔄 Google Sheet — ECDIS Charts</div>
+                <div className="a-title">🔄 Sync Charts — Sheet → Firebase</div>
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                  <span className="badge badge-gold">{sheetCharts.length} rows</span>
-                  <button className="btn btn-gold" style={{ padding: '5px 12px', fontSize: '0.72rem' }} onClick={refreshSheets} disabled={sheetLoading}>
-                    {sheetLoading ? '⏳ Syncing…' : '🔄 Sync Now'}
+                  <span className="badge badge-gold">{sheetCharts.length} in Firebase</span>
+                  {/* ✅ FIX: Only syncs charts, not everything */}
+                  <button className="btn btn-gold" style={{ padding: '5px 12px', fontSize: '0.72rem' }} onClick={refreshCharts} disabled={sheetLoading}>
+                    {sheetLoading ? '⏳ Syncing…' : '🔄 Sync Charts Now'}
                   </button>
                 </div>
               </div>
               <div className="info-box" style={{ fontSize: '0.74rem' }}>
-                📡 <strong style={{ color: 'var(--text)' }}>Live Google Sheet Database</strong> — includes ECDIS model info.<br />
-                <span style={{ color: 'var(--gold)' }}>Sheet ID: 1zuZxqUSFtxzg-E8CkTGj01YehhXCZIPodCisCicpxRA</span>
+                📡 Fetches ECDIS chart file names + links from your Google Sheet and saves permanently to Firebase.
+                All users see updated charts immediately after sync.
               </div>
               {sheetLoading
-                ? <div className="loading"><div className="spin" /><span>Fetching from Google Sheet…</span></div>
+                ? <div className="loading"><div className="spin" /><span>Fetching charts from Google Sheet → Saving to Firebase…</span></div>
                 : sheetCharts.length === 0
-                  ? <div className="empty"><div className="empty-icon">📊</div><div className="empty-t">No Rows Found</div><div className="empty-d">Add rows to your ECDIS Charts Google Sheet and click Sync Now</div></div>
-                  : <>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(120px,1fr))', gap: 6, marginBottom: '1rem' }}>
-                      {ECDIS_BRANDS.map(b => {
-                        const brandCol = Object.keys(sheetCharts[0] || {}).find(k => k.toLowerCase().includes('brand') || k.toLowerCase().includes('ecdis'));
-                        const cnt = brandCol ? sheetCharts.filter(r => r[brandCol]?.toLowerCase().includes(b.name.toLowerCase()) || r[brandCol]?.toLowerCase().includes(b.id)).length : 0;
-                        if (cnt === 0) return null;
+                  ? <div className="empty"><div className="empty-icon">📊</div><div className="empty-t">No Charts in Firebase Yet</div><div className="empty-d">Add rows to your ECDIS Charts Google Sheet then click Sync Charts Now</div></div>
+                  : <div className="tw">
+                    <table className="tbl">
+                      <thead><tr><th>#</th>{Object.keys(sheetCharts[0] || {}).map(col => <th key={col}>{col}</th>)}</tr></thead>
+                      <tbody>{sheetCharts.map((row, i) => {
+                        const brandCol = Object.keys(row).find(k => k.toLowerCase().includes('brand') || k.toLowerCase().includes('ecdis'));
+                        const brand = brandCol ? ECDIS_BRANDS.find(b => row[brandCol]?.toLowerCase().includes(b.name.toLowerCase()) || row[brandCol]?.toLowerCase().includes(b.id)) : null;
                         return (
-                          <div key={b.id} style={{ padding: '8px', borderRadius: 9, border: `1px solid ${b.color}55`, background: `${b.color}11`, textAlign: 'center' }}>
-                            <div style={{ fontSize: '1.1rem' }}>{b.emoji}</div>
-                            <div style={{ fontSize: '0.58rem', fontFamily: 'Orbitron,monospace', fontWeight: 700, color: b.color }}>{b.name}</div>
-                            <div style={{ fontSize: '0.65rem', color: 'var(--green)', fontWeight: 700 }}>{cnt} chart{cnt > 1 ? 's' : ''}</div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                    <div className="tw">
-                      <table className="tbl">
-                        <thead>
-                          <tr>
-                            <th>#</th>
-                            {Object.keys(sheetCharts[0] || {}).map(col => <th key={col}>{col}</th>)}
+                          <tr key={i}>
+                            <td style={{ color: 'var(--text3)', fontSize: '0.7rem' }}>{i + 1}</td>
+                            {Object.keys(sheetCharts[0] || {}).map(col => (
+                              <td key={col} style={{ fontSize: '0.76rem', maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                {col.toLowerCase().includes('url') || col.toLowerCase().includes('link')
+                                  ? row[col] ? <a href={row[col]} target="_blank" rel="noreferrer" style={{ color: 'var(--green)', fontSize: '0.7rem' }}>✅ Link</a> : <span style={{ color: 'var(--red)', fontSize: '0.7rem' }}>❌</span>
+                                  : col === brandCol && brand
+                                    ? <span style={{ color: brand.color, fontWeight: 600 }}>{brand.emoji} {row[col]}</span>
+                                    : <span style={{ color: col.toLowerCase().includes('name') || col.toLowerCase().includes('file') ? 'var(--gold)' : 'var(--text2)' }}>{row[col] || '—'}</span>}
+                              </td>
+                            ))}
                           </tr>
-                        </thead>
-                        <tbody>
-                          {sheetCharts.map((row, i) => {
-                            const brandCol = Object.keys(row).find(k => k.toLowerCase().includes('brand') || k.toLowerCase().includes('ecdis'));
-                            const brand = brandCol ? ECDIS_BRANDS.find(b => row[brandCol]?.toLowerCase().includes(b.name.toLowerCase()) || row[brandCol]?.toLowerCase().includes(b.id)) : null;
-                            return (
-                              <tr key={i}>
-                                <td style={{ color: 'var(--text3)', fontSize: '0.7rem' }}>{i + 1}</td>
-                                {Object.keys(sheetCharts[0] || {}).map(col => (
-                                  <td key={col} style={{ fontSize: '0.76rem', maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                    {col.toLowerCase().includes('url') || col.toLowerCase().includes('link')
-                                      ? row[col]
-                                        ? <a href={row[col]} target="_blank" rel="noreferrer" style={{ color: 'var(--green)', fontSize: '0.7rem' }}>✅ Link</a>
-                                        : <span style={{ color: 'var(--red)', fontSize: '0.7rem' }}>❌</span>
-                                      : col === brandCol && brand
-                                        ? <span style={{ color: brand.color, fontWeight: 600 }}>{brand.emoji} {row[col]}</span>
-                                        : <span style={{ color: col.toLowerCase().includes('model') ? '#A78BFA' : col.toLowerCase().includes('name') || col.toLowerCase().includes('file') ? 'var(--gold)' : 'var(--text2)' }}>{row[col] || '—'}</span>
-                                    }
-                                  </td>
-                                ))}
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                  </>
+                        );
+                      })}</tbody>
+                    </table>
+                  </div>
               }
-              <div style={{ marginTop: '1rem', padding: '0.9rem', background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 10, fontSize: '0.76rem', color: 'var(--text2)' }}>
-                💡 <strong style={{ color: 'var(--gold)' }}>How to add charts:</strong> Open your ECDIS Charts Google Sheet → Add a row → Click <strong>Sync Now</strong> here.
-              </div>
             </>
           )}
 
+          {/* ─── SYNC PORTS (Sheet → Firebase) ─────────────────────────── */}
           {section === 'port-search' && (
             <>
               <div className="a-hdr">
-                <div className="a-title">⚓ Port Search Database</div>
+                <div className="a-title">⚓ Sync Ports — Sheet → Firebase</div>
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                  <span className="badge">{sheetRoutes.length > 0 || sheetCharts.length > 0 ? 'Synced' : 'Not synced'}</span>
-                  <button className="btn btn-primary" style={{ padding: '5px 12px', fontSize: '0.72rem' }} onClick={refreshSheets} disabled={sheetLoading}>
+                  {/* ✅ FIX: Only syncs ports, not everything */}
+                  <button className="btn btn-primary" style={{ padding: '5px 12px', fontSize: '0.72rem' }} onClick={refreshPorts} disabled={sheetLoading}>
                     {sheetLoading ? '⏳ Syncing…' : '🔄 Sync Port Database'}
                   </button>
                 </div>
               </div>
               <div className="info-box">
-                📡 Syncs all 3000+ ports from your Google Sheet into the Port Search and Route Planner. Click <strong>Sync Port Database</strong> to reload all port data from your sheet.
-                <br /><span style={{ color: 'var(--cyan)', fontSize: '0.72rem' }}>Sheet ID: 1BFpUuo-nqS3MaUTtANtKT4CFem-X3nZJYGRADZtuIdk</span>
+                📡 Fetches all 25,000+ ports from your Google Sheet and saves permanently to Firebase.
+                Route Planner and Port Search will use this data for all users instantly after sync.
               </div>
-              <PortSearchPage portsDb={PORTS_DB} sheetLoading={sheetLoading} refreshSheets={refreshSheets} />
+              <PortSearchPage portsDb={PORTS_DB} sheetLoading={sheetLoading} refreshSheets={refreshPorts} />
             </>
           )}
 
+          {/* ─── USERS ─────────────────────────────────────────────────── */}
           {section === 'users' && (
             <>
               <div className="a-hdr">
                 <div className="a-title">👥 User Database</div>
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
                   <span className="badge badge-green">{users.length} registered</span>
-                  <span className="badge" style={{ background: 'rgba(255,60,60,0.15)', color: '#ff6b6b', border: '1px solid rgba(255,60,60,0.3)' }}>
-                    {users.filter(u => u.blocked).length} blocked
-                  </span>
+                  <span className="badge" style={{ background: 'rgba(255,60,60,0.15)', color: '#ff6b6b', border: '1px solid rgba(255,60,60,0.3)' }}>{users.filter(u => u.blocked).length} blocked</span>
                   <button className="btn btn-secondary" style={{ padding: '5px 10px', fontSize: '0.72rem' }} onClick={loadUsers}>🔄 Refresh</button>
                 </div>
               </div>
-              <div className="info-box">
-                🛡 <strong style={{ color: 'var(--text)' }}>Access Control</strong> — Block suspicious users instantly. Blocked users are auto-logged out and shown a warning when they try to login again.
-              </div>
+              <div className="info-box">🛡 <strong style={{ color: 'var(--text)' }}>Access Control</strong> — Block suspicious users instantly. Blocked users are auto-logged out.</div>
               {users.length === 0
                 ? <div className="empty"><div className="empty-icon">👥</div><div className="empty-t">No Users Yet</div><div className="empty-d">Users appear here after they register</div></div>
                 : <div className="tw">
                   <table className="tbl">
-                    <thead>
-                      <tr>
-                        <th>#</th><th>Name</th><th>Email</th><th>Phone</th><th>Joined</th><th>Status</th><th>Action</th>
-                      </tr>
-                    </thead>
+                    <thead><tr><th>#</th><th>Name</th><th>Email</th><th>Phone</th><th>Joined</th><th>Status</th><th>Action</th></tr></thead>
                     <tbody>{users.map((u, i) => (
                       <tr key={u.id} style={{ opacity: u.blocked ? 0.7 : 1, background: u.blocked ? 'rgba(255,60,60,0.04)' : 'transparent' }}>
                         <td style={{ color: 'var(--text3)' }}>{i + 1}</td>
-                        <td style={{ color: u.blocked ? '#ff6b6b' : 'var(--cyan)', fontWeight: 600 }}>
-                          {u.blocked && <span style={{ marginRight: 4 }}>⛔</span>}{u.name || '—'}
-                        </td>
+                        <td style={{ color: u.blocked ? '#ff6b6b' : 'var(--cyan)', fontWeight: 600 }}>{u.blocked && <span style={{ marginRight: 4 }}>⛔</span>}{u.name || '—'}</td>
                         <td style={{ color: 'var(--text2)', fontSize: '0.78rem' }}>{u.email}</td>
                         <td style={{ color: 'var(--gold)', fontSize: '0.78rem' }}>{u.phone || '—'}</td>
                         <td style={{ color: 'var(--text2)', fontSize: '0.72rem' }}>{u.createdAt?.toDate?.()?.toLocaleDateString() || '—'}</td>
-                        <td>
-                          {u.blocked
-                            ? <span style={{ background: 'rgba(255,60,60,0.15)', color: '#ff6b6b', border: '1px solid rgba(255,60,60,0.3)', borderRadius: 5, padding: '2px 8px', fontSize: '0.68rem', fontWeight: 700 }}>⛔ BLOCKED</span>
-                            : <span style={{ background: 'rgba(0,200,100,0.12)', color: 'var(--green)', border: '1px solid rgba(0,200,100,0.25)', borderRadius: 5, padding: '2px 8px', fontSize: '0.68rem', fontWeight: 700 }}>✅ ACTIVE</span>
-                          }
+                        <td>{u.blocked
+                          ? <span style={{ background: 'rgba(255,60,60,0.15)', color: '#ff6b6b', border: '1px solid rgba(255,60,60,0.3)', borderRadius: 5, padding: '2px 8px', fontSize: '0.68rem', fontWeight: 700 }}>⛔ BLOCKED</span>
+                          : <span style={{ background: 'rgba(0,200,100,0.12)', color: 'var(--green)', border: '1px solid rgba(0,200,100,0.25)', borderRadius: 5, padding: '2px 8px', fontSize: '0.68rem', fontWeight: 700 }}>✅ ACTIVE</span>}
                         </td>
-                        <td>
-                          {u.blocked
-                            ? <button
-                              style={{ background: 'rgba(0,200,100,0.15)', color: 'var(--green)', border: '1px solid rgba(0,200,100,0.3)', borderRadius: 6, padding: '4px 10px', fontSize: '0.68rem', fontWeight: 700, cursor: 'pointer' }}
-                              onClick={() => unblockUser(u)}>
-                              ✅ Unblock
-                            </button>
-                            : <button
-                              style={{ background: 'rgba(255,60,60,0.12)', color: '#ff6b6b', border: '1px solid rgba(255,60,60,0.3)', borderRadius: 6, padding: '4px 10px', fontSize: '0.68rem', fontWeight: 700, cursor: 'pointer' }}
-                              onClick={() => { if (window.confirm(`Block ${u.name || u.email}? They will be logged out immediately.`)) blockUser(u); }}>
-                              ⛔ Block
-                            </button>
-                          }
+                        <td>{u.blocked
+                          ? <button style={{ background: 'rgba(0,200,100,0.15)', color: 'var(--green)', border: '1px solid rgba(0,200,100,0.3)', borderRadius: 6, padding: '4px 10px', fontSize: '0.68rem', fontWeight: 700, cursor: 'pointer' }} onClick={() => unblockUser(u)}>✅ Unblock</button>
+                          : <button style={{ background: 'rgba(255,60,60,0.12)', color: '#ff6b6b', border: '1px solid rgba(255,60,60,0.3)', borderRadius: 6, padding: '4px 10px', fontSize: '0.68rem', fontWeight: 700, cursor: 'pointer' }} onClick={() => { if (window.confirm(`Block ${u.name || u.email}?`)) blockUser(u); }}>⛔ Block</button>}
                         </td>
                       </tr>
                     ))}</tbody>
