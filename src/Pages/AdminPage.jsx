@@ -11,8 +11,8 @@ import PortSearchPage from "./PortSearchPage";
 function AdminPage({
   notify, routes, setRoutes, charts, setCharts,
   sheetRoutes, sheetCharts,
-  refreshSheets, refreshRoutes, refreshCharts, refreshPorts,
-  sheetLoading,
+  refreshRoutes, refreshCharts, refreshPorts,
+  routesLoading, chartsLoading, portsLoading,
 }) {
   const [user, setUser]       = useState(null);
   const [email, setEmail]     = useState('');
@@ -131,9 +131,8 @@ function AdminPage({
   const GDriveHelp = () => (
     <div className="info-box" style={{ fontSize: '0.74rem' }}>
       📁 <strong style={{ color: 'var(--text)' }}>Google Drive Link Guide:</strong><br />
-      1. Upload file to Google Drive → Right click → Share → Anyone with link<br />
-      2. Copy link: <code style={{ color: 'var(--cyan)' }}>drive.google.com/file/d/ID/view</code><br />
-      3. Convert to: <code style={{ color: 'var(--green)' }}>drive.google.com/uc?export=download&id=ID</code>
+      1. Upload file → Right click → Share → Anyone with link → Copy link<br />
+      2. Convert: <code style={{ color: 'var(--green)' }}>drive.google.com/uc?export=download&id=FILE_ID</code>
     </div>
   );
 
@@ -143,6 +142,7 @@ function AdminPage({
         {sides.map(s => <button key={s.k} className={`amtab ${section === s.k ? 'active' : ''}`} onClick={() => setSection(s.k)}>{s.i} {s.l}</button>)}
         <button className="amtab" onClick={() => signOut(auth)}>🚪 Logout</button>
       </div>
+
       <div className="adm-layout">
         <div className="adm-sidebar">
           <div style={{ marginBottom: '1.2rem' }}>
@@ -163,19 +163,14 @@ function AdminPage({
             <>
               <div className="a-hdr">
                 <div className="a-title">📊 Dashboard</div>
-                <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
-                  <span style={{ fontSize: '0.72rem', color: 'var(--green)' }}>🔥 Firebase + Google Drive</span>
-                  <button className="btn btn-primary" style={{ padding: '5px 12px', fontSize: '0.7rem' }} onClick={refreshSheets} disabled={sheetLoading}>
-                    {sheetLoading ? '⏳ Syncing…' : '🔄 Sync All from Sheet'}
-                  </button>
-                </div>
+                <span style={{ fontSize: '0.72rem', color: 'var(--green)' }}>🔥 Firebase + Google Drive</span>
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(145px,1fr))', gap: '0.8rem', marginBottom: '1.4rem' }}>
                 {[
-                  { l: 'RTZ Routes (DB)',  v: routes.length,       i: '🗺', c: 'var(--cyan)' },
-                  { l: 'Chart Files (DB)', v: charts.length,       i: '📊', c: 'var(--gold)' },
-                  { l: 'Sheet Routes',     v: sheetRoutes.length,  i: '🔄', c: 'var(--green)' },
-                  { l: 'Sheet Charts',     v: sheetCharts.length,  i: '🔄', c: '#A78BFA' },
+                  { l: 'RTZ Routes (DB)',  v: routes.length,      i: '🗺', c: 'var(--cyan)' },
+                  { l: 'Chart Files (DB)', v: charts.length,      i: '📊', c: 'var(--gold)' },
+                  { l: 'Sheet Routes',     v: sheetRoutes.length, i: '🔄', c: 'var(--green)' },
+                  { l: 'Sheet Charts',     v: sheetCharts.length, i: '🔄', c: '#A78BFA' },
                   { l: 'Links Active',     v: [...routes, ...charts].filter(f => f.fileUrl).length, i: '✅', c: 'var(--green)' },
                   { l: 'ECDIS Brands',     v: ECDIS_BRANDS.length, i: '🖥', c: 'var(--text2)' },
                 ].map(s => (
@@ -186,11 +181,28 @@ function AdminPage({
                   </div>
                 ))}
               </div>
+
+              {/* Quick sync buttons on dashboard */}
+              <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: '1rem', marginBottom: '1rem' }}>
+                <div style={{ fontFamily: 'Orbitron,monospace', fontSize: '0.78rem', marginBottom: '0.8rem', color: 'var(--gold)' }}>⚡ Quick Sync — Each button is independent</div>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <button className="btn btn-primary" onClick={refreshRoutes} disabled={routesLoading}>
+                    {routesLoading ? <><div className="spin" style={{ width: 12, height: 12 }} /> Syncing Routes…</> : '🔄 Sync Routes'}
+                  </button>
+                  <button className="btn btn-gold" onClick={refreshCharts} disabled={chartsLoading}>
+                    {chartsLoading ? <><div className="spin" style={{ width: 12, height: 12 }} /> Syncing Charts…</> : '🔄 Sync Charts'}
+                  </button>
+                  <button className="btn btn-green" onClick={refreshPorts} disabled={portsLoading}>
+                    {portsLoading ? <><div className="spin" style={{ width: 12, height: 12 }} /> Syncing Ports…</> : '🔄 Sync Ports'}
+                  </button>
+                </div>
+              </div>
+
               <div className="info-box">
-                <strong style={{ color: 'var(--gold)' }}>📋 How syncing works:</strong><br />
-                Upload files to Google Drive → App Script adds file name + link to Google Sheet automatically →
-                Come here and click <strong>Sync Routes / Sync Charts / Sync Ports</strong> →
-                Data saves to Firebase permanently → All users see updated data instantly. No repeated syncing needed.
+                <strong style={{ color: 'var(--gold)' }}>📋 How it works:</strong><br />
+                Upload to Google Drive → App Script adds link to Google Sheet automatically →
+                Click the relevant Sync button above → Data saves to Firebase → All users get it instantly.
+                Each sync is <strong style={{ color: 'var(--cyan)' }}>independent</strong> — syncing Charts does NOT affect Routes or Ports.
               </div>
             </>
           )}
@@ -306,114 +318,115 @@ function AdminPage({
             </>
           )}
 
-          {/* ─── SYNC ROUTES (Sheet → Firebase) ────────────────────────── */}
+          {/* ─── SYNC ROUTES ───────────────────────────────────────────── */}
           {section === 'sheet-routes' && (
             <>
               <div className="a-hdr">
                 <div className="a-title">🔄 Sync Routes — Sheet → Firebase</div>
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                   <span className="badge">{sheetRoutes.length} in Firebase</span>
-                  {/* ✅ FIX: Only syncs routes, not everything */}
-                  <button className="btn btn-primary" style={{ padding: '5px 12px', fontSize: '0.72rem' }} onClick={refreshRoutes} disabled={sheetLoading}>
-                    {sheetLoading ? '⏳ Syncing…' : '🔄 Sync Routes Now'}
+                  {/* ✅ Only routesLoading — Charts & Ports unaffected */}
+                  <button className="btn btn-primary" style={{ padding: '5px 12px', fontSize: '0.72rem' }} onClick={refreshRoutes} disabled={routesLoading}>
+                    {routesLoading
+                      ? <><div className="spin" style={{ width: 12, height: 12 }} /> Syncing Routes…</>
+                      : '🔄 Sync Routes Now'}
                   </button>
                 </div>
               </div>
               <div className="info-box" style={{ fontSize: '0.74rem' }}>
-                📡 Fetches route file names + Google Drive links from your Google Sheet and saves them permanently to Firebase.
-                All users will see updated routes immediately after sync.<br />
-                <span style={{ color: 'var(--cyan)' }}>Sheet ID: {'{ROUTE_SHEET_ID}'}</span>
+                📡 Fetches route file names + Google Drive links from your Google Sheet → saves to Firebase permanently.
+                Only routes are updated. Charts and Ports are <strong style={{ color: 'var(--cyan)' }}>not affected</strong>.
               </div>
-              {sheetLoading
-                ? <div className="loading"><div className="spin" /><span>Fetching routes from Google Sheet → Saving to Firebase…</span></div>
+              {routesLoading
+                ? <div className="loading"><div className="spin" /><span>Fetching routes from Sheet → Saving to Firebase…</span></div>
                 : sheetRoutes.length === 0
                   ? <div className="empty"><div className="empty-icon">🗺</div><div className="empty-t">No Routes in Firebase Yet</div><div className="empty-d">Add rows to your Google Sheet then click Sync Routes Now</div></div>
                   : <div className="tw">
                     <table className="tbl">
-                      <thead><tr><th>#</th>{Object.keys(sheetRoutes[0] || {}).map(col => <th key={col}>{col}</th>)}</tr></thead>
-                      <tbody>{sheetRoutes.map((row, i) => (
+                      <thead><tr><th>#</th>{Object.keys(sheetRoutes[0] || {}).slice(0, 5).map(col => <th key={col}>{col}</th>)}</tr></thead>
+                      <tbody>{sheetRoutes.slice(0, 100).map((row, i) => (
                         <tr key={i}>
                           <td style={{ color: 'var(--text3)', fontSize: '0.7rem' }}>{i + 1}</td>
-                          {Object.keys(sheetRoutes[0] || {}).map(col => (
+                          {Object.keys(sheetRoutes[0] || {}).slice(0, 5).map(col => (
                             <td key={col} style={{ fontSize: '0.76rem', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                               {col.toLowerCase().includes('url') || col.toLowerCase().includes('link')
                                 ? row[col] ? <a href={row[col]} target="_blank" rel="noreferrer" style={{ color: 'var(--green)', fontSize: '0.7rem' }}>✅ Link</a> : <span style={{ color: 'var(--red)', fontSize: '0.7rem' }}>❌</span>
-                                : <span style={{ color: col.toLowerCase().includes('name') || col.toLowerCase().includes('file') ? 'var(--cyan)' : 'var(--text2)' }}>{row[col] || '—'}</span>}
+                                : <span style={{ color: col.toLowerCase().includes('name') ? 'var(--cyan)' : 'var(--text2)' }}>{row[col] || '—'}</span>}
                             </td>
                           ))}
                         </tr>
                       ))}</tbody>
                     </table>
+                    {sheetRoutes.length > 100 && <div style={{ padding: '8px', textAlign: 'center', fontSize: '0.72rem', color: 'var(--text3)' }}>Showing first 100 of {sheetRoutes.length} routes</div>}
                   </div>
               }
             </>
           )}
 
-          {/* ─── SYNC CHARTS (Sheet → Firebase) ────────────────────────── */}
+          {/* ─── SYNC CHARTS ───────────────────────────────────────────── */}
           {section === 'sheet-charts' && (
             <>
               <div className="a-hdr">
                 <div className="a-title">🔄 Sync Charts — Sheet → Firebase</div>
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                   <span className="badge badge-gold">{sheetCharts.length} in Firebase</span>
-                  {/* ✅ FIX: Only syncs charts, not everything */}
-                  <button className="btn btn-gold" style={{ padding: '5px 12px', fontSize: '0.72rem' }} onClick={refreshCharts} disabled={sheetLoading}>
-                    {sheetLoading ? '⏳ Syncing…' : '🔄 Sync Charts Now'}
+                  {/* ✅ Only chartsLoading — Routes & Ports unaffected */}
+                  <button className="btn btn-gold" style={{ padding: '5px 12px', fontSize: '0.72rem' }} onClick={refreshCharts} disabled={chartsLoading}>
+                    {chartsLoading
+                      ? <><div className="spin" style={{ width: 12, height: 12 }} /> Syncing Charts…</>
+                      : '🔄 Sync Charts Now'}
                   </button>
                 </div>
               </div>
               <div className="info-box" style={{ fontSize: '0.74rem' }}>
-                📡 Fetches ECDIS chart file names + links from your Google Sheet and saves permanently to Firebase.
-                All users see updated charts immediately after sync.
+                📡 Fetches ECDIS chart names + links from your Google Sheet → saves to Firebase permanently.
+                Only charts are updated. Routes and Ports are <strong style={{ color: 'var(--gold)' }}>not affected</strong>.
               </div>
-              {sheetLoading
-                ? <div className="loading"><div className="spin" /><span>Fetching charts from Google Sheet → Saving to Firebase…</span></div>
+              {chartsLoading
+                ? <div className="loading"><div className="spin" /><span>Fetching charts from Sheet → Saving to Firebase…</span></div>
                 : sheetCharts.length === 0
                   ? <div className="empty"><div className="empty-icon">📊</div><div className="empty-t">No Charts in Firebase Yet</div><div className="empty-d">Add rows to your ECDIS Charts Google Sheet then click Sync Charts Now</div></div>
                   : <div className="tw">
                     <table className="tbl">
-                      <thead><tr><th>#</th>{Object.keys(sheetCharts[0] || {}).map(col => <th key={col}>{col}</th>)}</tr></thead>
-                      <tbody>{sheetCharts.map((row, i) => {
-                        const brandCol = Object.keys(row).find(k => k.toLowerCase().includes('brand') || k.toLowerCase().includes('ecdis'));
-                        const brand = brandCol ? ECDIS_BRANDS.find(b => row[brandCol]?.toLowerCase().includes(b.name.toLowerCase()) || row[brandCol]?.toLowerCase().includes(b.id)) : null;
-                        return (
-                          <tr key={i}>
-                            <td style={{ color: 'var(--text3)', fontSize: '0.7rem' }}>{i + 1}</td>
-                            {Object.keys(sheetCharts[0] || {}).map(col => (
-                              <td key={col} style={{ fontSize: '0.76rem', maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                {col.toLowerCase().includes('url') || col.toLowerCase().includes('link')
-                                  ? row[col] ? <a href={row[col]} target="_blank" rel="noreferrer" style={{ color: 'var(--green)', fontSize: '0.7rem' }}>✅ Link</a> : <span style={{ color: 'var(--red)', fontSize: '0.7rem' }}>❌</span>
-                                  : col === brandCol && brand
-                                    ? <span style={{ color: brand.color, fontWeight: 600 }}>{brand.emoji} {row[col]}</span>
-                                    : <span style={{ color: col.toLowerCase().includes('name') || col.toLowerCase().includes('file') ? 'var(--gold)' : 'var(--text2)' }}>{row[col] || '—'}</span>}
-                              </td>
-                            ))}
-                          </tr>
-                        );
-                      })}</tbody>
+                      <thead><tr><th>#</th>{Object.keys(sheetCharts[0] || {}).slice(0, 5).map(col => <th key={col}>{col}</th>)}</tr></thead>
+                      <tbody>{sheetCharts.slice(0, 100).map((row, i) => (
+                        <tr key={i}>
+                          <td style={{ color: 'var(--text3)', fontSize: '0.7rem' }}>{i + 1}</td>
+                          {Object.keys(sheetCharts[0] || {}).slice(0, 5).map(col => (
+                            <td key={col} style={{ fontSize: '0.76rem', maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {col.toLowerCase().includes('url') || col.toLowerCase().includes('link')
+                                ? row[col] ? <a href={row[col]} target="_blank" rel="noreferrer" style={{ color: 'var(--green)', fontSize: '0.7rem' }}>✅ Link</a> : <span style={{ color: 'var(--red)', fontSize: '0.7rem' }}>❌</span>
+                                : <span style={{ color: col.toLowerCase().includes('name') ? 'var(--gold)' : 'var(--text2)' }}>{row[col] || '—'}</span>}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}</tbody>
                     </table>
+                    {sheetCharts.length > 100 && <div style={{ padding: '8px', textAlign: 'center', fontSize: '0.72rem', color: 'var(--text3)' }}>Showing first 100 of {sheetCharts.length} charts</div>}
                   </div>
               }
             </>
           )}
 
-          {/* ─── SYNC PORTS (Sheet → Firebase) ─────────────────────────── */}
+          {/* ─── SYNC PORTS ────────────────────────────────────────────── */}
           {section === 'port-search' && (
             <>
               <div className="a-hdr">
                 <div className="a-title">⚓ Sync Ports — Sheet → Firebase</div>
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                  {/* ✅ FIX: Only syncs ports, not everything */}
-                  <button className="btn btn-primary" style={{ padding: '5px 12px', fontSize: '0.72rem' }} onClick={refreshPorts} disabled={sheetLoading}>
-                    {sheetLoading ? '⏳ Syncing…' : '🔄 Sync Port Database'}
+                  {/* ✅ Only portsLoading — Routes & Charts unaffected */}
+                  <button className="btn btn-green" style={{ padding: '5px 12px', fontSize: '0.72rem' }} onClick={refreshPorts} disabled={portsLoading}>
+                    {portsLoading
+                      ? <><div className="spin" style={{ width: 12, height: 12 }} /> Syncing Ports…</>
+                      : '🔄 Sync Port Database'}
                   </button>
                 </div>
               </div>
               <div className="info-box">
-                📡 Fetches all 25,000+ ports from your Google Sheet and saves permanently to Firebase.
-                Route Planner and Port Search will use this data for all users instantly after sync.
+                📡 Fetches all ports from your Google Sheet → saves to Firebase permanently.
+                Only ports are updated. Routes and Charts are <strong style={{ color: 'var(--green)' }}>not affected</strong>.
               </div>
-              <PortSearchPage portsDb={PORTS_DB} sheetLoading={sheetLoading} refreshSheets={refreshPorts} />
+              <PortSearchPage portsDb={PORTS_DB} sheetLoading={portsLoading} refreshSheets={refreshPorts} />
             </>
           )}
 
@@ -428,16 +441,16 @@ function AdminPage({
                   <button className="btn btn-secondary" style={{ padding: '5px 10px', fontSize: '0.72rem' }} onClick={loadUsers}>🔄 Refresh</button>
                 </div>
               </div>
-              <div className="info-box">🛡 <strong style={{ color: 'var(--text)' }}>Access Control</strong> — Block suspicious users instantly. Blocked users are auto-logged out.</div>
+              <div className="info-box">🛡 <strong style={{ color: 'var(--text)' }}>Access Control</strong> — Block suspicious users instantly.</div>
               {users.length === 0
                 ? <div className="empty"><div className="empty-icon">👥</div><div className="empty-t">No Users Yet</div><div className="empty-d">Users appear here after they register</div></div>
                 : <div className="tw">
                   <table className="tbl">
                     <thead><tr><th>#</th><th>Name</th><th>Email</th><th>Phone</th><th>Joined</th><th>Status</th><th>Action</th></tr></thead>
                     <tbody>{users.map((u, i) => (
-                      <tr key={u.id} style={{ opacity: u.blocked ? 0.7 : 1, background: u.blocked ? 'rgba(255,60,60,0.04)' : 'transparent' }}>
+                      <tr key={u.id} style={{ opacity: u.blocked ? 0.7 : 1 }}>
                         <td style={{ color: 'var(--text3)' }}>{i + 1}</td>
-                        <td style={{ color: u.blocked ? '#ff6b6b' : 'var(--cyan)', fontWeight: 600 }}>{u.blocked && <span style={{ marginRight: 4 }}>⛔</span>}{u.name || '—'}</td>
+                        <td style={{ color: u.blocked ? '#ff6b6b' : 'var(--cyan)', fontWeight: 600 }}>{u.blocked && '⛔ '}{u.name || '—'}</td>
                         <td style={{ color: 'var(--text2)', fontSize: '0.78rem' }}>{u.email}</td>
                         <td style={{ color: 'var(--gold)', fontSize: '0.78rem' }}>{u.phone || '—'}</td>
                         <td style={{ color: 'var(--text2)', fontSize: '0.72rem' }}>{u.createdAt?.toDate?.()?.toLocaleDateString() || '—'}</td>
