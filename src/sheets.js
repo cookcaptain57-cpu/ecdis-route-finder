@@ -264,7 +264,7 @@ downloadUrl: (r.downloadUrl || ‘’).trim(),
 fileId:      (r.fileId      || ‘’).trim(),
 mimeType:    (r.mimeType    || ‘’).trim(),
 }));
-return […libNorm, …swNorm].filter(r => r.title && r.category);
+return [...libNorm, ...swNorm].filter(r => r.title && r.category);
 };
 
 // 1. Try network first
@@ -277,7 +277,7 @@ const lib = libRes.status === ‘fulfilled’ ? libRes.value : [];
 const sw  = swRes.status  === ‘fulfilled’ ? swRes.value  : [];
 const merged = normalise(lib, sw);
 
-```
+
 // Save to IDB only if we got real data
 if (merged.length > 0) {
   try { await _idbWrite(IDB_LIBRARY, merged); } catch {}
@@ -285,7 +285,7 @@ if (merged.length > 0) {
 
 // Return network data even if empty (so UI shows correct state)
 return merged;
-```
+
 
 } catch (networkErr) {
 console.warn(‘fetchLibrarySheet network failed, trying IDB cache:’, networkErr.message);
