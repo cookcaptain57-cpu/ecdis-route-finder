@@ -1,28 +1,31 @@
 /* eslint-disable */
-// src/App.jsx — Main shell only. All pages are in src/pages/, components in src/components/
+// src/App.jsx
 import { useState, useEffect } from "react";
 import { auth, db } from "./firebase";
 import { signOut, onAuthStateChanged, setPersistence, browserLocalPersistence } from "firebase/auth";
 import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
 
 import { PORTS_DB, ADMIN_EMAIL, normalizePortRow } from "./constants";
-import { fetchRouteSheet, fetchChartSheet, fetchPortsFromSheet, clearSheetCache,
-         loadSheetsFromFirestore, pushSheetsToFirestore } from "./sheets";
+import {
+  fetchRouteSheet, fetchChartSheet, fetchPortsFromSheet,
+  syncRoutesToFirestore, syncChartsToFirestore, syncPortsToFirestore,
+  getFirestoreMeta,
+  loadRoutesFromFirestore, loadChartsFromFirestore, loadPortsFromFirestore,
+  idbGet, idbSet,
+} from "./sheets";
 
-// Pages
-import Footer from "./components/Footer";
-import Notif  from "./components/Notif";
-import HomePage             from "./Pages/HomePage";
-import RoutesPage           from "./Pages/RoutesPage";
-import ChartsPage           from "./Pages/ChartsPage";
-import RoutePlannerPage     from "./Pages/RoutePlannerPage";
-import PortSearchPage       from "./Pages/PortSearchPage";
-import LoginPage            from "./Pages/LoginPage";
-import NavModePage          from "./Pages/NavModePage";
-import MaritimeLibraryPage  from "./Pages/MaritimeLibraryPage";
-import AdminPage            from "./Pages/AdminPage";
+import Footer              from "./components/Footer";
+import Notif               from "./components/Notif";
+import HomePage            from "./Pages/HomePage";
+import RoutesPage          from "./Pages/RoutesPage";
+import ChartsPage          from "./Pages/ChartsPage";
+import RoutePlannerPage    from "./Pages/RoutePlannerPage";
+import PortSearchPage      from "./Pages/PortSearchPage";
+import LoginPage           from "./Pages/LoginPage";
+import NavModePage         from "./Pages/NavModePage";
+import MaritimeLibraryPage from "./Pages/MaritimeLibraryPage";
+import AdminPage           from "./Pages/AdminPage";
 
-// ─── STYLES ───────────────────────────────────────────────────────────────────
 const S = `
   @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700;900&family=Exo+2:wght@300;400;500;600&display=swap');
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
@@ -215,35 +218,26 @@ const S = `
   .s-item span{font-size:1rem;}
 `;
 
-// ─── MAIN APP ─────────────────────────────────────────────────────────────────
 export default function App() {
-  const [tab, setTab] = useState('home');
-  const [searchQ, setSearchQ] = useState('');
-  const [notif, setNotif] = useState(null);
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [user, setUser] = useState(null);
-  const [userProfile, setUserProfile] = useState(null);
-  const [isBlocked, setIsBlocked] = useState(false);
-  const [routes, setRoutes] = useState([]);
-  const [charts, setCharts] = useState([]);
-  const [authChecked, setAuthChecked] = useState(false);
-  const [sheetRoutes, setSheetRoutes] = useState([]);
-  const [sheetCharts, setSheetCharts] = useState([]);
+  const [tab, setTab]                   = useState('home');
+  const [searchQ, setSearchQ]           = useState('');
+  const [notif, setNotif]               = useState(null);
+  const [menuOpen, setMenuOpen]         = useState(false);
+  const [user, setUser]                 = useState(null);
+  const [userProfile, setUserProfile]   = useState(null);
+  const [isBlocked, setIsBlocked]       = useState(false);
+  const [authChecked, setAuthChecked]   = useState(false);
+  const [routes, setRoutes]             = useState([]);
+  const [charts, setCharts]             = useState([]);
+  const [sheetRoutes, setSheetRoutes]   = useState([]);
+  const [sheetCharts, setSheetCharts]   = useState([]);
   const [sheetLoading, setSheetLoading] = useState(false);
-  const [portsDb, setPortsDb] = useState(PORTS_DB);
-
-  // ─── NEW: authInitDone ─────────────────────────────────────────────────────
-  // Fires in ~100ms from Firebase local cache — hides spinner immediately.
-  // authChecked fires only after Firestore getDoc (3-8 sec on slow internet).
-  // Spinner now uses authInitDone so users see the app almost instantly.
-  const [authInitDone, setAuthInitDone] = useState(false);
+  const [portsDb, setPortsDb]           = useState(PORTS_DB);
 
   const isAdmin = user?.email === ADMIN_EMAIL;
-  const notify = (msg, type = 'success') => setNotif({ msg, type, key: Date.now() });
+  const notify  = (msg, type = 'success') => setNotif({ msg, type, key: Date.now() });
 
-  // ─── applyPortData: shared logic to merge port data into portsDb ───────────
-  // Extracted so both fetchSheets and Firestore load can use same logic.
-  // Function name, parameters, return value — all unchanged from original.
+  // ─── Apply port data (merge with seed) ──────────────────────────────────
   const applyPortData = (d3) => {
     if (!Array.isArray(d3) || d3.length === 0) return;
     const normalized = d3.map(normalizePortRow).filter(Boolean);
@@ -260,124 +254,147 @@ export default function App() {
     setPortsDb([...seedMap.values()]);
   };
 
-  // ─── fetchSheets: MODIFIED — now tries Firestore first if IDB empty ────────
-  // Priority: IDB (instant) → Firestore (fast, always has data) → Google Sheet
-  // All existing function calls unchanged — same name, same behavior externally.
-  const fetchSheets = () => {
-    setSheetLoading(true);
-
-    // Step 1: Try IDB first (instant if data exists)
-    Promise.all([fetchRouteSheet(), fetchChartSheet(), fetchPortsFromSheet()])
-      .then(([d1, d2, d3]) => {
-        // If IDB had data — all 3 return instantly, we are done
-        if (
-          (Array.isArray(d1) && d1.length > 0) ||
-          (Array.isArray(d2) && d2.length > 0) ||
-          (Array.isArray(d3) && d3.length > 0)
-        ) {
-          if (Array.isArray(d1) && d1.length > 0) setSheetRoutes(d1);
-          if (Array.isArray(d2) && d2.length > 0) setSheetCharts(d2);
-          applyPortData(d3);
-          setSheetLoading(false);
-          return;
-        }
-
-        // Step 2: IDB was empty — try Firestore (admin synced data lives here)
-        // This is the key fix: new users / new devices get data from Firestore
-        // instead of waiting for 12 Google Sheet network requests
-        loadSheetsFromFirestore()
-          .then(({ routes: fr, charts: fc, ports: fp }) => {
-            if (fr.length > 0) setSheetRoutes(fr);
-            if (fc.length > 0) setSheetCharts(fc);
-            applyPortData(fp);
-            // If Firestore also had nothing (first ever sync not done yet)
-            // fall through to Google Sheet as last resort
-            if (fr.length === 0 && fc.length === 0) {
-              // Step 3: Last resort — direct Google Sheet fetch
-              // This only runs if admin has never synced yet
-              Promise.all([fetchRouteSheet(), fetchChartSheet(), fetchPortsFromSheet()])
-                .then(([s1, s2, s3]) => {
-                  if (Array.isArray(s1)) setSheetRoutes(s1);
-                  if (Array.isArray(s2)) setSheetCharts(s2);
-                  applyPortData(s3);
-                })
-                .catch(e => console.log('Sheet fetch fallback error', e))
-                .finally(() => setSheetLoading(false));
-            } else {
-              setSheetLoading(false);
-            }
-          })
-          .catch(() => setSheetLoading(false));
-      })
-      .catch(e => { console.log('Sheet fetch error', e); setSheetLoading(false); });
-  };
-
-  // ─── forceRefreshSheets: called by Admin Sync Now button ──────────────────
-  // MODIFIED: after fresh fetch, also pushes to Firestore so all users get it.
-  // clearSheetCache + fetchSheets logic unchanged — only Firestore push added.
-  const forceRefreshSheets = async () => {
-    await clearSheetCache();
-    setSheetLoading(true);
+  // ─── Load app data on startup ────────────────────────────────────────────
+  // Flow: get Firestore meta (1 read) → compare with IDB versions
+  // If version matches IDB → load from IDB (instant, 0 extra reads)
+  // If version differs → load from Firestore chunks → save to IDB
+  const loadAppData = async () => {
     try {
-      const [d1, d2, d3] = await Promise.all([
-        fetchRouteSheet(),
-        fetchChartSheet(),
-        fetchPortsFromSheet(),
-      ]);
-      if (Array.isArray(d1)) setSheetRoutes(d1);
-      if (Array.isArray(d2)) setSheetCharts(d2);
-      applyPortData(d3);
+      const meta = await getFirestoreMeta();
+      if (!meta) return; // Admin hasn't synced yet — app works but no sheet data
 
-      // NEW: push fresh data to Firestore so all users get updated data
-      // This is the only place pushSheetsToFirestore is called
-      await pushSheetsToFirestore(d1, d2, d3);
-      notify('✅ Synced — all users will get updated data', 'success');
-    } catch (e) {
-      console.log('Force refresh error', e);
-      notify('⚠ Sync error — check connection', 'error');
-    }
+      setSheetLoading(true);
+
+      const [cachedRv, cachedCv, cachedPv] = await Promise.all([
+        idbGet('routes_v'),
+        idbGet('charts_v'),
+        idbGet('ports_v'),
+      ]);
+
+      await Promise.all([
+        // Routes
+        (async () => {
+          if (meta.rv && cachedRv === meta.rv) {
+            const d = await idbGet('routes_d');
+            if (d) setSheetRoutes(d);
+          } else if (meta.rv && meta.rc) {
+            const d = await loadRoutesFromFirestore(meta.rc);
+            setSheetRoutes(d);
+            await idbSet('routes_d', d);
+            await idbSet('routes_v', meta.rv);
+          }
+        })(),
+        // Charts
+        (async () => {
+          if (meta.cv && cachedCv === meta.cv) {
+            const d = await idbGet('charts_d');
+            if (d) setSheetCharts(d);
+          } else if (meta.cv && meta.cc) {
+            const d = await loadChartsFromFirestore(meta.cc);
+            setSheetCharts(d);
+            await idbSet('charts_d', d);
+            await idbSet('charts_v', meta.cv);
+          }
+        })(),
+        // Ports
+        (async () => {
+          if (meta.pv && cachedPv === meta.pv) {
+            const d = await idbGet('ports_d');
+            if (d) applyPortData(d);
+          } else if (meta.pv && meta.pc) {
+            const d = await loadPortsFromFirestore(meta.pc);
+            applyPortData(d);
+            await idbSet('ports_d', d);
+            await idbSet('ports_v', meta.pv);
+          }
+        })(),
+      ]);
+    } catch (e) { console.warn('loadAppData error:', e); }
     setSheetLoading(false);
   };
 
-  useEffect(() => { fetchSheets(); }, []);
+  // ─── Admin: Sync Routes only (Sheet → Firestore) ─────────────────────────
+  const refreshRoutes = async () => {
+    setSheetLoading(true);
+    notify('📡 Fetching routes from Sheet…', 'info');
+    try {
+      const d = await fetchRouteSheet();
+      if (!Array.isArray(d) || d.length === 0) { notify('No routes found in Sheet', 'error'); setSheetLoading(false); return; }
+      notify('🔄 Saving to Firebase…', 'info');
+      await syncRoutesToFirestore(d);
+      setSheetRoutes(d);
+      await idbSet('routes_d', d);
+      const meta = await getFirestoreMeta();
+      if (meta?.rv) await idbSet('routes_v', meta.rv);
+      notify(`✅ ${d.length} routes synced to Firebase`, 'success');
+    } catch (e) { notify('Route sync failed: ' + e.message, 'error'); }
+    setSheetLoading(false);
+  };
 
+  // ─── Admin: Sync Charts only (Sheet → Firestore) ─────────────────────────
+  const refreshCharts = async () => {
+    setSheetLoading(true);
+    notify('📡 Fetching charts from Sheet…', 'info');
+    try {
+      const d = await fetchChartSheet();
+      if (!Array.isArray(d) || d.length === 0) { notify('No charts found in Sheet', 'error'); setSheetLoading(false); return; }
+      notify('🔄 Saving to Firebase…', 'info');
+      await syncChartsToFirestore(d);
+      setSheetCharts(d);
+      await idbSet('charts_d', d);
+      const meta = await getFirestoreMeta();
+      if (meta?.cv) await idbSet('charts_v', meta.cv);
+      notify(`✅ ${d.length} charts synced to Firebase`, 'success');
+    } catch (e) { notify('Chart sync failed: ' + e.message, 'error'); }
+    setSheetLoading(false);
+  };
+
+  // ─── Admin: Sync Ports only (Sheet → Firestore) ──────────────────────────
+  const refreshPorts = async () => {
+    setSheetLoading(true);
+    notify('📡 Fetching ports from Sheet…', 'info');
+    try {
+      const d = await fetchPortsFromSheet();
+      if (!Array.isArray(d) || d.length === 0) { notify('No ports found in Sheet', 'error'); setSheetLoading(false); return; }
+      notify('🔄 Saving to Firebase…', 'info');
+      await syncPortsToFirestore(d);
+      applyPortData(d);
+      await idbSet('ports_d', d);
+      const meta = await getFirestoreMeta();
+      if (meta?.pv) await idbSet('ports_v', meta.pv);
+      notify(`✅ ${d.length} ports synced to Firebase`, 'success');
+    } catch (e) { notify('Port sync failed: ' + e.message, 'error'); }
+    setSheetLoading(false);
+  };
+
+  // ─── Admin: Sync All (Sheet → Firestore) ─────────────────────────────────
+  const refreshSheets = async () => {
+    await refreshRoutes();
+    await refreshCharts();
+    await refreshPorts();
+  };
+
+  // Load data on app start
+  useEffect(() => { loadAppData(); }, []);
+
+  // ─── Auth listener ────────────────────────────────────────────────────────
   useEffect(() => {
     setPersistence(auth, browserLocalPersistence).catch(() => {});
     const unsub = onAuthStateChanged(auth, async u => {
       setUser(u);
-
-      // ─── NEW: setAuthInitDone immediately ────────────────────────────────
-      // Firebase resolves this from local cache in ~100ms.
-      // Spinner disappears here — user sees app immediately.
-      // Firestore profile check continues in background below.
-      setAuthInitDone(true);
-
       if (u) {
         try {
           const snap = await getDoc(doc(db, 'users', u.uid));
           if (snap.exists()) {
             const profile = { id: snap.id, ...snap.data() };
             if (profile.blocked) {
-              setIsBlocked(true);
-              await signOut(auth);
-              setUser(null);
-              setUserProfile(null);
-              setAuthChecked(true);
-              return;
+              setIsBlocked(true); await signOut(auth);
+              setUser(null); setUserProfile(null); setAuthChecked(true); return;
             }
-            setIsBlocked(false);
-            setUserProfile(profile);
-          } else {
-            setIsBlocked(false);
-            setUserProfile(null);
-          }
-        } catch {
-          setUserProfile(null);
-          setIsBlocked(false);
-        }
-      } else {
-        setUserProfile(null);
-      }
+            setIsBlocked(false); setUserProfile(profile);
+          } else { setIsBlocked(false); setUserProfile(null); }
+        } catch { setUserProfile(null); setIsBlocked(false); }
+      } else { setUserProfile(null); }
       setAuthChecked(true);
     });
     return () => unsub();
@@ -409,28 +426,38 @@ export default function App() {
     <>
       <style>{S}</style>
 
-      {/* ─── MODIFIED: spinner shows only until authInitDone (~100ms) ─────────
-          Previously: !authChecked → waited for Firestore getDoc (3-8 sec)
-          Now: !authChecked && !authInitDone → disappears almost instantly    */}
-      {!authChecked && !authInitDone && (
-        <div style={{ position: 'fixed', inset: 0, background: 'var(--bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999 }}>
-          <div style={{ textAlign: 'center' }}>
-            <div className="spin" style={{ width: 40, height: 40, margin: '0 auto 1rem' }} />
-            <div style={{ fontFamily: 'Orbitron,monospace', fontSize: '0.78rem', color: 'var(--cyan)' }}>NAVISPHERE<span style={{ color: 'var(--cyan)' }}>X</span></div>
-          </div>
+      {/* ✅ FIX: No more full-screen auth blocker
+          Dashboard shows INSTANTLY. Auth loads in background (<1s).
+          Small top-right indicator shows while auth is checking. */}
+      {!authChecked && (
+        <div style={{
+          position: 'fixed', top: 68, right: 12, zIndex: 9998,
+          background: 'rgba(4,12,26,0.95)', border: '1px solid var(--border)',
+          borderRadius: 8, padding: '5px 10px', fontSize: '0.68rem',
+          color: 'var(--cyan)', display: 'flex', alignItems: 'center', gap: 6,
+          backdropFilter: 'blur(10px)',
+        }}>
+          <div className="spin" style={{ width: 10, height: 10 }} />
+          Connecting…
         </div>
       )}
 
       <div className="grid-bg" />
       <div className="app">
+
         <nav className="nav">
           <div className="nav-brand" onClick={() => switchTab('home')} style={{ cursor: 'pointer' }}>
             <div className="nav-logo">🧭</div>
-            <div><div className="nav-title">NAVISPHERE<span style={{ color: 'var(--cyan)' }}>X</span></div><div className="nav-sub">MARINE</div></div>
+            <div>
+              <div className="nav-title">NAVISPHERE<span style={{ color: 'var(--cyan)' }}>X</span></div>
+              <div className="nav-sub">MARINE</div>
+            </div>
           </div>
           <div className="nav-tabs">
             {TABS.map(t => (
-              <button key={t.k} className={`ntab ${t.cls || ''} ${tab === t.k ? 'active' : ''}`} onClick={() => switchTab(t.k)}>{t.i} {t.l}</button>
+              <button key={t.k} className={`ntab ${t.cls || ''} ${tab === t.k ? 'active' : ''}`} onClick={() => switchTab(t.k)}>
+                {t.i} {t.l}
+              </button>
             ))}
             {user
               ? <div className="uc" onClick={() => { signOut(auth); notify('Logged out', 'info'); }}>
@@ -446,9 +473,15 @@ export default function App() {
         </nav>
 
         <div className={`mob-menu ${menuOpen ? 'open' : ''}`}>
-          {TABS.map(t => <button key={t.k} className={`mtab ${tab === t.k ? 'active' : ''}`} onClick={() => switchTab(t.k)}>{t.i} {t.l}</button>)}
+          {TABS.map(t => (
+            <button key={t.k} className={`mtab ${tab === t.k ? 'active' : ''}`} onClick={() => switchTab(t.k)}>
+              {t.i} {t.l}
+            </button>
+          ))}
           {user
-            ? <button className="mtab" onClick={() => { signOut(auth); notify('Logged out', 'info'); setMenuOpen(false); }}>🚪 Logout ({userProfile?.name?.split(' ')[0] || user.email.split('@')[0]})</button>
+            ? <button className="mtab" onClick={() => { signOut(auth); notify('Logged out', 'info'); setMenuOpen(false); }}>
+                🚪 Logout ({userProfile?.name?.split(' ')[0] || user.email.split('@')[0]})
+              </button>
             : <button className="mtab" onClick={() => switchTab('login')}>🔐 Login / Register</button>
           }
         </div>
@@ -458,37 +491,46 @@ export default function App() {
             <div style={{ maxWidth: 400, width: '100%', background: 'var(--card)', border: '2px solid rgba(255,60,60,0.5)', borderRadius: 16, padding: '2rem', textAlign: 'center' }}>
               <div style={{ fontSize: '3.5rem', marginBottom: '1rem' }}>⚠️</div>
               <div style={{ fontFamily: 'Orbitron,monospace', fontSize: '1rem', fontWeight: 700, color: '#ff6b6b', marginBottom: '0.5rem' }}>ACCESS SUSPENDED</div>
-              <div style={{ fontSize: '0.82rem', color: 'var(--text2)', lineHeight: 1.6, marginBottom: '1.2rem' }}>Suspicious or unauthorised login activity detected. Your access has been suspended by the administrator.</div>
+              <div style={{ fontSize: '0.82rem', color: 'var(--text2)', lineHeight: 1.6, marginBottom: '1.2rem' }}>Your access has been suspended by the administrator.</div>
               <a href="https://www.instagram.com/manish_the_navigator" target="_blank" rel="noreferrer"
                 style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, background: 'linear-gradient(135deg,#833ab4,#fd1d1d,#fcb045)', color: 'white', borderRadius: 10, padding: '12px 20px', textDecoration: 'none', fontWeight: 700, fontSize: '0.85rem', marginBottom: '1rem' }}>
                 <span style={{ fontSize: '1.2rem' }}>📸</span> Contact on Instagram
               </a>
-              <button style={{ marginTop: '1rem', background: 'transparent', border: '1px solid var(--border)', color: 'var(--text3)', borderRadius: 8, padding: '6px 16px', fontSize: '0.7rem', cursor: 'pointer' }} onClick={() => setIsBlocked(false)}>Dismiss</button>
+              <button style={{ marginTop: '1rem', background: 'transparent', border: '1px solid var(--border)', color: 'var(--text3)', borderRadius: 8, padding: '6px 16px', fontSize: '0.7rem', cursor: 'pointer' }}
+                onClick={() => setIsBlocked(false)}>Dismiss</button>
             </div>
           </div>
         )}
 
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, overflow: isPlannerFull ? 'hidden' : 'auto' }}>
+
           {tab === 'home'    && <HomePage routes={routes} charts={charts} onSearch={handleSearch} setTab={switchTab} user={user} portsDb={portsDb} />}
-          {tab === 'routes'  && <RoutesPage searchQuery={searchQ} notify={notify} user={user} setTab={switchTab} />}
-          {tab === 'charts'  && <ChartsPage notify={notify} user={user} setTab={switchTab} isAdmin={isAdmin} />}
+
+          {/* ✅ sheetRoutes + sheetCharts now passed → local instant search */}
+          {tab === 'routes'  && <RoutesPage searchQuery={searchQ} notify={notify} user={user} setTab={switchTab} sheetRoutes={sheetRoutes} sheetLoading={sheetLoading} />}
+          {tab === 'charts'  && <ChartsPage notify={notify} user={user} setTab={switchTab} isAdmin={isAdmin} sheetCharts={sheetCharts} sheetLoading={sheetLoading} />}
+
           {tab === 'planner' && <RoutePlannerPage notify={notify} sheetRoutes={[...routes, ...sheetRoutes]} portsDb={portsDb} />}
-          {tab === 'ports'   && <PortSearchPage portsDb={portsDb} sheetLoading={sheetLoading} refreshSheets={forceRefreshSheets} />}
+          {tab === 'ports'   && <PortSearchPage portsDb={portsDb} sheetLoading={sheetLoading} refreshSheets={refreshPorts} />}
           {tab === 'library' && <MaritimeLibraryPage setTab={switchTab} />}
           {tab === 'navmode' && <NavModePage notify={notify} sheetRoutes={[...routes, ...sheetRoutes]} portsDb={portsDb} setTab={switchTab} />}
           {tab === 'login'   && <LoginPage notify={notify} onLogin={(u, redirectTo) => { setUser(u); setTab(redirectTo || 'home'); }} />}
-          {tab === 'admin'   && (isAdmin
+
+          {tab === 'admin' && (isAdmin
             ? <AdminPage
                 notify={notify}
-                routes={routes}         setRoutes={setRoutes}
-                charts={charts}         setCharts={setCharts}
-                sheetRoutes={sheetRoutes}
-                sheetCharts={sheetCharts}
-                refreshSheets={forceRefreshSheets}
+                routes={routes}           setRoutes={setRoutes}
+                charts={charts}           setCharts={setCharts}
+                sheetRoutes={sheetRoutes} sheetCharts={sheetCharts}
+                refreshSheets={refreshSheets}
+                refreshRoutes={refreshRoutes}
+                refreshCharts={refreshCharts}
+                refreshPorts={refreshPorts}
                 sheetLoading={sheetLoading}
               />
             : <div className="section"><div className="empty"><div className="empty-icon">🔒</div><div className="empty-t">Admin Access Only</div></div></div>
           )}
+
           {!user && tab !== 'home' && tab !== 'login' && (
             <div style={{ display: 'flex', flex: 1, alignItems: 'center', justifyContent: 'center', padding: '2rem' }}>
               <div style={{ maxWidth: 380, width: '100%', background: 'var(--card)', border: '1px solid var(--border2)', borderRadius: 16, padding: '2rem', textAlign: 'center' }}>
