@@ -1,5 +1,5 @@
 /* eslint-disable */
-// src/pages/RoutePlannerPage.jsx
+// src/Pages/RoutePlannerPage.jsx
 import { useState, useEffect, useMemo } from "react";
 import { PORTS_DB } from "../constants";
 import { buildAutoRoute } from "../routing";
@@ -19,7 +19,8 @@ function RoutePlannerPage({ notify, sheetRoutes = [], portsDb = [] }) {
   const [playing, setPlaying] = useState(false);
   const [speed, setSpeed] = useState(5);
   const [clickAdd, setClickAdd] = useState(false);
-  const [overlays, setOverlays] = useState({ eca: false, seca: false, marpol: false, piracy: false, layover: false });
+  // CHANGED: added gebco and depthClick to overlays initial state
+  const [overlays, setOverlays] = useState({ eca: false, seca: false, marpol: false, piracy: false, layover: false, gebco: false, depthClick: false });
   const [mapMode, setMapMode] = useState('night');
   const [dbSuggestions, setDbSuggestions] = useState([]);
   const [showDbSugg, setShowDbSugg] = useState(false);
@@ -121,12 +122,15 @@ function RoutePlannerPage({ notify, sheetRoutes = [], portsDb = [] }) {
   const clearRoute = () => { setWaypoints([]); setPlaying(false); };
   const toggleOverlay = (k) => setOverlays(o => ({ ...o, [k]: !o[k] }));
 
+  // CHANGED: added gebco and depthClick entries to ovCfg
   const ovCfg = [
-    { k: 'eca', label: 'ECA', color: '#FF6B35', desc: 'Emission Control Area' },
-    { k: 'seca', label: 'SECA', color: '#FFB347', desc: 'Sulphur ECA' },
-    { k: 'marpol', label: 'MARPOL', color: '#9B59B6', desc: 'MARPOL Special Area' },
-    { k: 'piracy', label: 'Piracy', color: '#E74C3C', desc: 'Piracy Risk Area' },
-    { k: 'layover', label: 'Anchorage', color: '#3498DB', desc: 'Anchorage / Layover' },
+    { k: 'eca',        label: 'ECA',           color: '#FF6B35', desc: 'Emission Control Area' },
+    { k: 'seca',       label: 'SECA',          color: '#FFB347', desc: 'Sulphur ECA' },
+    { k: 'marpol',     label: 'MARPOL',        color: '#9B59B6', desc: 'MARPOL Special Area' },
+    { k: 'piracy',     label: 'Piracy',        color: '#E74C3C', desc: 'Piracy Risk Area' },
+    { k: 'layover',    label: 'Anchorage',     color: '#3498DB', desc: 'Anchorage / Layover' },
+    { k: 'gebco',      label: 'GEBCO Depth',   color: '#00B4D8', desc: 'GEBCO Bathymetry — colour-shaded sea depth (WMS)' },
+    { k: 'depthClick', label: 'Depth on Click',color: '#00C896', desc: 'Click any ocean point to show depth in metres (GEBCO 2020)' },
   ];
 
   return (
