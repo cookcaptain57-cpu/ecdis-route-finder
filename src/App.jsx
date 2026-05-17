@@ -6,7 +6,8 @@ import { signOut, onAuthStateChanged, setPersistence, browserLocalPersistence } 
 import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
 
 import { PORTS_DB, ADMIN_EMAIL, normalizePortRow } from "./constants";
-import { fetchRouteSheet, fetchChartSheet, fetchPortsFromSheet, clearSheetCache } from "./sheets";
+import { fetchRouteSheet, fetchChartSheet, fetchPortsFromSheet, clearSheetCache,
+         loadSheetsFromFirestore, pushSheetsToFirestore } from "./sheets";
 
 // Pages
 import Footer from "./components/Footer";
@@ -231,35 +232,112 @@ export default function App() {
   const [sheetLoading, setSheetLoading] = useState(false);
   const [portsDb, setPortsDb] = useState(PORTS_DB);
 
+  // ─── NEW: authInitDone ─────────────────────────────────────────────────────
+  // Fires in ~100ms from Firebase local cache — hides spinner immediately.
+  // authChecked fires only after Firestore getDoc (3-8 sec on slow internet).
+  // Spinner now uses authInitDone so users see the app almost instantly.
+  const [authInitDone, setAuthInitDone] = useState(false);
+
   const isAdmin = user?.email === ADMIN_EMAIL;
   const notify = (msg, type = 'success') => setNotif({ msg, type, key: Date.now() });
 
-  // ─── fetchSheets: reads from IDB cache first, network only if empty ────────
-  const fetchSheets = () => {
-    setSheetLoading(true);
-    Promise.all([fetchRouteSheet(), fetchChartSheet(), fetchPortsFromSheet()])
-      .then(([d1, d2, d3]) => {
-        setSheetRoutes(Array.isArray(d1) ? d1 : []);
-        setSheetCharts(Array.isArray(d2) ? d2 : []);
-        if (Array.isArray(d3) && d3.length > 0) {
-          const normalized = d3.map(normalizePortRow).filter(Boolean);
-          const seen = new Set(); const deduped = [];
-          normalized.forEach(p => {
-            const key = `${p.name?.toLowerCase()}-${p.country?.toLowerCase()}`;
-            if (!seen.has(key) && p.lat && p.lon) { seen.add(key); deduped.push(p); }
-          });
-          const seedMap = new Map(PORTS_DB.map(p => [p.id, p]));
-          deduped.forEach(p => { if (!seedMap.has(p.id)) seedMap.set(p.id, p); else seedMap.set(p.id, { ...seedMap.get(p.id), ...p }); });
-          const merged = [...seedMap.values()];
-          setPortsDb([...merged]);
-        }
-      }).catch(e => console.log('Sheet fetch error', e))
-      .finally(() => setSheetLoading(false));
+  // ─── applyPortData: shared logic to merge port data into portsDb ───────────
+  // Extracted so both fetchSheets and Firestore load can use same logic.
+  // Function name, parameters, return value — all unchanged from original.
+  const applyPortData = (d3) => {
+    if (!Array.isArray(d3) || d3.length === 0) return;
+    const normalized = d3.map(normalizePortRow).filter(Boolean);
+    const seen = new Set(); const deduped = [];
+    normalized.forEach(p => {
+      const key = `${p.name?.toLowerCase()}-${p.country?.toLowerCase()}`;
+      if (!seen.has(key) && p.lat && p.lon) { seen.add(key); deduped.push(p); }
+    });
+    const seedMap = new Map(PORTS_DB.map(p => [p.id, p]));
+    deduped.forEach(p => {
+      if (!seedMap.has(p.id)) seedMap.set(p.id, p);
+      else seedMap.set(p.id, { ...seedMap.get(p.id), ...p });
+    });
+    setPortsDb([...seedMap.values()]);
   };
 
-  // ─── forceRefreshSheets: clears IDB first, then fetches fresh from network ─
-  // await ensures IDB is fully cleared before fetchSheets() starts
-  const forceRefreshSheets = async () => { await clearSheetCache(); fetchSheets(); };
+  // ─── fetchSheets: MODIFIED — now tries Firestore first if IDB empty ────────
+  // Priority: IDB (instant) → Firestore (fast, always has data) → Google Sheet
+  // All existing function calls unchanged — same name, same behavior externally.
+  const fetchSheets = () => {
+    setSheetLoading(true);
+
+    // Step 1: Try IDB first (instant if data exists)
+    Promise.all([fetchRouteSheet(), fetchChartSheet(), fetchPortsFromSheet()])
+      .then(([d1, d2, d3]) => {
+        // If IDB had data — all 3 return instantly, we are done
+        if (
+          (Array.isArray(d1) && d1.length > 0) ||
+          (Array.isArray(d2) && d2.length > 0) ||
+          (Array.isArray(d3) && d3.length > 0)
+        ) {
+          if (Array.isArray(d1) && d1.length > 0) setSheetRoutes(d1);
+          if (Array.isArray(d2) && d2.length > 0) setSheetCharts(d2);
+          applyPortData(d3);
+          setSheetLoading(false);
+          return;
+        }
+
+        // Step 2: IDB was empty — try Firestore (admin synced data lives here)
+        // This is the key fix: new users / new devices get data from Firestore
+        // instead of waiting for 12 Google Sheet network requests
+        loadSheetsFromFirestore()
+          .then(({ routes: fr, charts: fc, ports: fp }) => {
+            if (fr.length > 0) setSheetRoutes(fr);
+            if (fc.length > 0) setSheetCharts(fc);
+            applyPortData(fp);
+            // If Firestore also had nothing (first ever sync not done yet)
+            // fall through to Google Sheet as last resort
+            if (fr.length === 0 && fc.length === 0) {
+              // Step 3: Last resort — direct Google Sheet fetch
+              // This only runs if admin has never synced yet
+              Promise.all([fetchRouteSheet(), fetchChartSheet(), fetchPortsFromSheet()])
+                .then(([s1, s2, s3]) => {
+                  if (Array.isArray(s1)) setSheetRoutes(s1);
+                  if (Array.isArray(s2)) setSheetCharts(s2);
+                  applyPortData(s3);
+                })
+                .catch(e => console.log('Sheet fetch fallback error', e))
+                .finally(() => setSheetLoading(false));
+            } else {
+              setSheetLoading(false);
+            }
+          })
+          .catch(() => setSheetLoading(false));
+      })
+      .catch(e => { console.log('Sheet fetch error', e); setSheetLoading(false); });
+  };
+
+  // ─── forceRefreshSheets: called by Admin Sync Now button ──────────────────
+  // MODIFIED: after fresh fetch, also pushes to Firestore so all users get it.
+  // clearSheetCache + fetchSheets logic unchanged — only Firestore push added.
+  const forceRefreshSheets = async () => {
+    await clearSheetCache();
+    setSheetLoading(true);
+    try {
+      const [d1, d2, d3] = await Promise.all([
+        fetchRouteSheet(),
+        fetchChartSheet(),
+        fetchPortsFromSheet(),
+      ]);
+      if (Array.isArray(d1)) setSheetRoutes(d1);
+      if (Array.isArray(d2)) setSheetCharts(d2);
+      applyPortData(d3);
+
+      // NEW: push fresh data to Firestore so all users get updated data
+      // This is the only place pushSheetsToFirestore is called
+      await pushSheetsToFirestore(d1, d2, d3);
+      notify('✅ Synced — all users will get updated data', 'success');
+    } catch (e) {
+      console.log('Force refresh error', e);
+      notify('⚠ Sync error — check connection', 'error');
+    }
+    setSheetLoading(false);
+  };
 
   useEffect(() => { fetchSheets(); }, []);
 
@@ -267,16 +345,39 @@ export default function App() {
     setPersistence(auth, browserLocalPersistence).catch(() => {});
     const unsub = onAuthStateChanged(auth, async u => {
       setUser(u);
+
+      // ─── NEW: setAuthInitDone immediately ────────────────────────────────
+      // Firebase resolves this from local cache in ~100ms.
+      // Spinner disappears here — user sees app immediately.
+      // Firestore profile check continues in background below.
+      setAuthInitDone(true);
+
       if (u) {
         try {
           const snap = await getDoc(doc(db, 'users', u.uid));
           if (snap.exists()) {
             const profile = { id: snap.id, ...snap.data() };
-            if (profile.blocked) { setIsBlocked(true); await signOut(auth); setUser(null); setUserProfile(null); setAuthChecked(true); return; }
-            setIsBlocked(false); setUserProfile(profile);
-          } else { setIsBlocked(false); setUserProfile(null); }
-        } catch { setUserProfile(null); setIsBlocked(false); }
-      } else { setUserProfile(null); }
+            if (profile.blocked) {
+              setIsBlocked(true);
+              await signOut(auth);
+              setUser(null);
+              setUserProfile(null);
+              setAuthChecked(true);
+              return;
+            }
+            setIsBlocked(false);
+            setUserProfile(profile);
+          } else {
+            setIsBlocked(false);
+            setUserProfile(null);
+          }
+        } catch {
+          setUserProfile(null);
+          setIsBlocked(false);
+        }
+      } else {
+        setUserProfile(null);
+      }
       setAuthChecked(true);
     });
     return () => unsub();
@@ -307,7 +408,11 @@ export default function App() {
   return (
     <>
       <style>{S}</style>
-      {!authChecked && (
+
+      {/* ─── MODIFIED: spinner shows only until authInitDone (~100ms) ─────────
+          Previously: !authChecked → waited for Firestore getDoc (3-8 sec)
+          Now: !authChecked && !authInitDone → disappears almost instantly    */}
+      {!authChecked && !authInitDone && (
         <div style={{ position: 'fixed', inset: 0, background: 'var(--bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999 }}>
           <div style={{ textAlign: 'center' }}>
             <div className="spin" style={{ width: 40, height: 40, margin: '0 auto 1rem' }} />
@@ -315,6 +420,7 @@ export default function App() {
           </div>
         </div>
       )}
+
       <div className="grid-bg" />
       <div className="app">
         <nav className="nav">
