@@ -228,86 +228,74 @@ export const fetchPortsFromSheet = async () => {
     console.warn('Port sheet fetch failed:', e.message);
     return [];
   }
-};
-// ─────────────────────────────────────────────────────────────────────────────
-// REPLACE the existing Maritime Library block at the bottom of your sheets.js
-// (the part starting with "─── Maritime Library Sheet IDs" to end of file)
-// Everything above that block stays untouched.
+};─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+// HOW TO USE THIS FILE:
+// 1. Open your sheets.js
+// 2. Find the line: // ─── Maritime Library Sheet IDs ─────
+// 3. DELETE everything from that line to the very end of the file
+// 4. PASTE everything below this comment block at the end of sheets.js
 // ─────────────────────────────────────────────────────────────────────────────
 
 // ─── Maritime Library Sheet IDs ────────────────────────────────────────────
-export const LIBRARY_SHEET_ID  = '16FLiXlhpbHja6y7esH-UsWYB0JQoB5Kr_x5hqbiJIQw';
-export const SOFTWARE_SHEET_ID = '1ckCXVUzubcHlCy76JZgAImGDQTRNBUEwn2uX1C237rw';
+export const LIBRARY_SHEET_ID  = ‘16FLiXlhpbHja6y7esH-UsWYB0JQoB5Kr_x5hqbiJIQw’;
+export const SOFTWARE_SHEET_ID = ‘1ckCXVUzubcHlCy76JZgAImGDQTRNBUEwn2uX1C237rw’;
 
-// IDB key for library cache
-const IDB_LIBRARY = 'mnav_library';
+const IDB_LIBRARY = ‘mnav_library’;
 
-// ─── fetchLibrarySheet — IDB first, then Google Sheet ──────────────────────
-// Returns merged array of { category, title, url, downloadUrl, fileId, mimeType }
-// Checks IDB cache first so page never flashes blank on refresh.
-// No existing functions are changed.
+// ─── fetchLibrarySheet — network first, then IDB cache ─────────────────────
+// Always tries network first. On success saves to IDB.
+// If network fails, falls back to IDB cache so page never goes blank.
 export const fetchLibrarySheet = async () => {
-  // 1. Try IDB cache first — instant load, no network needed
-  try {
-    const cached = await _idbRead(IDB_LIBRARY);
-    if (cached && Array.isArray(cached) && cached.length > 0) {
-      return cached;
-    }
-  } catch { /* fall through to network */ }
-
-  // 2. Fetch from both Google Sheets
-  try {
-    const [libRows, swRows] = await Promise.allSettled([
-      fetchSheetCSV(LIBRARY_SHEET_ID,  'Sheet1'),
-      fetchSheetCSV(SOFTWARE_SHEET_ID, 'Sheet1'),
-    ]);
-
-    const lib = libRows.status === 'fulfilled' ? libRows.value : [];
-    const sw  = swRows.status  === 'fulfilled' ? swRows.value  : [];
-
-    // Normalise software rows: previewUrl → url, keep mimeType
-    const swNorm = sw.map(r => ({
-      category:    r.category    || 'SAILORS USEFUL SOFTWARE',
-      title:       r.title       || '',
-      url:         r.previewUrl  || r.url || '',
-      downloadUrl: r.downloadUrl || '',
-      fileId:      r.fileId      || '',
-      mimeType:    r.mimeType    || '',
-    }));
-
-    // Normalise library rows
-    const libNorm = lib.map(r => ({
-      category:    r.category    || '',
-      title:       r.title       || '',
-      url:         r.url         || '',
-      downloadUrl: r.downloadUrl || '',
-      fileId:      r.fileId      || '',
-      mimeType:    '',
-    }));
-
-    const merged = [...libNorm, ...swNorm].filter(r => r.title && r.category);
-
-    // 3. Save to IDB so next load is instant
-    if (merged.length > 0) {
-      await _idbWrite(IDB_LIBRARY, merged);
-    }
-
-    return merged;
-  } catch (e) {
-    console.warn('fetchLibrarySheet failed:', e.message);
-    return [];
-  }
+// Helper to normalise rows from both sheets
+const normalise = (lib, sw) => {
+const libNorm = lib.map(r => ({
+category:    (r.category    || ‘’).trim(),
+title:       (r.title       || ‘’).trim(),
+url:         (r.url         || ‘’).trim(),
+downloadUrl: (r.downloadUrl || ‘’).trim(),
+fileId:      (r.fileId      || ‘’).trim(),
+mimeType:    ‘’,
+}));
+const swNorm = sw.map(r => ({
+category:    (r.category    || ‘SAILORS USEFUL SOFTWARE’).trim(),
+title:       (r.title       || ‘’).trim(),
+url:         (r.previewUrl  || r.url || ‘’).trim(),
+downloadUrl: (r.downloadUrl || ‘’).trim(),
+fileId:      (r.fileId      || ‘’).trim(),
+mimeType:    (r.mimeType    || ‘’).trim(),
+}));
+return […libNorm, …swNorm].filter(r => r.title && r.category);
 };
 
-// ─── clearLibraryCache — call this from Admin Sync if needed ───────────────
-// Clears only the library IDB cache so it re-fetches fresh data.
-export const clearLibraryCache = async () => {
-  try {
-    const db = await _idbOpen();
-    return new Promise((resolve, reject) => {
-      const req = db.transaction(IDB_STORE, 'readwrite').objectStore(IDB_STORE).delete(IDB_LIBRARY);
-      req.onsuccess = () => resolve();
-      req.onerror   = e => reject(e.target.error);
-    });
-  } catch {}
+// 1. Try network first
+try {
+const [libRes, swRes] = await Promise.allSettled([
+fetchSheetCSV(LIBRARY_SHEET_ID,  ‘Sheet1’),
+fetchSheetCSV(SOFTWARE_SHEET_ID, ‘Sheet1’),
+]);
+const lib = libRes.status === ‘fulfilled’ ? libRes.value : [];
+const sw  = swRes.status  === ‘fulfilled’ ? swRes.value  : [];
+const merged = normalise(lib, sw);
+
+```
+// Save to IDB only if we got real data
+if (merged.length > 0) {
+  try { await _idbWrite(IDB_LIBRARY, merged); } catch {}
+}
+
+// Return network data even if empty (so UI shows correct state)
+return merged;
+```
+
+} catch (networkErr) {
+console.warn(‘fetchLibrarySheet network failed, trying IDB cache:’, networkErr.message);
+}
+
+// 2. Network failed — try IDB cache as fallback
+try {
+const cached = await _idbRead(IDB_LIBRARY);
+if (cached && Array.isArray(cached) && cached.length > 0) return cached;
+} catch {}
+
+return [];
 };
