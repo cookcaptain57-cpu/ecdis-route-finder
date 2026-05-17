@@ -287,3 +287,46 @@ export const loadSheetsFromFirestore = async () => {
     return { routes: [], charts: [], ports: [] };
   }
 };
+// ─── Maritime Library Sheet IDs ────────────────────────────────────────────
+export const LIBRARY_SHEET_ID  = '16FLiXlhpbHja6y7esH-UsWYB0JQoB5Kr_x5hqbiJIQw';
+export const SOFTWARE_SHEET_ID = '1ckCXVUzubcHlCy76JZgAImGDQTRNBUEwn2uX1C237rw';
+
+// ─── fetchLibrarySheet — fetches Maritime Library + Sailors Software ───────
+// Returns merged array of { category, title, url, downloadUrl, fileId, mimeType }
+// No existing functions are changed.
+export const fetchLibrarySheet = async () => {
+  try {
+    const [libRows, swRows] = await Promise.allSettled([
+      fetchSheetCSV(LIBRARY_SHEET_ID, 'Sheet1'),
+      fetchSheetCSV(SOFTWARE_SHEET_ID, 'Sheet1'),
+    ]);
+
+    const lib = libRows.status === 'fulfilled' ? libRows.value : [];
+    const sw  = swRows.status  === 'fulfilled' ? swRows.value  : [];
+
+    // Normalise software rows: previewUrl → url, keep mimeType
+    const swNorm = sw.map(r => ({
+      category:    r.category    || 'SAILORS USEFUL SOFTWARE',
+      title:       r.title       || '',
+      url:         r.previewUrl  || r.url || '',
+      downloadUrl: r.downloadUrl || '',
+      fileId:      r.fileId      || '',
+      mimeType:    r.mimeType    || '',
+    }));
+
+    // Normalise library rows
+    const libNorm = lib.map(r => ({
+      category:    r.category    || '',
+      title:       r.title       || '',
+      url:         r.url         || '',
+      downloadUrl: r.downloadUrl || '',
+      fileId:      r.fileId      || '',
+      mimeType:    '',
+    }));
+
+    return [...libNorm, ...swNorm].filter(r => r.title && r.category);
+  } catch (e) {
+    console.warn('fetchLibrarySheet failed:', e.message);
+    return [];
+  }
+};
