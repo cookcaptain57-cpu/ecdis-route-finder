@@ -198,8 +198,7 @@ export const S = `
   }
 
   /* ─── FOOTER — unified, same on all screen sizes ────────
-     Added: position:relative + overflow:hidden so the wave
-     divs animate correctly inside this single container.
+     position:relative + overflow:hidden keep waves inside.
   ───────────────────────────────────────────────────────── */
   .footer{
     position:relative;
@@ -214,7 +213,6 @@ export const S = `
     padding-bottom:env(safe-area-inset-bottom,0.7rem);
   }
 
-  /* ── brand + owner left side ── */
   .footer-row{
     position:relative;
     z-index:10;
@@ -222,6 +220,7 @@ export const S = `
     align-items:center;
     justify-content:space-between;
     gap:10px;
+    flex-wrap:wrap;
   }
 
   .footer-left{
@@ -242,6 +241,7 @@ export const S = `
     color:var(--cyan);
   }
 
+  /* copyright line — small & muted */
   .footer-copy{
     font-size:0.62rem;
     font-weight:300;
@@ -249,21 +249,21 @@ export const S = `
     letter-spacing:0.03em;
   }
 
-  /* ── Disclaimer — once, small, same weight as copyright ── */
+  /* ── Disclaimer — exact same size/weight/color as copyright ── */
   .footer-disclaimer{
     position:relative;
     z-index:10;
-    font-size:0.58rem;
+    font-size:0.62rem;
     font-weight:300;
     color:var(--text3);
-    letter-spacing:0.02em;
-    line-height:1.6;
+    letter-spacing:0.03em;
+    line-height:1.5;
     margin-top:6px;
     padding-top:6px;
     border-top:1px solid rgba(26,58,92,0.3);
   }
 
-  /* ── Kept from original (used elsewhere) ── */
+  /* ── Kept for backward compat (used elsewhere in app) ── */
   .footer-status{
     display:flex;
     align-items:center;
@@ -305,45 +305,61 @@ export const S = `
      ─── INSTAGRAM BUTTON + ANIMATED WAVES (NEW) ────────────
      ════════════════════════════════════════════════════════ */
 
-  /* Instagram logo button — gradient rounded square + white SVG */
+  /* ── Instagram button ───────────────────────────────────
+     !important on color + text-decoration overrides the
+     browser default  a { color:blue; text-decoration:underline }
+     that was winning before.
+  ─────────────────────────────────────────────────────── */
   .dock-ig-btn{
-    display:flex;
-    align-items:center;
-    gap:8px;
-    text-decoration:none;
-    color:#fff;
-    font-size:0.72rem;
-    font-weight:500;
-    letter-spacing:0.04em;
+    display:flex !important;
+    align-items:center !important;
+    gap:8px !important;
+    text-decoration:none !important;
+    color:var(--text2) !important;
+    font-size:0.68rem !important;
+    font-weight:400 !important;
+    letter-spacing:0.03em !important;
     flex-shrink:0;
+    cursor:pointer;
+    transition:color 0.2s;
   }
 
+  .dock-ig-btn:hover{
+    color:var(--text) !important;
+  }
+
+  /* Gradient rounded square — vivid Instagram brand colours */
   .ig-icon-wrap{
-    width:36px;
-    height:36px;
-    border-radius:10px;
-    background:linear-gradient(
-      135deg,
-      #405de6 0%,
-      #5851db 15%,
-      #833ab4 30%,
-      #c13584 50%,
-      #e1306c 65%,
-      #fd1d1d 80%,
-      #f77737 90%,
-      #fcb045 100%
-    );
+    width:34px;
+    height:34px;
+    border-radius:9px;
+    background:
+      linear-gradient(
+        135deg,
+        #405de6 0%,
+        #833ab4 25%,
+        #c13584 45%,
+        #e1306c 60%,
+        #fd1d1d 75%,
+        #f77737 88%,
+        #fcb045 100%
+      );
     display:flex;
     align-items:center;
     justify-content:center;
-    box-shadow:0 4px 14px rgba(193,53,132,0.4);
+    box-shadow:
+      0 0 0 1px rgba(255,255,255,0.08),
+      0 4px 16px rgba(193,53,132,0.55);
     transition:transform 0.2s,box-shadow 0.2s;
+    flex-shrink:0;
   }
 
   .dock-ig-btn:hover .ig-icon-wrap,
   .dock-ig-btn:active .ig-icon-wrap{
-    transform:scale(1.1);
-    box-shadow:0 6px 22px rgba(193,53,132,0.65);
+    transform:scale(1.08);
+    box-shadow:
+      0 0 0 1px rgba(255,255,255,0.12),
+      0 6px 24px rgba(193,53,132,0.75);
   }
 
   /* ─── ANIMATED WAVES (inside .footer) ──────────────────── */
