@@ -1,6 +1,9 @@
 /* eslint-disable */
 // src/sheets.js — All Google Sheet fetch/search helpers
 
+import { db } from './firebase';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
+
 export const ROUTE_SHEET_ID = '1ILzyQODb4Ig2mdq9auZ7aJOfdKBBM01t192VE59WbCE';
 export const CHART_SHEET_ID = '1zuZxqUSFtxzg-E8CkTGj01YehhXCZIPodCisCicpxRA';
 export const PORTS_SHEET_ID = '1BFpUuo-nqS3MaUTtANtKT4CFem-X3nZJYGRADZtuIdk';
@@ -88,7 +91,7 @@ export const fetchSheetCSV = async (sheetId, tabName = 'Sheet1') => {
   return csvToRows(await res.text());
 };
 
-// ─── searchSheetLive — CHANGED: checks IDB first, falls back to network ───
+// ─── searchSheetLive — checks IDB first, falls back to network ────────────
 export const searchSheetLive = async (sheetId, query, tabNames = ['Sheet1'], maxResults = 50) => {
   if (!query || query.trim().length < 2) return [];
   const ql = query.toLowerCase().trim();
@@ -96,8 +99,6 @@ export const searchSheetLive = async (sheetId, query, tabNames = ['Sheet1'], max
   const cached = searchCache.get(cacheKey);
   if (cached && Date.now() - cached.ts < 300000) return cached.data;
 
-  // NEW: IDB-first — if this sheet's data is already cached locally, search it
-  // instantly without any network call. Falls through to network only if IDB empty.
   const idbKey = sheetId === ROUTE_SHEET_ID ? IDB_ROUTES
                : sheetId === CHART_SHEET_ID ? IDB_CHARTS
                : null;
@@ -113,7 +114,6 @@ export const searchSheetLive = async (sheetId, query, tabNames = ['Sheet1'], max
     }
   }
 
-  // EXISTING: network loop — runs only when IDB is empty (first load / after cache clear)
   let allRows = [];
   for (const tab of tabNames) {
     try {
@@ -130,10 +130,7 @@ export const searchSheetLive = async (sheetId, query, tabNames = ['Sheet1'], max
   return results;
 };
 
-// ─── fetchRouteSheet — CHANGED: parallel Google-direct fetch via Promise.any ─
-// Old: sequential reduce().catch() chain calling opensheet.elk.sh (slow 3rd party)
-// New: all tabs fired in parallel via fetchSheetCSV (Google direct); first tab
-//      that returns non-empty data wins. IDB cache logic unchanged.
+// ─── fetchRouteSheet — IDB first, then Google Sheet ───────────────────────
 const ROUTE_TABS = ['Sheet1', 'Routes', 'Route', 'Data', 'Sheet2'];
 export const fetchRouteSheet = async () => {
   const cached = await _idbRead(IDB_ROUTES);
@@ -152,8 +149,7 @@ export const fetchRouteSheet = async () => {
   }
 };
 
-// ─── fetchChartSheet — CHANGED: parallel Google-direct fetch via Promise.any ─
-// Same fix as fetchRouteSheet above.
+// ─── fetchChartSheet — IDB first, then Google Sheet ───────────────────────
 const CHART_TABS = ['Sheet1', 'Charts', 'ECDIS Charts', 'Routes', 'Chart', 'Data', 'Sheet2'];
 export const fetchChartSheet = async () => {
   const cached = await _idbRead(IDB_CHARTS);
@@ -172,7 +168,7 @@ export const fetchChartSheet = async () => {
   }
 };
 
-// ─── fetchPortsFromSheet — IDB cache, fetch only if empty ─────────────────
+// ─── fetchPortsFromSheet — IDB first, then Google Sheet ───────────────────
 export const fetchPortsFromSheet = async () => {
   const cached = await _idbRead(IDB_PORTS);
   if (cached && Array.isArray(cached) && cached.length > 0) return cached;
@@ -186,27 +182,14 @@ export const fetchPortsFromSheet = async () => {
     if (lines.length < 2) return [];
     const headers = lines[0].split(',').map(h => h.replace(/"/g, '').trim().toLowerCase());
 
-    // Confirmed sheet column layout:
-    //   0 → PORT CODE UNLCODE  (full LOCODE e.g. "INMUM")
-    //   1 → PORT NAME          (e.g. "Mumbai")
-    //   2 → COUNTRY            (e.g. "India")
-    //   3 → LATTITUDE          (DMS format e.g. 42°32'60.0"N — note double-T typo in sheet)
-    //   4 → LONGITUDE          (DMS format e.g. 1°34'48.0"E)
-    //
-    // colLat: 'lattitude'.includes('lat') → true, still found correctly despite typo
     const colLat = headers.findIndex(h => h.includes('lat'));
     const colLon = headers.findIndex(h => h.includes('lon') || h.includes('lng'));
 
-    // NEW: DMS parser — coordinates in sheet are Degrees°Minutes'Seconds"Direction
-    // parseFloat("42°32'60.0N") would return 42 (stops at °), losing all precision.
-    // This converts correctly: 42°32'60.0"N → 42 + 32/60 + 60/3600 = 42.5500°
     const parseDMS = (str) => {
       if (!str) return NaN;
       const s = str.replace(/"/g, '').trim();
-      // Try plain decimal first (handles any future decimal-format rows)
       const dec = parseFloat(s);
       if (!isNaN(dec) && !s.includes('°')) return dec;
-      // DMS: degrees°minutes'seconds"direction — e.g. 42°32'60.0"N or 42°32'60.0N
       const m = s.match(/(\d+)[°](\d+)[']([0-9.]+)["]?\s*([NSEWnsew])?/);
       if (!m) return NaN;
       let decimal = parseFloat(m[1]) + parseFloat(m[2]) / 60 + parseFloat(m[3]) / 3600;
@@ -225,26 +208,15 @@ export const fetchPortsFromSheet = async () => {
       }
       vals.push(cur.trim());
 
-      // CHANGED — correct column positions (old code read them in wrong order):
-      // vals[0] = PORT CODE UNLCODE → full LOCODE (was wrongly used as countryCode)
-      // vals[1] = PORT NAME         (was wrongly used as locode)
-      // vals[2] = COUNTRY           (was never read at all)
       const locode      = (vals[0] || '').replace(/"/g, '').trim();
       const portName    = (vals[1] || '').replace(/"/g, '').trim();
       const countryCode = (vals[2] || '').replace(/"/g, '').trim();
-
-      // CHANGED — use parseDMS instead of parseFloat; coordinates are in DMS format
       const lat = colLat >= 0 ? parseDMS(vals[colLat] || '') : NaN;
       const lon = colLon >= 0 ? parseDMS(vals[colLon] || '') : NaN;
 
       if (!portName || !locode) continue;
 
-      // CHANGED — locode from vals[0] is already the full LOCODE (e.g. "INMUM")
-      // Old code tried to combine countryCode+locode when locode.length<=3, which
-      // was wrong because it was reading PORT NAME into locode (6+ chars → no combine
-      // → id became "MUMBAI" instead of "INMUM")
       const fullLocode = locode.toUpperCase();
-
       rows.push({
         id:       fullLocode,
         name:     portName,
@@ -260,5 +232,58 @@ export const fetchPortsFromSheet = async () => {
   } catch (e) {
     console.warn('Port sheet fetch failed:', e.message);
     return [];
+  }
+};
+
+// ─── NEW: pushSheetsToFirestore ────────────────────────────────────────────
+// Called ONLY by Admin Sync Now button after fresh Google Sheet fetch.
+// Saves all 3 datasets to Firestore so every user gets them instantly.
+// Nothing else calls this function.
+export const pushSheetsToFirestore = async (routes, charts, ports) => {
+  try {
+    await Promise.all([
+      routes && routes.length > 0
+        ? setDoc(doc(db, 'sheetCache', 'routes'), { data: routes, updatedAt: Date.now() })
+        : Promise.resolve(),
+      charts && charts.length > 0
+        ? setDoc(doc(db, 'sheetCache', 'charts'), { data: charts, updatedAt: Date.now() })
+        : Promise.resolve(),
+      ports && ports.length > 0
+        ? setDoc(doc(db, 'sheetCache', 'ports'),  { data: ports,  updatedAt: Date.now() })
+        : Promise.resolve(),
+    ]);
+    console.log('✅ Sheets pushed to Firestore successfully');
+    return true;
+  } catch (e) {
+    console.warn('Firestore push failed:', e.message);
+    return false;
+  }
+};
+
+// ─── NEW: loadSheetsFromFirestore ──────────────────────────────────────────
+// Called by App on startup BEFORE hitting Google Sheet.
+// Priority order: IDB (instant) → Firestore (fast) → Google Sheet (slow)
+// Returns { routes, charts, ports } — same structure App expects.
+// Nothing about existing functions changes — this is purely additive.
+export const loadSheetsFromFirestore = async () => {
+  try {
+    const [rSnap, cSnap, pSnap] = await Promise.all([
+      getDoc(doc(db, 'sheetCache', 'routes')),
+      getDoc(doc(db, 'sheetCache', 'charts')),
+      getDoc(doc(db, 'sheetCache', 'ports')),
+    ]);
+    const routes = rSnap.exists() ? (rSnap.data().data || []) : [];
+    const charts = cSnap.exists() ? (cSnap.data().data || []) : [];
+    const ports  = pSnap.exists() ? (pSnap.data().data || []) : [];
+
+    // Also save to IDB so next visit is even faster (offline too)
+    if (routes.length > 0) await _idbWrite(IDB_ROUTES, routes);
+    if (charts.length > 0) await _idbWrite(IDB_CHARTS, charts);
+    if (ports.length  > 0) await _idbWrite(IDB_PORTS,  ports);
+
+    return { routes, charts, ports };
+  } catch (e) {
+    console.warn('Firestore load failed:', e.message);
+    return { routes: [], charts: [], ports: [] };
   }
 };
