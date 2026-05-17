@@ -48,7 +48,7 @@ export default function Footer() {
         <div className="wave-content">
           <div className="dock-left">
             <div className="dock-title">NavisphereX</div>
-            <div className="dock-sub">Marine System</div>
+            <div className="dock-sub">Contact Admin On Instagram</div>
           </div>
 
           {/* Instagram logo button — gradient rounded square + white SVG */}
