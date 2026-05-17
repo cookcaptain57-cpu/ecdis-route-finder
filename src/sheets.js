@@ -9,9 +9,6 @@ export const CHART_SHEET_ID = '1zuZxqUSFtxzg-E8CkTGj01YehhXCZIPodCisCicpxRA';
 export const PORTS_SHEET_ID = '1BFpUuo-nqS3MaUTtANtKT4CFem-X3nZJYGRADZtuIdk';
 
 // ─── Firestore collection + chunk size ─────────────────────────────────────
-// Data stored as chunks: routes_0, routes_1 … each doc holds 500 records
-// 50,000 routes = 100 Firestore documents = 100 writes (admin) / 100 reads (user first load)
-// After first load → IndexedDB caches everything → 1 Firestore read per session (version only)
 const CACHE_COL  = 'app_cache';
 const CHUNK_SIZE = 500;
 
@@ -19,8 +16,6 @@ const CHUNK_SIZE = 500;
 const _writeChunks = async (prefix, arr) => {
   const chunks = [];
   for (let i = 0; i < arr.length; i += CHUNK_SIZE) chunks.push(arr.slice(i, i + CHUNK_SIZE));
-
-  // Write in batches of 400 to stay safely under Firestore's 500-op batch limit
   const BATCH_LIMIT = 400;
   for (let b = 0; b < chunks.length; b += BATCH_LIMIT) {
     const batch = writeBatch(db);
@@ -44,9 +39,6 @@ const _readChunks = async (prefix, count) => {
 };
 
 // ─── Firestore meta (version document) ────────────────────────────────────
-// rv = routes version timestamp, rc = routes chunk count
-// cv = charts version timestamp, cc = charts chunk count
-// pv = ports  version timestamp, pc = ports  chunk count
 export const getFirestoreMeta = async () => {
   try {
     const snap = await getDoc(doc(db, CACHE_COL, 'meta'));
@@ -76,13 +68,11 @@ export const syncPortsToFirestore = async (ports) => {
 };
 
 // ─── Users: Load from Firestore ───────────────────────────────────────────
-export const loadRoutesFromFirestore  = (count) => _readChunks('routes', count);
-export const loadChartsFromFirestore  = (count) => _readChunks('charts', count);
-export const loadPortsFromFirestore   = (count) => _readChunks('ports',  count);
+export const loadRoutesFromFirestore = (count) => _readChunks('routes', count);
+export const loadChartsFromFirestore = (count) => _readChunks('charts', count);
+export const loadPortsFromFirestore  = (count) => _readChunks('ports',  count);
 
 // ─── IndexedDB cache ───────────────────────────────────────────────────────
-// Stores full data arrays so users only hit Firestore when version changes
-// Version = 1 Firestore read per session → all else from IndexedDB (instant)
 const IDB_NAME  = 'mnav_db';
 const IDB_STORE = 'cache';
 
@@ -168,9 +158,7 @@ export const searchSheetLive = async (sheetId, query, tabNames = ['Sheet1'], max
   return results;
 };
 
-// ─── Parallel tab fetcher (all tabs at once, first success wins) ───────────
-// Old: sequential try → fail → wait → try next = 7 round trips = slow
-// New: Promise.any() fires all simultaneously = 1 round trip = fast
+// ─── Parallel tab fetcher ──────────────────────────────────────────────────
 const _fetchTab = (sheetId, tab) =>
   fetch(`https://opensheet.elk.sh/${sheetId}/${tab}`)
     .then(r => { if (!r.ok) throw new Error(); return r.json(); })
@@ -228,79 +216,57 @@ export const fetchPortsFromSheet = async () => {
     console.warn('Port sheet fetch failed:', e.message);
     return [];
   }
-};─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+};
+
 // ─── Maritime Library Sheet IDs ────────────────────────────────────────────
 export const LIBRARY_SHEET_ID  = '16FLiXlhpbHja6y7esH-UsWYB0JQoB5Kr_x5hqbiJIQw';
 export const SOFTWARE_SHEET_ID = '1ckCXVUzubcHlCy76JZgAImGDQTRNBUEwn2uX1C237rw';
 
 const IDB_LIBRARY = 'mnav_library';
 
-// ─── fetchLibrarySheet — network first, then IDB cache ─────────────────────
+// ─── fetchLibrarySheet — network first, IDB cache as fallback ──────────────
 export const fetchLibrarySheet = async () => {
-
-  // Helper to normalise rows from both sheets
   const normalise = (lib, sw) => {
-
     const libNorm = lib.map(r => ({
-      category:    (r.category || '').trim(),
-      title:       (r.title || '').trim(),
-      url:         (r.url || '').trim(),
+      category:    (r.category    || '').trim(),
+      title:       (r.title       || '').trim(),
+      url:         (r.url         || '').trim(),
       downloadUrl: (r.downloadUrl || '').trim(),
-      fileId:      (r.fileId || '').trim(),
+      fileId:      (r.fileId      || '').trim(),
       mimeType:    '',
     }));
-
     const swNorm = sw.map(r => ({
-      category:    (r.category || 'SAILORS USEFUL SOFTWARE').trim(),
-      title:       (r.title || '').trim(),
-      url:         (r.previewUrl || r.url || '').trim(),
+      category:    (r.category    || 'SAILORS USEFUL SOFTWARE').trim(),
+      title:       (r.title       || '').trim(),
+      url:         (r.previewUrl  || r.url || '').trim(),
       downloadUrl: (r.downloadUrl || '').trim(),
-      fileId:      (r.fileId || '').trim(),
-      mimeType:    (r.mimeType || '').trim(),
+      fileId:      (r.fileId      || '').trim(),
+      mimeType:    (r.mimeType    || '').trim(),
     }));
-
     return [...libNorm, ...swNorm].filter(r => r.title && r.category);
   };
 
   // 1. Try network first
   try {
-
     const [libRes, swRes] = await Promise.allSettled([
-      fetchSheetCSV(LIBRARY_SHEET_ID, 'Sheet1'),
+      fetchSheetCSV(LIBRARY_SHEET_ID,  'Sheet1'),
       fetchSheetCSV(SOFTWARE_SHEET_ID, 'Sheet1'),
     ]);
-
-    const lib = libRes.status === 'fulfilled' ? libRes.value : [];
-    const sw  = swRes.status === 'fulfilled' ? swRes.value : [];
-
+    const lib    = libRes.status === 'fulfilled' ? libRes.value : [];
+    const sw     = swRes.status  === 'fulfilled' ? swRes.value  : [];
     const merged = normalise(lib, sw);
-
-    // Save to IDB only if we got real data
     if (merged.length > 0) {
-      try {
-        await idbSet(IDB_LIBRARY, merged);
-      } catch {}
+      try { await idbSet(IDB_LIBRARY, merged); } catch {}
     }
-
     return merged;
-
   } catch (networkErr) {
-
-    console.warn(
-      'fetchLibrarySheet network failed, trying IDB cache:',
-      networkErr.message
-    );
+    console.warn('fetchLibrarySheet network failed, trying IDB cache:', networkErr.message);
   }
 
   // 2. Network failed — try IDB cache as fallback
   try {
-
     const cached = await idbGet(IDB_LIBRARY);
-
-    if (cached && Array.isArray(cached) && cached.length > 0) {
-      return cached;
-    }
-
+    if (cached && Array.isArray(cached) && cached.length > 0) return cached;
   } catch {}
 
   return [];
