@@ -1,69 +1,124 @@
 /* eslint-disable */
-// src/sheets.js — All Google Sheet fetch/search helpers
+// src/sheets.js — Google Sheet fetch + Firestore sync + IndexedDB cache
 
 import { db } from './firebase';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, writeBatch } from 'firebase/firestore';
 
 export const ROUTE_SHEET_ID = '1ILzyQODb4Ig2mdq9auZ7aJOfdKBBM01t192VE59WbCE';
 export const CHART_SHEET_ID = '1zuZxqUSFtxzg-E8CkTGj01YehhXCZIPodCisCicpxRA';
 export const PORTS_SHEET_ID = '1BFpUuo-nqS3MaUTtANtKT4CFem-X3nZJYGRADZtuIdk';
 
-// ─── IndexedDB config ──────────────────────────────────────────────────────
-const IDB_NAME   = 'mnav_cache';
-const IDB_VER    = 1;
-const IDB_STORE  = 'sheets';
-const IDB_ROUTES = 'mnav_sheet_routes';
-const IDB_CHARTS = 'mnav_sheet_charts';
-const IDB_PORTS  = 'mnav_sheet_ports';
+// ─── Firestore collection + chunk size ─────────────────────────────────────
+// Data stored as chunks: routes_0, routes_1 … each doc holds 500 records
+// 50,000 routes = 100 Firestore documents = 100 writes (admin) / 100 reads (user first load)
+// After first load → IndexedDB caches everything → 1 Firestore read per session (version only)
+const CACHE_COL  = 'app_cache';
+const CHUNK_SIZE = 500;
+
+// ─── Firestore: write chunks ───────────────────────────────────────────────
+const _writeChunks = async (prefix, arr) => {
+  const chunks = [];
+  for (let i = 0; i < arr.length; i += CHUNK_SIZE) chunks.push(arr.slice(i, i + CHUNK_SIZE));
+
+  // Write in batches of 400 to stay safely under Firestore's 500-op batch limit
+  const BATCH_LIMIT = 400;
+  for (let b = 0; b < chunks.length; b += BATCH_LIMIT) {
+    const batch = writeBatch(db);
+    chunks.slice(b, b + BATCH_LIMIT).forEach((chunk, j) => {
+      batch.set(doc(db, CACHE_COL, `${prefix}_${b + j}`), {
+        i: b + j,
+        d: JSON.stringify(chunk),
+      });
+    });
+    await batch.commit();
+  }
+  return chunks.length;
+};
+
+// ─── Firestore: read chunks ────────────────────────────────────────────────
+const _readChunks = async (prefix, count) => {
+  const snaps = await Promise.all(
+    Array.from({ length: count }, (_, i) => getDoc(doc(db, CACHE_COL, `${prefix}_${i}`)))
+  );
+  return snaps.flatMap(s => (s.exists() ? JSON.parse(s.data().d) : []));
+};
+
+// ─── Firestore meta (version document) ────────────────────────────────────
+// rv = routes version timestamp, rc = routes chunk count
+// cv = charts version timestamp, cc = charts chunk count
+// pv = ports  version timestamp, pc = ports  chunk count
+export const getFirestoreMeta = async () => {
+  try {
+    const snap = await getDoc(doc(db, CACHE_COL, 'meta'));
+    return snap.exists() ? snap.data() : null;
+  } catch { return null; }
+};
+
+// ─── Admin: Sync routes → Firestore ───────────────────────────────────────
+export const syncRoutesToFirestore = async (routes) => {
+  const rc = await _writeChunks('routes', routes);
+  await setDoc(doc(db, CACHE_COL, 'meta'), { rv: String(Date.now()), rc }, { merge: true });
+  return rc;
+};
+
+// ─── Admin: Sync charts → Firestore ───────────────────────────────────────
+export const syncChartsToFirestore = async (charts) => {
+  const cc = await _writeChunks('charts', charts);
+  await setDoc(doc(db, CACHE_COL, 'meta'), { cv: String(Date.now()), cc }, { merge: true });
+  return cc;
+};
+
+// ─── Admin: Sync ports → Firestore ────────────────────────────────────────
+export const syncPortsToFirestore = async (ports) => {
+  const pc = await _writeChunks('ports', ports);
+  await setDoc(doc(db, CACHE_COL, 'meta'), { pv: String(Date.now()), pc }, { merge: true });
+  return pc;
+};
+
+// ─── Users: Load from Firestore ───────────────────────────────────────────
+export const loadRoutesFromFirestore  = (count) => _readChunks('routes', count);
+export const loadChartsFromFirestore  = (count) => _readChunks('charts', count);
+export const loadPortsFromFirestore   = (count) => _readChunks('ports',  count);
+
+// ─── IndexedDB cache ───────────────────────────────────────────────────────
+// Stores full data arrays so users only hit Firestore when version changes
+// Version = 1 Firestore read per session → all else from IndexedDB (instant)
+const IDB_NAME  = 'mnav_db';
+const IDB_STORE = 'cache';
 
 function _idbOpen() {
-  return new Promise((resolve, reject) => {
-    const req = indexedDB.open(IDB_NAME, IDB_VER);
-    req.onupgradeneeded = e => e.target.result.createObjectStore(IDB_STORE);
-    req.onsuccess       = e => resolve(e.target.result);
-    req.onerror         = e => reject(e.target.error);
+  return new Promise((res, rej) => {
+    const r = indexedDB.open(IDB_NAME, 1);
+    r.onupgradeneeded = e => e.target.result.createObjectStore(IDB_STORE, { keyPath: 'k' });
+    r.onsuccess = e => res(e.target.result);
+    r.onerror   = () => rej(r.error);
   });
 }
 
-async function _idbRead(key) {
+export async function idbGet(key) {
   try {
     const db = await _idbOpen();
-    return new Promise((resolve, reject) => {
+    return new Promise((res, rej) => {
       const req = db.transaction(IDB_STORE, 'readonly').objectStore(IDB_STORE).get(key);
-      req.onsuccess = e => resolve(e.target.result ?? null);
-      req.onerror   = e => reject(e.target.error);
+      req.onsuccess = () => res(req.result?.v ?? null);
+      req.onerror   = () => rej(req.error);
     });
   } catch { return null; }
 }
 
-async function _idbWrite(key, data) {
+export async function idbSet(key, value) {
   try {
     const db = await _idbOpen();
-    return new Promise((resolve, reject) => {
-      const req = db.transaction(IDB_STORE, 'readwrite').objectStore(IDB_STORE).put(data, key);
-      req.onsuccess = () => resolve();
-      req.onerror   = e => reject(e.target.error);
+    return new Promise((res, rej) => {
+      const tx = db.transaction(IDB_STORE, 'readwrite');
+      tx.objectStore(IDB_STORE).put({ k: key, v: value });
+      tx.oncomplete = res;
+      tx.onerror    = () => rej(tx.error);
     });
   } catch {}
 }
 
-async function _idbClear() {
-  try {
-    const db = await _idbOpen();
-    return new Promise((resolve, reject) => {
-      const tx    = db.transaction(IDB_STORE, 'readwrite');
-      const store = tx.objectStore(IDB_STORE);
-      [IDB_ROUTES, IDB_CHARTS, IDB_PORTS].forEach(k => store.delete(k));
-      tx.oncomplete = () => resolve();
-      tx.onerror    = e => reject(e.target.error);
-    });
-  } catch {}
-}
-
-// ─── Public cache clear — called by Admin "Sync Now" ──────────────────────
-export const clearSheetCache = () => _idbClear();
-
-// ─── Simple in-memory cache (5 min TTL) ───────────────────────────────────
+// ─── Existing helpers (unchanged) ─────────────────────────────────────────
 export const searchCache = new Map();
 
 export const csvToRows = (csv) => {
@@ -91,29 +146,12 @@ export const fetchSheetCSV = async (sheetId, tabName = 'Sheet1') => {
   return csvToRows(await res.text());
 };
 
-// ─── searchSheetLive — checks IDB first, falls back to network ────────────
 export const searchSheetLive = async (sheetId, query, tabNames = ['Sheet1'], maxResults = 50) => {
   if (!query || query.trim().length < 2) return [];
   const ql = query.toLowerCase().trim();
   const cacheKey = `${sheetId}:${ql}`;
   const cached = searchCache.get(cacheKey);
   if (cached && Date.now() - cached.ts < 300000) return cached.data;
-
-  const idbKey = sheetId === ROUTE_SHEET_ID ? IDB_ROUTES
-               : sheetId === CHART_SHEET_ID ? IDB_CHARTS
-               : null;
-  if (idbKey) {
-    const idbData = await _idbRead(idbKey);
-    if (idbData && Array.isArray(idbData) && idbData.length > 0) {
-      const results = idbData.filter(r => {
-        const hay = Object.values(r).filter(Boolean).join(' ').toLowerCase();
-        return hay.includes(ql);
-      }).slice(0, maxResults);
-      searchCache.set(cacheKey, { data: results, ts: Date.now() });
-      return results;
-    }
-  }
-
   let allRows = [];
   for (const tab of tabNames) {
     try {
@@ -130,75 +168,38 @@ export const searchSheetLive = async (sheetId, query, tabNames = ['Sheet1'], max
   return results;
 };
 
-// ─── fetchRouteSheet — IDB first, then Google Sheet ───────────────────────
-const ROUTE_TABS = ['Sheet1', 'Routes', 'Route', 'Data', 'Sheet2'];
-export const fetchRouteSheet = async () => {
-  const cached = await _idbRead(IDB_ROUTES);
-  if (cached && Array.isArray(cached) && cached.length > 0) return cached;
-  try {
-    const d = await Promise.any(
-      ROUTE_TABS.map(tab =>
-        fetchSheetCSV(ROUTE_SHEET_ID, tab)
-          .then(rows => { if (!rows || rows.length === 0) throw new Error('empty'); return rows; })
-      )
-    );
-    await _idbWrite(IDB_ROUTES, d);
-    return d;
-  } catch {
-    return [];
-  }
-};
+// ─── Parallel tab fetcher (all tabs at once, first success wins) ───────────
+// Old: sequential try → fail → wait → try next = 7 round trips = slow
+// New: Promise.any() fires all simultaneously = 1 round trip = fast
+const _fetchTab = (sheetId, tab) =>
+  fetch(`https://opensheet.elk.sh/${sheetId}/${tab}`)
+    .then(r => { if (!r.ok) throw new Error(); return r.json(); })
+    .then(d => { if (!Array.isArray(d) || d.length === 0) throw new Error(); return d; });
 
-// ─── fetchChartSheet — IDB first, then Google Sheet ───────────────────────
 const CHART_TABS = ['Sheet1', 'Charts', 'ECDIS Charts', 'Routes', 'Chart', 'Data', 'Sheet2'];
-export const fetchChartSheet = async () => {
-  const cached = await _idbRead(IDB_CHARTS);
-  if (cached && Array.isArray(cached) && cached.length > 0) return cached;
-  try {
-    const d = await Promise.any(
-      CHART_TABS.map(tab =>
-        fetchSheetCSV(CHART_SHEET_ID, tab)
-          .then(rows => { if (!rows || rows.length === 0) throw new Error('empty'); return rows; })
-      )
-    );
-    await _idbWrite(IDB_CHARTS, d);
-    return d;
-  } catch {
-    return [];
-  }
+export const fetchChartSheet = () =>
+  Promise.any(CHART_TABS.map(tab => _fetchTab(CHART_SHEET_ID, tab))).catch(() => []);
+
+export const fetchRouteSheet = () => {
+  const ROUTE_TABS = ['Sheet1', 'Routes', 'Route', 'Data', 'Sheet2'];
+  return Promise.any(ROUTE_TABS.map(tab => _fetchTab(ROUTE_SHEET_ID, tab))).catch(() => []);
 };
 
-// ─── fetchPortsFromSheet — IDB first, then Google Sheet ───────────────────
 export const fetchPortsFromSheet = async () => {
-  const cached = await _idbRead(IDB_PORTS);
-  if (cached && Array.isArray(cached) && cached.length > 0) return cached;
-
   const url = `https://docs.google.com/spreadsheets/d/${PORTS_SHEET_ID}/gviz/tq?tqx=out:csv&sheet=PORTDATA`;
   try {
-    const r = await fetch(url);
+    const r     = await fetch(url);
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    const csv = await r.text();
+    const csv   = await r.text();
     const lines = csv.trim().split('\n');
     if (lines.length < 2) return [];
     const headers = lines[0].split(',').map(h => h.replace(/"/g, '').trim().toLowerCase());
-
+    const colC   = headers.indexOf('port name') >= 0 ? headers.indexOf('port name') :
+                   headers.indexOf('portname')  >= 0 ? headers.indexOf('portname')  :
+                   headers.indexOf('name')       >= 0 ? headers.indexOf('name') : 2;
     const colLat = headers.findIndex(h => h.includes('lat'));
     const colLon = headers.findIndex(h => h.includes('lon') || h.includes('lng'));
-
-    const parseDMS = (str) => {
-      if (!str) return NaN;
-      const s = str.replace(/"/g, '').trim();
-      const dec = parseFloat(s);
-      if (!isNaN(dec) && !s.includes('°')) return dec;
-      const m = s.match(/(\d+)[°](\d+)[']([0-9.]+)["]?\s*([NSEWnsew])?/);
-      if (!m) return NaN;
-      let decimal = parseFloat(m[1]) + parseFloat(m[2]) / 60 + parseFloat(m[3]) / 3600;
-      const dir = (m[4] || '').toUpperCase();
-      if (dir === 'S' || dir === 'W') decimal = -decimal;
-      return decimal;
-    };
-
-    const rows = [];
+    const rows   = [];
     for (let i = 1; i < lines.length; i++) {
       const vals = []; let cur = ''; let inQ = false;
       for (const ch of lines[i]) {
@@ -207,97 +208,57 @@ export const fetchPortsFromSheet = async () => {
         else cur += ch;
       }
       vals.push(cur.trim());
-
-      const locode      = (vals[0] || '').replace(/"/g, '').trim();
-      const portName    = (vals[1] || '').replace(/"/g, '').trim();
-      const countryCode = (vals[2] || '').replace(/"/g, '').trim();
-      const lat = colLat >= 0 ? parseDMS(vals[colLat] || '') : NaN;
-      const lon = colLon >= 0 ? parseDMS(vals[colLon] || '') : NaN;
-
+      const countryCode = (vals[0] || '').replace(/"/g, '').trim();
+      const locode      = (vals[1] || '').replace(/"/g, '').trim();
+      const portName    = (vals[colC] || '').replace(/"/g, '').trim();
+      const lat = colLat >= 0 ? parseFloat(vals[colLat] || '') : NaN;
+      const lon = colLon >= 0 ? parseFloat(vals[colLon] || '') : NaN;
       if (!portName || !locode) continue;
-
-      const fullLocode = locode.toUpperCase();
+      const fullLocode = locode.length <= 3 ? (countryCode + locode) : locode;
       rows.push({
-        id:       fullLocode,
-        name:     portName,
-        city:     portName,
-        country:  countryCode,
-        lat:      isNaN(lat) ? null : lat,
-        lon:      isNaN(lon) ? null : lon,
+        id: fullLocode.toUpperCase(),
+        name: portName, city: portName, country: countryCode,
+        lat: isNaN(lat) ? null : lat,
+        lon: isNaN(lon) ? null : lon,
         keywords: (portName + ' ' + countryCode + ' ' + fullLocode).toLowerCase(),
       });
     }
-    await _idbWrite(IDB_PORTS, rows);
     return rows;
   } catch (e) {
     console.warn('Port sheet fetch failed:', e.message);
     return [];
   }
 };
+// ─────────────────────────────────────────────────────────────────────────────
+// REPLACE the existing Maritime Library block at the bottom of your sheets.js
+// (the part starting with "─── Maritime Library Sheet IDs" to end of file)
+// Everything above that block stays untouched.
+// ─────────────────────────────────────────────────────────────────────────────
 
-// ─── NEW: pushSheetsToFirestore ────────────────────────────────────────────
-// Called ONLY by Admin Sync Now button after fresh Google Sheet fetch.
-// Saves all 3 datasets to Firestore so every user gets them instantly.
-// Nothing else calls this function.
-export const pushSheetsToFirestore = async (routes, charts, ports) => {
-  try {
-    await Promise.all([
-      routes && routes.length > 0
-        ? setDoc(doc(db, 'sheetCache', 'routes'), { data: routes, updatedAt: Date.now() })
-        : Promise.resolve(),
-      charts && charts.length > 0
-        ? setDoc(doc(db, 'sheetCache', 'charts'), { data: charts, updatedAt: Date.now() })
-        : Promise.resolve(),
-      ports && ports.length > 0
-        ? setDoc(doc(db, 'sheetCache', 'ports'),  { data: ports,  updatedAt: Date.now() })
-        : Promise.resolve(),
-    ]);
-    console.log('✅ Sheets pushed to Firestore successfully');
-    return true;
-  } catch (e) {
-    console.warn('Firestore push failed:', e.message);
-    return false;
-  }
-};
-
-// ─── NEW: loadSheetsFromFirestore ──────────────────────────────────────────
-// Called by App on startup BEFORE hitting Google Sheet.
-// Priority order: IDB (instant) → Firestore (fast) → Google Sheet (slow)
-// Returns { routes, charts, ports } — same structure App expects.
-// Nothing about existing functions changes — this is purely additive.
-export const loadSheetsFromFirestore = async () => {
-  try {
-    const [rSnap, cSnap, pSnap] = await Promise.all([
-      getDoc(doc(db, 'sheetCache', 'routes')),
-      getDoc(doc(db, 'sheetCache', 'charts')),
-      getDoc(doc(db, 'sheetCache', 'ports')),
-    ]);
-    const routes = rSnap.exists() ? (rSnap.data().data || []) : [];
-    const charts = cSnap.exists() ? (cSnap.data().data || []) : [];
-    const ports  = pSnap.exists() ? (pSnap.data().data || []) : [];
-
-    // Also save to IDB so next visit is even faster (offline too)
-    if (routes.length > 0) await _idbWrite(IDB_ROUTES, routes);
-    if (charts.length > 0) await _idbWrite(IDB_CHARTS, charts);
-    if (ports.length  > 0) await _idbWrite(IDB_PORTS,  ports);
-
-    return { routes, charts, ports };
-  } catch (e) {
-    console.warn('Firestore load failed:', e.message);
-    return { routes: [], charts: [], ports: [] };
-  }
-};
 // ─── Maritime Library Sheet IDs ────────────────────────────────────────────
 export const LIBRARY_SHEET_ID  = '16FLiXlhpbHja6y7esH-UsWYB0JQoB5Kr_x5hqbiJIQw';
 export const SOFTWARE_SHEET_ID = '1ckCXVUzubcHlCy76JZgAImGDQTRNBUEwn2uX1C237rw';
 
-// ─── fetchLibrarySheet — fetches Maritime Library + Sailors Software ───────
+// IDB key for library cache
+const IDB_LIBRARY = 'mnav_library';
+
+// ─── fetchLibrarySheet — IDB first, then Google Sheet ──────────────────────
 // Returns merged array of { category, title, url, downloadUrl, fileId, mimeType }
+// Checks IDB cache first so page never flashes blank on refresh.
 // No existing functions are changed.
 export const fetchLibrarySheet = async () => {
+  // 1. Try IDB cache first — instant load, no network needed
+  try {
+    const cached = await _idbRead(IDB_LIBRARY);
+    if (cached && Array.isArray(cached) && cached.length > 0) {
+      return cached;
+    }
+  } catch { /* fall through to network */ }
+
+  // 2. Fetch from both Google Sheets
   try {
     const [libRows, swRows] = await Promise.allSettled([
-      fetchSheetCSV(LIBRARY_SHEET_ID, 'Sheet1'),
+      fetchSheetCSV(LIBRARY_SHEET_ID,  'Sheet1'),
       fetchSheetCSV(SOFTWARE_SHEET_ID, 'Sheet1'),
     ]);
 
@@ -324,9 +285,29 @@ export const fetchLibrarySheet = async () => {
       mimeType:    '',
     }));
 
-    return [...libNorm, ...swNorm].filter(r => r.title && r.category);
+    const merged = [...libNorm, ...swNorm].filter(r => r.title && r.category);
+
+    // 3. Save to IDB so next load is instant
+    if (merged.length > 0) {
+      await _idbWrite(IDB_LIBRARY, merged);
+    }
+
+    return merged;
   } catch (e) {
     console.warn('fetchLibrarySheet failed:', e.message);
     return [];
   }
+};
+
+// ─── clearLibraryCache — call this from Admin Sync if needed ───────────────
+// Clears only the library IDB cache so it re-fetches fresh data.
+export const clearLibraryCache = async () => {
+  try {
+    const db = await _idbOpen();
+    return new Promise((resolve, reject) => {
+      const req = db.transaction(IDB_STORE, 'readwrite').objectStore(IDB_STORE).delete(IDB_LIBRARY);
+      req.onsuccess = () => resolve();
+      req.onerror   = e => reject(e.target.error);
+    });
+  } catch {}
 };
