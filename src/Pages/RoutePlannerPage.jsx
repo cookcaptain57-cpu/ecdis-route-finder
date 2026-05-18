@@ -1,14 +1,15 @@
 /* eslint-disable */
 // src/Pages/RoutePlannerPage.jsx
+// ← CHANGED: removed PORTS_DB import — no longer used as fallback
 import { useState, useEffect, useMemo } from "react";
-import { PORTS_DB } from "../constants";
 import { buildAutoRoute } from "../routing";
 import { recalcWaypoints, totalRouteNM, parseRTZ, exportRTZ, exportCSV, downloadFile } from "../utils";
 import MapView from "../components/MapView";
 import ETACalculator from "../components/ETACalculator";
 
 function RoutePlannerPage({ notify, sheetRoutes = [], portsDb = [] }) {
-  const portsList = portsDb.length > 88 ? portsDb : PORTS_DB;
+  // ← CHANGED: always use portsDb directly — no fallback to hardcoded 41 ports
+  const portsList = portsDb;
   const [panel, setPanel] = useState('auto');
   const [fromPort, setFromPort] = useState('');
   const [toPort, setToPort] = useState('');
@@ -19,7 +20,6 @@ function RoutePlannerPage({ notify, sheetRoutes = [], portsDb = [] }) {
   const [playing, setPlaying] = useState(false);
   const [speed, setSpeed] = useState(5);
   const [clickAdd, setClickAdd] = useState(false);
-  // CHANGED: added gebco and depthClick to overlays initial state
   const [overlays, setOverlays] = useState({ eca: false, seca: false, marpol: false, piracy: false, layover: false, gebco: false, depthClick: false });
   const [mapMode, setMapMode] = useState('night');
   const [dbSuggestions, setDbSuggestions] = useState([]);
@@ -36,8 +36,8 @@ function RoutePlannerPage({ notify, sheetRoutes = [], portsDb = [] }) {
     }).slice(0, 8));
   };
 
-  useEffect(() => searchPort(fromPort, setFromSugg), [fromPort]);
-  useEffect(() => searchPort(toPort, setToSugg), [toPort]);
+  useEffect(() => searchPort(fromPort, setFromSugg), [fromPort, portsList]);
+  useEffect(() => searchPort(toPort, setToSugg), [toPort, portsList]);
 
   const searchEcdisRoutes = (dep, arr) => {
     if (!dep && !arr) return [];
@@ -122,7 +122,6 @@ function RoutePlannerPage({ notify, sheetRoutes = [], portsDb = [] }) {
   const clearRoute = () => { setWaypoints([]); setPlaying(false); };
   const toggleOverlay = (k) => setOverlays(o => ({ ...o, [k]: !o[k] }));
 
-  // CHANGED: added gebco and depthClick entries to ovCfg
   const ovCfg = [
     { k: 'eca',        label: 'ECA',           color: '#FF6B35', desc: 'Emission Control Area' },
     { k: 'seca',       label: 'SECA',          color: '#FFB347', desc: 'Sulphur ECA' },
