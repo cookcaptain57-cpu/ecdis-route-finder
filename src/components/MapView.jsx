@@ -23,8 +23,11 @@ function greatCircle(lat1, lon1, lat2, lon2, n) {
 function MapView({ waypoints, setWaypoints, overlays, playing, setPlaying, speed, onMapClick, mapMode }) {
   const containerRef = useRef(null);
   const mapRef = useRef(null);
-  // gebcoTile holds ESRI Ocean Reference layer when gebco is ON
-  const layersRef = useRef({ route: null, markers: [], zones: {}, ship: null, trail: null, baseTile: null, seamarkTile: null, gebcoTile: null });
+  const layersRef = useRef({
+    route: null, markers: [], zones: {}, ship: null, trail: null,
+    baseTile: null, seamarkTile: null, gebcoTile: null,
+    emodnetTile: null, encTile: null,
+  });
   const animRef = useRef(null);
   const animIdxRef = useRef(0);
   const animPtsRef = useRef([]);
@@ -36,20 +39,6 @@ function MapView({ waypoints, setWaypoints, overlays, playing, setPlaying, speed
     dusk:  { url: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager_nolabels/{z}/{x}/{y}{r}.png', attr: '© OpenStreetMap © CARTO', filter: 'sepia(40%) saturate(70%) brightness(70%)' },
   };
 
-  // CHANGED: ECDIS-style depth display — no colour shading, depth values as numbers
-  //
-  // OLD behaviour (gebco ON):
-  //   Layer 1 → ESRI Ocean Base  (heavy blue/green colour shading)   ← user did NOT want this
-  //   Layer 2 → ESRI Ocean Reference (depth numbers, port names)
-  //
-  // NEW behaviour (gebco ON):
-  //   Layer 1 → Carto Voyager light basemap (clean white/chart background, no shading)
-  //   Layer 2 → ESRI Ocean Reference only   (depth soundings in metres at zoom ≥9,
-  //              shipping lanes, port labels — looks like ECDIS at higher zoom levels)
-  //   Layer 3 → OpenSeaMap at opacity 0.85  (seamarks, buoys, depth contours — more visible)
-  //
-  // ESRI Ocean Reference depth numbers appear at zoom 9+.
-  // Zoom in past zoom 9 to see individual metre values like a real ENC chart.
   useEffect(() => {
     if (!ready || !window.L || !mapRef.current) return;
     const L = window.L, map = mapRef.current, lrs = layersRef.current;
@@ -57,34 +46,50 @@ function MapView({ waypoints, setWaypoints, overlays, playing, setPlaying, speed
     if (lrs.baseTile)    { lrs.baseTile.remove();    lrs.baseTile    = null; }
     if (lrs.seamarkTile) { lrs.seamarkTile.remove(); lrs.seamarkTile = null; }
     if (lrs.gebcoTile)   { lrs.gebcoTile.remove();   lrs.gebcoTile   = null; }
+    if (lrs.emodnetTile) { lrs.emodnetTile.remove(); lrs.emodnetTile = null; }
+    if (lrs.encTile)     { lrs.encTile.remove();     lrs.encTile     = null; }
 
     if (overlays?.gebco) {
-      // CHANGED: Light Carto Voyager base — white/chart-like background, no colour shading.
-      // Replaces ESRI Ocean Base which caused the blue/green depth shading the user didn't want.
       lrs.baseTile = L.tileLayer(
         'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
         { attribution: '© OpenStreetMap © CARTO', subdomains: 'abcd', maxZoom: 19 }
       ).addTo(map);
       if (containerRef.current) containerRef.current.style.filter = 'none';
 
-      // UNCHANGED url — ESRI Ocean Reference layer.
-      // This layer contains: depth soundings (metres) at zoom ≥9, shipping separation
-      // schemes, port names, maritime boundaries — the ECDIS-style info the user wants.
-      // opacity raised to 1.0 (was implicit 1.0 before, now explicit for clarity).
+      lrs.emodnetTile = L.tileLayer(
+        'https://tiles.emodnet-bathymetry.eu/2020/baselayer/{z}/{x}/{y}.png',
+        {
+          attribution: '© EMODnet Bathymetry',
+          maxZoom: 11,
+          opacity: 0.55,
+          errorTileUrl: 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7',
+        }
+      ).addTo(map);
+
       lrs.gebcoTile = L.tileLayer(
         'https://server.arcgisonline.com/arcgis/rest/services/Ocean/World_Ocean_Reference/MapServer/tile/{z}/{y}/{x}',
-        { maxZoom: 18, attribution: 'Tiles © Esri — GEBCO, NOAA, National Geographic', opacity: 1.0 }
+        { maxZoom: 18, attribution: 'Tiles © Esri — GEBCO, NOAA', opacity: 1.0 }
       ).addTo(map);
+
+      lrs.encTile = L.tileLayer.wms(
+        'https://gis.charttools.noaa.gov/arcgis/rest/services/MCS/ENCOnline/MapServer/exts/MaritimeChartService/WMSServer',
+        {
+          layers:      '0,1,2,3,4,5,6,7',
+          format:      'image/png',
+          transparent: true,
+          version:     '1.3.0',
+          attribution: '© NOAA ENC Online',
+          opacity:     0.85,
+          maxZoom:     18,
+        }
+      ).addTo(map);
+
     } else {
       const cfg = MAP_TILES[mapMode] || MAP_TILES.night;
       lrs.baseTile = L.tileLayer(cfg.url, { attribution: cfg.attr, subdomains: 'abcd', maxZoom: 19 }).addTo(map);
       if (containerRef.current) containerRef.current.style.filter = cfg.filter || 'none';
     }
 
-    // CHANGED: OpenSeaMap opacity is now 0.85 when GEBCO/ECDIS mode is ON (was fixed 0.55).
-    // Higher opacity makes seamarks, buoys and depth contour lines more readable
-    // against the light chart background — closer to real ENC display.
-    // Reverts to 0.55 in normal (dark/dusk) map modes so marks don't overpower the basemap.
     const seamarkOpacity = overlays?.gebco ? 0.85 : 0.55;
     lrs.seamarkTile = L.tileLayer(
       'https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png',
@@ -101,7 +106,6 @@ function MapView({ waypoints, setWaypoints, overlays, playing, setPlaying, speed
     layersRef.current.seamarkTile = L.tileLayer('https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png', { opacity: 0.55, maxZoom: 18 }).addTo(mapRef.current);
     mapRef.current.on('click', e => { onMapClick && onMapClick(e.latlng.lat, e.latlng.lng); });
     setReady(true);
-    // FIX: invalidateSize — container may be 0px tall in flex layout at init time
     [100, 300, 600, 1200].forEach(t => setTimeout(() => {
       try { mapRef.current?.invalidateSize({ animate: false }); } catch {}
     }, t));
@@ -128,8 +132,11 @@ function MapView({ waypoints, setWaypoints, overlays, playing, setPlaying, speed
     return () => {
       if (animRef.current) clearInterval(animRef.current);
       if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; }
-      // FIX: reset layersRef on unmount — prevents stale Leaflet refs crashing on remount
-      layersRef.current = { route: null, markers: [], zones: {}, ship: null, trail: null, baseTile: null, seamarkTile: null, gebcoTile: null };
+      layersRef.current = {
+        route: null, markers: [], zones: {}, ship: null, trail: null,
+        baseTile: null, seamarkTile: null, gebcoTile: null,
+        emodnetTile: null, encTile: null,
+      };
     };
   }, []);
 
@@ -173,11 +180,11 @@ function MapView({ waypoints, setWaypoints, overlays, playing, setPlaying, speed
     const L = window.L, map = mapRef.current, lrs = layersRef.current;
     Object.values(lrs.zones).forEach(l => l.remove()); lrs.zones = {};
     const cfg = {
-      eca:     { zones: ECA_ZONES,     color: '#FF6B35', label: 'ECA Area'      },
-      seca:    { zones: SECA_ZONES,    color: '#FFB347', label: 'SECA Area'     },
-      marpol:  { zones: MARPOL_ZONES,  color: '#9B59B6', label: 'MARPOL Area'   },
-      piracy:  { zones: PIRACY_ZONES,  color: '#E74C3C', label: 'Piracy Area'   },
-      layover: { zones: LAYOVER_ZONES, color: '#3498DB', label: 'Anchorage'     },
+      eca:     { zones: ECA_ZONES,     color: '#FF6B35', label: 'ECA Area'    },
+      seca:    { zones: SECA_ZONES,    color: '#FFB347', label: 'SECA Area'   },
+      marpol:  { zones: MARPOL_ZONES,  color: '#9B59B6', label: 'MARPOL Area' },
+      piracy:  { zones: PIRACY_ZONES,  color: '#E74C3C', label: 'Piracy Area' },
+      layover: { zones: LAYOVER_ZONES, color: '#3498DB', label: 'Anchorage'   },
     };
     Object.entries(cfg).forEach(([k, c]) => {
       if (!overlays?.[k]) return;
@@ -209,25 +216,17 @@ function MapView({ waypoints, setWaypoints, overlays, playing, setPlaying, speed
     return () => { if (animRef.current) clearInterval(animRef.current); };
   }, [playing, speed, ready]);
 
-  // Depth on click — shows "⏳ Fetching depth…" popup immediately,
-  // then replaces content with result or error.
-  // Uses opentopodata.org GEBCO 2020 dataset — CORS-safe, free, browser-compatible.
-  // Depth values are negative for ocean (converted to positive metres in display).
   useEffect(() => {
     if (!ready || !window.L || !mapRef.current) return;
     const map = mapRef.current;
     const L = window.L;
-
     const handleDepthClick = async (e) => {
-      // Show loading popup immediately so user has instant feedback
       const popup = L.popup({ closeOnClick: false, autoClose: false })
         .setLatLng(e.latlng)
         .setContent('<div style="font-size:12px;padding:2px 4px">⏳ Fetching depth…</div>')
         .openOn(map);
       try {
-        const res = await fetch(
-          `https://api.opentopodata.org/v1/gebco2020?locations=${e.latlng.lat},${e.latlng.lng}`
-        );
+        const res = await fetch(`https://api.opentopodata.org/v1/gebco2020?locations=${e.latlng.lat},${e.latlng.lng}`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         const elev = data?.results?.[0]?.elevation;
@@ -236,23 +235,11 @@ function MapView({ waypoints, setWaypoints, overlays, playing, setPlaying, speed
         const label = isOcean
           ? `🌊 Depth: <b style="color:#00B4D8">${Math.abs(elev).toFixed(0)} m</b>`
           : `⛰ Elevation: <b style="color:#00C896">${elev.toFixed(0)} m</b>`;
-        popup.setContent(
-          `<div style="font-size:12px;min-width:170px;line-height:1.7">
-            ${label}<br/>
-            <span style="color:#888;font-size:11px">${e.latlng.lat.toFixed(5)}°N&nbsp;&nbsp;${e.latlng.lng.toFixed(5)}°E</span><br/>
-            <span style="color:#555;font-size:10px">Source: GEBCO 2020</span>
-          </div>`
-        );
+        popup.setContent(`<div style="font-size:12px;min-width:170px;line-height:1.7">${label}<br/><span style="color:#888;font-size:11px">${e.latlng.lat.toFixed(5)}°N&nbsp;&nbsp;${e.latlng.lng.toFixed(5)}°E</span><br/><span style="color:#555;font-size:10px">Source: GEBCO 2020</span></div>`);
       } catch (err) {
-        popup.setContent(
-          `<div style="font-size:12px;color:#ff6b6b;min-width:140px">
-            ⚠ Depth unavailable<br/>
-            <span style="font-size:10px;color:#aaa">${err.message}</span>
-          </div>`
-        );
+        popup.setContent(`<div style="font-size:12px;color:#ff6b6b;min-width:140px">⚠ Depth unavailable<br/><span style="font-size:10px;color:#aaa">${err.message}</span></div>`);
       }
     };
-
     if (overlays?.depthClick) map.on('click', handleDepthClick);
     return () => map.off('click', handleDepthClick);
   }, [overlays?.depthClick, ready]);
