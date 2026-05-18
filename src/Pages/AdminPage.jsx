@@ -5,7 +5,8 @@ import {
   collection, getDocs, addDoc, deleteDoc, doc, setDoc, serverTimestamp,
 } from "firebase/firestore";
 import { onAuthStateChanged, signInWithEmailAndPassword, signOut } from "firebase/auth";
-import { ADMIN_EMAIL, ECDIS_BRANDS, ROUTE_TYPES, PORTS_DB } from "../constants";
+// ← CHANGED: removed PORTS_DB from import — no longer used here
+import { ADMIN_EMAIL, ECDIS_BRANDS, ROUTE_TYPES } from "../constants";
 import PortSearchPage from "./PortSearchPage";
 
 function AdminPage({
@@ -13,6 +14,7 @@ function AdminPage({
   sheetRoutes, sheetCharts,
   refreshRoutes, refreshCharts, refreshPorts,
   routesLoading, chartsLoading, portsLoading,
+  portsDb = [],   // ← CHANGED: now receives real port data from App.jsx
 }) {
   const [user, setUser]       = useState(null);
   const [email, setEmail]     = useState('');
@@ -173,6 +175,8 @@ function AdminPage({
                   { l: 'Sheet Charts',     v: sheetCharts.length, i: '🔄', c: '#A78BFA' },
                   { l: 'Links Active',     v: [...routes, ...charts].filter(f => f.fileUrl).length, i: '✅', c: 'var(--green)' },
                   { l: 'ECDIS Brands',     v: ECDIS_BRANDS.length, i: '🖥', c: 'var(--text2)' },
+                  // ← CHANGED: now shows real port count from Firebase/IDB
+                  { l: 'World Ports',      v: portsDb.length,     i: '⚓', c: 'var(--cyan)' },
                 ].map(s => (
                   <div key={s.l} className="file-card" style={{ padding: '1rem' }}>
                     <div style={{ fontSize: '1.5rem', marginBottom: 4 }}>{s.i}</div>
@@ -325,7 +329,6 @@ function AdminPage({
                 <div className="a-title">🔄 Sync Routes — Sheet → Firebase</div>
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                   <span className="badge">{sheetRoutes.length} in Firebase</span>
-                  {/* ✅ Only routesLoading — Charts & Ports unaffected */}
                   <button className="btn btn-primary" style={{ padding: '5px 12px', fontSize: '0.72rem' }} onClick={refreshRoutes} disabled={routesLoading}>
                     {routesLoading
                       ? <><div className="spin" style={{ width: 12, height: 12 }} /> Syncing Routes…</>
@@ -370,7 +373,6 @@ function AdminPage({
                 <div className="a-title">🔄 Sync Charts — Sheet → Firebase</div>
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                   <span className="badge badge-gold">{sheetCharts.length} in Firebase</span>
-                  {/* ✅ Only chartsLoading — Routes & Ports unaffected */}
                   <button className="btn btn-gold" style={{ padding: '5px 12px', fontSize: '0.72rem' }} onClick={refreshCharts} disabled={chartsLoading}>
                     {chartsLoading
                       ? <><div className="spin" style={{ width: 12, height: 12 }} /> Syncing Charts…</>
@@ -414,7 +416,8 @@ function AdminPage({
               <div className="a-hdr">
                 <div className="a-title">⚓ Sync Ports — Sheet → Firebase</div>
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                  {/* ✅ Only portsLoading — Routes & Charts unaffected */}
+                  {/* ← CHANGED: shows real port count from Firebase/IDB */}
+                  <span className="badge badge-green">{portsDb.length} ports loaded</span>
                   <button className="btn btn-green" style={{ padding: '5px 12px', fontSize: '0.72rem' }} onClick={refreshPorts} disabled={portsLoading}>
                     {portsLoading
                       ? <><div className="spin" style={{ width: 12, height: 12 }} /> Syncing Ports…</>
@@ -423,10 +426,11 @@ function AdminPage({
                 </div>
               </div>
               <div className="info-box">
-                📡 Fetches all ports from your Google Sheet → saves to Firebase permanently.
+                📡 Fetches all ports from your Google Sheet → saves to Firebase permanently → all users load from Firebase instantly → browser caches to IDB for offline use.
                 Only ports are updated. Routes and Charts are <strong style={{ color: 'var(--green)' }}>not affected</strong>.
               </div>
-              <PortSearchPage portsDb={PORTS_DB} sheetLoading={portsLoading} refreshSheets={refreshPorts} />
+              {/* ← CHANGED: passes real portsDb instead of hardcoded PORTS_DB */}
+              <PortSearchPage portsDb={portsDb} sheetLoading={portsLoading} refreshSheets={refreshPorts} />
             </>
           )}
 
