@@ -231,20 +231,20 @@ export default function App() {
   const [charts, setCharts]               = useState([]);
   const [sheetRoutes, setSheetRoutes]     = useState([]);
   const [sheetCharts, setSheetCharts]     = useState([]);
-  const [portsDb, setPortsDb]             = useState(PORTS_DB);
+  // ← CHANGED: start empty — never show 41 hardcoded ports as initial state
+  const [portsDb, setPortsDb]             = useState([]);
 
   // ✅ SEPARATE loading states — each sync button has its OWN spinner
-  // Clicking Sync Charts will NOT affect Routes or Ports buttons
   const [routesLoading, setRoutesLoading] = useState(false);
   const [chartsLoading, setChartsLoading] = useState(false);
   const [portsLoading, setPortsLoading]   = useState(false);
 
-  // Combined loading for pages that just need to know "is anything loading"
   const sheetLoading = routesLoading || chartsLoading || portsLoading;
 
   const isAdmin = user?.email === ADMIN_EMAIL;
   const notify  = (msg, type = 'success') => setNotif({ msg, type, key: Date.now() });
 
+  // ← CHANGED: no longer seeds from PORTS_DB — only uses real data from Firebase/Sheet
   const applyPortData = (d3) => {
     if (!Array.isArray(d3) || d3.length === 0) return;
     const normalized = d3.map(normalizePortRow).filter(Boolean);
@@ -253,23 +253,30 @@ export default function App() {
       const key = `${p.name?.toLowerCase()}-${p.country?.toLowerCase()}`;
       if (!seen.has(key) && p.lat && p.lon) { seen.add(key); deduped.push(p); }
     });
-    const seedMap = new Map(PORTS_DB.map(p => [p.id, p]));
-    deduped.forEach(p => {
-      if (!seedMap.has(p.id)) seedMap.set(p.id, p);
-      else seedMap.set(p.id, { ...seedMap.get(p.id), ...p });
-    });
+    // ← CHANGED: empty map — don't merge with hardcoded 41 ports
+    const seedMap = new Map();
+    deduped.forEach(p => seedMap.set(p.id, p));
     setPortsDb([...seedMap.values()]);
   };
 
   // ─── Load app data on startup ─────────────────────────────────────────────
-  // Priority 1: Firestore (if admin has synced) → fast, permanent
-  // Priority 2: Google Sheet direct fetch (fallback if Firestore empty)
-  // Each user caches in IndexedDB → next load is instant
   const loadAppData = async () => {
     try {
+      // ← CHANGED: IDB-first — show cached port data IMMEDIATELY before any network call.
+      // This makes ports appear instantly on repeat visits, even with no internet.
+      const [idbPortsEarly, idbRoutesEarly, idbChartsEarly] = await Promise.all([
+        idbGet('ports_d'),
+        idbGet('routes_d'),
+        idbGet('charts_d'),
+      ]);
+      if (Array.isArray(idbPortsEarly)  && idbPortsEarly.length  > 0) applyPortData(idbPortsEarly);
+      if (Array.isArray(idbRoutesEarly) && idbRoutesEarly.length > 0) setSheetRoutes(idbRoutesEarly);
+      if (Array.isArray(idbChartsEarly) && idbChartsEarly.length > 0) setSheetCharts(idbChartsEarly);
+
+      // Now check Firestore for newer versions (background update)
       const meta = await getFirestoreMeta();
 
-      // ── Firestore has data — load from it ─────────────────────────────
+      // ── Firestore has data — load from it if version is newer ─────────
       if (meta) {
         const [cachedRv, cachedCv, cachedPv] = await Promise.all([
           idbGet('routes_v'),
@@ -277,7 +284,6 @@ export default function App() {
           idbGet('ports_v'),
         ]);
 
-        // Load each type independently — only re-fetch from Firestore if version changed
         await Promise.all([
           (async () => {
             if (meta.rv && cachedRv === meta.rv) {
@@ -308,6 +314,7 @@ export default function App() {
             }
           })(),
           (async () => {
+            // ← CHANGED: ports now follow exact same pattern as routes/charts
             if (meta.pv && cachedPv === meta.pv) {
               const d = await idbGet('ports_d');
               if (d && d.length > 0) { applyPortData(d); return; }
@@ -322,11 +329,11 @@ export default function App() {
             }
           })(),
         ]);
-        return; // Done — loaded from Firestore
+        return;
       }
 
-      // ── Firestore empty — fall back to Google Sheet directly ───────────
-      // This runs until admin does first sync
+      // ── No Firestore meta yet — fall back to Google Sheet directly ─────
+      // Only runs until admin does first sync
       setRoutesLoading(true); setChartsLoading(true); setPortsLoading(true);
       const [d1, d2, d3] = await Promise.all([
         fetchRouteSheet(),
@@ -342,8 +349,6 @@ export default function App() {
   };
 
   // ─── Admin: Sync Routes ONLY ──────────────────────────────────────────────
-  // Only routesLoading = true → only Routes sync button shows spinner
-  // Charts and Ports buttons stay normal and usable
   const refreshRoutes = async () => {
     setRoutesLoading(true);
     notify('📡 Fetching routes from Sheet…', 'info');
@@ -365,7 +370,6 @@ export default function App() {
   };
 
   // ─── Admin: Sync Charts ONLY ──────────────────────────────────────────────
-  // Only chartsLoading = true → only Charts sync button shows spinner
   const refreshCharts = async () => {
     setChartsLoading(true);
     notify('📡 Fetching charts from Sheet…', 'info');
@@ -387,7 +391,6 @@ export default function App() {
   };
 
   // ─── Admin: Sync Ports ONLY ───────────────────────────────────────────────
-  // Only portsLoading = true → only Ports sync button shows spinner
   const refreshPorts = async () => {
     setPortsLoading(true);
     notify('📡 Fetching ports from Sheet…', 'info');
@@ -408,7 +411,6 @@ export default function App() {
     setPortsLoading(false);
   };
 
-  // Load on app start
   useEffect(() => { loadAppData(); }, []);
 
   // ─── Auth listener ────────────────────────────────────────────────────────
@@ -460,7 +462,6 @@ export default function App() {
     <>
       <style>{S}</style>
 
-      {/* Small top-right indicator — app shows immediately, auth loads in background */}
       {!authChecked && (
         <div style={{
           position: 'fixed', top: 68, right: 12, zIndex: 9998,
@@ -553,6 +554,8 @@ export default function App() {
                 routesLoading={routesLoading}
                 chartsLoading={chartsLoading}
                 portsLoading={portsLoading}
+                portsDb={portsDb}
+                // ← CHANGED: portsDb now passed so AdminPage shows real port data
               />
             : <div className="section"><div className="empty"><div className="empty-icon">🔒</div><div className="empty-t">Admin Access Only</div></div></div>
           )}
