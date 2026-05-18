@@ -334,26 +334,90 @@ export default function NavModePage({
   }, [aisTargets]);
 
   // ── MODIFIED: TILE SWAP ──
-  useEffect(() => {
-    if(!mapReady||!leafRef.current||!window.L) return;
-    const L=window.L,map=leafRef.current;
-    if(baseTileRef.current){map.removeLayer(baseTileRef.current);baseTileRef.current=null;}
-    if(gebcoRefTile.current){map.removeLayer(gebcoRefTile.current);gebcoRefTile.current=null;}
-    if(seamarkRef.current){map.removeLayer(seamarkRef.current);seamarkRef.current=null;}
-    const TILES={
-      night:{url:'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',attr:'© CARTO'},
-      day:{url:'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',attr:'© CARTO'},
-      dusk:{url:'https://{s}.basemaps.cartocdn.com/rastertiles/voyager_nolabels/{z}/{x}/{y}{r}.png',attr:'© CARTO'},
-    };
-    if(gebcoOn){
-      baseTileRef.current=L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',{subdomains:'abcd',attribution:'© CARTO',maxZoom:19}).addTo(map);
-      gebcoRefTile.current=L.tileLayer('https://server.arcgisonline.com/arcgis/rest/services/Ocean/World_Ocean_Reference/MapServer/tile/{z}/{y}/{x}',{maxZoom:18,attribution:'Tiles © Esri — GEBCO, NOAA',opacity:1.0}).addTo(map);
-    } else {
-      const cfg=TILES[mapMode]||TILES.night;
-      baseTileRef.current=L.tileLayer(cfg.url,{subdomains:'abcd',attribution:cfg.attr,maxZoom:19}).addTo(map);
-    }
-    seamarkRef.current=L.tileLayer('https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png',{opacity:gebcoOn?0.85:0.55,maxZoom:18,attribution:'© OpenSeaMap'}).addTo(map);
-  }, [gebcoOn,mapMode,mapReady]);
+  // ─────────────────────────────────────────────────────────────────────────────
+// NAVMODE PATCH — replace ONLY the "── MODIFIED: TILE SWAP ──" useEffect block
+// Find this comment in NavModePage.jsx:
+//   // ── MODIFIED: TILE SWAP ──
+// Replace the entire useEffect (from that comment to its closing }, [gebcoOn,mapMode,mapReady]);)
+// with the block below. Everything else in NavModePage.jsx stays identical.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ADD: new refs at the top of the component (add alongside existing gebcoRefTile ref):
+//   const emodnetTileRef = useRef(null);
+//   const encTileRef     = useRef(null);
+
+// ── MODIFIED: TILE SWAP ──
+// CHANGED: gebcoOn now loads EMODnet bathymetry + NOAA ENC WMS in addition to
+// existing ESRI Ocean Reference layer. Zero existing logic removed.
+useEffect(() => {
+  if (!mapReady || !leafRef.current || !window.L) return;
+  const L = window.L, map = leafRef.current;
+
+  // Remove existing tiles
+  if (baseTileRef.current)   { map.removeLayer(baseTileRef.current);   baseTileRef.current   = null; }
+  if (gebcoRefTile.current)  { map.removeLayer(gebcoRefTile.current);  gebcoRefTile.current  = null; }
+  if (seamarkRef.current)    { map.removeLayer(seamarkRef.current);    seamarkRef.current    = null; }
+  if (emodnetTileRef.current){ map.removeLayer(emodnetTileRef.current);emodnetTileRef.current= null; } // NEW
+  if (encTileRef.current)    { map.removeLayer(encTileRef.current);    encTileRef.current    = null; } // NEW
+
+  const TILES = {
+    night: { url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',            attr: '© CARTO' },
+    day:   { url: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', attr: '© CARTO' },
+    dusk:  { url: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager_nolabels/{z}/{x}/{y}{r}.png', attr: '© CARTO' },
+  };
+
+  if (gebcoOn) {
+    // Layer 1: Light chart base
+    baseTileRef.current = L.tileLayer(
+      'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
+      { subdomains: 'abcd', attribution: '© CARTO', maxZoom: 19 }
+    ).addTo(map);
+
+    // NEW Layer 2: EMODnet Bathymetry — worldwide depth colour zones + contours
+    emodnetTileRef.current = L.tileLayer(
+      'https://tiles.emodnet-bathymetry.eu/2020/baselayer/{z}/{x}/{y}.png',
+      {
+        attribution: '© EMODnet Bathymetry',
+        maxZoom: 11,
+        opacity: 0.55,
+        errorTileUrl: 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7',
+      }
+    ).addTo(map);
+
+    // Layer 3: ESRI Ocean Reference — depth numbers at zoom ≥9 (unchanged)
+    gebcoRefTile.current = L.tileLayer(
+      'https://server.arcgisonline.com/arcgis/rest/services/Ocean/World_Ocean_Reference/MapServer/tile/{z}/{y}/{x}',
+      { maxZoom: 18, attribution: 'Tiles © Esri — GEBCO, NOAA', opacity: 1.0 }
+    ).addTo(map);
+
+    // NEW Layer 4: NOAA ENC Online WMS — real ENC depth soundings + shipping lanes worldwide
+    encTileRef.current = L.tileLayer.wms(
+      'https://gis.charttools.noaa.gov/arcgis/rest/services/MCS/ENCOnline/MapServer/exts/MaritimeChartService/WMSServer',
+      {
+        layers:      '0,1,2,3,4,5,6,7',
+        format:      'image/png',
+        transparent: true,
+        version:     '1.3.0',
+        attribution: '© NOAA ENC Online',
+        opacity:     0.85,
+        maxZoom:     18,
+      }
+    ).addTo(map);
+
+  } else {
+    const cfg = TILES[mapMode] || TILES.night;
+    baseTileRef.current = L.tileLayer(
+      cfg.url, { subdomains: 'abcd', attribution: cfg.attr, maxZoom: 19 }
+    ).addTo(map);
+  }
+
+  seamarkRef.current = L.tileLayer(
+    'https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png',
+    { opacity: gebcoOn ? 0.85 : 0.55, maxZoom: 18, attribution: '© OpenSeaMap' }
+  ).addTo(map);
+
+}, [gebcoOn, mapMode, mapReady]);
+
 
   // ADD: sync vectorMinsRef (ref used in GPS callback, no restart needed)
   useEffect(()=>{ vectorMinsRef.current=vectorMins; },[vectorMins]);
