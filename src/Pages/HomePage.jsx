@@ -1,7 +1,8 @@
 /* eslint-disable */
 // src/pages/HomePage.jsx
+// ← CHANGED: removed PORTS_DB import — no longer used as fallback
 import { useState, useEffect, useRef } from "react";
-import { PORTS_DB, ECDIS_BRANDS } from "../constants";
+import { ECDIS_BRANDS } from "../constants";
 
 function HomePage({ routes, charts, onSearch, setTab, user, portsDb = [] }) {
   const [q, setQ] = useState('');
@@ -19,8 +20,8 @@ function HomePage({ routes, charts, onSearch, setTab, user, portsDb = [] }) {
     const ql = q.toLowerCase();
     const hits = new Set();
     [...routes, ...charts].forEach(f => [f.fileName, f.portName, f.keywords, f.brand].filter(Boolean).forEach(s => { if (s.toLowerCase().includes(ql)) hits.add(s); }));
-    const db = portsDb.length > 0 ? portsDb : PORTS_DB;
-    db.forEach(p => { if (p.name?.toLowerCase().includes(ql)) hits.add(p.name); });
+    // ← CHANGED: always use portsDb directly — no fallback to hardcoded 41 ports
+    portsDb.forEach(p => { if (p.name?.toLowerCase().includes(ql)) hits.add(p.name); });
     setSugg([...hits].slice(0, 7));
   }, [q, routes, charts, portsDb]);
 
@@ -50,7 +51,8 @@ function HomePage({ routes, charts, onSearch, setTab, user, portsDb = [] }) {
     { title: 'ECDIS MANUALS', desc: 'User Manuals & Guides', icon: '📡', color: 'var(--cyan)' },
   ];
 
-  const db = portsDb.length > 0 ? portsDb : PORTS_DB;
+  // ← CHANGED: always use portsDb directly — no fallback to hardcoded 41 ports
+  const db = portsDb;
 
   return (
     <div style={{ flex: 1 }}>
@@ -111,6 +113,7 @@ function HomePage({ routes, charts, onSearch, setTab, user, portsDb = [] }) {
             { n: routes.length, l: 'RTZ Routes', c: 'var(--cyan)' },
             { n: charts.length, l: 'Chart Files', c: 'var(--gold)' },
             { n: ECDIS_BRANDS.length, l: 'ECDIS Brands', c: 'var(--purple)' },
+            // ← CHANGED: db is now always portsDb — shows real count (or 0 while loading)
             { n: db.length, l: 'World Ports', c: 'var(--green)' },
           ].map((s, i) => (
             <div key={i} style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 10, padding: '10px 12px', textAlign: 'center' }}>
