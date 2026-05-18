@@ -260,10 +260,13 @@ export default function App() {
   };
 
   // ─── Load app data on startup ─────────────────────────────────────────────
+  // NOTE: this function NEVER touches routesLoading / chartsLoading / portsLoading.
+  // Those states are ONLY set by the manual refreshRoutes / refreshCharts / refreshPorts.
+  // This keeps all three sync buttons fully independent and never auto-triggered.
   const loadAppData = async () => {
     try {
-      // ← CHANGED: IDB-first — show cached port data IMMEDIATELY before any network call.
-      // This makes ports appear instantly on repeat visits, even with no internet.
+      // Step 1: IDB-first — show cached data IMMEDIATELY, no network needed.
+      // On repeat visits this is instant and works fully offline.
       const [idbPortsEarly, idbRoutesEarly, idbChartsEarly] = await Promise.all([
         idbGet('ports_d'),
         idbGet('routes_d'),
@@ -273,10 +276,10 @@ export default function App() {
       if (Array.isArray(idbRoutesEarly) && idbRoutesEarly.length > 0) setSheetRoutes(idbRoutesEarly);
       if (Array.isArray(idbChartsEarly) && idbChartsEarly.length > 0) setSheetCharts(idbChartsEarly);
 
-      // Now check Firestore for newer versions (background update)
+      // Step 2: Check Firestore silently in background for newer versions.
+      // No spinner shown — this is a silent background refresh.
       const meta = await getFirestoreMeta();
 
-      // ── Firestore has data — load from it if version is newer ─────────
       if (meta) {
         const [cachedRv, cachedCv, cachedPv] = await Promise.all([
           idbGet('routes_v'),
@@ -291,12 +294,11 @@ export default function App() {
               if (d && d.length > 0) { setSheetRoutes(d); return; }
             }
             if (meta.rv && meta.rc) {
-              setRoutesLoading(true);
+              // silent — no setRoutesLoading here
               const d = await loadRoutesFromFirestore(meta.rc);
               setSheetRoutes(d);
               await idbSet('routes_d', d);
               await idbSet('routes_v', meta.rv);
-              setRoutesLoading(false);
             }
           })(),
           (async () => {
@@ -305,47 +307,43 @@ export default function App() {
               if (d && d.length > 0) { setSheetCharts(d); return; }
             }
             if (meta.cv && meta.cc) {
-              setChartsLoading(true);
+              // silent — no setChartsLoading here
               const d = await loadChartsFromFirestore(meta.cc);
               setSheetCharts(d);
               await idbSet('charts_d', d);
               await idbSet('charts_v', meta.cv);
-              setChartsLoading(false);
             }
           })(),
           (async () => {
-            // ← CHANGED: ports now follow exact same pattern as routes/charts
             if (meta.pv && cachedPv === meta.pv) {
               const d = await idbGet('ports_d');
               if (d && d.length > 0) { applyPortData(d); return; }
             }
             if (meta.pv && meta.pc) {
-              setPortsLoading(true);
+              // silent — no setPortsLoading here
               const d = await loadPortsFromFirestore(meta.pc);
               applyPortData(d);
               await idbSet('ports_d', d);
               await idbSet('ports_v', meta.pv);
-              setPortsLoading(false);
             }
           })(),
         ]);
         return;
       }
 
-      // ── No Firestore meta yet — fall back to Google Sheet directly ─────
-      // Only runs until admin does first sync
-      setRoutesLoading(true); setChartsLoading(true); setPortsLoading(true);
+      // Step 3: No Firestore meta at all — fall back to Google Sheet directly.
+      // Silent — no loading spinners. Runs only until admin does first sync.
       const [d1, d2, d3] = await Promise.all([
         fetchRouteSheet(),
         fetchChartSheet(),
         fetchPortsFromSheet(),
       ]);
-      setSheetRoutes(Array.isArray(d1) ? d1 : []);
-      setSheetCharts(Array.isArray(d2) ? d2 : []);
+      if (Array.isArray(d1) && d1.length > 0) setSheetRoutes(d1);
+      if (Array.isArray(d2) && d2.length > 0) setSheetCharts(d2);
       applyPortData(d3);
 
     } catch (e) { console.warn('loadAppData error:', e); }
-    setRoutesLoading(false); setChartsLoading(false); setPortsLoading(false);
+    // No setXxxLoading(false) here — we never set them true in this function
   };
 
   // ─── Admin: Sync Routes ONLY ──────────────────────────────────────────────
