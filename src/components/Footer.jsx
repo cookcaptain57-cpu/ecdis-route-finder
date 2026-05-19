@@ -86,7 +86,7 @@ export default function Footer() {
           href="https://instagram.com/manish_the_navigator"
           target="_blank"
           rel="noreferrer"
-          aria-label="Contact Admin On Instagram"
+          aria-label="👈Click to Contact Admin On Instagram"
           style={igLinkStyle}
         >
           <span style={igIconStyle}>
