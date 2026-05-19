@@ -280,7 +280,7 @@ export default function NavModePage({ notify, sheetRoutes = [], portsDb = [], se
     aisWsRef.current=ws;
     ws.onopen=()=>ws.send(JSON.stringify({
       Apikey: AISSTREAM_KEY,
-      BoundingBoxes:[[-90,-180],[90,180]], // world — range filtered client-side
+      BoundingBoxes:[[[-90,-180],[90,180]]], // world — range filtered client-side
       FilterMessageTypes:["PositionReport"],
     }));
     ws.onmessage=(msg)=>{try{const d=JSON.parse(msg.data);const p=d?.Message?.PositionReport,m=d?.MetaData;if(!p||!m) return;setAisTargets(prev=>({...prev,[m.MMSI]:{mmsi:m.MMSI,lat:p.Latitude,lon:p.Longitude,cog:p.CourseOverGround||0,sog:p.SpeedOverGround||0,name:m.ShipName||''}}));}catch{}};
@@ -417,7 +417,7 @@ export default function NavModePage({ notify, sheetRoutes = [], portsDb = [], se
   useEffect(()=>{autoCenterRef.current=autoCenter;},[autoCenter]);
   useEffect(()=>{aisRangeRef.current=aisRange;},[aisRange]);
   useEffect(()=>{depthCheckOnRef.current=depthCheckOn;},[depthCheckOn]);
-  useEffect(()=>{contoursRef.current={shallow:shallowDepth,safety:safetyDepth,deep:deepDepth};},[shallowDepth,safetyDepth,deepDepth]);
+  useEffect(()=>{contoursRef.current={shallow:shallowDepth,safety:safetyDepth,deep:deepDepth,draft:shipDraft};},[shallowDepth,safetyDepth,deepDepth,shipDraft]);
 
   // ── PERSIST ALL PREFERENCES (Item 9) ──
   useEffect(()=>{localStorage.setItem('nav_mapMode',mapMode);},[mapMode]);
@@ -540,7 +540,7 @@ export default function NavModePage({ notify, sheetRoutes = [], portsDb = [], se
             const ct=contoursRef.current;
             let status,clr;
             if(isLand){status='⛰ Land / Shoal';clr='#808080';}
-            else if(depth<ct.shallow){status=`🔴 DANGER — Shallow (Draft ${shipDraft}m)`;clr='#FF3030';}
+            else if(depth<ct.shallow){status=`🔴 DANGER — Shallow (Draft ${ct.draft}m)`;clr='#FF3030';}
             else if(depth<ct.safety){status='🟡 CAUTION — Near Safety Contour';clr='#FFD700';}
             else if(depth<ct.deep){status='🟢 Safe Water';clr='#00FF88';}
             else{status='🔵 Deep Water';clr='#00D4FF';}
@@ -586,7 +586,7 @@ export default function NavModePage({ notify, sheetRoutes = [], portsDb = [], se
 
   // HUD drag handlers
   const onHudTS=(e)=>{const t=e.touches[0];hudDragRef.current={dx:t.clientX-hudPos.x,dy:t.clientY-hudPos.y};};
-  const onHudTM=(e)=>{if(!hudDragRef.current) return;e.stopPropagation();const t=e.touches[0];setHudPos({x:Math.max(0,Math.min(window.innerWidth-180,t.clientX-hudDragRef.current.dx)),y:Math.max(50,Math.min(window.innerHeight-200,t.clientY-hudDragRef.current.dy));)};};
+  const onHudTM=(e)=>{if(!hudDragRef.current) return;e.stopPropagation();const t=e.touches[0];setHudPos({x:Math.max(0,Math.min(window.innerWidth-180,t.clientX-hudDragRef.current.dx)),y:Math.max(50,Math.min(window.innerHeight-200,t.clientY-hudDragRef.current.dy))});};
   const onHudTE=()=>{hudDragRef.current=null;};
 
   // ── UI ──────────────────────────────────────────────────────────────────
