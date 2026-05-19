@@ -20,15 +20,26 @@ function greatCircle(lat1, lon1, lat2, lon2, n) {
   return pts;
 }
 
-function MapView({ waypoints, setWaypoints, overlays, playing, setPlaying, speed, onMapClick, mapMode }) {
+// ← CHANGED: added optional props checkHighlights, manualWaypoints, setManualWaypoints
+function MapView({
+  waypoints, setWaypoints, overlays, playing, setPlaying, speed, onMapClick, mapMode,
+  checkHighlights = [],
+  manualWaypoints = [],
+  setManualWaypoints = null,
+}) {
   const containerRef = useRef(null);
-  const mapRef = useRef(null);
+  const mapRef       = useRef(null);
+  // ← CHANGED: added legLabels, checkLayer, manualRoute, manualMarkers to layersRef
   const layersRef = useRef({
     route: null, markers: [], zones: {}, ship: null, trail: null,
     baseTile: null, seamarkTile: null, gebcoTile: null,
     emodnetTile: null, encTile: null,
+    legLabels:     [],    // course/distance labels on auto-route segments
+    checkLayer:    null,  // route-check highlight overlay
+    manualRoute:   null,  // green manual route polyline
+    manualMarkers: [],    // manual WP markers + leg labels
   });
-  const animRef = useRef(null);
+  const animRef    = useRef(null);
   const animIdxRef = useRef(0);
   const animPtsRef = useRef([]);
   const [ready, setReady] = useState(false);
@@ -58,12 +69,8 @@ function MapView({ waypoints, setWaypoints, overlays, playing, setPlaying, speed
 
       lrs.emodnetTile = L.tileLayer(
         'https://tiles.emodnet-bathymetry.eu/2020/baselayer/{z}/{x}/{y}.png',
-        {
-          attribution: '© EMODnet Bathymetry',
-          maxZoom: 11,
-          opacity: 0.55,
-          errorTileUrl: 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7',
-        }
+        { attribution: '© EMODnet Bathymetry', maxZoom: 11, opacity: 0.55,
+          errorTileUrl: 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7' }
       ).addTo(map);
 
       lrs.gebcoTile = L.tileLayer(
@@ -73,17 +80,9 @@ function MapView({ waypoints, setWaypoints, overlays, playing, setPlaying, speed
 
       lrs.encTile = L.tileLayer.wms(
         'https://gis.charttools.noaa.gov/arcgis/rest/services/MCS/ENCOnline/MapServer/exts/MaritimeChartService/WMSServer',
-        {
-          layers:      '0,1,2,3,4,5,6,7',
-          format:      'image/png',
-          transparent: true,
-          version:     '1.3.0',
-          attribution: '© NOAA ENC Online',
-          opacity:     0.85,
-          maxZoom:     18,
-        }
+        { layers: '0,1,2,3,4,5,6,7', format: 'image/png', transparent: true,
+          version: '1.3.0', attribution: '© NOAA ENC Online', opacity: 0.85, maxZoom: 18 }
       ).addTo(map);
-
     } else {
       const cfg = MAP_TILES[mapMode] || MAP_TILES.night;
       lrs.baseTile = L.tileLayer(cfg.url, { attribution: cfg.attr, subdomains: 'abcd', maxZoom: 19 }).addTo(map);
@@ -95,7 +94,6 @@ function MapView({ waypoints, setWaypoints, overlays, playing, setPlaying, speed
       'https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png',
       { opacity: seamarkOpacity, maxZoom: 18 }
     ).addTo(map);
-
   }, [mapMode, ready, overlays?.gebco]);
 
   const initMap = () => {
@@ -132,30 +130,39 @@ function MapView({ waypoints, setWaypoints, overlays, playing, setPlaying, speed
     return () => {
       if (animRef.current) clearInterval(animRef.current);
       if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; }
+      // ← CHANGED: added new layer refs to cleanup
       layersRef.current = {
         route: null, markers: [], zones: {}, ship: null, trail: null,
         baseTile: null, seamarkTile: null, gebcoTile: null,
         emodnetTile: null, encTile: null,
+        legLabels: [], checkLayer: null, manualRoute: null, manualMarkers: [],
       };
     };
   }, []);
 
+  // ── Auto-route waypoints + leg labels ────────────────────────────────────────
   useEffect(() => {
     if (!ready || !window.L) return;
     const L = window.L, map = mapRef.current, lrs = layersRef.current;
-    if (lrs.route) { lrs.route.remove(); lrs.route = null; }
-    lrs.markers.forEach(m => m.remove()); lrs.markers = [];
-    if (lrs.ship) { lrs.ship.remove(); lrs.ship = null; }
+
+    if (lrs.route)  { lrs.route.remove();  lrs.route  = null; }
+    lrs.markers.forEach(m => m.remove());  lrs.markers  = [];
+    if (lrs.ship)   { lrs.ship.remove();   lrs.ship   = null; }
+    // ← ADDED: clear previous leg labels
+    lrs.legLabels.forEach(l => l.remove()); lrs.legLabels = [];
+
     if (waypoints.length === 0) return;
+
     const latlngs = waypoints.map(w => [w.lat, w.lon]);
     lrs.route = L.polyline(latlngs, { color: '#00B4D8', weight: 2.5, opacity: 0.9, dashArray: '8 4' }).addTo(map);
+
     waypoints.forEach((wp, i) => {
       const isFirst = i === 0, isLast = i === waypoints.length - 1;
       const color = isFirst ? '#00C896' : isLast ? '#FF4757' : '#00B4D8';
-      const size = isFirst || isLast ? 14 : 9;
-      const icon = L.divIcon({
+      const size  = isFirst || isLast ? 14 : 9;
+      const icon  = L.divIcon({
         html: `<div style="background:${color};border:2px solid #fff;border-radius:50%;width:${size}px;height:${size}px;cursor:pointer;"></div>`,
-        className: '', iconSize: [size, size], iconAnchor: [size/2, size/2]
+        className: '', iconSize: [size, size], iconAnchor: [size/2, size/2],
       });
       const m = L.marker([wp.lat, wp.lon], { icon, draggable: true, zIndexOffset: isFirst || isLast ? 100 : 0 });
       const popupHtml = `<div style="font-size:12px;min-width:130px;"><b style="color:#00B4D8">WP${String(i+1).padStart(2,'0')}${wp.name ? ` — ${wp.name}` : ''}</b><br/>Lat: ${wp.lat.toFixed(5)}°<br/>Lon: ${wp.lon.toFixed(5)}°${i > 0 ? `<br/>Course: ${(wp.bearing||0).toFixed(1)}°<br/>Leg: ${(wp.distance||0).toFixed(1)} NM` : ''}${wp.totalNM ? `<br/>Total: ${wp.totalNM.toFixed(1)} NM` : ''}</div>`;
@@ -166,7 +173,30 @@ function MapView({ waypoints, setWaypoints, overlays, playing, setPlaying, speed
       });
       m.addTo(map); lrs.markers.push(m);
     });
+
     if (waypoints.length > 1) map.fitBounds(lrs.route.getBounds(), { padding: [50, 50] });
+
+    // ← ADDED: leg course/distance labels at each segment midpoint
+    waypoints.forEach((wp, i) => {
+      if (i === 0) return;
+      const prev    = waypoints[i - 1];
+      const midLat  = (prev.lat + wp.lat) / 2;
+      const midLon  = (prev.lon + wp.lon) / 2;
+      const brng    = (wp.bearing  || 0).toFixed(0);
+      const dist    = (wp.distance || 0).toFixed(1);
+      const lbl = L.marker([midLat, midLon], {
+        icon: L.divIcon({
+          html: `<div style="transform:translate(-50%,-50%);background:rgba(0,0,0,0.82);border:1px solid rgba(0,180,216,0.45);border-radius:4px;padding:2px 7px;white-space:nowrap;pointer-events:none;">` +
+                `<span style="font-family:Orbitron,monospace;font-size:9.5px;color:#00B4D8;letter-spacing:0.5px;">&#9658; ${brng}&deg;</span>` +
+                `<span style="font-family:monospace;font-size:9.5px;color:#FFD700;margin-left:5px;">${dist}NM</span></div>`,
+          className: '', iconSize: [0, 0], iconAnchor: [0, 0],
+        }),
+        interactive: false, zIndexOffset: -200,
+      });
+      lbl.addTo(map);
+      lrs.legLabels.push(lbl);
+    });
+
     const pts = [];
     for (let i = 0; i < waypoints.length - 1; i++) {
       const seg = greatCircle(waypoints[i].lat, waypoints[i].lon, waypoints[i+1].lat, waypoints[i+1].lon, 30);
@@ -218,8 +248,7 @@ function MapView({ waypoints, setWaypoints, overlays, playing, setPlaying, speed
 
   useEffect(() => {
     if (!ready || !window.L || !mapRef.current) return;
-    const map = mapRef.current;
-    const L = window.L;
+    const map = mapRef.current, L = window.L;
     const handleDepthClick = async (e) => {
       const popup = L.popup({ closeOnClick: false, autoClose: false })
         .setLatLng(e.latlng)
@@ -243,6 +272,79 @@ function MapView({ waypoints, setWaypoints, overlays, playing, setPlaying, speed
     if (overlays?.depthClick) map.on('click', handleDepthClick);
     return () => map.off('click', handleDepthClick);
   }, [overlays?.depthClick, ready]);
+
+  // ← ADDED: route-check highlight overlay (land crossings, zone hits, sharp turns)
+  useEffect(() => {
+    if (!ready || !window.L) return;
+    const L = window.L, map = mapRef.current, lrs = layersRef.current;
+    if (lrs.checkLayer) { lrs.checkLayer.remove(); lrs.checkLayer = null; }
+    if (!checkHighlights || checkHighlights.length === 0) return;
+    const lg = L.layerGroup();
+    checkHighlights.forEach(h => {
+      if (h.type === 'segment' && h.fromLat !== undefined) {
+        L.polyline([[h.fromLat, h.fromLon], [h.toLat, h.toLon]], {
+          color: h.color || '#E74C3C', weight: 7, opacity: 0.78, dashArray: '10 5',
+        }).bindPopup(`<div style="font-size:12px;max-width:220px;">${h.severity==='error'?'🚫':'⚠️'} ${h.message}</div>`).addTo(lg);
+      }
+      if (h.type === 'point' && h.lat !== undefined) {
+        L.circleMarker([h.lat, h.lon], {
+          radius: 11, color: h.color || '#E74C3C', weight: 3,
+          fillColor: h.color || '#E74C3C', fillOpacity: 0.25,
+        }).bindPopup(`<div style="font-size:12px;max-width:220px;">${h.severity==='error'?'🚫':'⚠️'} ${h.message}</div>`).addTo(lg);
+      }
+    });
+    lg.addTo(map);
+    lrs.checkLayer = lg;
+  }, [checkHighlights, ready]);
+
+  // ← ADDED: manual route display — green dashed line, draggable markers, leg labels
+  useEffect(() => {
+    if (!ready || !window.L) return;
+    const L = window.L, map = mapRef.current, lrs = layersRef.current;
+    if (lrs.manualRoute)  { lrs.manualRoute.remove();  lrs.manualRoute  = null; }
+    lrs.manualMarkers.forEach(m => m.remove()); lrs.manualMarkers = [];
+    if (!manualWaypoints || manualWaypoints.length === 0) return;
+
+    const latlngs = manualWaypoints.map(w => [w.lat, w.lon]);
+    lrs.manualRoute = L.polyline(latlngs, {
+      color: '#00C896', weight: 2.5, opacity: 0.9, dashArray: '6 3',
+    }).addTo(map);
+
+    manualWaypoints.forEach((wp, i) => {
+      const isFirst = i === 0, isLast = i === manualWaypoints.length - 1;
+      const color = isFirst ? '#00C896' : isLast ? '#FF4757' : '#FFD700';
+      const sz    = (isFirst || isLast) ? 14 : 9;
+      const icon  = L.divIcon({
+        html: `<div style="background:${color};border:2px solid #fff;border-radius:50%;width:${sz}px;height:${sz}px;cursor:pointer;box-shadow:0 0 4px rgba(0,0,0,0.5);"></div>`,
+        className: '', iconSize: [sz, sz], iconAnchor: [sz/2, sz/2],
+      });
+      const m = L.marker([wp.lat, wp.lon], { icon, draggable: true, zIndexOffset: 50 });
+      m.bindPopup(`<div style="font-size:12px;min-width:140px;"><b style="color:#00C896">&#9998; WP${String(i+1).padStart(2,'0')}${wp.name?` — ${wp.name}`:''}</b><br/>Lat: ${wp.lat.toFixed(5)}&deg;<br/>Lon: ${wp.lon.toFixed(5)}&deg;${i>0?`<br/>Course: ${(wp.bearing||0).toFixed(1)}&deg;<br/>Leg: ${(wp.distance||0).toFixed(1)} NM`:''}</div>`);
+      m.on('dragend', e => {
+        if (!setManualWaypoints) return;
+        const { lat, lng } = e.target.getLatLng();
+        setManualWaypoints(wps => recalcWaypoints(wps.map((w, j) => j === i ? { ...w, lat, lon: lng } : w)));
+      });
+      m.addTo(map); lrs.manualMarkers.push(m);
+
+      // Leg label for each segment
+      if (i > 0) {
+        const prev   = manualWaypoints[i - 1];
+        const midLat = (prev.lat + wp.lat) / 2;
+        const midLon = (prev.lon + wp.lon) / 2;
+        const lbl = L.marker([midLat, midLon], {
+          icon: L.divIcon({
+            html: `<div style="transform:translate(-50%,-50%);background:rgba(0,0,0,0.82);border:1px solid rgba(0,200,150,0.5);border-radius:4px;padding:2px 7px;white-space:nowrap;pointer-events:none;">` +
+                  `<span style="font-family:Orbitron,monospace;font-size:9.5px;color:#00C896;">&#9658; ${(wp.bearing||0).toFixed(0)}&deg;</span>` +
+                  `<span style="font-family:monospace;font-size:9.5px;color:#FFD700;margin-left:5px;">${(wp.distance||0).toFixed(1)}NM</span></div>`,
+            className: '', iconSize: [0, 0], iconAnchor: [0, 0],
+          }),
+          interactive: false, zIndexOffset: -150,
+        });
+        lbl.addTo(map); lrs.manualMarkers.push(lbl);
+      }
+    });
+  }, [manualWaypoints, ready]);
 
   const activeOverlays = Object.entries(overlays || {}).filter(([, v]) => v);
   const legendColors = { eca: '#FF6B35', seca: '#FFB347', marpol: '#9B59B6', piracy: '#E74C3C', layover: '#3498DB', gebco: '#00B4D8', depthClick: '#00C896' };
