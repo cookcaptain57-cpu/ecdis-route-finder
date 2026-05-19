@@ -279,12 +279,12 @@ export default function NavModePage({ notify, sheetRoutes = [], portsDb = [], se
     const ws=new WebSocket("wss://stream.aisstream.io/v0/stream");
     aisWsRef.current=ws;
     ws.onopen=()=>ws.send(JSON.stringify({
-      Apikey: AISSTREAM_KEY,
-      BoundingBoxes:[[[-90,-180],[90,180]]], // world — range filtered client-side
+      APIkey: AISSTREAM_KEY,                        // correct casing per aisstream docs
+      BoundingBoxes:[[[-90,-180],[90,180]]],        // triple-nested: [[ [sw], [ne] ]]
       FilterMessageTypes:["PositionReport"],
     }));
     ws.onmessage=(msg)=>{try{const d=JSON.parse(msg.data);const p=d?.Message?.PositionReport,m=d?.MetaData;if(!p||!m) return;setAisTargets(prev=>({...prev,[m.MMSI]:{mmsi:m.MMSI,lat:p.Latitude,lon:p.Longitude,cog:p.CourseOverGround||0,sog:p.SpeedOverGround||0,name:m.ShipName||''}}));}catch{}};
-    ws.onerror=()=>notify("AIS connection error — check API key","error");
+    ws.onerror=()=>notify("AIS connection error","error");
     ws.onclose=(e)=>{if(e.code!==1000) notify("AIS stream closed","error");};
     return()=>ws.close();
   },[aisOn]);
@@ -394,19 +394,73 @@ export default function NavModePage({ notify, sheetRoutes = [], portsDb = [], se
     });
   },[aisTargets,livePos]); // livePos dep ensures range filter updates as ship moves
 
-  // ── TILE SWAP ──
+  // ── TILE SWAP — new layered architecture ──
+  // Base map ALWAYS uses mapMode (night/day/dusk) — never overridden.
+  // Depth layers (EMODnet + ESRI Reference + NOAA ENC) are ADDED ON TOP when gebcoOn.
+  // This fixes night/day/dusk being stuck when depth was toggled on.
+  //
+  // Layer order (bottom → top):
+  //   1. OSM/Carto base (night / day / dusk)        — always
+  //   2. EMODnet depth shading                       — when gebcoOn, Europe+global
+  //   3. ESRI Ocean Reference (depth numbers, z≥9)  — when gebcoOn, global
+  //   4. NOAA ENC WMS (detailed, z≥7)              — when gebcoOn, USA waters
+  //   5. OpenSeaMap seamarks                         — always on top
   useEffect(()=>{
     if(!mapReady||!leafRef.current||!window.L) return;
-    const L=window.L,map=leafRef.current;
-    [baseTileRef,gebcoRefTile,seamarkRef,emodnetTileRef,encTileRef].forEach(r=>{if(r.current){try{map.removeLayer(r.current);}catch{}r.current=null;}});
-    const TILES={night:{url:'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',attr:'© CARTO'},day:{url:'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',attr:'© CARTO'},dusk:{url:'https://{s}.basemaps.cartocdn.com/rastertiles/voyager_nolabels/{z}/{x}/{y}{r}.png',attr:'© CARTO'}};
+    const L=window.L, map=leafRef.current;
+
+    // Remove all depth + seamark layers — base tile stays unless mapMode changed
+    [gebcoRefTile,seamarkRef,emodnetTileRef,encTileRef].forEach(r=>{
+      if(r.current){try{map.removeLayer(r.current);}catch{}r.current=null;}
+    });
+    // Remove base only if mode changed (baseTileRef tracks last mapMode url)
+    const TILES={
+      night:{url:'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',          attr:'© CARTO © OpenStreetMap'},
+      day:  {url:'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',attr:'© CARTO © OpenStreetMap'},
+      dusk: {url:'https://{s}.basemaps.cartocdn.com/rastertiles/voyager_nolabels/{z}/{x}/{y}{r}.png',attr:'© CARTO © OpenStreetMap'},
+    };
+    const cfg=TILES[mapMode]||TILES.night;
+    if(baseTileRef.current) { try{map.removeLayer(baseTileRef.current);}catch{} baseTileRef.current=null; }
+    // Layer 1: base map — always mapMode, never overridden by depth toggle
+    baseTileRef.current=L.tileLayer(cfg.url,{
+      subdomains:'abcd', attribution:cfg.attr, maxZoom:20,
+    }).addTo(map);
+
     if(gebcoOn){
-      baseTileRef.current=L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',{subdomains:'abcd',attribution:'© CARTO',maxZoom:19}).addTo(map);
-      try{emodnetTileRef.current=L.tileLayer('https://tiles.emodnet-bathymetry.eu/2020/baselayer/{z}/{x}/{y}.png',{attribution:'© EMODnet',maxZoom:11,opacity:0.5}).addTo(map);}catch{}
-      gebcoRefTile.current=L.tileLayer('https://server.arcgisonline.com/arcgis/rest/services/Ocean/World_Ocean_Reference/MapServer/tile/{z}/{y}/{x}',{maxZoom:18,attribution:'Tiles © Esri — GEBCO, NOAA',opacity:1.0}).addTo(map);
-      try{encTileRef.current=L.tileLayer.wms('https://gis.charttools.noaa.gov/arcgis/rest/services/MCS/ENCOnline/MapServer/exts/MaritimeChartService/WMSServer',{layers:'0,1,2,3,4,5,6,7',format:'image/png',transparent:true,version:'1.3.0',attribution:'© NOAA ENC',opacity:0.85,maxZoom:18}).addTo(map);}catch{}
-    }else{const cfg=TILES[mapMode]||TILES.night;baseTileRef.current=L.tileLayer(cfg.url,{subdomains:'abcd',attribution:cfg.attr,maxZoom:19}).addTo(map);}
-    seamarkRef.current=L.tileLayer('https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png',{opacity:gebcoOn?0.85:0.55,maxZoom:18,attribution:'© OpenSeaMap'}).addTo(map);
+      // Layer 2: EMODnet bathymetry — worldwide depth colour zones
+      // Global coverage via GEBCO-based EMODnet mosaic. Caps at zoom 11 (overview).
+      try{
+        emodnetTileRef.current=L.tileLayer(
+          'https://tiles.emodnet-bathymetry.eu/2020/baselayer/{z}/{x}/{y}.png',
+          {attribution:'© EMODnet Bathymetry',maxZoom:11,opacity:0.55,
+           errorTileUrl:'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'}
+        ).addTo(map);
+      }catch{}
+
+      // Layer 3: ESRI Ocean Reference — depth soundings (numbers) at zoom ≥9, global
+      // Shows individual metre values, shipping lanes, port names worldwide.
+      gebcoRefTile.current=L.tileLayer(
+        'https://server.arcgisonline.com/arcgis/rest/services/Ocean/World_Ocean_Reference/MapServer/tile/{z}/{y}/{x}',
+        {maxZoom:18,attribution:'Tiles © Esri — GEBCO NOAA National Geographic',opacity:1.0}
+      ).addTo(map);
+
+      // Layer 4: NOAA ENC WMS — detailed S-57 ENC rendering for USA waters
+      // Automatically invisible outside US coverage area (transparent tiles).
+      try{
+        encTileRef.current=L.tileLayer.wms(
+          'https://gis.charttools.noaa.gov/arcgis/rest/services/MCS/ENCOnline/MapServer/exts/MaritimeChartService/WMSServer',
+          {layers:'0,1,2,3,4,5,6,7',format:'image/png',transparent:true,
+           version:'1.3.0',attribution:'© NOAA ENC Online',opacity:0.9,maxZoom:18}
+        ).addTo(map);
+      }catch{}
+    }
+
+    // Layer 5: OpenSeaMap seamarks — always on top (depth contours, buoys, lights)
+    seamarkRef.current=L.tileLayer(
+      'https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png',
+      {opacity:gebcoOn?0.9:0.6,maxZoom:18,attribution:'© OpenSeaMap'}
+    ).addTo(map);
+
   },[gebcoOn,mapMode,mapReady]);
 
   // ── REF SYNCS ──
@@ -476,28 +530,51 @@ export default function NavModePage({ notify, sheetRoutes = [], portsDb = [], se
     map.fitBounds(lrs.route.getBounds(),{padding:[60,60]});
   },[activeRoute,mapReady,colors]);
 
-  // ── ETA CALC ──
+  // ── ETA CALC — route-following distance (not direct line) ──
+  // Previous bug: distanceNM(ship → waypoint) is a great-circle shortcut.
+  // For a 4200 NM multi-leg route this gave ~4125 NM (the straight-line chord).
+  // Fix: find nearest upcoming waypoint, then sum leg-by-leg to target.
   useEffect(()=>{
     if(!livePos||!activeRoute?.waypoints?.length){setEtaResult(null);return;}
     if(livePos.sog<0.2){setEtaResult(null);return;}
-    const wps=activeRoute.waypoints,idx=Math.min(Math.max(selectedWpIdx,0),wps.length-1);
-    const remainNM=distanceNM(livePos.lat,livePos.lon,wps[idx].lat,wps[idx].lon);
+    const wps=activeRoute.waypoints;
+    const targetIdx=Math.min(Math.max(selectedWpIdx,0),wps.length-1);
+
+    // Find nearest waypoint (most likely the next one to reach)
+    let nearIdx=0, nearDist=Infinity;
+    wps.forEach((wp,i)=>{ const d=distanceNM(livePos.lat,livePos.lon,wp.lat,wp.lon); if(d<nearDist){nearDist=d;nearIdx=i;} });
+
+    // Sum: ship → nearIdx → nearIdx+1 → ... → targetIdx
+    let remainNM=distanceNM(livePos.lat,livePos.lon,wps[nearIdx].lat,wps[nearIdx].lon);
+    for(let i=nearIdx;i<targetIdx;i++){
+      remainNM+=distanceNM(wps[i].lat,wps[i].lon,wps[i+1].lat,wps[i+1].lon);
+    }
+
     const hours=remainNM/livePos.sog;
-    setEtaResult({remainNM:remainNM.toFixed(1),hours,hrs:Math.floor(hours),mins:Math.round((hours%1)*60),wpName:wps[idx].name||`WP${String(idx+1).padStart(2,'0')}`});
+    setEtaResult({remainNM:remainNM.toFixed(1),hours,hrs:Math.floor(hours),mins:Math.round((hours%1)*60),wpName:wps[targetIdx].name||`WP${String(targetIdx+1).padStart(2,'0')}`});
   },[livePos,activeRoute,selectedWpIdx]);
 
-  // ── Item 6: MAP BEARING — update mapBearingRef for ship icon compensation ──
+  // ── Item 6: MAP ORIENTATION — Course Up / Head Up ──
+  // Rotates the map CONTAINER div (mapRef) with CSS transform.
+  // HUD and side panel are in the parent div so they stay upright.
+  // mapBearingRef is updated so ship icon compensates: iconRotation = cog - mapBearing.
+  // Note: in rotated modes, R/B tap coordinates may be slightly offset from visual.
   useEffect(()=>{
-    if(!mapReady||!leafRef.current) return;
-    const bearing=displayMode==='north'?0:displayMode==='course'?(livePos?.cog||0):(livePos?.heading||livePos?.cog||0);
-    mapBearingRef.current=bearing; // store for ship icon rotation compensation
-    const map=leafRef.current;
-    if(typeof map.setBearing==='function'){
-      map.setBearing(bearing);
-    }else{
-      const panes=map.getPanes();
-      ['tilePane','overlayPane','shadowPane'].forEach(p=>{if(panes[p]) panes[p].style.transform=`rotate(${-bearing}deg)`;});
+    if(!mapReady||!mapRef.current||!leafRef.current) return;
+    const bearing = displayMode==='north'  ? 0
+      : displayMode==='course' ? (livePos?.cog||0)
+      : (livePos?.heading||livePos?.cog||0);
+    mapBearingRef.current = bearing;
+
+    // Try leaflet-rotate plugin (proper — corrects click coordinates)
+    if(typeof leafRef.current.setBearing==='function'){
+      try{ leafRef.current.setBearing(bearing); return; }catch{}
     }
+    // Fallback: CSS rotate the map container div
+    // Works visually for Course Up / Head Up without plugin
+    mapRef.current.style.transform = bearing!==0 ? `rotate(${bearing}deg)` : '';
+    mapRef.current.style.transformOrigin = 'center center';
+    setTimeout(()=>{ try{leafRef.current?.invalidateSize({animate:false});}catch{} },100);
   },[displayMode,livePos?.cog,livePos?.heading,mapReady]);
 
   // ── INIT MAP ──
@@ -512,7 +589,7 @@ export default function NavModePage({ notify, sheetRoutes = [], portsDb = [], se
       baseTileRef.current=L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{subdomains:'abcd',attribution:'© CARTO'}).addTo(leafRef.current);
       seamarkRef.current=L.tileLayer('https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png',{opacity:0.55,maxZoom:18,attribution:'© OpenSeaMap'}).addTo(leafRef.current);
 
-      leafRef.current.on('click',async(e)=>{
+      leafRef.current.on('click',(e)=>{
         // R/B mode
         if(rbModeRef.current){
           const pos=livePosRef.current;if(!pos){notify('Enable GPS first','error');return;}
@@ -526,31 +603,30 @@ export default function NavModePage({ notify, sheetRoutes = [], portsDb = [], se
           layersRef.current.rbMarker=L.circleMarker([e.latlng.lat,e.latlng.lng],{radius:5,color:'#FFD700',fillColor:'#FFD700',fillOpacity:1}).addTo(leafRef.current);
           return;
         }
-        // Item 3: depth check mode
+        // Depth check — tile-based approach (no per-click API fetch)
+        // Real depth values are shown by ESRI Ocean Reference tiles at zoom ≥9.
+        // Enable "🌊 Ocean Depth" in the HUD controls, then zoom in to see soundings.
         if(depthCheckOnRef.current){
-          const popup=L.popup({closeOnClick:false,autoClose:false}).setLatLng(e.latlng).setContent('<div style="font-size:13px;padding:4px">⏳ Checking depth…</div>').openOn(leafRef.current);
-          try{
-            const res=await fetch(`https://api.opentopodata.org/v1/gebco2020?locations=${e.latlng.lat},${e.latlng.lng}`);
-            if(!res.ok) throw new Error(`HTTP ${res.status}`);
-            const data=await res.json();
-            const elev=data?.results?.[0]?.elevation;
-            if(elev==null) throw new Error('No data');
-            const depth=elev<=0?Math.abs(elev):0;
-            const isLand=elev>0;
-            const ct=contoursRef.current;
-            let status,clr;
-            if(isLand){status='⛰ Land / Shoal';clr='#808080';}
-            else if(depth<ct.shallow){status=`🔴 DANGER — Shallow (Draft ${ct.draft}m)`;clr='#FF3030';}
-            else if(depth<ct.safety){status='🟡 CAUTION — Near Safety Contour';clr='#FFD700';}
-            else if(depth<ct.deep){status='🟢 Safe Water';clr='#00FF88';}
-            else{status='🔵 Deep Water';clr='#00D4FF';}
-            popup.setContent(`<div style="font-size:13px;min-width:180px;line-height:1.7">
-              <div style="color:${clr};font-weight:700">${status}</div>
-              Depth: <b>${depth.toFixed(0)} m</b><br/>
-              <span style="font-size:11px;color:#888">Shallow&lt;${ct.shallow}m · Safety&lt;${ct.safety}m · Deep&gt;${ct.deep}m</span><br/>
-              <span style="font-size:11px;color:#666">${toDMS(e.latlng.lat,true)} ${toDMS(e.latlng.lng,false)}</span>
-            </div>`);
-          }catch(err){popup.setContent(`<div style="color:#ff6b6b;font-size:13px">⚠ Depth unavailable<br/><span style="font-size:11px">${err.message}</span></div>`);}
+          const ct=contoursRef.current;
+          const popup=L.popup({closeOnClick:true,autoClose:true})
+            .setLatLng(e.latlng)
+            .setContent(`<div style="font-size:13px;min-width:170px;line-height:1.8;padding:4px">
+              <b style="color:#00D4FF">📍 ${toDMS(e.latlng.lat,true)}</b><br/>
+              <b style="color:#00D4FF">${toDMS(e.latlng.lng,false)}</b><br/>
+              <hr style="margin:4px 0;border-color:#333"/>
+              <span style="color:#FFB300">🌊 Depth check — zoom in ≥9</span><br/>
+              <span style="color:#888;font-size:11px">ESRI Ocean Reference shows depth<br/>
+              soundings (metres) at zoom ≥9.<br/>
+              NOAA ENC shows detailed data<br/>in USA waters.</span><br/>
+              <hr style="margin:4px 0;border-color:#333"/>
+              <span style="font-size:11px">
+                🔴 Shallow &lt;${ct.shallow}m &nbsp;
+                🟡 Safety &lt;${ct.safety}m<br/>
+                🟢 Safe ≥${ct.safety}m &nbsp;
+                🔵 Deep &gt;${ct.deep}m
+              </span>
+            </div>`)
+            .openOn(leafRef.current);
           return;
         }
       });
@@ -672,9 +748,15 @@ export default function NavModePage({ notify, sheetRoutes = [], portsDb = [], se
                 {toDMS(livePos.lat,true)}<br/>
                 {toDMS(livePos.lon,false)}
               </div>
+              {/* SOG and COG always visible */}
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'4px 8px',marginTop:5}}>
+                {[['SOG',`${livePos.sog.toFixed(1)} kn`,S.green],['COG',`${livePos.cog.toFixed(0)}°T`,S.green]].map(([k,v,c])=>(
+                  <div key={k}><div style={{color:S.dim,fontSize:S.fLabel}}>{k}</div><div style={{color:c,fontFamily:'monospace',fontSize:'0.82rem',fontWeight:700}}>{v}</div></div>
+                ))}
+              </div>
               {!hudCollapsed && (
-                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'4px 8px',marginTop:5}}>
-                  {[['SOG',`${livePos.sog.toFixed(1)} kn`,S.green],['COG',`${livePos.cog.toFixed(0)}°T`,S.green],['HDG',`${livePos.heading.toFixed(0)}°`,S.gold],['ACC',`${livePos.acc.toFixed(0)} m`,S.gold]].map(([k,v,c])=>(
+                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'4px 8px',marginTop:4}}>
+                  {[['HDG',`${livePos.heading.toFixed(0)}°`,S.gold],['ACC',`${livePos.acc.toFixed(0)} m`,S.gold]].map(([k,v,c])=>(
                     <div key={k}><div style={{color:S.dim,fontSize:S.fLabel}}>{k}</div><div style={{color:c,fontFamily:'monospace',fontSize:'0.82rem',fontWeight:700}}>{v}</div></div>
                   ))}
                 </div>
