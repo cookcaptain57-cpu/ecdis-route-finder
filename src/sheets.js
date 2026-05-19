@@ -201,8 +201,10 @@ export const fetchPortsFromSheet = async () => {
 
   try {
     while (true) {
-      // Request exactly PAGE_SIZE rows starting at current offset
-      const tq  = encodeURIComponent(`select * limit ${PAGE_SIZE} offset ${offset}`);
+      // Request PAGE_SIZE + 1 because GViz counts the header row inside the limit.
+      // i.e. limit 3000 = 1 header + 2999 data rows → loop stops too early.
+      //      limit 3001 = 1 header + 3000 data rows → correct full page.
+      const tq  = encodeURIComponent(`select * limit ${PAGE_SIZE + 1} offset ${offset}`);
       const url = `https://docs.google.com/spreadsheets/d/${PORTS_SHEET_ID}/gviz/tq?tqx=out:csv&sheet=PORTDATA&tq=${tq}`;
       const r   = await fetch(url);
       if (!r.ok) break;
