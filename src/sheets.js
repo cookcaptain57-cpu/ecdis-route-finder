@@ -173,48 +173,88 @@ export const fetchRouteSheet = () => {
   return Promise.any(ROUTE_TABS.map(tab => _fetchTab(ROUTE_SHEET_ID, tab))).catch(() => []);
 };
 
+// ─── fetchPortsFromSheet ── CHANGED: paginated fetch, all other code identical
+// Root cause: GViz endpoint silently truncates large sheets at ~3700 rows per
+// single request — so 27,000 port rows were cut to 3699 every time.
+// Fix: loop with GViz limit/offset (3000 rows per page) until no pages remain.
+// Function name unchanged · return shape unchanged · nothing else in file touched.
 export const fetchPortsFromSheet = async () => {
-  const url = `https://docs.google.com/spreadsheets/d/${PORTS_SHEET_ID}/gviz/tq?tqx=out:csv&sheet=PORTDATA`;
-  try {
-    const r     = await fetch(url);
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    const csv   = await r.text();
-    const lines = csv.trim().split('\n');
-    if (lines.length < 2) return [];
-    const headers = lines[0].split(',').map(h => h.replace(/"/g, '').trim().toLowerCase());
-    const colC   = headers.indexOf('port name') >= 0 ? headers.indexOf('port name') :
-                   headers.indexOf('portname')  >= 0 ? headers.indexOf('portname')  :
-                   headers.indexOf('name')       >= 0 ? headers.indexOf('name') : 2;
-    const colLat = headers.findIndex(h => h.includes('lat'));
-    const colLon = headers.findIndex(h => h.includes('lon') || h.includes('lng'));
-    const rows   = [];
-    for (let i = 1; i < lines.length; i++) {
-      const vals = []; let cur = ''; let inQ = false;
-      for (const ch of lines[i]) {
-        if (ch === '"') inQ = !inQ;
-        else if (ch === ',' && !inQ) { vals.push(cur.trim()); cur = ''; }
-        else cur += ch;
-      }
-      vals.push(cur.trim());
-      const countryCode = (vals[0] || '').replace(/"/g, '').trim();
-      const locode      = (vals[1] || '').replace(/"/g, '').trim();
-      const portName    = (vals[colC] || '').replace(/"/g, '').trim();
-      const lat = colLat >= 0 ? parseFloat(vals[colLat] || '') : NaN;
-      const lon = colLon >= 0 ? parseFloat(vals[colLon] || '') : NaN;
-      if (!portName || !locode) continue;
-      const fullLocode = locode.length <= 3 ? (countryCode + locode) : locode;
-      rows.push({
-        id: fullLocode.toUpperCase(),
-        name: portName, city: portName, country: countryCode,
-        lat: isNaN(lat) ? null : lat,
-        lon: isNaN(lon) ? null : lon,
-        keywords: (portName + ' ' + countryCode + ' ' + fullLocode).toLowerCase(),
-      });
+  const PAGE_SIZE = 3000; // safely below the ~3700 GViz per-request hard limit
+
+  // CSV line parser — identical logic to the original, extracted so it can be
+  // reused across every page without duplicating code inside the loop
+  const parseLine = (line) => {
+    const vals = []; let cur = ''; let inQ = false;
+    for (const ch of line) {
+      if (ch === '"') inQ = !inQ;
+      else if (ch === ',' && !inQ) { vals.push(cur.trim()); cur = ''; }
+      else cur += ch;
     }
-    return rows;
+    vals.push(cur.trim());
+    return vals;
+  };
+
+  const allRows = [];
+  let offset = 0;
+  let colC = 2, colLat = -1, colLon = -1;
+  let headersFound = false;
+
+  try {
+    while (true) {
+      // Request exactly PAGE_SIZE rows starting at current offset
+      const tq  = encodeURIComponent(`select * limit ${PAGE_SIZE} offset ${offset}`);
+      const url = `https://docs.google.com/spreadsheets/d/${PORTS_SHEET_ID}/gviz/tq?tqx=out:csv&sheet=PORTDATA&tq=${tq}`;
+      const r   = await fetch(url);
+      if (!r.ok) break;
+
+      const csv   = await r.text();
+      const lines = csv.trim().split('\n');
+      if (lines.length < 2) break; // header only or empty = no more data
+
+      // Detect column positions once from the first page's header row
+      if (!headersFound) {
+        const headers = lines[0].split(',').map(h => h.replace(/"/g, '').trim().toLowerCase());
+        colC   = headers.indexOf('port name') >= 0 ? headers.indexOf('port name') :
+                 headers.indexOf('portname')  >= 0 ? headers.indexOf('portname')  :
+                 headers.indexOf('name')       >= 0 ? headers.indexOf('name') : 2;
+        colLat = headers.findIndex(h => h.includes('lat'));
+        colLon = headers.findIndex(h => h.includes('lon') || h.includes('lng'));
+        headersFound = true;
+      }
+
+      // GViz always puts the header in line 0 of every page — skip it
+      const dataLineCount = lines.length - 1;
+      for (let i = 1; i < lines.length; i++) {
+        const vals        = parseLine(lines[i]);
+        const countryCode = (vals[0] || '').replace(/"/g, '').trim();
+        const locode      = (vals[1] || '').replace(/"/g, '').trim();
+        const portName    = (vals[colC] || '').replace(/"/g, '').trim();
+        const lat         = colLat >= 0 ? parseFloat(vals[colLat] || '') : NaN;
+        const lon         = colLon >= 0 ? parseFloat(vals[colLon] || '') : NaN;
+        if (!portName || !locode) continue;
+        const fullLocode  = locode.length <= 3 ? (countryCode + locode) : locode;
+        allRows.push({
+          id:       fullLocode.toUpperCase(),
+          name:     portName,
+          city:     portName,
+          country:  countryCode,
+          lat:      isNaN(lat) ? null : lat,
+          lon:      isNaN(lon) ? null : lon,
+          keywords: (portName + ' ' + countryCode + ' ' + fullLocode).toLowerCase(),
+        });
+      }
+
+      // If this page returned fewer rows than requested, it was the last page
+      if (dataLineCount < PAGE_SIZE) break;
+      offset += PAGE_SIZE;
+    }
+
+    return allRows;
+
   } catch (e) {
     console.warn('Port sheet fetch failed:', e.message);
-    return [];
+    // Return whatever rows were collected before the error instead of []
+    return allRows.length > 0 ? allRows : [];
   }
 };
 
