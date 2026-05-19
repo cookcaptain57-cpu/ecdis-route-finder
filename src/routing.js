@@ -119,12 +119,28 @@ const ROUTE_TABLE = {
 
 export function buildAutoRoute(fromPort, toPort) {
   const from = PORTS_DB.find(p => p.id === fromPort);
-  const to = PORTS_DB.find(p => p.id === toPort);
+  const to   = PORTS_DB.find(p => p.id === toPort);
   if (!from || !to) return [];
 
   const key = `${fromPort}-${toPort}`, keyR = `${toPort}-${fromPort}`;
-  if (ROUTE_TABLE[key]) return recalcWaypoints(ROUTE_TABLE[key].map(([lat,lon],i,arr)=>({lat,lon,name:i===0?from.name:i===arr.length-1?to.name:undefined})));
-  if (ROUTE_TABLE[keyR]) return recalcWaypoints([...ROUTE_TABLE[keyR]].reverse().map(([lat,lon],i,arr)=>({lat,lon,name:i===0?from.name:i===arr.length-1?to.name:undefined})));
+
+  // ← CHANGED: after mapping table coords, replace first/last with actual DB port coordinates
+  if (ROUTE_TABLE[key]) {
+    const _pts = ROUTE_TABLE[key].map(([lat,lon],i,arr) => ({
+      lat, lon, name: i===0 ? from.name : i===arr.length-1 ? to.name : undefined,
+    }));
+    _pts[0]             = { lat: from.lat, lon: from.lon, name: from.name };
+    _pts[_pts.length-1] = { lat: to.lat,   lon: to.lon,   name: to.name  };
+    return recalcWaypoints(_pts);
+  }
+  if (ROUTE_TABLE[keyR]) {
+    const _pts = [...ROUTE_TABLE[keyR]].reverse().map(([lat,lon],i,arr) => ({
+      lat, lon, name: i===0 ? from.name : i===arr.length-1 ? to.name : undefined,
+    }));
+    _pts[0]             = { lat: from.lat, lon: from.lon, name: from.name };
+    _pts[_pts.length-1] = { lat: to.lat,   lon: to.lon,   name: to.name  };
+    return recalcWaypoints(_pts);
+  }
 
   const wps = [];
   const add = (...keys) => keys.forEach(k => { if(SEA_WP[k]) wps.push({...SEA_WP[k]}); });
