@@ -244,16 +244,36 @@ export default function App() {
   const isAdmin = user?.email === ADMIN_EMAIL;
   const notify  = (msg, type = 'success') => setNotif({ msg, type, key: Date.now() });
 
-  // ← CHANGED: no longer seeds from PORTS_DB — only uses real data from Firebase/Sheet
+  // ← CHANGED: two fixes in applyPortData
+  // Fix 1 — data from Firebase/IDB/fetchPortsFromSheet is already normalised
+  //   (has id, name, lat, lon directly). Running normalizePortRow on it calls
+  //   String(null) → "null" → parseFloat("null") → NaN → port filtered out.
+  //   Detect pre-normalised data and skip the normalizePortRow step entirely.
+  // Fix 2 — old filter `p.lat && p.lon` drops valid ports at lat=0 / lon=0
+  //   and also drops ports with null coords from PortSearch unnecessarily.
+  //   Route planner already handles missing coords gracefully (no waypoint placed).
   const applyPortData = (d3) => {
     if (!Array.isArray(d3) || d3.length === 0) return;
-    const normalized = d3.map(normalizePortRow).filter(Boolean);
-    const seen = new Set(); const deduped = [];
+
+    let normalized;
+    const isPreNormalized = d3[0] && typeof d3[0].id === 'string' && typeof d3[0].name === 'string';
+    if (isPreNormalized) {
+      // Data from fetchPortsFromSheet / Firebase — already has id, name, lat, lon
+      normalized = d3.filter(p => p && p.name && p.id);
+    } else {
+      // Raw Google Sheet row data — run through normalizePortRow
+      normalized = d3.map(normalizePortRow).filter(Boolean);
+    }
+
+    const seen = new Set();
+    const deduped = [];
     normalized.forEach(p => {
       const key = `${p.name?.toLowerCase()}-${p.country?.toLowerCase()}`;
-      if (!seen.has(key) && p.lat && p.lon) { seen.add(key); deduped.push(p); }
+      // Keep ports without coordinates too (port search still works; route planner
+      // filters its own list when coordinates are needed for waypoint placement)
+      if (!seen.has(key)) { seen.add(key); deduped.push(p); }
     });
-    // ← CHANGED: empty map — don't merge with hardcoded 41 ports
+
     const seedMap = new Map();
     deduped.forEach(p => seedMap.set(p.id, p));
     setPortsDb([...seedMap.values()]);
@@ -289,42 +309,82 @@ export default function App() {
 
         await Promise.all([
           (async () => {
+            // Routes: try IDB cache first (version match)
             if (meta.rv && cachedRv === meta.rv) {
               const d = await idbGet('routes_d');
               if (d && d.length > 0) { setSheetRoutes(d); return; }
             }
             if (meta.rv && meta.rc) {
-              // silent — no setRoutesLoading here
+              // Routes exist in Firebase — load from chunks
               const d = await loadRoutesFromFirestore(meta.rc);
               setSheetRoutes(d);
               await idbSet('routes_d', d);
               await idbSet('routes_v', meta.rv);
+            } else {
+              // ← FIX: meta exists (ports synced) but routes NOT in Firebase yet.
+              // Fall back to IDB cache, then Google Sheets so users always see data.
+              const idbRoutes = await idbGet('routes_d');
+              if (Array.isArray(idbRoutes) && idbRoutes.length > 0) {
+                setSheetRoutes(idbRoutes); return;
+              }
+              const d = await fetchRouteSheet();
+              if (Array.isArray(d) && d.length > 0) {
+                setSheetRoutes(d);
+                await idbSet('routes_d', d); // cache for next visit
+                // no routes_v saved — so Firebase is checked again next load
+              }
             }
           })(),
           (async () => {
+            // Charts: try IDB cache first (version match)
             if (meta.cv && cachedCv === meta.cv) {
               const d = await idbGet('charts_d');
               if (d && d.length > 0) { setSheetCharts(d); return; }
             }
             if (meta.cv && meta.cc) {
-              // silent — no setChartsLoading here
+              // Charts exist in Firebase — load from chunks
               const d = await loadChartsFromFirestore(meta.cc);
               setSheetCharts(d);
               await idbSet('charts_d', d);
               await idbSet('charts_v', meta.cv);
+            } else {
+              // ← FIX: meta exists but charts NOT in Firebase yet.
+              // Fall back to IDB cache, then Google Sheets.
+              const idbCharts = await idbGet('charts_d');
+              if (Array.isArray(idbCharts) && idbCharts.length > 0) {
+                setSheetCharts(idbCharts); return;
+              }
+              const d = await fetchChartSheet();
+              if (Array.isArray(d) && d.length > 0) {
+                setSheetCharts(d);
+                await idbSet('charts_d', d); // cache for next visit
+                // no charts_v saved — so Firebase is checked again next load
+              }
             }
           })(),
           (async () => {
+            // Ports: try IDB cache first (version match)
             if (meta.pv && cachedPv === meta.pv) {
               const d = await idbGet('ports_d');
               if (d && d.length > 0) { applyPortData(d); return; }
             }
             if (meta.pv && meta.pc) {
-              // silent — no setPortsLoading here
+              // Ports exist in Firebase — load from chunks
               const d = await loadPortsFromFirestore(meta.pc);
               applyPortData(d);
               await idbSet('ports_d', d);
               await idbSet('ports_v', meta.pv);
+            } else {
+              // ← FIX: meta exists but ports NOT in Firebase yet.
+              const idbPorts = await idbGet('ports_d');
+              if (Array.isArray(idbPorts) && idbPorts.length > 0) {
+                applyPortData(idbPorts); return;
+              }
+              const d = await fetchPortsFromSheet();
+              if (Array.isArray(d) && d.length > 0) {
+                applyPortData(d);
+                await idbSet('ports_d', d);
+              }
             }
           })(),
         ]);
@@ -411,6 +471,17 @@ export default function App() {
 
   useEffect(() => { loadAppData(); }, []);
 
+  // ─── Auto-redirect after login ────────────────────────────────────────────
+  // Fixes: user logs in but stays on login page — now auto-goes to dashboard
+  // (or the page they originally tried to visit before being redirected to login)
+  useEffect(() => {
+    if (user && tab === 'login') {
+      const intended = sessionStorage.getItem('intendedTab');
+      sessionStorage.removeItem('intendedTab');
+      setTab(intended || 'home');
+    }
+  }, [user]);
+
   // ─── Auth listener ────────────────────────────────────────────────────────
   useEffect(() => {
     setPersistence(auth, browserLocalPersistence).catch(() => {});
@@ -491,7 +562,9 @@ export default function App() {
               ? <div className="uc" onClick={() => { signOut(auth); notify('Logged out', 'info'); }}>
                   👥 {userProfile?.name?.split(' ')[0] || user.email.split('@')[0]}{isAdmin ? ' 🛡' : ''} · Logout
                 </div>
-              : <button className="ntab" onClick={() => switchTab('login')}>🔐 Login</button>
+              : authChecked
+                ? <button className="ntab" onClick={() => switchTab('login')}>🔐 Login</button>
+                : null
             }
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -510,7 +583,9 @@ export default function App() {
             ? <button className="mtab" onClick={() => { signOut(auth); notify('Logged out', 'info'); setMenuOpen(false); }}>
                 🚪 Logout ({userProfile?.name?.split(' ')[0] || user.email.split('@')[0]})
               </button>
-            : <button className="mtab" onClick={() => switchTab('login')}>🔐 Login / Register</button>
+            : authChecked
+              ? <button className="mtab" onClick={() => switchTab('login')}>🔐 Login / Register</button>
+              : null
           }
         </div>
 
@@ -558,7 +633,7 @@ export default function App() {
             : <div className="section"><div className="empty"><div className="empty-icon">🔒</div><div className="empty-t">Admin Access Only</div></div></div>
           )}
 
-          {!user && tab !== 'home' && tab !== 'login' && (
+          {authChecked && !user && tab !== 'home' && tab !== 'login' && (
             <div style={{ display: 'flex', flex: 1, alignItems: 'center', justifyContent: 'center', padding: '2rem' }}>
               <div style={{ maxWidth: 380, width: '100%', background: 'var(--card)', border: '1px solid var(--border2)', borderRadius: 16, padding: '2rem', textAlign: 'center' }}>
                 <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>🔐</div>
