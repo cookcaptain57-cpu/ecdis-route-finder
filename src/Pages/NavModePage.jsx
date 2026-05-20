@@ -113,6 +113,7 @@ export default function NavModePage({ notify, sheetRoutes = [], portsDb = [], se
   const [deepDepth,     setDeepDepth]    = useState(() => Number(localStorage.getItem('nav_deepDepth')||200));
   const [shipDraft,     setShipDraft]    = useState(() => Number(localStorage.getItem('nav_draft')||6));
   const [depthCheckOn,  setDepthCheckOn] = useState(false);
+  const [aisStatus,     setAisStatus]    = useState('off'); // 'off'|'connecting'|'connected'|'error'
 
   // ── EXISTING: SAFE MAP INVALIDATE ──
   const safeInvalidate = useCallback(() => {
@@ -240,8 +241,99 @@ export default function NavModePage({ notify, sheetRoutes = [], portsDb = [], se
     reader.readAsText(file);e.target.value='';
   };
 
-  // ── CHART FILE PARSERS ──
-  const tryParseGeoJSON=(text,filename)=>{try{const d=JSON.parse(text);if(['FeatureCollection','Feature','Point','LineString','Polygon','MultiPoint','MultiLineString','MultiPolygon'].includes(d.type)) return {type:'geojson',name:filename,data:d};return null;}catch{return null;}};
+  // ── CHART FILE PARSERS ──────────────────────────────────────────────────
+  // Priority order: ECDIS UserChart XML → GeoJSON → KML
+  // ─────────────────────────────────────────────────────────────────────
+
+  // Parser 1: ECDIS User Chart XML (Furuno, Kongsberg, JRC, Wärtsilä, etc.)
+  // Format: <userchart><lines><line><vertex lat lon/></line></lines>
+  //                    <labels><label><vertex lat lon/><attribute labelText/></label></labels>
+  //                    <polygons>, <circles>, <symbols> also supported
+  const tryParseUserChart=(text,filename)=>{
+    try{
+      const doc=new DOMParser().parseFromString(text,'application/xml');
+      if(doc.querySelector('parsererror')) return null;
+      const root=doc.querySelector('userchart');
+      if(!root) return null;
+      const chartName=root.getAttribute('name')||root.getAttribute('description')||filename;
+      const features=[];
+
+      // Lines → LineString
+      doc.querySelectorAll('lines > line').forEach(el=>{
+        const attr=el.querySelector('attribute');
+        const tp=el.querySelector('type');
+        const lineType=parseInt(attr?.getAttribute('lineType')||'1');
+        const checkDanger=tp?.getAttribute('checkDanger')==='1';
+        const coords=[];
+        el.querySelectorAll('vertex').forEach(v=>{
+          const lat=parseFloat(v.getAttribute('latitude')),lon=parseFloat(v.getAttribute('longitude'));
+          if(!isNaN(lat)&&!isNaN(lon)) coords.push([lon,lat]);
+        });
+        if(coords.length>=2) features.push({type:'Feature',
+          properties:{featureType:'line',name:el.getAttribute('name')||'',lineType,checkDanger},
+          geometry:{type:'LineString',coordinates:coords}});
+      });
+
+      // Labels → Point with labelText
+      doc.querySelectorAll('labels > label').forEach(el=>{
+        const attr=el.querySelector('attribute');
+        const tp=el.querySelector('type');
+        const labelText=attr?.getAttribute('labelText')||el.getAttribute('name')||'';
+        const checkDanger=tp?.getAttribute('checkDanger')==='1';
+        const v=el.querySelector('vertex');
+        if(!v) return;
+        const lat=parseFloat(v.getAttribute('latitude')),lon=parseFloat(v.getAttribute('longitude'));
+        if(!isNaN(lat)&&!isNaN(lon)) features.push({type:'Feature',
+          properties:{featureType:'label',labelText,checkDanger},
+          geometry:{type:'Point',coordinates:[lon,lat]}});
+      });
+
+      // Polygons/Areas → Polygon
+      doc.querySelectorAll('polygons > polygon, areas > area').forEach(el=>{
+        const tp=el.querySelector('type');
+        const checkDanger=tp?.getAttribute('checkDanger')==='1';
+        const coords=[];
+        el.querySelectorAll('vertex').forEach(v=>{
+          const lat=parseFloat(v.getAttribute('latitude')),lon=parseFloat(v.getAttribute('longitude'));
+          if(!isNaN(lat)&&!isNaN(lon)) coords.push([lon,lat]);
+        });
+        if(coords.length>=3){
+          if(coords[0][0]!==coords[coords.length-1][0]||coords[0][1]!==coords[coords.length-1][1]) coords.push(coords[0]);
+          features.push({type:'Feature',
+            properties:{featureType:'polygon',name:el.getAttribute('name')||'',checkDanger},
+            geometry:{type:'Polygon',coordinates:[coords]}});
+        }
+      });
+
+      // Circles → Point (radius stored in properties, drawn as L.circle)
+      doc.querySelectorAll('circles > circle').forEach(el=>{
+        const attr=el.querySelector('attribute');
+        const tp=el.querySelector('type');
+        const radiusNM=parseFloat(attr?.getAttribute('radius')||attr?.getAttribute('rangeOfNotes')||'0.5');
+        const checkDanger=tp?.getAttribute('checkDanger')==='1';
+        const v=el.querySelector('vertex');
+        if(!v) return;
+        const lat=parseFloat(v.getAttribute('latitude')),lon=parseFloat(v.getAttribute('longitude'));
+        if(!isNaN(lat)&&!isNaN(lon)) features.push({type:'Feature',
+          properties:{featureType:'circle',name:el.getAttribute('name')||'',radiusM:radiusNM*1852,checkDanger},
+          geometry:{type:'Point',coordinates:[lon,lat]}});
+      });
+
+      if(!features.length) return null;
+      const lines=features.filter(f=>f.properties.featureType==='line').length;
+      const labels=features.filter(f=>f.properties.featureType==='label').length;
+      const polys=features.filter(f=>f.properties.featureType==='polygon').length;
+      return {type:'userchart',name:chartName,summary:`${lines} lines · ${labels} labels · ${polys} areas`,
+              data:{type:'FeatureCollection',features}};
+    }catch{return null;}
+  };
+
+  // Parser 2: GeoJSON
+  const tryParseGeoJSON=(text,filename)=>{
+    try{const d=JSON.parse(text);if(['FeatureCollection','Feature','Point','LineString','Polygon','MultiPoint','MultiLineString','MultiPolygon'].includes(d.type)) return {type:'geojson',name:filename,data:d};return null;}catch{return null;}
+  };
+
+  // Parser 3: KML
   const tryParseKML=(text,filename)=>{
     try{
       const doc=new DOMParser().parseFromString(text,'application/xml');
@@ -249,44 +341,143 @@ export default function NavModePage({ notify, sheetRoutes = [], portsDb = [], se
       const features=[],pc=str=>str.trim().split(/\s+/).map(p=>{const[lo,la]=p.split(',').map(Number);return(!isNaN(la)&&!isNaN(lo))?[lo,la]:null;}).filter(Boolean);
       doc.querySelectorAll('Placemark').forEach(pm=>{
         const name=pm.querySelector('name')?.textContent?.trim()||'';
-        const ptEl=pm.querySelector('Point coordinates');if(ptEl){pc(ptEl.textContent).forEach(([lo,la])=>features.push({type:'Feature',properties:{name},geometry:{type:'Point',coordinates:[lo,la]}}));}
-        const lsEl=pm.querySelector('LineString coordinates');if(lsEl){const c=pc(lsEl.textContent);if(c.length) features.push({type:'Feature',properties:{name},geometry:{type:'LineString',coordinates:c}});}
-        const pgEl=pm.querySelector('Polygon outerBoundaryIs LinearRing coordinates');if(pgEl){const c=pc(pgEl.textContent);if(c.length) features.push({type:'Feature',properties:{name},geometry:{type:'Polygon',coordinates:[c]}});}
+        const ptEl=pm.querySelector('Point coordinates');
+        if(ptEl){pc(ptEl.textContent).forEach(([lo,la])=>features.push({type:'Feature',properties:{name,featureType:'point'},geometry:{type:'Point',coordinates:[lo,la]}}));}
+        const lsEl=pm.querySelector('LineString coordinates');
+        if(lsEl){const c=pc(lsEl.textContent);if(c.length) features.push({type:'Feature',properties:{name,featureType:'line'},geometry:{type:'LineString',coordinates:c}});}
+        const pgEl=pm.querySelector('Polygon outerBoundaryIs LinearRing coordinates');
+        if(pgEl){const c=pc(pgEl.textContent);if(c.length) features.push({type:'Feature',properties:{name,featureType:'polygon'},geometry:{type:'Polygon',coordinates:[c]}});}
       });
       if(!features.length) return null;
-      return {type:'geojson',name:doc.querySelector('Document>name')?.textContent?.trim()||filename,data:{type:'FeatureCollection',features}};
+      return {type:'kml',name:doc.querySelector('Document>name')?.textContent?.trim()||filename,data:{type:'FeatureCollection',features}};
     }catch{return null;}
   };
+
+  // Unified chart file loader
   const loadChartFile=(e)=>{
     const file=e.target.files?.[0];if(!file) return;
     const reader=new FileReader();
     reader.onload=(ev)=>{
       try{
         const text=ev.target.result;
-        const overlay=tryParseGeoJSON(text,file.name)||tryParseKML(text,file.name);
-        if(!overlay) throw new Error('Unsupported format. Use GeoJSON or KML.');
-        if(leafRef.current&&window.L){const L=window.L;const layer=L.geoJSON(overlay.data,{style:{color:'#00FFFF',weight:1.5,opacity:0.85,fillColor:'#00FFFF',fillOpacity:0.08},pointToLayer:(f,ll)=>L.circleMarker(ll,{radius:5,color:'#00FFFF',fillOpacity:0.9}).bindPopup(f.properties?.name||file.name),onEachFeature:(f,l)=>{if(f.properties?.name) l.bindTooltip(f.properties.name);}}).addTo(leafRef.current);chartLayersRef.current.push({id:overlay.name,layer});}
-        setChartOverlays(prev=>[...prev,{name:overlay.name}]);notify(`✓ Chart: ${overlay.name}`,'error');
-      }catch(err){notify(`Chart failed: ${err.message}`,'error');}
+        // Try in priority order: UserChart XML → GeoJSON → KML
+        const overlay=tryParseUserChart(text,file.name)||tryParseGeoJSON(text,file.name)||tryParseKML(text,file.name);
+        if(!overlay) throw new Error('Unsupported format. Supported: ECDIS User Chart XML, GeoJSON, KML.');
+
+        if(leafRef.current&&window.L){
+          const L=window.L;
+          const layer=L.geoJSON(overlay.data,{
+            // Style lines, polygons
+            style:(feature)=>{
+              const p=feature.properties;
+              const danger=p.checkDanger;
+              // ECDIS lineType: 1=solid, 2=dashed, 3=dotted
+              const dash=p.lineType===2?'8 5':p.lineType===3?'3 5':null;
+              return {color:danger?'#FF3030':'#00E5FF',weight:2,opacity:0.9,dashArray:dash,
+                      fillColor:danger?'#FF3030':'#00E5FF',fillOpacity:0.07};
+            },
+            // Render points: labels as text, circles as L.circle, others as dot
+            pointToLayer:(feature,latlng)=>{
+              const p=feature.properties;
+              if(p.featureType==='label'){
+                // Text label — ECDIS style: yellow monospace with dark shadow
+                const danger=p.checkDanger;
+                return L.marker(latlng,{
+                  icon:L.divIcon({
+                    html:`<div style="color:${danger?'#FF5050':'#FFD700'};font-size:11px;font-weight:600;white-space:nowrap;font-family:monospace;text-shadow:1px 1px 2px #000,-1px -1px 2px #000,0 0 6px #000;pointer-events:none;line-height:1.2;">${p.labelText||''}</div>`,
+                    className:'',iconAnchor:[0,8],
+                  }),
+                  interactive:false,zIndexOffset:-50,
+                });
+              }
+              if(p.featureType==='circle'){
+                return L.circle(latlng,{radius:p.radiusM||926,
+                  color:'#00E5FF',fillColor:'#00E5FF',fillOpacity:0.05,weight:1.5,dashArray:'6 4'});
+              }
+              return L.circleMarker(latlng,{radius:5,color:'#00E5FF',fillOpacity:0.85,weight:2})
+                .bindPopup(`<div style="font-size:12px"><b>${p.name||p.labelText||'Point'}</b></div>`);
+            },
+            onEachFeature:(feature,l)=>{
+              const p=feature.properties;
+              if(['line','polygon'].includes(p.featureType)&&p.name)
+                l.bindPopup(`<div style="font-size:12px"><b style="color:#00E5FF">${p.name}</b><br/>${p.checkDanger?'🔴 Danger area':p.featureType}</div>`);
+            },
+          }).addTo(leafRef.current);
+          chartLayersRef.current.push({id:overlay.name,layer});
+        }
+        setChartOverlays(prev=>[...prev,{name:overlay.name,summary:overlay.summary||''}]);
+        notify(`✓ ${overlay.name}${overlay.summary?' ('+overlay.summary+')':''}`,'error');
+      }catch(err){notify(`Chart load failed: ${err.message}`,'error');}
     };
     reader.readAsText(file);e.target.value='';
   };
-  const removeChart=(name)=>{const idx=chartLayersRef.current.findIndex(c=>c.id===name);if(idx>=0){try{leafRef.current?.removeLayer(chartLayersRef.current[idx].layer);}catch{}chartLayersRef.current.splice(idx,1);}setChartOverlays(prev=>prev.filter(c=>c.name!==name));};
+  const removeChart=(name)=>{
+    const idx=chartLayersRef.current.findIndex(c=>c.id===name);
+    if(idx>=0){try{leafRef.current?.removeLayer(chartLayersRef.current[idx].layer);}catch{}chartLayersRef.current.splice(idx,1);}
+    setChartOverlays(prev=>prev.filter(c=>c.name!==name));
+  };
 
-  // ── EXISTING: AIS STREAM — Item 8: real key, world bbox, client-side range filter ──
+  // ── AIS STREAM — fixed APIKey casing, status tracking, auto-reconnect ──
+  // aisstream.io official field name is "APIKey" (capital K).
+  // Previous versions used "Apikey" and "APIkey" — both wrong.
+  // Auto-reconnect: retries every 5s on unexpected close (code !== 1000/1001).
   useEffect(()=>{
-    if(!aisOn){aisWsRef.current?.close();aisWsRef.current=null;return;}
-    const ws=new WebSocket("wss://stream.aisstream.io/v0/stream");
-    aisWsRef.current=ws;
-    ws.onopen=()=>ws.send(JSON.stringify({
-      APIkey: AISSTREAM_KEY,                        // correct casing per aisstream docs
-      BoundingBoxes:[[[-90,-180],[90,180]]],        // triple-nested: [[ [sw], [ne] ]]
-      FilterMessageTypes:["PositionReport"],
-    }));
-    ws.onmessage=(msg)=>{try{const d=JSON.parse(msg.data);const p=d?.Message?.PositionReport,m=d?.MetaData;if(!p||!m) return;setAisTargets(prev=>({...prev,[m.MMSI]:{mmsi:m.MMSI,lat:p.Latitude,lon:p.Longitude,cog:p.CourseOverGround||0,sog:p.SpeedOverGround||0,name:m.ShipName||''}}));}catch{}};
-    ws.onerror=()=>notify("AIS connection error","error");
-    ws.onclose=(e)=>{if(e.code!==1000) notify("AIS stream closed","error");};
-    return()=>ws.close();
+    if(!aisOn){ aisWsRef.current?.close(); aisWsRef.current=null; setAisStatus('off'); setAisTargets({}); return; }
+
+    let retryTimer=null;
+    const connect=()=>{
+      setAisStatus('connecting');
+      const ws=new WebSocket("wss://stream.aisstream.io/v0/stream");
+      aisWsRef.current=ws;
+
+      ws.onopen=()=>{
+        setAisStatus('connected');
+        ws.send(JSON.stringify({
+          APIKey: AISSTREAM_KEY,              // ← FIXED: capital K per aisstream.io docs
+          BoundingBoxes:[[[-90,-180],[90,180]]],  // world — client-side range filter applied in render
+          FilterMessageTypes:["PositionReport"],
+        }));
+      };
+
+      ws.onmessage=(msg)=>{
+        try{
+          const d=JSON.parse(msg.data);
+          // aisstream.io sends: {MessageType, Message:{PositionReport:{...}}, MetaData:{MMSI,ShipName,...}}
+          const p=d?.Message?.PositionReport;
+          const m=d?.MetaData;
+          if(!p||!m) return;
+          if(p.Latitude===0&&p.Longitude===0) return; // skip 0,0 ghost targets
+          setAisTargets(prev=>({
+            ...prev,
+            [m.MMSI]:{
+              mmsi:  m.MMSI,
+              name:  (m.ShipName||'').trim(),
+              lat:   p.Latitude,
+              lon:   p.Longitude,
+              cog:   p.CourseOverGround||0,
+              sog:   p.SpeedOverGround||0,
+              hdg:   p.TrueHeading||0,
+              ts:    Date.now(),
+            }
+          }));
+        }catch{}
+      };
+
+      ws.onerror=()=>setAisStatus('error');
+
+      ws.onclose=(ev)=>{
+        // 1000 = normal, 1001 = going away — don't retry
+        if(ev.code!==1000&&ev.code!==1001&&aisOn){
+          setAisStatus('connecting');
+          retryTimer=setTimeout(connect,5000); // retry after 5s
+        } else {
+          setAisStatus('off');
+        }
+      };
+    };
+
+    connect();
+    return()=>{ clearTimeout(retryTimer); aisWsRef.current?.close(); };
   },[aisOn]);
 
   // ── MODIFIED: GPS FIX — Item 6: compensate ship icon for map bearing ──
@@ -722,7 +913,7 @@ export default function NavModePage({ notify, sheetRoutes = [], portsDb = [], se
           {/* Item 5: Collapsible controls section */}
           {!togCollapsed && (
             <div style={{display:'flex',flexDirection:'column',gap:5,paddingBottom:5,borderBottom:`1px solid rgba(0,212,255,0.1)`}}>
-              {[[gpsOn,setGpsOn,'📍 GPS'],[aisOn,setAisOn,`📡 AIS${aisCount?` (${aisCount})`:''}  `],[gebcoOn,setGebcoOn,'🌊 Depth'],[depthCheckOn,setDepthCheckOn,'🔍 Depth Check']].map(([v,s,lb])=>(
+              {[[gpsOn,setGpsOn,'📍 GPS'],[aisOn,setAisOn,`📡 AIS${aisStatus==='connected'?` ✅ ${Object.keys(aisTargets).length}`:aisStatus==='connecting'?` ⏳`:aisStatus==='error'?` ❌`:''}`],[gebcoOn,setGebcoOn,'🌊 Depth'],[depthCheckOn,setDepthCheckOn,'🔍 Depth Check']].map(([v,s,lb])=>(
                 <label key={lb} style={{display:'flex',alignItems:'center',gap:7,cursor:'pointer',fontSize:S.fSm,color:S.text,minHeight:26}}>
                   <input type="checkbox" checked={v} onChange={e=>s(e.target.checked)}/>{lb}
                 </label>
@@ -882,7 +1073,10 @@ export default function NavModePage({ notify, sheetRoutes = [], portsDb = [], se
               <div style={{color:S.dim,fontSize:S.fXs,lineHeight:1.5}}>Download chart files from the Charts page first, then load them here as map overlays.</div>
               {chartOverlays.map((c,i)=>(
                 <div key={i} style={{display:'flex',alignItems:'center',gap:4}}>
-                  <span style={{flex:1,color:'#00FFFF',fontSize:S.fXs,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>🗺 {c.name}</span>
+                  <div style={{flex:1}}>
+                    <div style={{color:'#00E5FF',fontSize:S.fXs,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>🗺 {c.name}</div>
+                    {c.summary&&<div style={{color:S.dim,fontSize:'0.55rem'}}>{c.summary}</div>}
+                  </div>
                   <button onClick={()=>removeChart(c.name)} style={{background:'transparent',border:'1px solid rgba(255,71,87,0.35)',color:S.red,borderRadius:4,padding:'2px 6px',fontSize:'0.65rem',cursor:'pointer'}}>✕</button>
                 </div>
               ))}
