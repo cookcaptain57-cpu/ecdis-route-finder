@@ -165,6 +165,7 @@ const S = `
   .loading{display:flex;align-items:center;justify-content:center;gap:12px;padding:2rem;color:var(--text2);font-size:0.84rem;}
   .spin{width:20px;height:20px;border:2px solid var(--border2);border-top-color:var(--cyan);border-radius:50%;animation:spin 0.8s linear infinite;flex-shrink:0;}
   @keyframes spin{to{transform:rotate(360deg);}}
+  @keyframes shimmer{0%{background-position:200% 0;}100%{background-position:-200% 0;}}
   .empty{text-align:center;padding:3rem 1rem;color:var(--text3);}
   .empty-icon{font-size:2.8rem;margin-bottom:1rem;}
   .empty-t{font-family:'Orbitron',monospace;font-size:0.82rem;margin-bottom:6px;color:var(--text2);}
@@ -234,6 +235,17 @@ export default function App() {
   // ← CHANGED: start empty — never show 41 hardcoded ports as initial state
   const [portsDb, setPortsDb]             = useState([]);
 
+  // Sync banner: null | 'syncing' | 'done'
+  // Shows a non-blocking status bar while data loads from Firebase/Sheets
+  const [syncBanner, setSyncBanner]             = useState(null);
+  // Prevents double-retry after auth is confirmed
+  const hasRetriedRef                           = { current: false };
+
+  // Per-sync progress for admin panel progress bars (0-100)
+  const [routesSyncProgress, setRoutesSyncProgress] = useState(0);
+  const [chartsSyncProgress, setChartsSyncProgress] = useState(0);
+  const [portsSyncProgress,  setPortsSyncProgress]  = useState(0);
+
   // ✅ SEPARATE loading states — each sync button has its OWN spinner
   const [routesLoading, setRoutesLoading] = useState(false);
   const [chartsLoading, setChartsLoading] = useState(false);
@@ -279,197 +291,177 @@ export default function App() {
     setPortsDb([...seedMap.values()]);
   };
 
-  // ─── Load app data on startup ─────────────────────────────────────────────
-  // NOTE: this function NEVER touches routesLoading / chartsLoading / portsLoading.
-  // Those states are ONLY set by the manual refreshRoutes / refreshCharts / refreshPorts.
-  // This keeps all three sync buttons fully independent and never auto-triggered.
+  // ─── Load app data ────────────────────────────────────────────────────────
+  // Called on mount AND again after auth is confirmed (fixes race condition where
+  // Firestore rules block unauthenticated reads on first attempt).
+  // Never touches routesLoading/chartsLoading/portsLoading — those are manual sync only.
   const loadAppData = async () => {
     try {
-      // Step 1: IDB-first — show cached data IMMEDIATELY, no network needed.
-      // On repeat visits this is instant and works fully offline.
+      // Step 1: IDB-first — instant, works offline, no network call
       const [idbPortsEarly, idbRoutesEarly, idbChartsEarly] = await Promise.all([
-        idbGet('ports_d'),
-        idbGet('routes_d'),
-        idbGet('charts_d'),
+        idbGet('ports_d'), idbGet('routes_d'), idbGet('charts_d'),
       ]);
-      if (Array.isArray(idbPortsEarly)  && idbPortsEarly.length  > 0) applyPortData(idbPortsEarly);
       if (Array.isArray(idbRoutesEarly) && idbRoutesEarly.length > 0) setSheetRoutes(idbRoutesEarly);
       if (Array.isArray(idbChartsEarly) && idbChartsEarly.length > 0) setSheetCharts(idbChartsEarly);
+      if (Array.isArray(idbPortsEarly)  && idbPortsEarly.length  > 0) applyPortData(idbPortsEarly);
 
-      // Step 2: Check Firestore silently in background for newer versions.
-      // No spinner shown — this is a silent background refresh.
+      // Show sync banner only if cache was empty (user needs to wait for network)
+      const allCached = idbRoutesEarly?.length > 0 && idbChartsEarly?.length > 0 && idbPortsEarly?.length > 0;
+      if (!allCached) setSyncBanner('syncing');
+
+      // Step 2: Check Firestore for data / newer version
       const meta = await getFirestoreMeta();
 
       if (meta) {
         const [cachedRv, cachedCv, cachedPv] = await Promise.all([
-          idbGet('routes_v'),
-          idbGet('charts_v'),
-          idbGet('ports_v'),
+          idbGet('routes_v'), idbGet('charts_v'), idbGet('ports_v'),
         ]);
-
         await Promise.all([
           (async () => {
-            // Routes: try IDB cache first (version match)
             if (meta.rv && cachedRv === meta.rv) {
-              const d = await idbGet('routes_d');
-              if (d && d.length > 0) { setSheetRoutes(d); return; }
+              const d = await idbGet('routes_d'); if (d?.length > 0) { setSheetRoutes(d); return; }
             }
             if (meta.rv && meta.rc) {
-              // Routes exist in Firebase — load from chunks
               const d = await loadRoutesFromFirestore(meta.rc);
-              setSheetRoutes(d);
-              await idbSet('routes_d', d);
-              await idbSet('routes_v', meta.rv);
+              setSheetRoutes(d); await idbSet('routes_d', d); await idbSet('routes_v', meta.rv);
             } else {
-              // ← FIX: meta exists (ports synced) but routes NOT in Firebase yet.
-              // Fall back to IDB cache, then Google Sheets so users always see data.
-              const idbRoutes = await idbGet('routes_d');
-              if (Array.isArray(idbRoutes) && idbRoutes.length > 0) {
-                setSheetRoutes(idbRoutes); return;
-              }
               const d = await fetchRouteSheet();
-              if (Array.isArray(d) && d.length > 0) {
-                setSheetRoutes(d);
-                await idbSet('routes_d', d); // cache for next visit
-                // no routes_v saved — so Firebase is checked again next load
-              }
+              if (Array.isArray(d) && d.length > 0) { setSheetRoutes(d); await idbSet('routes_d', d); }
             }
           })(),
           (async () => {
-            // Charts: try IDB cache first (version match)
             if (meta.cv && cachedCv === meta.cv) {
-              const d = await idbGet('charts_d');
-              if (d && d.length > 0) { setSheetCharts(d); return; }
+              const d = await idbGet('charts_d'); if (d?.length > 0) { setSheetCharts(d); return; }
             }
             if (meta.cv && meta.cc) {
-              // Charts exist in Firebase — load from chunks
               const d = await loadChartsFromFirestore(meta.cc);
-              setSheetCharts(d);
-              await idbSet('charts_d', d);
-              await idbSet('charts_v', meta.cv);
+              setSheetCharts(d); await idbSet('charts_d', d); await idbSet('charts_v', meta.cv);
             } else {
-              // ← FIX: meta exists but charts NOT in Firebase yet.
-              // Fall back to IDB cache, then Google Sheets.
-              const idbCharts = await idbGet('charts_d');
-              if (Array.isArray(idbCharts) && idbCharts.length > 0) {
-                setSheetCharts(idbCharts); return;
-              }
               const d = await fetchChartSheet();
-              if (Array.isArray(d) && d.length > 0) {
-                setSheetCharts(d);
-                await idbSet('charts_d', d); // cache for next visit
-                // no charts_v saved — so Firebase is checked again next load
-              }
+              if (Array.isArray(d) && d.length > 0) { setSheetCharts(d); await idbSet('charts_d', d); }
             }
           })(),
           (async () => {
-            // Ports: try IDB cache first (version match)
             if (meta.pv && cachedPv === meta.pv) {
-              const d = await idbGet('ports_d');
-              if (d && d.length > 0) { applyPortData(d); return; }
+              const d = await idbGet('ports_d'); if (d?.length > 0) { applyPortData(d); return; }
             }
             if (meta.pv && meta.pc) {
-              // Ports exist in Firebase — load from chunks
               const d = await loadPortsFromFirestore(meta.pc);
-              applyPortData(d);
-              await idbSet('ports_d', d);
-              await idbSet('ports_v', meta.pv);
+              applyPortData(d); await idbSet('ports_d', d); await idbSet('ports_v', meta.pv);
             } else {
-              // ← FIX: meta exists but ports NOT in Firebase yet.
-              const idbPorts = await idbGet('ports_d');
-              if (Array.isArray(idbPorts) && idbPorts.length > 0) {
-                applyPortData(idbPorts); return;
-              }
               const d = await fetchPortsFromSheet();
-              if (Array.isArray(d) && d.length > 0) {
-                applyPortData(d);
-                await idbSet('ports_d', d);
-              }
+              if (Array.isArray(d) && d.length > 0) { applyPortData(d); await idbSet('ports_d', d); }
             }
           })(),
         ]);
-        return;
+      } else {
+        // Step 3: No Firestore meta — fallback to Google Sheets directly
+        const [d1, d2, d3] = await Promise.all([fetchRouteSheet(), fetchChartSheet(), fetchPortsFromSheet()]);
+        if (Array.isArray(d1) && d1.length > 0) setSheetRoutes(d1);
+        if (Array.isArray(d2) && d2.length > 0) setSheetCharts(d2);
+        applyPortData(d3);
       }
-
-      // Step 3: No Firestore meta at all — fall back to Google Sheet directly.
-      // Silent — no loading spinners. Runs only until admin does first sync.
-      const [d1, d2, d3] = await Promise.all([
-        fetchRouteSheet(),
-        fetchChartSheet(),
-        fetchPortsFromSheet(),
-      ]);
-      if (Array.isArray(d1) && d1.length > 0) setSheetRoutes(d1);
-      if (Array.isArray(d2) && d2.length > 0) setSheetCharts(d2);
-      applyPortData(d3);
-
     } catch (e) { console.warn('loadAppData error:', e); }
-    // No setXxxLoading(false) here — we never set them true in this function
+
+    // Dismiss banner: if was showing 'syncing' → flip to 'done' for 4s then hide
+    setSyncBanner(prev => {
+      if (prev === 'syncing') { setTimeout(() => setSyncBanner(null), 4000); return 'done'; }
+      return null;
+    });
   };
 
   // ─── Admin: Sync Routes ONLY ──────────────────────────────────────────────
   const refreshRoutes = async () => {
-    setRoutesLoading(true);
+    setRoutesLoading(true); setRoutesSyncProgress(5);
     notify('📡 Fetching routes from Sheet…', 'info');
     try {
+      setRoutesSyncProgress(10);
       const d = await fetchRouteSheet();
+      setRoutesSyncProgress(50);
       if (!Array.isArray(d) || d.length === 0) {
         notify('No routes found in Sheet', 'error');
-        setRoutesLoading(false); return;
+        setRoutesLoading(false); setRoutesSyncProgress(0); return;
       }
       notify('🔄 Saving routes to Firebase…', 'info');
-      await syncRoutesToFirestore(d);
+      await syncRoutesToFirestore(d); setRoutesSyncProgress(85);
       setSheetRoutes(d);
-      await idbSet('routes_d', d);
+      await idbSet('routes_d', d); setRoutesSyncProgress(95);
       const meta = await getFirestoreMeta();
       if (meta?.rv) await idbSet('routes_v', meta.rv);
+      setRoutesSyncProgress(100);
       notify(`✅ ${d.length} routes synced to Firebase`, 'success');
-    } catch (e) { notify('Route sync failed: ' + e.message, 'error'); }
+    } catch (e) { notify('Route sync failed: ' + e.message, 'error'); setRoutesSyncProgress(0); }
     setRoutesLoading(false);
+    setTimeout(() => setRoutesSyncProgress(0), 3000);
   };
 
   // ─── Admin: Sync Charts ONLY ──────────────────────────────────────────────
   const refreshCharts = async () => {
-    setChartsLoading(true);
+    setChartsLoading(true); setChartsSyncProgress(5);
     notify('📡 Fetching charts from Sheet…', 'info');
     try {
+      setChartsSyncProgress(10);
       const d = await fetchChartSheet();
+      setChartsSyncProgress(50);
       if (!Array.isArray(d) || d.length === 0) {
         notify('No charts found in Sheet', 'error');
-        setChartsLoading(false); return;
+        setChartsLoading(false); setChartsSyncProgress(0); return;
       }
       notify('🔄 Saving charts to Firebase…', 'info');
-      await syncChartsToFirestore(d);
+      await syncChartsToFirestore(d); setChartsSyncProgress(85);
       setSheetCharts(d);
-      await idbSet('charts_d', d);
+      await idbSet('charts_d', d); setChartsSyncProgress(95);
       const meta = await getFirestoreMeta();
       if (meta?.cv) await idbSet('charts_v', meta.cv);
+      setChartsSyncProgress(100);
       notify(`✅ ${d.length} charts synced to Firebase`, 'success');
-    } catch (e) { notify('Chart sync failed: ' + e.message, 'error'); }
+    } catch (e) { notify('Chart sync failed: ' + e.message, 'error'); setChartsSyncProgress(0); }
     setChartsLoading(false);
+    setTimeout(() => setChartsSyncProgress(0), 3000);
   };
 
   // ─── Admin: Sync Ports ONLY ───────────────────────────────────────────────
   const refreshPorts = async () => {
-    setPortsLoading(true);
+    setPortsLoading(true); setPortsSyncProgress(2);
     notify('📡 Fetching ports from Sheet…', 'info');
     try {
-      const d = await fetchPortsFromSheet();
+      const ESTIMATED_TOTAL = 27000;
+      // Pass onProgress callback — fetchPortsFromSheet calls it after each page
+      const d = await fetchPortsFromSheet((fetched) => {
+        const pct = Math.min(65, Math.round((fetched / ESTIMATED_TOTAL) * 65));
+        setPortsSyncProgress(pct);
+      });
+      setPortsSyncProgress(68);
       if (!Array.isArray(d) || d.length === 0) {
         notify('No ports found in Sheet', 'error');
-        setPortsLoading(false); return;
+        setPortsLoading(false); setPortsSyncProgress(0); return;
       }
-      notify('🔄 Saving ports to Firebase…', 'info');
-      await syncPortsToFirestore(d);
+      notify(`🔄 Saving ${d.length.toLocaleString()} ports to Firebase…`, 'info');
+      await syncPortsToFirestore(d); setPortsSyncProgress(88);
       applyPortData(d);
-      await idbSet('ports_d', d);
+      await idbSet('ports_d', d); setPortsSyncProgress(95);
       const meta = await getFirestoreMeta();
       if (meta?.pv) await idbSet('ports_v', meta.pv);
-      notify(`✅ ${d.length} ports synced to Firebase`, 'success');
-    } catch (e) { notify('Port sync failed: ' + e.message, 'error'); }
+      setPortsSyncProgress(100);
+      notify(`✅ ${d.length.toLocaleString()} ports synced to Firebase`, 'success');
+    } catch (e) { notify('Port sync failed: ' + e.message, 'error'); setPortsSyncProgress(0); }
     setPortsLoading(false);
+    setTimeout(() => setPortsSyncProgress(0), 3000);
   };
 
+  // Run on mount — gets IDB cache instantly, then tries Firebase
   useEffect(() => { loadAppData(); }, []);
+
+  // ─── Retry after auth confirmed ───────────────────────────────────────────
+  // Fixes: Firestore rules require login → first loadAppData (before auth) fails
+  // silently → user logs in → data still empty. Re-run loadAppData once auth
+  // is confirmed so Firebase now has credentials and can serve the data.
+  useEffect(() => {
+    if (!authChecked) return;
+    if (sheetRoutes.length === 0 || portsDb.length === 0) {
+      loadAppData();
+    }
+  }, [authChecked]);
 
   // ─── Auto-redirect after login ────────────────────────────────────────────
   // Fixes: user logs in but stays on login page — now auto-goes to dashboard
@@ -606,6 +598,42 @@ export default function App() {
         )}
 
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, overflow: isPlannerFull ? 'hidden' : 'auto' }}>
+
+          {/* ── Top progress bar — thin line at top when loading from network ── */}
+          {syncBanner && (
+            <div style={{ position: 'fixed', top: 60, left: 0, right: 0, height: 3, zIndex: 200, overflow: 'hidden' }}>
+              {syncBanner === 'syncing'
+                ? <div style={{ height: '100%', background: 'linear-gradient(90deg,var(--cyan),var(--blue),var(--cyan))', backgroundSize: '200% 100%', animation: 'shimmer 1.4s linear infinite' }} />
+                : <div style={{ height: '100%', background: 'var(--green)', width: '100%' }} />
+              }
+            </div>
+          )}
+
+          {/* ── Floating popup notification — non-blocking, appears only on network load ── */}
+          {syncBanner === 'syncing' && (
+            <div style={{ position: 'fixed', bottom: 72, left: '50%', transform: 'translateX(-50%)', zIndex: 9996,
+              background: 'rgba(4,12,26,0.97)', border: '1px solid rgba(0,180,216,0.45)', borderRadius: 14,
+              padding: '13px 18px', display: 'flex', alignItems: 'center', gap: 12,
+              boxShadow: '0 8px 32px rgba(0,0,0,0.6)', backdropFilter: 'blur(20px)', maxWidth: '92vw', minWidth: 280 }}>
+              <div className="spin" style={{ width: 16, height: 16, borderTopColor: 'var(--cyan)', flexShrink: 0 }} />
+              <div>
+                <div style={{ fontFamily: 'Orbitron,monospace', fontSize: '0.74rem', fontWeight: 700, color: 'var(--cyan)', marginBottom: 2 }}>Loading App Data</div>
+                <div style={{ fontSize: '0.68rem', color: 'var(--text2)', lineHeight: 1.4 }}>Syncing routes, charts &amp; ports from Firebase…<br />App is fully usable while loading.</div>
+              </div>
+            </div>
+          )}
+          {syncBanner === 'done' && (
+            <div style={{ position: 'fixed', bottom: 72, left: '50%', transform: 'translateX(-50%)', zIndex: 9996,
+              background: 'rgba(4,12,26,0.97)', border: '1px solid rgba(0,200,150,0.45)', borderRadius: 14,
+              padding: '13px 18px', display: 'flex', alignItems: 'center', gap: 12,
+              boxShadow: '0 8px 32px rgba(0,0,0,0.6)', backdropFilter: 'blur(20px)', maxWidth: '92vw', minWidth: 280 }}>
+              <span style={{ fontSize: '1.2rem' }}>✅</span>
+              <div>
+                <div style={{ fontFamily: 'Orbitron,monospace', fontSize: '0.74rem', fontWeight: 700, color: 'var(--green)', marginBottom: 2 }}>All Data Ready</div>
+                <div style={{ fontSize: '0.68rem', color: 'var(--text2)' }}>Routes, charts &amp; ports loaded — ready to navigate.</div>
+              </div>
+            </div>
+          )}
           {tab === 'home'    && <HomePage routes={routes} charts={charts} onSearch={handleSearch} setTab={switchTab} user={user} portsDb={portsDb} />}
           {tab === 'routes'  && <RoutesPage searchQuery={searchQ} notify={notify} user={user} setTab={switchTab} sheetRoutes={sheetRoutes} sheetLoading={routesLoading} />}
           {tab === 'charts'  && <ChartsPage notify={notify} user={user} setTab={switchTab} isAdmin={isAdmin} sheetCharts={sheetCharts} sheetLoading={chartsLoading} />}
@@ -628,7 +656,9 @@ export default function App() {
                 chartsLoading={chartsLoading}
                 portsLoading={portsLoading}
                 portsDb={portsDb}
-                // ← CHANGED: portsDb now passed so AdminPage shows real port data
+                routesSyncProgress={routesSyncProgress}
+                chartsSyncProgress={chartsSyncProgress}
+                portsSyncProgress={portsSyncProgress}
               />
             : <div className="section"><div className="empty"><div className="empty-icon">🔒</div><div className="empty-t">Admin Access Only</div></div></div>
           )}
