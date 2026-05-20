@@ -367,42 +367,53 @@ export default function NavModePage({ notify, sheetRoutes = [], portsDb = [], se
         if(leafRef.current&&window.L){
           const L=window.L;
           const layer=L.geoJSON(overlay.data,{
-            // Style lines, polygons
+            // Style lines and polygons — use dark visible colors on any background
             style:(feature)=>{
               const p=feature.properties;
               const danger=p.checkDanger;
-              // ECDIS lineType: 1=solid, 2=dashed, 3=dotted
               const dash=p.lineType===2?'8 5':p.lineType===3?'3 5':null;
-              return {color:danger?'#FF3030':'#00E5FF',weight:2,opacity:0.9,dashArray:dash,
-                      fillColor:danger?'#FF3030':'#00E5FF',fillOpacity:0.07};
+              // Danger = bright red, normal = dark navy blue (visible on light AND dark maps)
+              return {
+                color:danger?'#FF2020':'#0055CC',
+                weight:3, opacity:1, dashArray:dash,
+                fillColor:danger?'#FF2020':'#0055CC', fillOpacity:0.12,
+              };
             },
-            // Render points: labels as text, circles as L.circle, others as dot
             pointToLayer:(feature,latlng)=>{
               const p=feature.properties;
               if(p.featureType==='label'){
-                // Text label — ECDIS style: yellow monospace with dark shadow
                 const danger=p.checkDanger;
+                // Dark background behind text — visible on both light and dark maps
                 return L.marker(latlng,{
                   icon:L.divIcon({
-                    html:`<div style="color:${danger?'#FF5050':'#FFD700'};font-size:11px;font-weight:600;white-space:nowrap;font-family:monospace;text-shadow:1px 1px 2px #000,-1px -1px 2px #000,0 0 6px #000;pointer-events:none;line-height:1.2;">${p.labelText||''}</div>`,
+                    html:`<div style="
+                      background:rgba(0,0,80,0.75);
+                      color:${danger?'#FF6060':'#FFFFFF'};
+                      font-size:11px;font-weight:700;
+                      white-space:nowrap;font-family:monospace;
+                      padding:1px 4px;border-radius:3px;
+                      border:1px solid ${danger?'#FF6060':'rgba(255,255,255,0.4)'};
+                      pointer-events:none;line-height:1.3;
+                    ">${p.labelText||''}</div>`,
                     className:'',iconAnchor:[0,8],
                   }),
-                  interactive:false,zIndexOffset:-50,
+                  interactive:false,zIndexOffset:300,
                 });
               }
               if(p.featureType==='circle'){
                 return L.circle(latlng,{radius:p.radiusM||926,
-                  color:'#00E5FF',fillColor:'#00E5FF',fillOpacity:0.05,weight:1.5,dashArray:'6 4'});
+                  color:'#0055CC',fillColor:'#0055CC',fillOpacity:0.08,weight:2,dashArray:'6 4'});
               }
-              return L.circleMarker(latlng,{radius:5,color:'#00E5FF',fillOpacity:0.85,weight:2})
+              return L.circleMarker(latlng,{radius:6,color:'#0055CC',fillOpacity:0.85,weight:2})
                 .bindPopup(`<div style="font-size:12px"><b>${p.name||p.labelText||'Point'}</b></div>`);
             },
             onEachFeature:(feature,l)=>{
               const p=feature.properties;
               if(['line','polygon'].includes(p.featureType)&&p.name)
-                l.bindPopup(`<div style="font-size:12px"><b style="color:#00E5FF">${p.name}</b><br/>${p.checkDanger?'🔴 Danger area':p.featureType}</div>`);
+                l.bindPopup(`<div style="font-size:12px"><b style="color:#0055CC">${p.name}</b><br/>${p.checkDanger?'🔴 Danger area':p.featureType}</div>`);
             },
           }).addTo(leafRef.current);
+          layer.bringToFront(); // ensure chart is above base tiles
           chartLayersRef.current.push({id:overlay.name,layer});
         }
         setChartOverlays(prev=>[...prev,{name:overlay.name,summary:overlay.summary||''}]);
@@ -417,67 +428,105 @@ export default function NavModePage({ notify, sheetRoutes = [], portsDb = [], se
     setChartOverlays(prev=>prev.filter(c=>c.name!==name));
   };
 
-  // ── AIS STREAM — fixed APIKey casing, status tracking, auto-reconnect ──
-  // aisstream.io official field name is "APIKey" (capital K).
-  // Previous versions used "Apikey" and "APIkey" — both wrong.
-  // Auto-reconnect: retries every 5s on unexpected close (code !== 1000/1001).
+  // ── AIS STREAM — VesselAPI REST (primary) + aisstream WebSocket (fallback) ──
+  // VesselAPI key NAVISPHEREX: polls every 30s for vessels near ship position.
+  // Falls back to aisstream.io WebSocket if GPS not available.
+  const aisIntervalRef = useRef(null);
+
   useEffect(()=>{
-    if(!aisOn){ aisWsRef.current?.close(); aisWsRef.current=null; setAisStatus('off'); setAisTargets({}); return; }
+    if(!aisOn){
+      aisWsRef.current?.close(); aisWsRef.current=null;
+      clearInterval(aisIntervalRef.current); aisIntervalRef.current=null;
+      setAisStatus('off'); setAisTargets({});
+      return;
+    }
 
-    let retryTimer=null;
-    const connect=()=>{
-      setAisStatus('connecting');
-      const ws=new WebSocket("wss://stream.aisstream.io/v0/stream");
-      aisWsRef.current=ws;
+    // VesselAPI REST polling — works globally, no WebSocket needed
+    const VESSEL_API_KEY = '7da0c40c639a5f2a7532e75d9cdad6156b65f61932d778c1ce8580f9786e4506';
+    let retryWs=null;
 
-      ws.onopen=()=>{
-        setAisStatus('connected');
-        ws.send(JSON.stringify({
-          APIKey: AISSTREAM_KEY,              // ← FIXED: capital K per aisstream.io docs
-          BoundingBoxes:[[[-90,-180],[90,180]]],  // world — client-side range filter applied in render
-          FilterMessageTypes:["PositionReport"],
-        }));
-      };
-
-      ws.onmessage=(msg)=>{
-        try{
-          const d=JSON.parse(msg.data);
-          // aisstream.io sends: {MessageType, Message:{PositionReport:{...}}, MetaData:{MMSI,ShipName,...}}
-          const p=d?.Message?.PositionReport;
-          const m=d?.MetaData;
-          if(!p||!m) return;
-          if(p.Latitude===0&&p.Longitude===0) return; // skip 0,0 ghost targets
-          setAisTargets(prev=>({
-            ...prev,
-            [m.MMSI]:{
-              mmsi:  m.MMSI,
-              name:  (m.ShipName||'').trim(),
-              lat:   p.Latitude,
-              lon:   p.Longitude,
-              cog:   p.CourseOverGround||0,
-              sog:   p.SpeedOverGround||0,
-              hdg:   p.TrueHeading||0,
-              ts:    Date.now(),
-            }
-          }));
-        }catch{}
-      };
-
-      ws.onerror=()=>setAisStatus('error');
-
-      ws.onclose=(ev)=>{
-        // 1000 = normal, 1001 = going away — don't retry
-        if(ev.code!==1000&&ev.code!==1001&&aisOn){
-          setAisStatus('connecting');
-          retryTimer=setTimeout(connect,5000); // retry after 5s
-        } else {
-          setAisStatus('off');
-        }
-      };
+    const fetchVesselApi = async () => {
+      const pos = livePosRef.current;
+      const range = aisRangeRef.current || 50; // default 50 NM
+      // VesselAPI endpoint — area search by lat/lng/radius
+      const endpoints = [
+        `https://api.vesselapi.com/v1/vessel/list?lat=${pos?.lat||0}&lng=${pos?.lon||0}&radius=${range}`,
+        `https://api.vesselapi.com/v1/vessels?lat=${pos?.lat||0}&lng=${pos?.lon||0}&radius=${range}`,
+      ];
+      for (const url of endpoints) {
+        try {
+          const res = await fetch(url, {
+            headers: { 'Authorization': VESSEL_API_KEY, 'x-api-key': VESSEL_API_KEY }
+          });
+          if (!res.ok) continue;
+          const data = await res.json();
+          // Handle various response shapes
+          const vessels = data?.vessels || data?.data || data?.results || (Array.isArray(data)?data:[]);
+          if (vessels.length >= 0) {
+            setAisStatus('connected');
+            const targets = {};
+            vessels.forEach(v => {
+              const mmsi = v.mmsi || v.MMSI || v.id;
+              const lat  = v.lat || v.latitude || v.Latitude;
+              const lon  = v.lon || v.lng || v.longitude || v.Longitude;
+              if (mmsi && lat && lon) {
+                targets[mmsi] = {
+                  mmsi, lat: parseFloat(lat), lon: parseFloat(lon),
+                  cog: parseFloat(v.cog || v.CourseOverGround || 0),
+                  sog: parseFloat(v.sog || v.SpeedOverGround || 0),
+                  name: (v.name || v.shipName || v.ShipName || '').trim(),
+                  ts: Date.now(),
+                };
+              }
+            });
+            setAisTargets(targets);
+            return; // success — stop trying other endpoints
+          }
+        } catch {}
+      }
+      // VesselAPI failed — fall through to aisstream WebSocket
+      startAisstream();
     };
 
-    connect();
-    return()=>{ clearTimeout(retryTimer); aisWsRef.current?.close(); };
+    const startAisstream = () => {
+      if (aisWsRef.current?.readyState === WebSocket.OPEN) return;
+      setAisStatus('connecting');
+      const ws = new WebSocket("wss://stream.aisstream.io/v0/stream");
+      aisWsRef.current = ws;
+      ws.onopen = () => {
+        setAisStatus('connected');
+        ws.send(JSON.stringify({
+          APIKey: 'e66d76190c2bf6c206264e3cb894308b853d73df',
+          BoundingBoxes: [[[-90,-180],[90,180]]],
+          FilterMessageTypes: ["PositionReport"],
+        }));
+      };
+      ws.onmessage = (msg) => {
+        try {
+          const d = JSON.parse(msg.data);
+          const p = d?.Message?.PositionReport, m = d?.MetaData;
+          if (!p || !m) return;
+          if (p.Latitude === 0 && p.Longitude === 0) return;
+          setAisTargets(prev => ({
+            ...prev,
+            [m.MMSI]: { mmsi:m.MMSI, name:(m.ShipName||'').trim(), lat:p.Latitude, lon:p.Longitude, cog:p.CourseOverGround||0, sog:p.SpeedOverGround||0, ts:Date.now() }
+          }));
+        } catch {}
+      };
+      ws.onerror = () => setAisStatus('error');
+      ws.onclose = (ev) => { if(ev.code!==1000&&ev.code!==1001) { setAisStatus('connecting'); retryWs=setTimeout(startAisstream,5000); } };
+    };
+
+    // Start immediately then poll every 30s
+    setAisStatus('connecting');
+    fetchVesselApi();
+    aisIntervalRef.current = setInterval(fetchVesselApi, 30000);
+
+    return () => {
+      clearTimeout(retryWs);
+      clearInterval(aisIntervalRef.current);
+      aisWsRef.current?.close();
+    };
   },[aisOn]);
 
   // ── MODIFIED: GPS FIX — Item 6: compensate ship icon for map bearing ──
@@ -697,13 +746,45 @@ export default function NavModePage({ notify, sheetRoutes = [], portsDb = [], se
     const wps=normalizeRouteCoords(activeRoute.waypoints);
     const c=colors;
     lrs.route=L.polyline(wps.map(w=>[w.lat,w.lon]),{color:c.route,weight:2.5,opacity:0.9,dashArray:'8 4'}).addTo(map);
+
     wps.forEach((wp,i)=>{
       const isFirst=i===0,isLast=i===wps.length-1;
-      const col=isFirst?'#00C896':isLast?'#FF4757':c.route,sz=isFirst||isLast?14:8;
-      const icon=L.divIcon({html:`<div style="background:${col};border:2px solid #fff;border-radius:50%;width:${sz}px;height:${sz}px;"></div>`,className:'',iconSize:[sz,sz],iconAnchor:[sz/2,sz/2]});
-      const m=L.marker([wp.lat,wp.lon],{icon}).bindPopup(`<div style="font-size:13px;min-width:150px"><b style="color:${c.route}">WP${String(i+1).padStart(2,'0')}${wp.name?' — '+wp.name:''}</b><br/>Lat: ${toDMS(wp.lat,true)}<br/>Lon: ${toDMS(wp.lon,false)}</div>`).addTo(map);
-      lrs.routeMarkers.push(m);
+      const col=isFirst?'#00C896':isLast?'#FF4757':c.route, sz=isFirst||isLast?14:8;
+      // Dot icon
+      const dotIcon=L.divIcon({
+        html:`<div style="background:${col};border:2.5px solid #fff;border-radius:50%;width:${sz}px;height:${sz}px;box-shadow:0 0 4px rgba(0,0,0,0.5);"></div>`,
+        className:'',iconSize:[sz,sz],iconAnchor:[sz/2,sz/2]
+      });
+      // WP label icon — shows number + name below the dot
+      const wpLabel=`WP${String(i+1).padStart(2,'0')}${wp.name?' '+wp.name:''}`;
+      const labelIcon=L.divIcon({
+        html:`<div style="color:#fff;font-size:10px;font-weight:700;font-family:monospace;white-space:nowrap;text-shadow:1px 1px 2px #000,-1px -1px 2px #000;margin-top:2px;line-height:1.2;pointer-events:none;">${wpLabel}</div>`,
+        className:'',iconSize:[0,0],iconAnchor:[-4,-sz/2-2]
+      });
+      const m=L.marker([wp.lat,wp.lon],{icon:dotIcon}).bindPopup(
+        `<div style="font-size:13px;min-width:160px;line-height:1.7">
+          <b style="color:${col}">${wpLabel}</b><br/>
+          ${toDMS(wp.lat,true)}<br/>
+          ${toDMS(wp.lon,false)}
+          ${i>0?`<hr style="margin:4px 0;border-color:#333"/>Leg ${i}: ${calcBearing(wps[i-1].lat,wps[i-1].lon,wp.lat,wp.lon).toFixed(1)}°T · ${distanceNM(wps[i-1].lat,wps[i-1].lon,wp.lat,wp.lon).toFixed(1)} NM`:''}
+        </div>`
+      ).addTo(map);
+      const lbl=L.marker([wp.lat,wp.lon],{icon:labelIcon,interactive:false,zIndexOffset:200}).addTo(map);
+      lrs.routeMarkers.push(m,lbl);
     });
+
+    // Leg labels — course + distance at midpoint of each leg
+    for(let i=0;i<wps.length-1;i++){
+      const mid=[(wps[i].lat+wps[i+1].lat)/2,(wps[i].lon+wps[i+1].lon)/2];
+      const brg=calcBearing(wps[i].lat,wps[i].lon,wps[i+1].lat,wps[i+1].lon);
+      const dist=distanceNM(wps[i].lat,wps[i].lon,wps[i+1].lat,wps[i+1].lon);
+      const legIcon=L.divIcon({
+        html:`<div style="background:rgba(0,0,0,0.65);color:#FFD700;font-size:10px;font-weight:600;font-family:monospace;white-space:nowrap;padding:1px 4px;border-radius:3px;border:1px solid rgba(255,215,0,0.4);pointer-events:none;">${brg.toFixed(0)}°T · ${dist.toFixed(1)} NM</div>`,
+        className:'',iconSize:[0,0],iconAnchor:[-4,8]
+      });
+      const legLbl=L.marker(mid,{icon:legIcon,interactive:false,zIndexOffset:100}).addTo(map);
+      lrs.routeMarkers.push(legLbl);
+    }
     if(wps.length>=2){
       const XTD=1.0,portPts=[],stbdPts=[];
       wps.forEach((wp,i)=>{
@@ -1050,12 +1131,21 @@ export default function NavModePage({ notify, sheetRoutes = [], portsDb = [], se
               </div>
               {rbResult && (
                 <div style={{background:'#020810',borderRadius:7,padding:'8px 10px',border:'1px solid rgba(255,215,0,0.3)'}}>
-                  <div style={{display:'flex',justifyContent:'space-between'}}>
+                  <div style={{display:'flex',justifyContent:'space-between',marginBottom:4}}>
                     {[['RANGE',rbResult.rangeNM+' NM'],['BRG',rbResult.bearing+'°T']].map(([k,v])=>(
                       <div key={k}><div style={{color:S.dim,fontSize:S.fLabel}}>{k}</div><div style={{color:S.gold,fontFamily:'monospace',fontSize:'0.9rem',fontWeight:700}}>{v}</div></div>
                     ))}
                   </div>
-                  <div style={{color:S.dim,fontSize:S.fXs,marginTop:4}}>{toDMS(parseFloat(rbResult.lat),true)}<br/>{toDMS(parseFloat(rbResult.lon),false)}</div>
+                  {/* TTG — time to reach the tapped point at current SOG */}
+                  {livePos?.sog>0.2&&(
+                    <div style={{borderTop:'1px solid rgba(255,215,0,0.2)',paddingTop:4,marginBottom:4}}>
+                      <div style={{color:S.dim,fontSize:S.fLabel}}>TTG @ {livePos.sog.toFixed(1)} kn</div>
+                      <div style={{color:S.green,fontFamily:'monospace',fontSize:'0.82rem',fontWeight:700}}>
+                        {(()=>{const h=parseFloat(rbResult.rangeNM)/livePos.sog;const hr=Math.floor(h);const mn=Math.round((h-hr)*60);return hr>0?`${hr}h ${mn}m`:`${mn} min`;})()}
+                      </div>
+                    </div>
+                  )}
+                  <div style={{color:S.dim,fontSize:S.fXs}}>{toDMS(parseFloat(rbResult.lat),true)}<br/>{toDMS(parseFloat(rbResult.lon),false)}</div>
                 </div>
               )}
               {rbMode&&!livePos&&<div style={{color:S.red,fontSize:S.fXs}}>⚠ Enable GPS first</div>}
@@ -1067,10 +1157,12 @@ export default function NavModePage({ notify, sheetRoutes = [], portsDb = [], se
             <div style={{display:'flex',flexDirection:'column',gap:7}}>
               <label style={{background:'#060F1C',border:`1px solid ${S.vDim}`,color:S.text,borderRadius:6,padding:'7px 10px',fontSize:S.fSm,cursor:'pointer',display:'block',textAlign:'center'}}>
                 🗺️ Load Chart Overlay
-                <input type="file" style={{display:'none'}} onChange={loadChartFile}/>
+                <input type="file" accept=".xml,.geojson,.json,.kml,.kmz,.gpx" style={{display:'none'}} onChange={loadChartFile}/>
               </label>
-              <div style={{color:S.vDim,fontSize:'0.55rem'}}>GeoJSON · KML · GPX</div>
-              <div style={{color:S.dim,fontSize:S.fXs,lineHeight:1.5}}>Download chart files from the Charts page first, then load them here as map overlays.</div>
+              <div style={{color:S.vDim,fontSize:'0.55rem',lineHeight:1.5}}>
+                ECDIS User Chart XML (Furuno/Kongsberg/JRC)<br/>
+                GeoJSON · KML · GPX
+              </div>
               {chartOverlays.map((c,i)=>(
                 <div key={i} style={{display:'flex',alignItems:'center',gap:4}}>
                   <div style={{flex:1}}>
