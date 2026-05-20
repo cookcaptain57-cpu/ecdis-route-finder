@@ -117,26 +117,18 @@ const ROUTE_TABLE = {
   "PSD-SIN":[[31.26,32.31],[29.77,32.55],[15.0,41.5],[12.58,43.38],[12.0,62.0],[8.5,75.0],[8.5,84.5],[6.5,95.0],[5.0,99.2],[3.09,101.02],[1.29,103.85]],
 };
 
-export function buildAutoRoute(fromPort, toPort) {
-  const from = PORTS_DB.find(p => p.id === fromPort);
-  const to   = PORTS_DB.find(p => p.id === toPort);
-  if (!from || !to) return [];
+// ── ADDED: Internal routing engine — takes full port objects {id,lat,lon,name} ──
+function _doRoute(from, to) {
+  const key = `${from.id}-${to.id}`, keyR = `${to.id}-${from.id}`;
 
-  const key = `${fromPort}-${toPort}`, keyR = `${toPort}-${fromPort}`;
-
-  // ← CHANGED: after mapping table coords, replace first/last with actual DB port coordinates
   if (ROUTE_TABLE[key]) {
-    const _pts = ROUTE_TABLE[key].map(([lat,lon],i,arr) => ({
-      lat, lon, name: i===0 ? from.name : i===arr.length-1 ? to.name : undefined,
-    }));
+    const _pts = ROUTE_TABLE[key].map(([lat,lon],i,arr)=>({lat,lon,name:i===0?from.name:i===arr.length-1?to.name:undefined}));
     _pts[0]             = { lat: from.lat, lon: from.lon, name: from.name };
     _pts[_pts.length-1] = { lat: to.lat,   lon: to.lon,   name: to.name  };
     return recalcWaypoints(_pts);
   }
   if (ROUTE_TABLE[keyR]) {
-    const _pts = [...ROUTE_TABLE[keyR]].reverse().map(([lat,lon],i,arr) => ({
-      lat, lon, name: i===0 ? from.name : i===arr.length-1 ? to.name : undefined,
-    }));
+    const _pts = [...ROUTE_TABLE[keyR]].reverse().map(([lat,lon],i,arr)=>({lat,lon,name:i===0?from.name:i===arr.length-1?to.name:undefined}));
     _pts[0]             = { lat: from.lat, lon: from.lon, name: from.name };
     _pts[_pts.length-1] = { lat: to.lat,   lon: to.lon,   name: to.name  };
     return recalcWaypoints(_pts);
@@ -255,4 +247,27 @@ export function buildAutoRoute(fromPort, toPort) {
   }
   if(allWPs.length>0) allWPs[allWPs.length-1].name=to.name;
   return recalcWaypoints(allWPs);
+}
+
+// ── buildAutoRoute — unchanged external API, now delegates to _doRoute ──────
+export function buildAutoRoute(fromPort, toPort) {
+  const from = PORTS_DB.find(p => p.id === fromPort);
+  const to   = PORTS_DB.find(p => p.id === toPort);
+  if (!from || !to) return [];
+  return _doRoute(from, to);
+}
+
+// ── ADDED: buildAutoRouteCoords — for ports from dynamic DB not in PORTS_DB ─
+// Accepts full port objects {id, lat, lon, name} — same routing logic as above
+export function buildAutoRouteCoords(from, to) {
+  if (!from || !to) return [];
+  const lat1 = Number(from.lat ?? from.latitude ?? 0);
+  const lon1 = Number(from.lon ?? from.longitude ?? from.lng ?? 0);
+  const lat2 = Number(to.lat   ?? to.latitude   ?? 0);
+  const lon2 = Number(to.lon   ?? to.longitude  ?? to.lng  ?? 0);
+  if (!lat1 || !lon1 || !lat2 || !lon2) return [];
+  return _doRoute(
+    { id: from.id || 'DEP', lat: lat1, lon: lon1, name: from.name || 'Departure' },
+    { id: to.id   || 'ARR', lat: lat2, lon: lon2, name: to.name   || 'Arrival'   }
+  );
 }
