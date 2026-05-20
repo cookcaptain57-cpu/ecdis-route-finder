@@ -173,6 +173,26 @@ export const fetchRouteSheet = () => {
   return Promise.any(ROUTE_TABS.map(tab => _fetchTab(ROUTE_SHEET_ID, tab))).catch(() => []);
 };
 
+// ─── parseDMS ── NEW helper: converts DMS string to decimal degrees ─────────
+// Added to fix: parseFloat() was dropping minutes + seconds from DMS values
+// like "42°32'60.0N", returning only the degree integer (e.g. 42).
+// Handles both with and without the " seconds symbol (CSV unescaping strips it).
+// Falls back to parseFloat() so existing decimal-format rows still work.
+const parseDMS = (str) => {
+  if (!str) return NaN;
+  // Strip any stray quote characters left by CSV unescaping, then trim
+  const s = str.replace(/"/g, '').trim();
+  // Match: degrees ° minutes ' seconds (optional ") direction [NSEW]
+  // e.g. "42°32'60.0N" or "42°32'60.0"N" or "1°18'30"E"
+  const m = s.match(/^(\d+)[°\s]+(\d+)['\s]+(\d+(?:\.\d+)?)\s*["']?\s*([NSEWnsew])/);
+  if (m) {
+    const decimal = parseFloat(m[1]) + parseFloat(m[2]) / 60 + parseFloat(m[3]) / 3600;
+    return /[SWsw]/.test(m[4]) ? -decimal : decimal;
+  }
+  // Fallback: value is already in decimal degrees format
+  return parseFloat(s);
+};
+
 // ─── fetchPortsFromSheet ── CHANGED: paginated fetch, all other code identical
 // Root cause: GViz endpoint silently truncates large sheets at ~3700 rows per
 // single request — so 27,000 port rows were cut to 3699 every time.
@@ -231,8 +251,12 @@ export const fetchPortsFromSheet = async () => {
         const countryCode = (vals[0] || '').replace(/"/g, '').trim();
         const locode      = (vals[1] || '').replace(/"/g, '').trim();
         const portName    = (vals[colC] || '').replace(/"/g, '').trim();
-        const lat         = colLat >= 0 ? parseFloat(vals[colLat] || '') : NaN;
-        const lon         = colLon >= 0 ? parseFloat(vals[colLon] || '') : NaN;
+
+        // ── CHANGED: was parseFloat() — now parseDMS() so DMS strings like
+        //    "42°32'60.0N" are fully converted instead of truncated to degrees only.
+        const lat = colLat >= 0 ? parseDMS(vals[colLat] || '') : NaN;
+        const lon = colLon >= 0 ? parseDMS(vals[colLon] || '') : NaN;
+
         if (!portName || !locode) continue;
         const fullLocode  = locode.length <= 3 ? (countryCode + locode) : locode;
         allRows.push({
