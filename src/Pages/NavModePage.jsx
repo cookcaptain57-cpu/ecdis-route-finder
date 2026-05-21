@@ -46,6 +46,8 @@ export default function NavModePage({ notify, sheetRoutes = [], portsDb = [], se
   const gebcoRefTile   = useRef(null);
   const emodnetTileRef = useRef(null);
   const encTileRef     = useRef(null);
+  const esriBaseRef    = useRef(null);   // ADD: ESRI Ocean Base coloured depth zones
+  const gebcoWmsRef    = useRef(null);   // ADD: GEBCO WMS gap-filler
 
   const layersRef = useRef({
     route:null, vessel:null, vector:null,
@@ -113,7 +115,8 @@ export default function NavModePage({ notify, sheetRoutes = [], portsDb = [], se
   const [deepDepth,     setDeepDepth]    = useState(() => Number(localStorage.getItem('nav_deepDepth')||200));
   const [shipDraft,     setShipDraft]    = useState(() => Number(localStorage.getItem('nav_draft')||6));
   const [depthCheckOn,  setDepthCheckOn] = useState(false);
-  const [aisStatus,     setAisStatus]    = useState('off'); // 'off'|'connecting'|'connected'|'error'
+  const [aisStatus,     setAisStatus]    = useState('off');
+  const [xtdNM,         setXtdNM]        = useState(() => Number(localStorage.getItem('nav_xtdNM')||1.0)); // Item 2: selectable XTD
 
   // ── EXISTING: SAFE MAP INVALIDATE ──
   const safeInvalidate = useCallback(() => {
@@ -365,8 +368,15 @@ export default function NavModePage({ notify, sheetRoutes = [], portsDb = [], se
         if(!overlay) throw new Error('Unsupported format. Supported: ECDIS User Chart XML, GeoJSON, KML.');
 
         if(leafRef.current&&window.L){
-          const L=window.L;
+          const L=window.L, map=leafRef.current;
+          // Create dedicated high-z pane for chart overlays (above tiles z200, below markers z600)
+          if(!map.getPane('chartPane')){
+            const cp=map.createPane('chartPane');
+            cp.style.zIndex='450';
+            cp.style.pointerEvents='none';
+          }
           const layer=L.geoJSON(overlay.data,{
+            pane:'chartPane',
             // Style lines and polygons — use dark visible colors on any background
             style:(feature)=>{
               const p=feature.properties;
@@ -415,6 +425,8 @@ export default function NavModePage({ notify, sheetRoutes = [], portsDb = [], se
           }).addTo(leafRef.current);
           layer.bringToFront(); // ensure chart is above base tiles
           chartLayersRef.current.push({id:overlay.name,layer});
+          // Pan map to show the loaded chart
+          try{ const b=layer.getBounds(); if(b.isValid()) map.fitBounds(b,{padding:[40,40]}); }catch{}
         }
         setChartOverlays(prev=>[...prev,{name:overlay.name,summary:overlay.summary||''}]);
         notify(`✓ ${overlay.name}${overlay.summary?' ('+overlay.summary+')':''}`,'error');
@@ -447,44 +459,44 @@ export default function NavModePage({ notify, sheetRoutes = [], portsDb = [], se
 
     const fetchVesselApi = async () => {
       const pos = livePosRef.current;
-      const range = aisRangeRef.current || 50; // default 50 NM
-      // VesselAPI endpoint — area search by lat/lng/radius
+      const range = aisRangeRef.current || 50;
+      // VesselAPI.com REST endpoints — try multiple patterns
+      const lat = pos?.lat || 0, lng = pos?.lon || 0;
       const endpoints = [
-        `https://api.vesselapi.com/v1/vessel/list?lat=${pos?.lat||0}&lng=${pos?.lon||0}&radius=${range}`,
-        `https://api.vesselapi.com/v1/vessels?lat=${pos?.lat||0}&lng=${pos?.lon||0}&radius=${range}`,
+        { url:`https://api.vesselapi.com/v1/vessel/list?lat=${lat}&lng=${lng}&radius=${range}`, auth:'header' },
+        { url:`https://api.vesselapi.com/v1/vessels?lat=${lat}&lng=${lng}&radius=${range}`, auth:'header' },
+        { url:`https://api.vesselapi.com/v1/vessel/area?lat=${lat}&lng=${lng}&radius_nm=${range}`, auth:'header' },
+        { url:`https://api.vesselapi.com/vessels?lat=${lat}&lng=${lng}&radius=${range}&apiKey=${VESSEL_API_KEY}`, auth:'param' },
       ];
-      for (const url of endpoints) {
+      for (const ep of endpoints) {
         try {
-          const res = await fetch(url, {
-            headers: { 'Authorization': VESSEL_API_KEY, 'x-api-key': VESSEL_API_KEY }
-          });
+          const headers = ep.auth==='header'
+            ? { 'Authorization': VESSEL_API_KEY, 'x-api-key': VESSEL_API_KEY, 'Content-Type':'application/json' }
+            : {};
+          const res = await fetch(ep.url, { headers });
           if (!res.ok) continue;
           const data = await res.json();
-          // Handle various response shapes
-          const vessels = data?.vessels || data?.data || data?.results || (Array.isArray(data)?data:[]);
-          if (vessels.length >= 0) {
+          const vessels = data?.vessels || data?.data || data?.results || data?.ships || (Array.isArray(data)?data:[]);
+          if (Array.isArray(vessels)) {
             setAisStatus('connected');
             const targets = {};
             vessels.forEach(v => {
-              const mmsi = v.mmsi || v.MMSI || v.id;
-              const lat  = v.lat || v.latitude || v.Latitude;
-              const lon  = v.lon || v.lng || v.longitude || v.Longitude;
-              if (mmsi && lat && lon) {
-                targets[mmsi] = {
-                  mmsi, lat: parseFloat(lat), lon: parseFloat(lon),
-                  cog: parseFloat(v.cog || v.CourseOverGround || 0),
-                  sog: parseFloat(v.sog || v.SpeedOverGround || 0),
-                  name: (v.name || v.shipName || v.ShipName || '').trim(),
-                  ts: Date.now(),
-                };
+              const mmsi = v.mmsi||v.MMSI||v.id;
+              const lat  = parseFloat(v.lat||v.latitude||v.Latitude||0);
+              const lon  = parseFloat(v.lon||v.lng||v.longitude||v.Longitude||0);
+              if (mmsi && lat && lon && !(lat===0&&lon===0)) {
+                targets[mmsi] = { mmsi, lat, lon,
+                  cog: parseFloat(v.cog||v.CourseOverGround||0),
+                  sog: parseFloat(v.sog||v.SpeedOverGround||v.speed||0),
+                  name: (v.name||v.shipName||v.ShipName||v.vessel_name||'').trim(),
+                  ts: Date.now() };
               }
             });
-            setAisTargets(targets);
-            return; // success — stop trying other endpoints
+            if(Object.keys(targets).length > 0) { setAisTargets(targets); return; }
           }
         } catch {}
       }
-      // VesselAPI failed — fall through to aisstream WebSocket
+      // VesselAPI unavailable — fallback to aisstream WebSocket
       startAisstream();
     };
 
@@ -563,8 +575,8 @@ export default function NavModePage({ notify, sheetRoutes = [], portsDb = [], se
             className:'',iconSize:[20,28],iconAnchor:[10,14],
           });
 
-          if(!layersRef.current.vessel){layersRef.current.vessel=L.marker([lat,lon],{icon:shipIcon,zIndexOffset:1000}).addTo(leafRef.current);}
-          else{layersRef.current.vessel.setLatLng([lat,lon]);layersRef.current.vessel.setIcon(shipIcon);}
+          if(!layersRef.current.vessel){layersRef.current.vessel=L.marker([lat,lon],{icon:shipIcon,zIndexOffset:9999}).addTo(leafRef.current);}
+          else{layersRef.current.vessel.setLatLng([lat,lon]);layersRef.current.vessel.setIcon(shipIcon);layersRef.current.vessel.setZIndexOffset(9999);}
 
           const RAD=Math.PI/180,lookNM=Math.max(sog,0.3)*(vectorMinsRef.current/60);
           const vLat=lat+(lookNM/60)*Math.cos(cog*RAD),vLon=lon+(lookNM/60)*Math.sin(cog*RAD);
@@ -634,73 +646,34 @@ export default function NavModePage({ notify, sheetRoutes = [], portsDb = [], se
     });
   },[aisTargets,livePos]); // livePos dep ensures range filter updates as ship moves
 
-  // ── TILE SWAP — new layered architecture ──
-  // Base map ALWAYS uses mapMode (night/day/dusk) — never overridden.
-  // Depth layers (EMODnet + ESRI Reference + NOAA ENC) are ADDED ON TOP when gebcoOn.
-  // This fixes night/day/dusk being stuck when depth was toggled on.
-  //
-  // Layer order (bottom → top):
-  //   1. OSM/Carto base (night / day / dusk)        — always
-  //   2. EMODnet depth shading                       — when gebcoOn, Europe+global
-  //   3. ESRI Ocean Reference (depth numbers, z≥9)  — when gebcoOn, global
-  //   4. NOAA ENC WMS (detailed, z≥7)              — when gebcoOn, USA waters
-  //   5. OpenSeaMap seamarks                         — always on top
+  // ── TILE SWAP — 7-layer ECDIS depth stack with explicit zIndex ──
   useEffect(()=>{
     if(!mapReady||!leafRef.current||!window.L) return;
     const L=window.L, map=leafRef.current;
-
-    // Remove all depth + seamark layers — base tile stays unless mapMode changed
-    [gebcoRefTile,seamarkRef,emodnetTileRef,encTileRef].forEach(r=>{
+    [baseTileRef,esriBaseRef,emodnetTileRef,gebcoWmsRef,gebcoRefTile,encTileRef,seamarkRef].forEach(r=>{
       if(r.current){try{map.removeLayer(r.current);}catch{}r.current=null;}
     });
-    // Remove base only if mode changed (baseTileRef tracks last mapMode url)
     const TILES={
-      night:{url:'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',          attr:'© CARTO © OpenStreetMap'},
-      day:  {url:'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',attr:'© CARTO © OpenStreetMap'},
-      dusk: {url:'https://{s}.basemaps.cartocdn.com/rastertiles/voyager_nolabels/{z}/{x}/{y}{r}.png',attr:'© CARTO © OpenStreetMap'},
+      night:{url:'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'},
+      day:  {url:'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png'},
+      dusk: {url:'https://{s}.basemaps.cartocdn.com/rastertiles/voyager_nolabels/{z}/{x}/{y}{r}.png'},
     };
-    const cfg=TILES[mapMode]||TILES.night;
-    if(baseTileRef.current) { try{map.removeLayer(baseTileRef.current);}catch{} baseTileRef.current=null; }
-    // Layer 1: base map — always mapMode, never overridden by depth toggle
-    baseTileRef.current=L.tileLayer(cfg.url,{
-      subdomains:'abcd', attribution:cfg.attr, maxZoom:20,
-    }).addTo(map);
-
+    // Layer 1: base — ALWAYS mapMode, never overridden
+    baseTileRef.current=L.tileLayer((TILES[mapMode]||TILES.night).url,{subdomains:'abcd',maxZoom:20,zIndex:1,attribution:'© CARTO © OpenStreetMap'}).addTo(map);
     if(gebcoOn){
-      // Layer 2: EMODnet bathymetry — worldwide depth colour zones
-      // Global coverage via GEBCO-based EMODnet mosaic. Caps at zoom 11 (overview).
-      try{
-        emodnetTileRef.current=L.tileLayer(
-          'https://tiles.emodnet-bathymetry.eu/2020/baselayer/{z}/{x}/{y}.png',
-          {attribution:'© EMODnet Bathymetry',maxZoom:11,opacity:0.55,
-           errorTileUrl:'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'}
-        ).addTo(map);
-      }catch{}
-
-      // Layer 3: ESRI Ocean Reference — depth soundings (numbers) at zoom ≥9, global
-      // Shows individual metre values, shipping lanes, port names worldwide.
-      gebcoRefTile.current=L.tileLayer(
-        'https://server.arcgisonline.com/arcgis/rest/services/Ocean/World_Ocean_Reference/MapServer/tile/{z}/{y}/{x}',
-        {maxZoom:18,attribution:'Tiles © Esri — GEBCO NOAA National Geographic',opacity:1.0}
-      ).addTo(map);
-
-      // Layer 4: NOAA ENC WMS — detailed S-57 ENC rendering for USA waters
-      // Automatically invisible outside US coverage area (transparent tiles).
-      try{
-        encTileRef.current=L.tileLayer.wms(
-          'https://gis.charttools.noaa.gov/arcgis/rest/services/MCS/ENCOnline/MapServer/exts/MaritimeChartService/WMSServer',
-          {layers:'0,1,2,3,4,5,6,7',format:'image/png',transparent:true,
-           version:'1.3.0',attribution:'© NOAA ENC Online',opacity:0.9,maxZoom:18}
-        ).addTo(map);
-      }catch{}
+      // Layer 2: ESRI Ocean Base — coloured depth zones global (was MISSING)
+      esriBaseRef.current=L.tileLayer('https://server.arcgisonline.com/arcgis/rest/services/Ocean/World_Ocean_Base/MapServer/tile/{z}/{y}/{x}',{maxZoom:13,opacity:0.75,zIndex:2,attribution:'© Esri Ocean'}).addTo(map);
+      // Layer 3: EMODnet WMS — high-res coastal Europe+global (PNG CDN was dead, switched to WMS)
+      try{emodnetTileRef.current=L.tileLayer.wms('https://ows.emodnet-bathymetry.eu/wms',{layers:'emodnet:mean_atlas_land,emodnet:mean_rainbowcolour',format:'image/png',transparent:true,version:'1.3.0',opacity:0.55,zIndex:3,attribution:'© EMODnet Bathymetry'}).addTo(map);}catch{}
+      // Layer 4: GEBCO WMS — open ocean gap filler (was MISSING)
+      try{gebcoWmsRef.current=L.tileLayer.wms('https://www.gebco.net/data_and_products/gebco_web_services/web_map_service/mapserv',{layers:'GEBCO_LATEST_2',format:'image/png',transparent:true,version:'1.3.0',opacity:0.4,zIndex:4,attribution:'© GEBCO'}).addTo(map);}catch{}
+      // Layer 5: ESRI Ocean Reference — depth soundings metres at zoom ≥9 global
+      gebcoRefTile.current=L.tileLayer('https://server.arcgisonline.com/arcgis/rest/services/Ocean/World_Ocean_Reference/MapServer/tile/{z}/{y}/{x}',{maxZoom:18,opacity:1.0,zIndex:5,attribution:'© Esri'}).addTo(map);
+      // Layer 6: NOAA ENC WMS — S-57 US waters, transparent elsewhere
+      try{encTileRef.current=L.tileLayer.wms('https://gis.charttools.noaa.gov/arcgis/rest/services/MCS/ENCOnline/MapServer/exts/MaritimeChartService/WMSServer',{layers:'0,1,2,3,4,5,6,7',format:'image/png',transparent:true,version:'1.3.0',opacity:0.9,zIndex:6,attribution:'© NOAA'}).addTo(map);}catch{}
     }
-
-    // Layer 5: OpenSeaMap seamarks — always on top (depth contours, buoys, lights)
-    seamarkRef.current=L.tileLayer(
-      'https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png',
-      {opacity:gebcoOn?0.9:0.6,maxZoom:18,attribution:'© OpenSeaMap'}
-    ).addTo(map);
-
+    // Layer 7: OpenSeaMap seamarks — ALWAYS on top
+    seamarkRef.current=L.tileLayer('https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png',{opacity:gebcoOn?0.9:0.6,maxZoom:18,zIndex:10,attribution:'© OpenSeaMap'}).addTo(map);
   },[gebcoOn,mapMode,mapReady]);
 
   // ── REF SYNCS ──
@@ -731,6 +704,7 @@ export default function NavModePage({ notify, sheetRoutes = [], portsDb = [], se
   useEffect(()=>{localStorage.setItem('nav_safetyDepth',safetyDepth);},[safetyDepth]);
   useEffect(()=>{localStorage.setItem('nav_deepDepth',deepDepth);},[deepDepth]);
   useEffect(()=>{localStorage.setItem('nav_draft',shipDraft);},[shipDraft]);
+  useEffect(()=>{localStorage.setItem('nav_xtdNM',xtdNM);},[xtdNM]);
   useEffect(()=>{if(activeRoute) localStorage.setItem('nav_activeRoute',JSON.stringify(activeRoute));else localStorage.removeItem('nav_activeRoute');},[activeRoute]);
 
   // ── ROUTE RENDER — Item 7: antimeridian normalization ──
@@ -786,7 +760,7 @@ export default function NavModePage({ notify, sheetRoutes = [], portsDb = [], se
       lrs.routeMarkers.push(legLbl);
     }
     if(wps.length>=2){
-      const XTD=1.0,portPts=[],stbdPts=[];
+      const XTD=xtdNM,portPts=[],stbdPts=[];
       wps.forEach((wp,i)=>{
         let brg;
         if(i===0) brg=calcBearing(wp.lat,wp.lon,wps[1].lat,wps[1].lon);
@@ -800,30 +774,46 @@ export default function NavModePage({ notify, sheetRoutes = [], portsDb = [], se
       lrs.xtdFill=L.polygon([...portPts,...[...stbdPts].reverse()],{color:'transparent',fillColor:c.xtd,fillOpacity:0.06,weight:0}).addTo(map);
     }
     map.fitBounds(lrs.route.getBounds(),{padding:[60,60]});
-  },[activeRoute,mapReady,colors]);
+  },[activeRoute,mapReady,colors,xtdNM]);
 
-  // ── ETA CALC — route-following distance (not direct line) ──
-  // Previous bug: distanceNM(ship → waypoint) is a great-circle shortcut.
-  // For a 4200 NM multi-leg route this gave ~4125 NM (the straight-line chord).
-  // Fix: find nearest upcoming waypoint, then sum leg-by-leg to target.
+  // ── ETA CALC — FIXED DTG BUG ──
+  // Previous bug: used "nearest WP" as entry point → if ship just passed WP19,
+  // nearestWP=WP19 (already behind), then added full leg WP19→WP20 again = too large.
+  // Example from image: showed 443 NM instead of correct 371 NM.
+  //
+  // Fix: iterate ALL waypoints 0..targetIdx, compute route-following total for each
+  // as entry point. The MINIMUM is the correct remaining distance — this naturally
+  // picks the next waypoint ahead without needing to know which leg we're on.
   useEffect(()=>{
     if(!livePos||!activeRoute?.waypoints?.length){setEtaResult(null);return;}
     if(livePos.sog<0.2){setEtaResult(null);return;}
     const wps=activeRoute.waypoints;
     const targetIdx=Math.min(Math.max(selectedWpIdx,0),wps.length-1);
 
-    // Find nearest waypoint (most likely the next one to reach)
-    let nearIdx=0, nearDist=Infinity;
-    wps.forEach((wp,i)=>{ const d=distanceNM(livePos.lat,livePos.lon,wp.lat,wp.lon); if(d<nearDist){nearDist=d;nearIdx=i;} });
+    // Sum leg distances from wpFrom to wpTo
+    const legSum=(from,to)=>{let d=0;for(let i=from;i<to;i++) d+=distanceNM(wps[i].lat,wps[i].lon,wps[i+1].lat,wps[i+1].lon);return d;};
 
-    // Sum: ship → nearIdx → nearIdx+1 → ... → targetIdx
-    let remainNM=distanceNM(livePos.lat,livePos.lon,wps[nearIdx].lat,wps[nearIdx].lon);
-    for(let i=nearIdx;i<targetIdx;i++){
-      remainNM+=distanceNM(wps[i].lat,wps[i].lon,wps[i+1].lat,wps[i+1].lon);
+    // Try each WP as route entry, pick minimum total (= correct remaining distance)
+    let remainNM=Infinity;
+    for(let i=0;i<=targetIdx;i++){
+      const d=distanceNM(livePos.lat,livePos.lon,wps[i].lat,wps[i].lon)+legSum(i,targetIdx);
+      if(d<remainNM) remainNM=d;
     }
 
     const hours=remainNM/livePos.sog;
-    setEtaResult({remainNM:remainNM.toFixed(1),hours,hrs:Math.floor(hours),mins:Math.round((hours%1)*60),wpName:wps[targetIdx].name||`WP${String(targetIdx+1).padStart(2,'0')}`});
+    const hrs=Math.floor(hours), mins=Math.round((hours%1)*60);
+
+    // Arrival date/time in local device time
+    const arr=new Date(Date.now()+hours*3600000);
+    const p=n=>String(n).padStart(2,'0');
+    const mo=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][arr.getMonth()];
+    const arrStr=`${p(arr.getDate())} ${mo} ${arr.getFullYear()}  ${p(arr.getHours())}:${p(arr.getMinutes())} LT`;
+
+    setEtaResult({
+      remainNM:remainNM.toFixed(1), hours, hrs, mins,
+      wpName:wps[targetIdx].name||`WP${String(targetIdx+1).padStart(2,'0')}`,
+      arrivalStr:arrStr,
+    });
   },[livePos,activeRoute,selectedWpIdx]);
 
   // ── Item 6: MAP ORIENTATION — Course Up / Head Up ──
@@ -999,6 +989,23 @@ export default function NavModePage({ notify, sheetRoutes = [], portsDb = [], se
                   <input type="checkbox" checked={v} onChange={e=>s(e.target.checked)}/>{lb}
                 </label>
               ))}
+              {/* R/B quick toggle in HUD — Item 3 */}
+              <label style={{display:'flex',alignItems:'center',gap:7,cursor:'pointer',fontSize:S.fSm,color:rbMode?S.gold:S.text,minHeight:26,borderTop:`1px solid rgba(0,212,255,0.1)`,paddingTop:4,marginTop:2}}>
+                <input type="checkbox" checked={rbMode} onChange={e=>{
+                  const on=e.target.checked; rbModeRef.current=on; setRbMode(on);
+                  if(!on){rbTargetRef.current=null;setRbResult(null);if(leafRef.current){if(layersRef.current.rbLine) leafRef.current.removeLayer(layersRef.current.rbLine);if(layersRef.current.rbMarker) leafRef.current.removeLayer(layersRef.current.rbMarker);layersRef.current.rbLine=null;layersRef.current.rbMarker=null;}}
+                }}/>
+                📐 {rbMode?'Tap map → R/B live':'Range & Bearing'}
+              </label>
+              {rbResult&&rbMode&&(
+                <div style={{background:'rgba(0,0,0,0.4)',borderRadius:5,padding:'5px 7px',border:'1px solid rgba(255,215,0,0.3)'}}>
+                  <div style={{display:'flex',gap:10}}>
+                    <div><div style={{color:S.dim,fontSize:S.fLabel}}>RANGE</div><div style={{color:S.gold,fontFamily:'monospace',fontSize:'0.78rem',fontWeight:700}}>{rbResult.rangeNM} NM</div></div>
+                    <div><div style={{color:S.dim,fontSize:S.fLabel}}>BRG</div><div style={{color:S.gold,fontFamily:'monospace',fontSize:'0.78rem',fontWeight:700}}>{rbResult.bearing}°T</div></div>
+                    {livePos?.sog>0.2&&<div><div style={{color:S.dim,fontSize:S.fLabel}}>TTG</div><div style={{color:S.green,fontFamily:'monospace',fontSize:'0.78rem',fontWeight:700}}>{(()=>{const h=parseFloat(rbResult.rangeNM)/livePos.sog;const hr=Math.floor(h);const mn=Math.round((h-hr)*60);return hr>0?`${hr}h${mn}m`:`${mn}m`;})()}</div></div>}
+                  </div>
+                </div>
+              )}
               {/* Vector toggle */}
               {gpsOn && (
                 <div>
@@ -1006,6 +1013,17 @@ export default function NavModePage({ notify, sheetRoutes = [], portsDb = [], se
                   <div style={{display:'flex',gap:3}}>
                     {[6,12,20,30,60].map(m=>(
                       <button key={m} onClick={()=>setVectorMins(m)} style={{background:vectorMins===m?'rgba(0,212,255,0.2)':'transparent',border:`1px solid ${vectorMins===m?S.cyan:S.vDim}`,color:vectorMins===m?S.cyan:S.dim,borderRadius:4,padding:'2px 5px',fontSize:'0.62rem',cursor:'pointer'}}>{m}m</button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {/* XTD selector — Item 2 */}
+              {activeRoute&&(
+                <div>
+                  <div style={{color:S.dim,fontSize:S.fLabel,marginBottom:3,letterSpacing:0.5}}>XTD LIMIT</div>
+                  <div style={{display:'flex',gap:3,flexWrap:'wrap'}}>
+                    {[0.1,0.25,0.5,1.0,2.0].map(n=>(
+                      <button key={n} onClick={()=>setXtdNM(n)} style={{background:xtdNM===n?'rgba(255,179,0,0.2)':'transparent',border:`1px solid ${xtdNM===n?S.gold:S.vDim}`,color:xtdNM===n?S.gold:S.dim,borderRadius:4,padding:'2px 5px',fontSize:'0.58rem',cursor:'pointer'}}>{n} NM</button>
                     ))}
                   </div>
                 </div>
@@ -1041,6 +1059,7 @@ export default function NavModePage({ notify, sheetRoutes = [], portsDb = [], se
                     ))}
                   </div>
                   <div style={{color:S.dim,fontSize:'0.6rem',marginTop:2}}>→ {etaResult.wpName}</div>
+                  {etaResult.arrivalStr&&<div style={{color:S.gold,fontFamily:'monospace',fontSize:'0.65rem',marginTop:2}}>🕐 {etaResult.arrivalStr}</div>}
                 </div>
               )}
             </div>
