@@ -25,6 +25,8 @@ import LoginPage           from "./Pages/LoginPage";
 import NavModePage         from "./Pages/NavModePage";
 import MaritimeLibraryPage from "./Pages/MaritimeLibraryPage";
 import AdminPage           from "./Pages/AdminPage";
+import VesselSearchPage    from "./Pages/VesselSearchPage";
+import AccountPage         from "./Pages/AccountPage";
 
 const S = `
   @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700;900&family=Exo+2:wght@300;400;500;600&display=swap');
@@ -240,6 +242,10 @@ export default function App() {
   const [syncBanner, setSyncBanner]             = useState(null);
   // Prevents double-retry after auth is confirmed
   const hasRetriedRef                           = { current: false };
+
+  // Disclaimer: modal on first app open, small banner on first nav-tab visit per session
+  const [showDisclaimer, setShowDisclaimer]     = useState(false);
+  const [navDiscBanner,  setNavDiscBanner]       = useState(false);
 
   // Per-sync progress for admin panel progress bars (0-100)
   const [routesSyncProgress, setRoutesSyncProgress] = useState(0);
@@ -497,6 +503,11 @@ export default function App() {
     return () => unsub();
   }, []);
 
+  // Show disclaimer modal once per session on app open
+  useEffect(() => {
+    if (!sessionStorage.getItem('disclaimer_ok')) setShowDisclaimer(true);
+  }, []);
+
   const TABS = [
     { k: 'home',    i: '🏠', l: 'Dashboard' },
     { k: 'routes',  i: '🛤', l: 'Routes' },
@@ -504,17 +515,27 @@ export default function App() {
     { k: 'planner', i: '🗺', l: 'Route Planner', cls: 'green' },
     { k: 'navmode', i: '🧭', l: 'Nav Mode', cls: 'green' },
     { k: 'ports',   i: '⚓', l: 'Ports Database' },
+    { k: 'vessel',  i: '🛢', l: 'Vessel Search' },
     { k: 'library', i: '📖', l: 'Maritime Library' },
+    ...(user ? [{ k: 'account', i: '👤', l: 'My Account' }] : []),
     ...(isAdmin ? [{ k: 'admin', i: '🛡', l: 'Admin' }] : []),
   ];
 
   const handleSearch = (q) => { setSearchQ(q); setTab('routes'); setMenuOpen(false); };
+
   const switchTab = k => {
     if (!user && k !== 'home' && k !== 'login') {
       setTab('login'); setMenuOpen(false);
       sessionStorage.setItem('intendedTab', k); return;
     }
     setTab(k); setMenuOpen(false);
+    // Show nav disclaimer banner on FIRST visit to navigation tabs per session
+    const navTabs = ['routes', 'planner', 'navmode'];
+    if (navTabs.includes(k) && !sessionStorage.getItem(`navdisc_${k}`)) {
+      sessionStorage.setItem(`navdisc_${k}`, '1');
+      setNavDiscBanner(true);
+      setTimeout(() => setNavDiscBanner(false), 7000);
+    }
   };
 
   const isPlannerFull = tab === 'planner' || tab === 'navmode';
@@ -634,11 +655,13 @@ export default function App() {
               </div>
             </div>
           )}
-          {tab === 'home'    && <HomePage routes={routes} charts={charts} onSearch={handleSearch} setTab={switchTab} user={user} portsDb={portsDb} />}
+          {tab === 'home'    && <HomePage routes={routes} charts={charts} onSearch={handleSearch} setTab={switchTab} user={user} portsDb={portsDb} userProfile={userProfile} />}
           {tab === 'routes'  && <RoutesPage searchQuery={searchQ} notify={notify} user={user} setTab={switchTab} sheetRoutes={sheetRoutes} sheetLoading={routesLoading} />}
           {tab === 'charts'  && <ChartsPage notify={notify} user={user} setTab={switchTab} isAdmin={isAdmin} sheetCharts={sheetCharts} sheetLoading={chartsLoading} />}
           {tab === 'planner' && <RoutePlannerPage notify={notify} sheetRoutes={[...routes, ...sheetRoutes]} portsDb={portsDb} />}
           {tab === 'ports'   && <PortSearchPage portsDb={portsDb} sheetLoading={portsLoading} refreshSheets={refreshPorts} />}
+          {tab === 'vessel'  && <VesselSearchPage />}
+          {tab === 'account' && user && <AccountPage user={user} userProfile={userProfile} setUserProfile={setUserProfile} notify={notify} setTab={switchTab} />}
           {tab === 'library' && <MaritimeLibraryPage setTab={switchTab} />}
           {tab === 'navmode' && <NavModePage notify={notify} sheetRoutes={[...routes, ...sheetRoutes]} portsDb={portsDb} setTab={switchTab} />}
           {tab === 'login'   && <LoginPage notify={notify} onLogin={(u, redirectTo) => { setUser(u); setTab(redirectTo || 'home'); }} />}
@@ -680,6 +703,34 @@ export default function App() {
 
         {tab !== 'planner' && <Footer />}
         {notif && <Notif key={notif.key} msg={notif.msg} type={notif.type} onClose={() => setNotif(null)} />}
+
+        {/* ── Disclaimer modal — once per session on app open ── */}
+        {showDisclaimer && (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1.5rem' }}>
+            <div style={{ background: 'var(--card)', border: '2px solid rgba(240,165,0,0.4)', borderRadius: 18, padding: '2rem', maxWidth: 400, width: '100%', boxShadow: '0 20px 60px rgba(0,0,0,0.7)', textAlign: 'center' }}>
+              <div style={{ fontSize: '3rem', marginBottom: '0.8rem' }}>⚠️</div>
+              <div style={{ fontFamily: 'Orbitron,monospace', fontSize: '0.9rem', fontWeight: 700, color: 'var(--gold)', marginBottom: '0.8rem', letterSpacing: '0.06em' }}>NAVIGATION DISCLAIMER</div>
+              <div style={{ fontSize: '0.8rem', color: 'var(--text2)', lineHeight: 1.8, marginBottom: '1.6rem' }}>
+                Content on <strong style={{ color: 'var(--text)' }}>NavisphereX Marine</strong> is{' '}
+                <strong style={{ color: 'var(--gold)' }}>not to be used solely for navigation</strong>.<br />
+                Always verify routes, charts and data with official and approved sources before use at sea.
+              </div>
+              <button className="btn btn-gold" style={{ width: '100%', justifyContent: 'center', fontSize: '0.82rem', padding: '12px' }}
+                onClick={() => { sessionStorage.setItem('disclaimer_ok', '1'); setShowDisclaimer(false); }}>
+                ✅ I Understand — Continue
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ── Nav disclaimer banner — first visit to Routes / Planner / NavMode ── */}
+        {navDiscBanner && (
+          <div style={{ position: 'fixed', bottom: 72, left: '50%', transform: 'translateX(-50%)', zIndex: 9995, background: 'rgba(4,12,26,0.97)', border: '1px solid rgba(240,165,0,0.4)', borderRadius: 12, padding: '10px 16px', display: 'flex', alignItems: 'center', gap: 10, boxShadow: '0 6px 24px rgba(0,0,0,0.5)', backdropFilter: 'blur(20px)', maxWidth: '92vw', minWidth: 260 }}>
+            <span style={{ fontSize: '1.1rem', flexShrink: 0 }}>⚠️</span>
+            <span style={{ fontSize: '0.7rem', color: 'var(--gold)', lineHeight: 1.4 }}>Content not to be used solely for navigation. Always verify with official sources.</span>
+            <button onClick={() => setNavDiscBanner(false)} style={{ background: 'none', border: 'none', color: 'var(--text3)', cursor: 'pointer', fontSize: '1rem', flexShrink: 0, marginLeft: 4 }}>✕</button>
+          </div>
+        )}
       </div>
     </>
   );
