@@ -5,11 +5,35 @@ import { auth, db } from "../firebase";
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword, sendPasswordResetEmail, signOut } from "firebase/auth";
 import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
 
+const MARITIME_RANKS = [
+  'Captain / Master',
+  'Chief Officer (1st Officer)',
+  '2nd Officer',
+  '3rd Officer',
+  'Chief Engineer',
+  '2nd Engineer',
+  '3rd Engineer',
+  '4th Engineer',
+  'Electrical Officer (ETO)',
+  'Bosun',
+  'AB Seaman (Rating)',
+  'Ordinary Seaman (OS)',
+  'Deck Cadet',
+  'Engine Cadet',
+  'Shore-based / Other',
+];
+
 function LoginPage({ notify, onLogin }) {
-  const [mode, setMode] = useState('login');
-  const [email, setEmail] = useState(''); const [pass, setPass] = useState('');
-  const [name, setName] = useState(''); const [phone, setPhone] = useState('');
-  const [loading, setLoading] = useState(false); const [err, setErr] = useState(''); const [ok, setOk] = useState('');
+  const [mode, setMode]         = useState('login');
+  const [email, setEmail]       = useState('');
+  const [pass, setPass]         = useState('');
+  const [name, setName]         = useState('');
+  const [phone, setPhone]       = useState('');
+  const [rank, setRank]         = useState('');
+  const [agreeTerms, setAgreeTerms] = useState(false);
+  const [loading, setLoading]   = useState(false);
+  const [err, setErr]           = useState('');
+  const [ok, setOk]             = useState('');
 
   const doLogin = async () => {
     setLoading(true); setErr('');
@@ -37,19 +61,26 @@ function LoginPage({ notify, onLogin }) {
   };
 
   const doSignup = async () => {
-    if (!name.trim()) { setErr('Please enter your full name.'); return; }
+    if (!name.trim())  { setErr('Please enter your full name.'); return; }
     if (!phone.trim()) { setErr('Please enter your phone number.'); return; }
+    if (!rank)         { setErr('Please select your rank.'); return; }
     if (!email || !pass) { setErr('Fill all fields.'); return; }
     if (pass.length < 6) { setErr('Password min 6 characters.'); return; }
+    if (!agreeTerms)   { setErr('Please accept Terms & Conditions to continue.'); return; }
     setLoading(true); setErr('');
     try {
       const c = await createUserWithEmailAndPassword(auth, email, pass);
-      await setDoc(doc(db, 'users', c.user.uid), { email, name: name.trim(), phone: phone.trim(), createdAt: serverTimestamp(), role: 'user' });
+      await setDoc(doc(db, 'users', c.user.uid), {
+        email, name: name.trim(), phone: phone.trim(), rank,
+        createdAt: serverTimestamp(), role: 'user',
+      });
       notify('Account created! 🎉', 'success');
       const intended2 = sessionStorage.getItem('intendedTab');
       sessionStorage.removeItem('intendedTab');
       onLogin(c.user, intended2 || 'home');
-    } catch (e) { setErr(e.code === 'auth/email-already-in-use' ? 'Email already registered. Login instead.' : 'Error: ' + e.message); }
+    } catch (e) {
+      setErr(e.code === 'auth/email-already-in-use' ? 'Email already registered. Login instead.' : 'Error: ' + e.message);
+    }
     setLoading(false);
   };
 
@@ -61,6 +92,8 @@ function LoginPage({ notify, onLogin }) {
     setLoading(false);
   };
 
+  const resetForm = (m) => { setMode(m); setErr(''); setOk(''); setAgreeTerms(false); };
+
   return (
     <div className="auth-wrap">
       <div className="auth-card">
@@ -69,26 +102,81 @@ function LoginPage({ notify, onLogin }) {
           <div className="auth-title">NavisphereX Marine</div>
           <div className="auth-sub">{mode === 'reset' ? 'Reset Password' : 'Free account · Download all files'}</div>
         </div>
+
         {mode !== 'reset' && (
           <div className="auth-tabs">
-            <button className={`atab ${mode === 'login' ? 'active' : ''}`} onClick={() => { setMode('login'); setErr(''); setOk(''); }}>Login</button>
-            <button className={`atab ${mode === 'signup' ? 'active' : ''}`} onClick={() => { setMode('signup'); setErr(''); setOk(''); }}>Create Account</button>
+            <button className={`atab ${mode === 'login' ? 'active' : ''}`} onClick={() => resetForm('login')}>Login</button>
+            <button className={`atab ${mode === 'signup' ? 'active' : ''}`} onClick={() => resetForm('signup')}>Create Account</button>
           </div>
         )}
+
         <div className="info-box" style={{ fontSize: '0.74rem' }}>🆓 Free account · Access all RTZ routes &amp; ECDIS charts</div>
-        {mode === 'signup' && <>
-          <div className="ff"><label className="fl">Full Name *</label><input className="fi" placeholder="Capt. Ahmed Khan" value={name} onChange={e => setName(e.target.value)} /></div>
-          <div className="ff"><label className="fl">Phone Number *</label><input className="fi" type="tel" placeholder="+91 9876543210" value={phone} onChange={e => setPhone(e.target.value)} /></div>
-        </>}
-        <div className="ff"><label className="fl">Email</label><input className="fi" type="email" placeholder="officer@ship.com" value={email} onChange={e => setEmail(e.target.value)} onKeyDown={e => e.key === 'Enter' && (mode === 'login' ? doLogin() : mode === 'signup' ? doSignup() : doReset())} /></div>
-        {mode !== 'reset' && <div className="ff"><label className="fl">Password</label><input className="fi" type="password" placeholder="Min 6 characters" value={pass} onChange={e => setPass(e.target.value)} onKeyDown={e => e.key === 'Enter' && (mode === 'login' ? doLogin() : doSignup())} /></div>}
+
+        {mode === 'signup' && (
+          <>
+            <div className="ff">
+              <label className="fl">Full Name *</label>
+              {/* ← CHANGED: placeholder now shows owner's name as example */}
+              <input className="fi" placeholder="e.g. Manish Bharti" value={name} onChange={e => setName(e.target.value)} />
+            </div>
+            <div className="ff">
+              <label className="fl">Phone Number *</label>
+              {/* ← CHANGED: placeholder updated */}
+              <input className="fi" type="tel" placeholder="e.g. 7870025XXX" value={phone} onChange={e => setPhone(e.target.value)} />
+            </div>
+            {/* ← CHANGED: added Rank dropdown */}
+            <div className="ff">
+              <label className="fl">Rank / Designation *</label>
+              <select className="fi" value={rank} onChange={e => setRank(e.target.value)}>
+                <option value="">— Select your rank —</option>
+                {MARITIME_RANKS.map(r => <option key={r} value={r}>{r}</option>)}
+              </select>
+            </div>
+          </>
+        )}
+
+        <div className="ff">
+          <label className="fl">Email</label>
+          {/* ← CHANGED: placeholder updated */}
+          <input className="fi" type="email" placeholder="e.g. manishbharti339@gmail.com" value={email} onChange={e => setEmail(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && (mode === 'login' ? doLogin() : mode === 'signup' ? doSignup() : doReset())} />
+        </div>
+
+        {mode !== 'reset' && (
+          <div className="ff">
+            <label className="fl">Password</label>
+            <input className="fi" type="password" placeholder="Min 6 characters" value={pass} onChange={e => setPass(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && (mode === 'login' ? doLogin() : doSignup())} />
+          </div>
+        )}
+
+        {/* ← CHANGED: Terms & Conditions checkbox — only shown on signup */}
+        {mode === 'signup' && (
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, marginBottom: '1rem', cursor: 'pointer' }} onClick={() => setAgreeTerms(a => !a)}>
+            <div style={{ width: 18, height: 18, borderRadius: 4, border: `2px solid ${agreeTerms ? 'var(--cyan)' : 'var(--border2)'}`, background: agreeTerms ? 'var(--cyan)' : 'transparent', flexShrink: 0, marginTop: 2, display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.2s' }}>
+              {agreeTerms && <span style={{ color: '#000', fontSize: '0.75rem', fontWeight: 900, lineHeight: 1 }}>✓</span>}
+            </div>
+            <span style={{ fontSize: '0.72rem', color: 'var(--text2)', lineHeight: 1.5 }}>
+              I agree to the{' '}
+              <span style={{ color: 'var(--cyan)', textDecoration: 'underline' }}>Terms &amp; Conditions</span>
+              {' '}and{' '}
+              <span style={{ color: 'var(--cyan)', textDecoration: 'underline' }}>Privacy Policy</span>.
+              Content is not for sole navigation use — always verify with official sources.
+            </span>
+          </div>
+        )}
+
         {err && <div className="err-box">{err}</div>}
-        {ok && <div className="ok-box">{ok}</div>}
-        <button className="submit-btn" onClick={mode === 'login' ? doLogin : mode === 'signup' ? doSignup : doReset} disabled={loading}>
+        {ok  && <div className="ok-box">{ok}</div>}
+
+        <button className="submit-btn"
+          onClick={mode === 'login' ? doLogin : mode === 'signup' ? doSignup : doReset}
+          disabled={loading || (mode === 'signup' && !agreeTerms)}>
           {loading ? 'Please wait…' : mode === 'login' ? '🔐 LOGIN' : mode === 'signup' ? '✅ CREATE FREE ACCOUNT' : '📧 SEND RESET EMAIL'}
         </button>
-        {mode === 'login' && <div className="link-txt" onClick={() => { setMode('reset'); setErr(''); setOk(''); }}>Forgot password?</div>}
-        {mode === 'reset' && <div className="link-txt" onClick={() => { setMode('login'); setErr(''); setOk(''); }}>← Back to login</div>}
+
+        {mode === 'login'  && <div className="link-txt" onClick={() => resetForm('reset')}>Forgot password?</div>}
+        {mode === 'reset'  && <div className="link-txt" onClick={() => resetForm('login')}>← Back to login</div>}
       </div>
     </div>
   );
