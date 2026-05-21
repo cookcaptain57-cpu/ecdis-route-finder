@@ -4,7 +4,7 @@
 import { useState, useEffect, useRef } from "react";
 import { ECDIS_BRANDS } from "../constants";
 
-function HomePage({ routes, charts, onSearch, setTab, user, portsDb = [] }) {
+function HomePage({ routes, charts, onSearch, setTab, user, portsDb = [], userProfile = null }) {
   const [q, setQ] = useState('');
   const [sugg, setSugg] = useState([]);
   const [showSugg, setShowSugg] = useState(false);
@@ -74,7 +74,11 @@ function HomePage({ routes, charts, onSearch, setTab, user, portsDb = [] }) {
           </div>
           <p style={{ color: 'var(--text2)', fontSize: '0.86rem', maxWidth: 420, lineHeight: 1.6, marginBottom: '1.4rem' }}>
             Your all-in-one maritime platform for planning, navigation and knowledge.
-            {user && <span style={{ color: 'var(--cyan)' }}> Welcome, {user.email.split('@')[0]}!</span>}
+            {user && (
+              <span style={{ color: 'var(--cyan)' }}>
+                {' '}Welcome, {userProfile?.rank ? `${userProfile.rank} ` : ''}{userProfile?.name || user.email.split('@')[0]}!
+              </span>
+            )}
           </p>
         </div>
         <div style={{ display: 'flex', gap: '0.8rem', flexWrap: 'wrap', marginBottom: '1.4rem' }}>
@@ -108,20 +112,7 @@ function HomePage({ routes, charts, onSearch, setTab, user, portsDb = [] }) {
       </div>
 
       <div style={{ padding: '1.4rem', maxWidth: 1100, margin: '0 auto', width: '100%' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(110px,1fr))', gap: '0.6rem', marginBottom: '1.6rem' }}>
-          {[
-            { n: routes.length, l: 'RTZ Routes', c: 'var(--cyan)' },
-            { n: charts.length, l: 'Chart Files', c: 'var(--gold)' },
-            { n: ECDIS_BRANDS.length, l: 'ECDIS Brands', c: 'var(--purple)' },
-            // ← CHANGED: db is now always portsDb — shows real count (or 0 while loading)
-            { n: db.length, l: 'World Ports', c: 'var(--green)' },
-          ].map((s, i) => (
-            <div key={i} style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 10, padding: '10px 12px', textAlign: 'center' }}>
-              <div style={{ fontFamily: 'Orbitron,monospace', fontSize: '1.2rem', fontWeight: 700, color: s.c }}>{s.n}</div>
-              <div style={{ fontSize: '0.62rem', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>{s.l}</div>
-            </div>
-          ))}
-        </div>
+        {/* ← CHANGED: removed stats grid (RTZ Routes, Chart Files, ECDIS Brands, World Ports) */}
 
         <div style={{ marginBottom: '1.8rem' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: '1rem' }}>
