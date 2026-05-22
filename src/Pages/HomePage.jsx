@@ -33,14 +33,15 @@ function HomePage({ routes, charts, onSearch, setTab, user, portsDb = [], userPr
     { icon: '✏️', title: 'ROUTE PLANNER', desc: 'Plan optimised routes with advanced tools.', tab: 'planner', color: 'var(--green)' },
     { icon: '🧭', title: 'NAV MODE', desc: 'Navigate with precision using smart nav mode.', tab: 'navmode', color: '#A78BFA', badge: 'NEW' },
     { icon: '⚓', title: 'PORTS DATABASE', desc: 'Explore global ports with details & coordinates.', tab: 'ports', color: 'var(--cyan)' },
+    { icon: '🛢', title: 'VESSEL SEARCH', desc: 'Search vessels by IMO, MMSI or flag state.', tab: 'vessel', color: 'var(--gold)', badge: 'SOON' },
     { icon: '📚', title: 'MARITIME LIBRARY', desc: 'SOLAS, MARPOL, IMO, STCW & more books.', tab: 'library', color: 'var(--gold)' },
   ];
 
   const QUICK_ACTIONS = [
-    { icon: '⬆️', title: 'Upload Route', desc: 'Share your route', tab: 'admin', color: 'var(--cyan)' },
+    { icon: '👤', title: 'My Account', desc: 'Profile & saved items', tab: 'account', color: 'var(--cyan)' },
     { icon: '⬇️', title: 'Download Latest', desc: 'Get latest updates', tab: 'routes', color: 'var(--green)' },
     { icon: '📊', title: 'New Charts', desc: 'Explore new charts', tab: 'charts', color: 'var(--gold)' },
-    { icon: '⭐', title: 'Favourites', desc: 'View saved items', tab: 'routes', color: '#F59E0B' },
+    { icon: '🛢', title: 'Vessel Search', desc: 'Search by IMO / MMSI', tab: 'vessel', color: '#A78BFA' },
   ];
 
   const KNOWLEDGE = [
