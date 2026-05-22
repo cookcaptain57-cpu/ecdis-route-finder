@@ -1,8 +1,9 @@
 /* eslint-disable */
 import { useState, useEffect } from "react";
 import { auth, db } from "../firebase";
-import { collection, getDocs, deleteDoc, doc, setDoc, serverTimestamp } from "firebase/firestore";
-import { onAuthStateChanged, signInWithEmailAndPassword, signOut } from "firebase/auth";
+import { collection, getDocs, deleteDoc, doc, setDoc, getDoc, serverTimestamp } from "firebase/firestore";
+import { onAuthStateChanged, signInWithEmailAndPassword, signOut, sendPasswordResetEmail } from "firebase/auth";
+import * as XLSX from "xlsx";
 import { ADMIN_EMAIL, ECDIS_BRANDS } from "../constants";
 import { idbSet, fetchRouteSheet, fetchChartSheet } from "../sheets";
 import PortSearchPage from "./PortSearchPage";
@@ -30,6 +31,10 @@ function AdminPage({
   const [chartsView, setChartsView] = useState('firebase');
   const [portsView,  setPortsView]  = useState('firebase');
 
+  // Download limits (loaded from Firestore app_config/limits)
+  const [limits, setLimits]             = useState({ maxRoutesPerDay: 10, maxChartsPerDay: 10 });
+  const [limitsLoading, setLimitsLoading] = useState(false);
+
   // Live sheet preview
   const [liveRoutes,        setLiveRoutes]        = useState([]);
   const [liveCharts,        setLiveCharts]        = useState([]);
@@ -51,8 +56,61 @@ function AdminPage({
     setLiveLoadingCharts(false);
   };
 
+  // Load download limits from Firestore
+  const loadLimits = async () => {
+    try {
+      const snap = await getDoc(doc(db, 'app_config', 'limits'));
+      if (snap.exists()) setLimits(snap.data());
+    } catch {}
+  };
+
+  // Save download limits to Firestore
+  const saveLimits = async () => {
+    setLimitsLoading(true);
+    try {
+      await setDoc(doc(db, 'app_config', 'limits'), {
+        maxRoutesPerDay: Number(limits.maxRoutesPerDay),
+        maxChartsPerDay: Number(limits.maxChartsPerDay),
+        updatedAt: serverTimestamp(),
+      });
+      notify('✅ Download limits saved', 'success');
+    } catch (e) { notify('Failed to save limits: ' + e.message, 'error'); }
+    setLimitsLoading(false);
+  };
+
+  // Export all users to Excel
+  const exportUsers = () => {
+    if (users.length === 0) { notify('No users to export', 'error'); return; }
+    const rows = users.map(u => ({
+      'Name':       u.name     || '',
+      'Email':      u.email    || '',
+      'Phone':      u.phone    || '',
+      'Rank':       u.rank     || '',
+      'Ship Name':  u.shipName || '',
+      'Address':    u.address  || '',
+      'Tier':       u.tier     || 'free',
+      'Joined':     u.createdAt?.toDate?.()?.toLocaleDateString() || '',
+      'Status':     u.blocked  ? 'Blocked' : 'Active',
+      'Note':       'Passwords are not stored/accessible (Firebase security)',
+    }));
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'NavisphereX Users');
+    XLSX.writeFile(wb, `NavisphereX_Users_${new Date().toISOString().slice(0,10)}.xlsx`);
+    notify(`✅ Exported ${rows.length} users to Excel`, 'success');
+  };
+
+  // Send password reset email to a user
+  const sendResetToUser = async (userEmail) => {
+    try {
+      await sendPasswordResetEmail(auth, userEmail);
+      notify(`✅ Password reset email sent to ${userEmail}`, 'success');
+    } catch (e) { notify('Failed to send reset: ' + e.message, 'error'); }
+  };
+
   useEffect(() => { const u = onAuthStateChanged(auth, u => setUser(u)); return () => u(); }, []);
   useEffect(() => { if (user && section === 'users') loadUsers(); }, [user, section]);
+  useEffect(() => { if (user && section === 'settings') loadLimits(); }, [user, section]);
 
   // Confirmation wrappers
   const confirmAndRefreshRoutes = () => {
@@ -211,6 +269,7 @@ function AdminPage({
     { k: 'sheet-routes', i: '🔄', l: 'Sync Routes' },
     { k: 'sheet-charts', i: '🔄', l: 'Sync Charts' },
     { k: 'port-search',  i: '⚓', l: 'Sync Ports' },
+    { k: 'settings',     i: '⚙️', l: 'Settings' },
     { k: 'users',        i: '👥', l: 'User Database' },
   ];
 
@@ -456,6 +515,42 @@ function AdminPage({
             </>
           )}
 
+          {/* ─── SETTINGS — download limits ────────────────────────────── */}
+          {section === 'settings' && (
+            <>
+              <div className="a-hdr"><div className="a-title">⚙️ App Settings</div></div>
+
+              {/* Download limits */}
+              <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: '1.2rem', marginBottom: '1rem' }}>
+                <div style={{ fontFamily: 'Orbitron,monospace', fontSize: '0.8rem', fontWeight: 700, color: 'var(--gold)', marginBottom: '0.4rem' }}>📥 Download Limits (per user per day)</div>
+                <div style={{ fontSize: '0.72rem', color: 'var(--text3)', marginBottom: '1rem', lineHeight: 1.5 }}>
+                  Free &amp; Paid user accounts are limited to X downloads per day. Admin account has unlimited access.
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: '1rem' }}>
+                  <div className="ff" style={{ margin: 0 }}>
+                    <label className="fl">🛤 Max Routes / Day</label>
+                    <input className="fi" type="number" min="1" max="1000"
+                      value={limits.maxRoutesPerDay}
+                      onChange={e => setLimits(l => ({ ...l, maxRoutesPerDay: e.target.value }))} />
+                  </div>
+                  <div className="ff" style={{ margin: 0 }}>
+                    <label className="fl">📊 Max Charts / Day</label>
+                    <input className="fi" type="number" min="1" max="1000"
+                      value={limits.maxChartsPerDay}
+                      onChange={e => setLimits(l => ({ ...l, maxChartsPerDay: e.target.value }))} />
+                  </div>
+                </div>
+                <button className="btn btn-gold" onClick={saveLimits} disabled={limitsLoading}>
+                  {limitsLoading ? 'Saving…' : '✅ Save Limits to Firebase'}
+                </button>
+              </div>
+
+              <div className="info-box">
+                💡 These limits apply to all <strong style={{ color: 'var(--cyan)' }}>Free</strong> and <strong style={{ color: 'var(--gold)' }}>Paid</strong> user accounts. Admin account is always unlimited. Limits reset at midnight each day.
+              </div>
+            </>
+          )}
+
           {/* ─── USERS ─────────────────────────────────────────────────── */}
           {section === 'users' && (
             <>
@@ -465,26 +560,46 @@ function AdminPage({
                   <span className="badge badge-green">{users.length} registered</span>
                   <span className="badge" style={{ background: 'rgba(255,60,60,0.15)', color: '#ff6b6b', border: '1px solid rgba(255,60,60,0.3)' }}>{users.filter(u => u.blocked).length} blocked</span>
                   <button className="btn btn-secondary" style={{ padding: '5px 10px', fontSize: '0.72rem' }} onClick={loadUsers}>🔄 Refresh</button>
+                  <button className="btn btn-green" style={{ padding: '5px 10px', fontSize: '0.72rem' }} onClick={exportUsers}>⬇ Export Excel</button>
                 </div>
               </div>
-              <div className="info-box">🛡 <strong style={{ color: 'var(--text)' }}>Access Control</strong> — Block suspicious users instantly.</div>
+
+              <div className="info-box" style={{ fontSize: '0.72rem' }}>
+                🛡 <strong style={{ color: 'var(--text)' }}>Access Control</strong> — Block users instantly. &nbsp;
+                🔒 <strong style={{ color: 'var(--gold)' }}>Passwords</strong> are never stored or accessible — Firebase encrypts them. Use "Reset" to help users change their password.
+              </div>
+
               {users.length === 0
                 ? <div className="empty"><div className="empty-icon">👥</div><div className="empty-t">No Users Yet</div><div className="empty-d">Users appear here after they register</div></div>
                 : <div className="tw"><table className="tbl">
-                  <thead><tr><th>#</th><th>Name</th><th>Email</th><th>Phone</th><th>Joined</th><th>Status</th><th>Action</th></tr></thead>
+                  <thead><tr><th>#</th><th>Name</th><th>Rank</th><th>Email</th><th>Phone</th><th>Tier</th><th>Joined</th><th>Status</th><th>Actions</th></tr></thead>
                   <tbody>{users.map((u, i) => (
                     <tr key={u.id} style={{ opacity: u.blocked ? 0.7 : 1 }}>
                       <td style={{ color: 'var(--text3)' }}>{i + 1}</td>
                       <td style={{ color: u.blocked ? '#ff6b6b' : 'var(--cyan)', fontWeight: 600 }}>{u.blocked && '⛔ '}{u.name || '—'}</td>
-                      <td style={{ color: 'var(--text2)', fontSize: '0.78rem' }}>{u.email}</td>
-                      <td style={{ color: 'var(--gold)', fontSize: '0.78rem' }}>{u.phone || '—'}</td>
-                      <td style={{ color: 'var(--text2)', fontSize: '0.72rem' }}>{u.createdAt?.toDate?.()?.toLocaleDateString() || '—'}</td>
+                      <td style={{ fontSize: '0.7rem', color: 'var(--text2)' }}>{u.rank || '—'}</td>
+                      <td style={{ color: 'var(--text2)', fontSize: '0.74rem' }}>{u.email}</td>
+                      <td style={{ color: 'var(--gold)', fontSize: '0.74rem' }}>{u.phone || '—'}</td>
+                      <td><span style={{ padding: '2px 7px', borderRadius: 5, fontSize: '0.62rem', fontWeight: 700,
+                        background: u.tier === 'paid' ? 'rgba(240,165,0,0.15)' : 'rgba(0,180,216,0.12)',
+                        color: u.tier === 'paid' ? 'var(--gold)' : 'var(--cyan)',
+                        border: `1px solid ${u.tier === 'paid' ? 'rgba(240,165,0,0.3)' : 'rgba(0,180,216,0.25)'}` }}>
+                        {u.tier === 'paid' ? '⭐ Paid' : '🆓 Free'}
+                      </span></td>
+                      <td style={{ color: 'var(--text2)', fontSize: '0.7rem' }}>{u.createdAt?.toDate?.()?.toLocaleDateString() || '—'}</td>
                       <td>{u.blocked
-                        ? <span style={{ background: 'rgba(255,60,60,0.15)', color: '#ff6b6b', border: '1px solid rgba(255,60,60,0.3)', borderRadius: 5, padding: '2px 8px', fontSize: '0.68rem', fontWeight: 700 }}>⛔ BLOCKED</span>
-                        : <span style={{ background: 'rgba(0,200,100,0.12)', color: 'var(--green)', border: '1px solid rgba(0,200,100,0.25)', borderRadius: 5, padding: '2px 8px', fontSize: '0.68rem', fontWeight: 700 }}>✅ ACTIVE</span>}</td>
-                      <td>{u.blocked
-                        ? <button style={{ background: 'rgba(0,200,100,0.15)', color: 'var(--green)', border: '1px solid rgba(0,200,100,0.3)', borderRadius: 6, padding: '4px 10px', fontSize: '0.68rem', fontWeight: 700, cursor: 'pointer' }} onClick={() => unblockUser(u)}>✅ Unblock</button>
-                        : <button style={{ background: 'rgba(255,60,60,0.12)', color: '#ff6b6b', border: '1px solid rgba(255,60,60,0.3)', borderRadius: 6, padding: '4px 10px', fontSize: '0.68rem', fontWeight: 700, cursor: 'pointer' }} onClick={() => { if (window.confirm(`Block ${u.name || u.email}?`)) blockUser(u); }}>⛔ Block</button>}
+                        ? <span style={{ background: 'rgba(255,60,60,0.15)', color: '#ff6b6b', border: '1px solid rgba(255,60,60,0.3)', borderRadius: 5, padding: '2px 7px', fontSize: '0.62rem', fontWeight: 700 }}>⛔ BLOCKED</span>
+                        : <span style={{ background: 'rgba(0,200,100,0.12)', color: 'var(--green)', border: '1px solid rgba(0,200,100,0.25)', borderRadius: 5, padding: '2px 7px', fontSize: '0.62rem', fontWeight: 700 }}>✅ ACTIVE</span>}
+                      </td>
+                      <td>
+                        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                          {u.blocked
+                            ? <button style={{ background: 'rgba(0,200,100,0.15)', color: 'var(--green)', border: '1px solid rgba(0,200,100,0.3)', borderRadius: 5, padding: '3px 8px', fontSize: '0.62rem', fontWeight: 700, cursor: 'pointer' }} onClick={() => unblockUser(u)}>✅ Unblock</button>
+                            : <button style={{ background: 'rgba(255,60,60,0.12)', color: '#ff6b6b', border: '1px solid rgba(255,60,60,0.3)', borderRadius: 5, padding: '3px 8px', fontSize: '0.62rem', fontWeight: 700, cursor: 'pointer' }} onClick={() => { if (window.confirm(`Block ${u.name || u.email}?`)) blockUser(u); }}>⛔ Block</button>
+                          }
+                          <button style={{ background: 'rgba(0,180,216,0.1)', color: 'var(--cyan)', border: '1px solid rgba(0,180,216,0.25)', borderRadius: 5, padding: '3px 8px', fontSize: '0.62rem', fontWeight: 700, cursor: 'pointer' }}
+                            onClick={() => { if (window.confirm(`Send password reset to ${u.email}?`)) sendResetToUser(u.email); }}>🔑 Reset</button>
+                        </div>
                       </td>
                     </tr>
                   ))}</tbody>
