@@ -16,6 +16,7 @@ import {
 
 import Footer              from "./components/Footer";
 import Notif               from "./components/Notif";
+import WelcomePopup        from "./components/WelcomePopup";
 import HomePage            from "./Pages/HomePage";
 import RoutesPage          from "./Pages/RoutesPage";
 import ChartsPage          from "./Pages/ChartsPage";
@@ -246,6 +247,8 @@ export default function App() {
   // Disclaimer: modal on first app open, small banner on first nav-tab visit per session
   const [showDisclaimer, setShowDisclaimer]     = useState(false);
   const [navDiscBanner,  setNavDiscBanner]       = useState(false);
+  // Welcome popup — typewriter message shown on login / signup
+  const [welcomePopup,   setWelcomePopup]        = useState(null); // null | {type,name,rank}
 
   // Per-sync progress for admin panel progress bars (0-100)
   const [routesSyncProgress, setRoutesSyncProgress] = useState(0);
@@ -515,7 +518,7 @@ export default function App() {
     { k: 'planner', i: '🗺', l: 'Route Planner', cls: 'green' },
     { k: 'navmode', i: '🧭', l: 'Nav Mode', cls: 'green' },
     { k: 'ports',   i: '⚓', l: 'Ports Database' },
-    { k: 'vessel',  i: '🛢', l: 'Vessel Search' },
+    { k: 'vessel',  i: '🛳', l: 'Vessel Search' },
     { k: 'library', i: '📖', l: 'Maritime Library' },
     ...(user ? [{ k: 'account', i: '👤', l: 'My Account' }] : []),
     ...(isAdmin ? [{ k: 'admin', i: '🛡', l: 'Admin' }] : []),
@@ -552,6 +555,18 @@ export default function App() {
           color: 'var(--cyan)', display: 'flex', alignItems: 'center', gap: 6,
         }}>
           <div className="spin" style={{ width: 10, height: 10 }} /> Connecting…
+        </div>
+      )}
+
+      {/* ── Full-screen auth loading overlay — completely prevents login flicker ── */}
+      {!authChecked && (
+        <div style={{ position: 'fixed', inset: 0, background: 'var(--bg)', zIndex: 99999,
+          display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 16 }}>
+          <div style={{ fontFamily: 'Orbitron,monospace', fontSize: '1.5rem', fontWeight: 900, letterSpacing: '0.06em' }}>
+            NAVISPHERE<span style={{ color: 'var(--cyan)' }}>X</span>
+          </div>
+          <div style={{ fontSize: '0.64rem', color: 'var(--text3)', letterSpacing: '0.2em' }}>MARINE</div>
+          <div className="spin" style={{ marginTop: 8 }} />
         </div>
       )}
 
@@ -664,7 +679,15 @@ export default function App() {
           {tab === 'account' && user && <AccountPage user={user} userProfile={userProfile} setUserProfile={setUserProfile} notify={notify} setTab={switchTab} />}
           {tab === 'library' && <MaritimeLibraryPage setTab={switchTab} />}
           {tab === 'navmode' && <NavModePage notify={notify} sheetRoutes={[...routes, ...sheetRoutes]} portsDb={portsDb} setTab={switchTab} />}
-          {tab === 'login'   && <LoginPage notify={notify} onLogin={(u, redirectTo) => { setUser(u); setTab(redirectTo || 'home'); }} />}
+          {tab === 'login'   && <LoginPage notify={notify} onLogin={(u, redirectTo, isNew, userName, userRank) => {
+            setUser(u);
+            setTab(redirectTo || 'home');
+            // Show welcome popup once per session
+            if (!sessionStorage.getItem('welcome_shown')) {
+              sessionStorage.setItem('welcome_shown', '1');
+              setWelcomePopup({ type: isNew ? 'new' : 'returning', name: userName, rank: userRank });
+            }
+          }} />}
 
           {tab === 'admin' && (isAdmin
             ? <AdminPage
@@ -703,6 +726,16 @@ export default function App() {
 
         {tab !== 'planner' && <Footer />}
         {notif && <Notif key={notif.key} msg={notif.msg} type={notif.type} onClose={() => setNotif(null)} />}
+
+        {/* ── Welcome popup — typewriter message on login / signup ── */}
+        {welcomePopup && (
+          <WelcomePopup
+            type={welcomePopup.type}
+            name={welcomePopup.name}
+            rank={welcomePopup.rank}
+            onClose={() => setWelcomePopup(null)}
+          />
+        )}
 
         {/* ── Disclaimer modal — once per session on app open ── */}
         {showDisclaimer && (
