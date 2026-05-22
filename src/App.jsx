@@ -518,7 +518,7 @@ export default function App() {
     { k: 'planner', i: '🗺', l: 'Route Planner', cls: 'green' },
     { k: 'navmode', i: '🧭', l: 'Nav Mode', cls: 'green' },
     { k: 'ports',   i: '⚓', l: 'Ports Database' },
-    { k: 'vessel',  i: '🛳', l: 'Vessel Search' },
+    { k: 'vessel',  i: '🚢', l: 'Vessel Search' },
     { k: 'library', i: '📖', l: 'Maritime Library' },
     ...(user ? [{ k: 'account', i: '👤', l: 'My Account' }] : []),
     ...(isAdmin ? [{ k: 'admin', i: '🛡', l: 'Admin' }] : []),
