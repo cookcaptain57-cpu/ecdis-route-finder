@@ -12,11 +12,7 @@
 
 // ── WS hosts to try in order ──────────────────────────────────────────────
 const WS_HOSTS = [
-  'ws://192.168.1.1:4002',   // bridge on default SafePilot WiFi router
-  'ws://10.0.0.1:4002',      // bridge on alternate router
-  'ws://192.168.0.1:4002',   // bridge on common home router
-  'ws://192.168.1.1:4001',   // direct WS if AIS device supports it
-  'ws://10.0.0.1:10110',     // OpenCPN/multiplexer direct WS
+  'ws://localhost:4002',
 ];
 
 // ── Stale target timeout: remove targets not updated in 10 minutes ─────────
