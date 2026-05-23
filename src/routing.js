@@ -1,8 +1,12 @@
 /* eslint-disable */
 // src/routing.js
-// Maritime routing powered by SeaRoute network graph (public/worldroutens.json)
-// Implements A* pathfinding through actual shipping lanes.
-// Port approach: validates entry/exit nodes are reachable without crossing land.
+// Maritime routing via SeaRoute network (public/worldroutens.json)
+// All 5 ChatGPT-identified fixes applied:
+// FIX 1: max 20 NM snap distance
+// FIX 2: GRID_DEG = 0.25 (was 2)
+// FIX 3: toFixed(5) node key precision (was toFixed(3))
+// FIX 4: route simplification (min 5 NM between kept waypoints)
+// FIX 5: edge sanity check (reject edges > 300 NM)
 
 import { PORTS_DB } from "./constants";
 
@@ -28,6 +32,21 @@ function recalcWaypoints(wps){
     return{...wp,distance:dist,bearing:bear,totalNM:(p.totalNM||0)+dist};
   });
 }
+
+// FIX 4: Route simplification — removes micro graph nodes, reduces waypoint count
+// Keeps first, last, and any waypoint >= minDistNM from the previous kept waypoint
+function simplifyRoute(wps, minDistNM=5){
+  if(wps.length<3)return wps;
+  const out=[wps[0]];
+  for(let i=1;i<wps.length-1;i++){
+    const prev=out[out.length-1];
+    const d=haversine(prev.lat,prev.lon,wps[i].lat,wps[i].lon);
+    if(d>=minDistNM)out.push(wps[i]);
+  }
+  out.push(wps[wps.length-1]);
+  return recalcWaypoints(out);
+}
+
 function greatCircle(lat1,lon1,lat2,lon2,n){
   const pts=[];
   for(let i=0;i<=n;i++){
@@ -44,23 +63,17 @@ function greatCircle(lat1,lon1,lat2,lon2,n){
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// TILE-BASED LAND DETECTION (same CARTO tiles the map displays)
-// Used to validate port→network-node connections don't cross land.
+// TILE-BASED LAND DETECTION
 // ══════════════════════════════════════════════════════════════════════════════
-
-// Tile pixel cache so repeated checks for the same area reuse the canvas
-const _tileCache = {};
-
-function _tileKey(zoom,tx,ty){ return `${zoom}/${tx}/${ty}`; }
-
+const _tileCache={};
 function _getOrFetchTile(zoom,tx,ty){
-  const k = _tileKey(zoom,tx,ty);
-  if(_tileCache[k]) return _tileCache[k];
-  _tileCache[k] = new Promise(resolve=>{
+  const k=`${zoom}/${tx}/${ty}`;
+  if(_tileCache[k])return _tileCache[k];
+  _tileCache[k]=new Promise(resolve=>{
     const img=new Image(); img.crossOrigin='anonymous';
     const cv=document.createElement('canvas'); cv.width=cv.height=256;
     const ctx=cv.getContext('2d');
-    img.onload=()=>{ ctx.drawImage(img,0,0); resolve({ctx,cv}); };
+    img.onload=()=>{ctx.drawImage(img,0,0);resolve({ctx});};
     img.onerror=()=>resolve(null);
     img.src=`https://a.basemaps.cartocdn.com/rastertiles/voyager/${zoom}/${tx}/${ty}.png`;
     setTimeout(()=>resolve(null),5000);
@@ -68,7 +81,6 @@ function _getOrFetchTile(zoom,tx,ty){
   return _tileCache[k];
 }
 
-// ADDED: check a single lat/lon — returns true=land, false=water, null=unknown
 async function _checkOnLand(lat,lon){
   try{
     const zoom=11,n=1<<zoom;
@@ -78,34 +90,31 @@ async function _checkOnLand(lat,lon){
     const px=Math.floor(((lon+180)/360*n-tx)*256);
     const py=Math.floor(((1-Math.log(Math.tan(latR)+1/Math.cos(latR))/Math.PI)/2*n-ty)*256);
     const tile=await _getOrFetchTile(zoom,tx,ty);
-    if(!tile) return null;
+    if(!tile)return null;
     const[r,g,b]=tile.ctx.getImageData(px,py,1,1).data;
-    // CARTO voyager water: blue channel dominant and > 130
-    return !(b>130&&b>r&&b>=g); // true = land
-  }catch{ return null; }
+    return!(b>130&&b>r&&b>=g); // true=land
+  }catch{return null;}
 }
 
-// ADDED: check if the midpoint of a line segment is on land
 async function _midpointOnLand(lat1,lon1,lat2,lon2){
-  // Sample at 25%, 50%, 75% along the segment
-  const checks = await Promise.all([0.25,0.5,0.75].map(t=>
-    _checkOnLand(lat1+(lat2-lat1)*t, lon1+(lon2-lon1)*t)
+  const checks=await Promise.all([0.25,0.5,0.75].map(t=>
+    _checkOnLand(lat1+(lat2-lat1)*t,lon1+(lon2-lon1)*t)
   ));
   return checks.some(c=>c===true);
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// MARITIME NETWORK GRAPH (SeaRoute — public/worldroutens.json)
+// MARITIME NETWORK GRAPH
 // ══════════════════════════════════════════════════════════════════════════════
 
-let _ready  = false;
-let _loading= null;
-let _nodes  = {};    // nodeKey -> {lat,lon,k}
-let _adj    = {};    // nodeKey -> [{to,dist}]
-let _grid   = {};    // spatial grid
-const GRID_DEG = 2;
+let _ready=false, _loading=null;
+let _nodes={}, _adj={}, _grid={};
 
-function _nk(lat,lon){ return `${lat.toFixed(3)},${lon.toFixed(3)}`; }
+// FIX 2: GRID_DEG = 0.25 instead of 2 — much tighter spatial indexing
+const GRID_DEG=0.25;
+
+// FIX 3: toFixed(5) — ~1m precision prevents incorrect node merging
+function _nk(lat,lon){ return `${lat.toFixed(5)},${lon.toFixed(5)}`; }
 
 function _addNode(lon,lat){
   const k=_nk(lat,lon);
@@ -121,9 +130,8 @@ function _addNode(lon,lat){
 function _addEdge(k1,k2,dist){
   if(!_adj[k1])_adj[k1]=[];
   if(!_adj[k2])_adj[k2]=[];
-  // Avoid duplicate edges
-  if(!_adj[k1].some(e=>e.to===k2)){_adj[k1].push({to:k2,dist});}
-  if(!_adj[k2].some(e=>e.to===k1)){_adj[k2].push({to:k1,dist});}
+  if(!_adj[k1].some(e=>e.to===k2))_adj[k1].push({to:k2,dist});
+  if(!_adj[k2].some(e=>e.to===k1))_adj[k2].push({to:k1,dist});
 }
 
 function _parseNetwork(data){
@@ -132,14 +140,16 @@ function _parseNetwork(data){
   if(data.type==='FeatureCollection'&&Array.isArray(data.features)){
     console.log('[SeaRoute] Parsing GeoJSON FeatureCollection…');
     data.features.forEach(f=>{
-      const geom=f.geometry;
-      if(!geom)return;
+      const geom=f.geometry; if(!geom)return;
       const process=(coords)=>{
         for(let i=0;i<coords.length-1;i++){
           const[lon1,lat1]=coords[i],[lon2,lat2]=coords[i+1];
           if(isNaN(lat1)||isNaN(lon1)||isNaN(lat2)||isNaN(lon2))return;
+          // FIX 5: edge sanity check — reject edges longer than 300 NM
+          const dist=haversine(lat1,lon1,lat2,lon2);
+          if(dist>300)return; // corrupted/impossible edge
           const k1=_addNode(lon1,lat1),k2=_addNode(lon2,lat2);
-          _addEdge(k1,k2,haversine(lat1,lon1,lat2,lon2));
+          _addEdge(k1,k2,dist);
         }
       };
       if(geom.type==='LineString')process(geom.coordinates);
@@ -149,21 +159,25 @@ function _parseNetwork(data){
     console.log('[SeaRoute] Parsing node/edge format…');
     const byId={};
     data.nodes.forEach(n=>{
-      const lat=n.lat??n.y??n.latitude;
-      const lon=n.lon??n.lng??n.x??n.longitude;
+      const lat=n.lat??n.y??n.latitude, lon=n.lon??n.lng??n.x??n.longitude;
       if(lat==null||lon==null)return;
       byId[n.id??n.i??n.node_id]=_addNode(lon,lat);
     });
     (data.edges||data.links||[]).forEach(e=>{
-      const k1=byId[e.from??e.source??e.u],k2=byId[e.to??e.target??e.v];
+      const k1=byId[e.from??e.source??e.u], k2=byId[e.to??e.target??e.v];
       if(!k1||!k2)return;
       const n1=_nodes[k1],n2=_nodes[k2];
       const dist=e.dist??e.weight??e.length??(n1&&n2?haversine(n1.lat,n1.lon,n2.lat,n2.lon):0);
+      // FIX 5: reject impossible edges
+      if(dist>300)return;
       _addEdge(k1,k2,dist);
     });
   } else {
-    console.warn('[SeaRoute] Unknown network format — expected GeoJSON FeatureCollection or {nodes,edges}');
+    console.warn('[SeaRoute] Unknown network format');
   }
+
+  const nc=Object.keys(_nodes).length;
+  console.log(`[SeaRoute] Parsed: ${nc.toLocaleString()} nodes, ${Object.keys(_adj).length.toLocaleString()} adjacency entries`);
 }
 
 function _ensureNetwork(){
@@ -174,58 +188,64 @@ function _ensureNetwork(){
     .then(data=>{
       _parseNetwork(data);
       const nc=Object.keys(_nodes).length;
-      if(nc<10)throw new Error('Too few nodes parsed — check worldroutens.json format');
-      console.log(`[SeaRoute] Network ready: ${nc.toLocaleString()} nodes, ${Object.keys(_adj).length.toLocaleString()} edge-lists`);
+      if(nc<10)throw new Error('Too few nodes — check worldroutens.json format');
+      console.log(`[SeaRoute] Network ready: ${nc.toLocaleString()} nodes`);
       _ready=true; return true;
     })
     .catch(e=>{
-      console.warn('[SeaRoute] Network load failed:',e.message,
-        '\nEnsure worldroutens.json is in the public/ folder of your project.');
+      console.warn('[SeaRoute] Network load failed:',e.message);
       _loading=null; return false;
     });
   return _loading;
 }
 
-// ── Get N nearest nodes to a point ───────────────────────────────────────────
+// FIX 1 + 2: max 20 NM snap distance, tight grid search
 function _nearestNodesMulti(lat,lon,count=10){
-  const gx=Math.floor(lon/GRID_DEG),gy=Math.floor(lat/GRID_DEG);
+  const gx=Math.floor(lon/GRID_DEG), gy=Math.floor(lat/GRID_DEG);
   const found=[];
-  for(let r=0;r<=15&&found.length<count*3;r++){
+  // Search expanding rings — with GRID_DEG=0.25 each ring = 0.25°
+  for(let r=0;r<=80&&found.length<count*5;r++){
     for(let dx=-r;dx<=r;dx++)for(let dy=-r;dy<=r;dy++){
       if(Math.abs(dx)!==r&&Math.abs(dy)!==r)continue;
       const cells=_grid[`${gx+dx},${gy+dy}`]||[];
-      cells.forEach(n=>found.push({...n,_d:haversine(lat,lon,n.lat,n.lon)}));
+      cells.forEach(n=>{
+        const d=haversine(lat,lon,n.lat,n.lon);
+        found.push({...n,_d:d});
+      });
     }
-    if(found.length>=count)break;
+    // Stop expanding early if we have enough close candidates
+    const maxD=r*GRID_DEG*60; // rough NM equivalent
+    if(found.length>=count&&found.some(n=>n._d<20))break;
+    if(r>20&&found.length>=count)break;
   }
-  return found.sort((a,b)=>a._d-b._d).slice(0,count);
+  // FIX 1: hard cap at 20 NM — never snap to a distant/wrong node
+  return found
+    .filter(n=>n._d<=20)
+    .sort((a,b)=>a._d-b._d)
+    .slice(0,count);
 }
 
-// ADDED: find best entry/exit node that doesn't require crossing land ──────────
-// Checks candidates IN PARALLEL (fast — shared tile cache means repeated
-// lookups in the same area reuse the cached canvas pixel data).
+// Find best entry/exit node that doesn't require crossing land
 async function _findBestNode(portLat,portLon){
   const candidates=_nearestNodesMulti(portLat,portLon,10);
-  if(!candidates.length)return null;
-
-  // Check all candidates in parallel
+  if(!candidates.length){
+    console.warn(`[SeaRoute] No network node within 20 NM of ${portLat},${portLon}`);
+    return null;
+  }
+  // Check all candidates in parallel — shared tile cache makes this fast
   const checks=await Promise.all(
-    candidates.slice(0,10).map(async c=>({
+    candidates.slice(0,8).map(async c=>({
       c,
       crossesLand:await _midpointOnLand(portLat,portLon,c.lat,c.lon),
     }))
   );
-
-  // Prefer nearest node that doesn't cross land
   const clear=checks.find(r=>r.crossesLand===false||r.crossesLand===null);
   if(clear)return clear.c;
-
-  // All midpoints seem to be on land — return nearest anyway
-  console.warn('[SeaRoute] Could not find clear port approach for',portLat,portLon,'— using nearest node');
+  console.warn(`[SeaRoute] All nearby nodes involve land crossing at ${portLat},${portLon} — using nearest`);
   return candidates[0];
 }
 
-// ── Binary min-heap for A* ────────────────────────────────────────────────────
+// ── A* with binary min-heap ───────────────────────────────────────────────────
 class _MinHeap{
   constructor(){this.h=[];}
   push(p,k){this.h.push([p,k]);this._up(this.h.length-1);}
@@ -235,16 +255,14 @@ class _MinHeap{
   _dn(i){const n=this.h.length;for(;;){let m=i,l=2*i+1,r=2*i+2;if(l<n&&this.h[l][0]<this.h[m][0])m=l;if(r<n&&this.h[r][0]<this.h[m][0])m=r;if(m===i)break;[this.h[m],this.h[i]]=[this.h[i],this.h[m]];i=m;}}
 }
 
-// ── A* pathfinding through maritime network ───────────────────────────────────
 function _aStar(startK,endK,endLat,endLon){
   const dist={[startK]:0},prev={};
   const pq=new _MinHeap();
   const vis=new Set();
   pq.push(0,startK);
-  let iterations=0;
+  let iter=0;
   while(pq.size>0){
-    iterations++;
-    if(iterations>500000)break; // safety cap
+    if(iter++>500000)break;
     const[,curr]=pq.pop();
     if(curr===endK)break;
     if(vis.has(curr))continue;
@@ -260,39 +278,40 @@ function _aStar(startK,endK,endLat,endLon){
       }
     }
   }
-  const path=[];
-  let c=endK;
-  let safety=0;
+  const path=[]; let c=endK, safety=0;
   while(c&&safety++<200000){path.unshift(_nodes[c]);c=prev[c];}
   return path.length>1&&path[0]?.k===startK?path:[];
 }
 
-// ── Primary route function via SeaRoute network ───────────────────────────────
 async function _routeViaNetwork(fromLat,fromLon,toLat,toLon){
   const ok=await _ensureNetwork();
   if(!ok||Object.keys(_nodes).length<10)return null;
 
-  // Find best entry/exit nodes — avoids port approach crossing land
   const[startNode,endNode]=await Promise.all([
     _findBestNode(fromLat,fromLon),
     _findBestNode(toLat,toLon),
   ]);
 
   if(!startNode||!endNode){
-    console.warn('[SeaRoute] Could not find network nodes for this port pair');
+    console.warn('[SeaRoute] No valid network entry/exit nodes found');
     return null;
   }
 
-  console.log(`[SeaRoute] A* start=${startNode.k} (${startNode._d?.toFixed(1)} NM from port) end=${endNode.k} (${endNode._d?.toFixed(1)} NM from port)`);
+  console.log(`[SeaRoute] A* start=${startNode.k} (${startNode._d?.toFixed(1)}NM) end=${endNode.k} (${endNode._d?.toFixed(1)}NM)`);
 
   const path=_aStar(startNode.k,endNode.k,toLat,toLon);
   if(path.length<2){
-    console.warn('[SeaRoute] A* found no path — graph may be disconnected at these coordinates');
+    console.warn('[SeaRoute] A* found no path');
     return null;
   }
 
-  console.log(`[SeaRoute] A* complete: ${path.length} waypoints`);
-  return recalcWaypoints(path.map(n=>({lat:n.lat,lon:n.lon})));
+  // FIX 4: simplify — remove micro-nodes, keep waypoints >= 5 NM apart
+  const simplified=simplifyRoute(
+    recalcWaypoints(path.map(n=>({lat:n.lat,lon:n.lon}))),
+    5
+  );
+  console.log(`[SeaRoute] Route: ${path.length} raw nodes → ${simplified.length} waypoints after simplification`);
+  return simplified;
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -304,21 +323,9 @@ const CANAL_SPECS={
   panama:{name:'Panama Canal Neopanamax',beam:51.25,draft:15.2,loa:366,airDraft:57.91},
   kiel:  {name:'Kiel Canal',             beam:32.5, draft:9.5, loa:235,airDraft:42  },
 };
-function _usesSuez(f,t){
-  const eu=p=>(p.lon>-7&&p.lon<37&&p.lat>30&&p.lat<48)||(p.lat>48&&p.lon>-15&&p.lon<40);
-  const as=p=>p.lon>37&&p.lon<180&&p.lat>-40&&p.lat<40;
-  return(eu(f)&&as(t))||(eu(t)&&as(f));
-}
-function _usesPanama(f,t){
-  const atl=p=>p.lon>-98&&p.lon<-55&&p.lat>-60&&p.lat<55;
-  const pac=p=>p.lon<-80||p.lon>100;
-  return(atl(f)&&pac(t))||(pac(f)&&atl(t));
-}
-function _usesKiel(f,t){
-  const bal=p=>p.lon>9&&p.lon<32&&p.lat>53&&p.lat<66;
-  const nth=p=>p.lon>-5&&p.lon<10&&p.lat>50&&p.lat<60;
-  return(bal(f)&&nth(t))||(nth(f)&&bal(t));
-}
+function _usesSuez(f,t){const eu=p=>(p.lon>-7&&p.lon<37&&p.lat>30&&p.lat<48)||(p.lat>48&&p.lon>-15&&p.lon<40);const as=p=>p.lon>37&&p.lon<180&&p.lat>-40&&p.lat<40;return(eu(f)&&as(t))||(eu(t)&&as(f));}
+function _usesPanama(f,t){const atl=p=>p.lon>-98&&p.lon<-55&&p.lat>-60&&p.lat<55;const pac=p=>p.lon<-80||p.lon>100;return(atl(f)&&pac(t))||(pac(f)&&atl(t));}
+function _usesKiel(f,t){const bal=p=>p.lon>9&&p.lon<32&&p.lat>53&&p.lat<66;const nth=p=>p.lon>-5&&p.lon<10&&p.lat>50&&p.lat<60;return(bal(f)&&nth(t))||(nth(f)&&bal(t));}
 
 export function checkCanalPassage(from,to,vp={}){
   const{draft=10,beam=32,loa=200,airDraft=50}=vp;
@@ -339,44 +346,30 @@ export function checkCanalPassage(from,to,vp={}){
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// FALLBACK WAYPOINT ROUTING
-// Used only when SeaRoute network is unavailable.
+// FALLBACK WAYPOINT ROUTING (only when network unavailable)
 // ══════════════════════════════════════════════════════════════════════════════
 
 export const SEA_WP={
-  SUEZ_N:{lat:31.27,lon:32.33},SUEZ_S:{lat:29.92,lon:32.55},
-  RED_N:{lat:29.77,lon:32.55},RED_N2:{lat:28.0,lon:33.5},RED_C:{lat:24.0,lon:37.0},RED_S:{lat:15.0,lon:41.5},
+  SUEZ_N:{lat:31.27,lon:32.33},SUEZ_S:{lat:29.92,lon:32.55},RED_N:{lat:29.77,lon:32.55},RED_N2:{lat:28.0,lon:33.5},RED_C:{lat:24.0,lon:37.0},RED_S:{lat:15.0,lon:41.5},
   BAB:{lat:12.58,lon:43.38},ADEN_G:{lat:11.8,lon:45.5},ADEN_E:{lat:11.5,lon:50.0},SOCOTRA:{lat:12.0,lon:54.0},
-  HORMUZ:{lat:26.58,lon:56.35},HORMUZ_E:{lat:23.5,lon:59.0},ARAB_NW:{lat:22.0,lon:60.0},ARAB_W:{lat:18.0,lon:60.0},
-  IND_W:{lat:12.0,lon:62.0},IND_W2:{lat:8.0,lon:64.0},IND_W_COAST:{lat:14.0,lon:73.0},
-  IND_SW:{lat:10.0,lon:74.8},IND_TIP_W:{lat:7.5,lon:76.5},IND_TIP:{lat:6.0,lon:77.5},PALK_W:{lat:7.5,lon:78.8},
-  LANKA_SW:{lat:5.8,lon:79.8},LANKA_S:{lat:5.4,lon:80.6},LANKA_SE:{lat:6.0,lon:82.0},
-  IND_NE:{lat:8.5,lon:84.5},IND_E_COAST:{lat:12.0,lon:81.5},
+  HORMUZ:{lat:26.58,lon:56.35},HORMUZ_E:{lat:23.5,lon:59.0},ARAB_NW:{lat:22.0,lon:60.0},ARAB_W:{lat:18.0,lon:60.0},IND_W:{lat:12.0,lon:62.0},IND_W2:{lat:8.0,lon:64.0},
+  IND_W_COAST:{lat:14.0,lon:73.0},IND_SW:{lat:10.0,lon:74.8},IND_TIP_W:{lat:7.5,lon:76.5},IND_TIP:{lat:6.0,lon:77.5},PALK_W:{lat:7.5,lon:78.8},
+  LANKA_SW:{lat:5.8,lon:79.8},LANKA_S:{lat:5.4,lon:80.6},LANKA_SE:{lat:6.0,lon:82.0},IND_NE:{lat:8.5,lon:84.5},IND_E_COAST:{lat:12.0,lon:81.5},
   BAY_SW:{lat:10.0,lon:83.0},BAY_C:{lat:13.5,lon:87.0},BAY_N:{lat:18.0,lon:90.0},BAY_E:{lat:12.0,lon:93.0},
   ANDAMAN_W:{lat:11.0,lon:92.0},ANDAMAN:{lat:10.5,lon:94.0},ANDAMAN_S:{lat:6.5,lon:95.0},
-  MALACCA_NW:{lat:6.5,lon:98.8},MALACCA_N:{lat:3.09,lon:101.02},MALACCA_C1:{lat:2.9,lon:100.67},
-  MALACCA_C:{lat:2.33,lon:101.35},MALACCA_S1:{lat:1.83,lon:101.8},MALACCA_S2:{lat:1.56,lon:102.39},
-  MALACCA_S3:{lat:1.15,lon:103.41},MALACCA_S:{lat:1.18,lon:103.82},
-  SCS_W:{lat:3.0,lon:108.0},SCS_C:{lat:8.0,lon:110.0},SCS_N:{lat:14.0,lon:112.0},SCS_NE:{lat:18.0,lon:115.0},PHILIP:{lat:10.0,lon:122.0},
-  EAST_CHINA2:{lat:31.0,lon:124.0},EAST_CHINA:{lat:27.0,lon:124.0},KOREA_STR:{lat:34.5,lon:129.0},
-  JAPAN_SEA:{lat:37.0,lon:132.0},EAST_CHINA_N:{lat:37.57,lon:122.61},TSUGARU:{lat:41.5,lon:140.8},
-  PAC_NW:{lat:48.0,lon:-160.0},PAC_NE:{lat:40.0,lon:-150.0},PAC_C:{lat:5.0,lon:-140.0},
-  PAC_SW:{lat:-20.0,lon:170.0},PAC_SE:{lat:-20.0,lon:-90.0},
-  LOMBOK:{lat:-8.5,lon:115.8},SUNDA:{lat:-6.1,lon:105.7},TIMOR:{lat:-9.5,lon:127.0},
-  ARAFURA:{lat:-12.0,lon:136.0},TORRES:{lat:-10.5,lon:142.5},AUS_N:{lat:-12.0,lon:127.0},AUS_W:{lat:-25.0,lon:108.0},
+  MALACCA_NW:{lat:6.5,lon:98.8},MALACCA_N:{lat:3.09,lon:101.02},MALACCA_C1:{lat:2.9,lon:100.67},MALACCA_C:{lat:2.33,lon:101.35},MALACCA_S1:{lat:1.83,lon:101.8},MALACCA_S2:{lat:1.56,lon:102.39},MALACCA_S3:{lat:1.15,lon:103.41},MALACCA_S:{lat:1.18,lon:103.82},
+  SCS_W:{lat:3.0,lon:108.0},SCS_C:{lat:8.0,lon:110.0},SCS_N:{lat:14.0,lon:112.0},PHILIP:{lat:10.0,lon:122.0},
+  EAST_CHINA2:{lat:31.0,lon:124.0},EAST_CHINA:{lat:27.0,lon:124.0},KOREA_STR:{lat:34.5,lon:129.0},JAPAN_SEA:{lat:37.0,lon:132.0},EAST_CHINA_N:{lat:37.57,lon:122.61},TSUGARU:{lat:41.5,lon:140.8},
+  PAC_NW:{lat:48.0,lon:-160.0},PAC_NE:{lat:40.0,lon:-150.0},PAC_C:{lat:5.0,lon:-140.0},PAC_SW:{lat:-20.0,lon:170.0},PAC_SE:{lat:-20.0,lon:-90.0},
+  LOMBOK:{lat:-8.5,lon:115.8},SUNDA:{lat:-6.1,lon:105.7},TIMOR:{lat:-9.5,lon:127.0},ARAFURA:{lat:-12.0,lon:136.0},TORRES:{lat:-10.5,lon:142.5},AUS_N:{lat:-12.0,lon:127.0},AUS_W:{lat:-25.0,lon:108.0},
   AUS_SE:{lat:-38.5,lon:148.2},CORAL:{lat:-18.0,lon:152.0},TASMAN:{lat:-38.0,lon:157.0},NZ_N:{lat:-38.52,lon:174.63},
-  GIBRALTAR:{lat:35.98,lon:-5.5},MED_W:{lat:37.5,lon:5.0},MED_W2:{lat:37.0,lon:10.0},
-  MED_C:{lat:37.0,lon:15.0},MED_E:{lat:34.5,lon:24.0},MED_E2:{lat:33.5,lon:28.0},BLACK_W:{lat:43.0,lon:29.0},
-  BASC:{lat:47.0,lon:-5.0},DOVER:{lat:51.05,lon:1.5},NORTH_SEA:{lat:56.0,lon:3.0},
-  SKAGEN:{lat:57.72,lon:10.6},BALTIC_E:{lat:59.0,lon:21.5},
-  ATLANTIC_N:{lat:45.0,lon:-30.0},ATLANTIC_C:{lat:20.0,lon:-35.0},
-  ATLANTIC_S:{lat:-15.0,lon:-20.0},ATLANTIC_SW:{lat:-40.0,lon:-40.0},
-  ATL_NW:{lat:50.0,lon:-20.0},ATL_MID:{lat:35.0,lon:-38.0},ATL_W_AFR:{lat:5.0,lon:-15.0},ATL_SA:{lat:-10.0,lon:-20.0},
+  GIBRALTAR:{lat:35.98,lon:-5.5},MED_W:{lat:37.5,lon:5.0},MED_W2:{lat:37.0,lon:10.0},MED_C:{lat:37.0,lon:15.0},MED_E:{lat:34.5,lon:24.0},MED_E2:{lat:33.5,lon:28.0},BLACK_W:{lat:43.0,lon:29.0},
+  BASC:{lat:47.0,lon:-5.0},DOVER:{lat:51.05,lon:1.5},NORTH_SEA:{lat:56.0,lon:3.0},SKAGEN:{lat:57.72,lon:10.6},BALTIC_E:{lat:59.0,lon:21.5},
+  ATLANTIC_N:{lat:45.0,lon:-30.0},ATLANTIC_C:{lat:20.0,lon:-35.0},ATLANTIC_S:{lat:-15.0,lon:-20.0},ATLANTIC_SW:{lat:-40.0,lon:-40.0},ATL_NW:{lat:50.0,lon:-20.0},ATL_MID:{lat:35.0,lon:-38.0},ATL_W_AFR:{lat:5.0,lon:-15.0},ATL_SA:{lat:-10.0,lon:-20.0},
   CAPE_GH:{lat:-34.5,lon:19.5},IND_S:{lat:-35.0,lon:50.0},IND_SW2:{lat:-25.0,lon:90.0},CAPE_HORN:{lat:-55.9,lon:-67.3},
   AFR_E:{lat:-10.0,lon:50.0},AFR_E2:{lat:-25.0,lon:40.0},
   PANAMA_P:{lat:8.9,lon:-79.5},PANAMA_A:{lat:9.38,lon:-79.9},CARIB:{lat:15.0,lon:-75.0},CARIB_E:{lat:12.0,lon:-63.0},
-  EAST_US:{lat:35.0,lon:-71.0},EAST_US_N:{lat:40.0,lon:-70.0},
-  WEST_US:{lat:35.0,lon:-121.0},WEST_US_N:{lat:48.0,lon:-125.0},
+  EAST_US:{lat:35.0,lon:-71.0},EAST_US_N:{lat:40.0,lon:-70.0},WEST_US:{lat:35.0,lon:-121.0},WEST_US_N:{lat:48.0,lon:-125.0},
   SA_E:{lat:-23.5,lon:-43.5},SA_W:{lat:-33.0,lon:-71.5},
 };
 
@@ -386,10 +379,9 @@ const PORT_EXIT={
   DXB:['HORMUZ'],FUJ:['HORMUZ'],KWI:['HORMUZ'],BAH:['HORMUZ'],DOH:['HORMUZ'],MCT:['HORMUZ_E'],
   JED:['RED_S','BAB'],ADE:['BAB','ADEN_G'],PSD:['SUEZ_S','RED_N'],
   ROT:['DOVER','BASC'],HAM:['NORTH_SEA','DOVER'],ANT:['DOVER','BASC'],
-  NYK:['EAST_CHINA_N','KOREA_STR'],BUS:['KOREA_STR'],YOK:['EAST_CHINA'],SHA:['EAST_CHINA2'],
-  HKG:['SCS_N'],MAN:['PHILIP'],SYD:['CORAL'],JAK:['SUNDA'],
+  NYK:['EAST_CHINA_N','KOREA_STR'],BUS:['KOREA_STR'],YOK:['EAST_CHINA'],SHA:['EAST_CHINA2'],HKG:['SCS_N'],MAN:['PHILIP'],
+  SYD:['CORAL'],JAK:['SUNDA'],
 };
-
 const ROUTE_TABLE={
   "MUM-SIN":[[18.93,72.83],[14.0,73.0],[10.0,74.8],[7.5,76.5],[6.0,77.5],[5.4,80.6],[6.0,82.0],[8.5,84.5],[6.5,95.0],[5.0,99.2],[3.09,101.02],[2.33,101.35],[1.15,103.41],[1.29,103.85]],
   "MUM-DXB":[[18.93,72.83],[20.0,67.0],[23.5,59.0],[26.58,56.35],[25.05,55.13]],
@@ -466,7 +458,7 @@ export function buildAutoRoute(fromPort,toPort){
 export function buildAutoRouteCoords(from,to){
   if(!from||!to)return[];
   const lat1=Number(from.lat??from.latitude??0),lon1=Number(from.lon??from.longitude??from.lng??0);
-  const lat2=Number(to.lat??to.latitude??0),  lon2=Number(to.lon??to.longitude??to.lng??0);
+  const lat2=Number(to.lat??to.latitude??0),lon2=Number(to.lon??to.longitude??to.lng??0);
   if(!lat1||!lon1||!lat2||!lon2)return[];
   return _doRoute({id:from.id||'DEP',lat:lat1,lon:lon1,name:from.name||'Departure'},{id:to.id||'ARR',lat:lat2,lon:lon2,name:to.name||'Arrival'});
 }
@@ -474,19 +466,17 @@ export function buildAutoRouteCoords(from,to){
 export async function buildProRoute(from,to,vesselParams={}){
   const{draft=10,beam=32,loa=200,airDraft=50,vesselType='cargo'}=vesselParams;
   const fromObj={id:from.id||'DEP',lat:Number(from.lat??from.latitude??0),lon:Number(from.lon??from.longitude??from.lng??0),name:from.name||'Departure'};
-  const toObj  ={id:to.id  ||'ARR',lat:Number(to.lat??to.latitude??0),  lon:Number(to.lon??to.longitude??to.lng??0),  name:to.name  ||'Arrival'  };
+  const toObj  ={id:to.id  ||'ARR',lat:Number(to.lat??to.latitude??0),lon:Number(to.lon??to.longitude??to.lng??0),name:to.name||'Arrival'};
   if(!fromObj.lat||!fromObj.lon||!toObj.lat||!toObj.lon)
     return{waypoints:[],error:'Invalid port coordinates',canalInfo:[],warnings:[],routeSource:'error'};
 
   const canalInfo=checkCanalPassage(fromObj,toObj,{draft,beam,loa,airDraft});
+  let waypoints=null,routeSource='fallback';
 
-  let waypoints=null, routeSource='fallback';
-
-  // PRIMARY: SeaRoute network A* with land-validated port approach
+  // PRIMARY: SeaRoute network A* with all 5 fixes applied
   waypoints=await _routeViaNetwork(fromObj.lat,fromObj.lon,toObj.lat,toObj.lon);
   if(waypoints&&waypoints.length>1){
     routeSource='searoute-network';
-    // Anchor exact port coordinates
     waypoints[0]={...waypoints[0],lat:fromObj.lat,lon:fromObj.lon,name:fromObj.name};
     waypoints[waypoints.length-1]={...waypoints[waypoints.length-1],lat:toObj.lat,lon:toObj.lon,name:toObj.name};
     waypoints=recalcWaypoints(waypoints);
@@ -512,9 +502,9 @@ export async function buildProRoute(from,to,vesselParams={}){
   for(let i=waypoints.length-1;i>0;i--){cumNM+=(waypoints[i].distance||0);if(cumNM>=20){approachStartIdx=i;break;}}
 
   const confidence=routeSource==='searoute-network'
-    ?'HIGH — SeaRoute actual shipping lanes (land-validated approach)'
+    ?'HIGH — SeaRoute shipping lanes (5-fix applied)'
     :routeSource==='route-table'?'MEDIUM — validated route table'
-    :'LOW — waypoint graph (worldroutens.json loaded? check console)';
+    :'LOW — waypoint graph fallback';
 
   const canalMsgs=canalInfo.map(c=>c.status==='OK'?`✅ ${c.canal}: vessel fits`:`🚫 ${c.canal}: BLOCKED — ${c.reason} — ${c.alternative}`);
 
@@ -537,5 +527,5 @@ export async function buildProRoute(from,to,vesselParams={}){
   };
 }
 
-// Start loading network in background immediately on module load
+// Preload network in background on module load
 _ensureNetwork().catch(()=>{});
