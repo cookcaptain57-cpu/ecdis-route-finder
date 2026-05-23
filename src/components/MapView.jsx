@@ -38,11 +38,9 @@ function MapView({
   const animIdxRef = useRef(0);
   const animPtsRef = useRef([]);
 
-  // ← ADDED: ref keeps the latest onMapClick — fixes stale-closure bug on mobile
   const onMapClickRef = useRef(onMapClick);
   useEffect(() => { onMapClickRef.current = onMapClick; }, [onMapClick]);
 
-  // ← ADDED: ref keeps latest setManualWaypoints for popup buttons
   const setManualWaypointsRef = useRef(setManualWaypoints);
   useEffect(() => { setManualWaypointsRef.current = setManualWaypoints; }, [setManualWaypoints]);
 
@@ -89,14 +87,14 @@ function MapView({
     const L = window.L;
     mapRef.current = L.map(containerRef.current, {
       center: [15, 70], zoom: 3, preferCanvas: true, zoomControl: true,
-      tap: true, tapTolerance: 15,  // ← ADDED: improve mobile tap detection
+      tap: true, tapTolerance: 15,
+      worldCopyJump: true, // FIX: prevents double-earth rendering on trans-pacific routes
     });
     layersRef.current.baseTile = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
       { attribution: '© OpenStreetMap © CARTO', subdomains:'abcd', maxZoom:19 }).addTo(mapRef.current);
     layersRef.current.seamarkTile = L.tileLayer('https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png',
       { opacity:0.55, maxZoom:18 }).addTo(mapRef.current);
 
-    // ← CHANGED: use ref so click always calls the LATEST onMapClick (fixes stale closure on mobile)
     mapRef.current.on('click', e => {
       onMapClickRef.current?.(e.latlng.lat, e.latlng.lng);
     });
@@ -146,11 +144,21 @@ function MapView({
     lrs.legLabels.forEach(l => l.remove()); lrs.legLabels = [];
     if (waypoints.length === 0) return;
 
-    const latlngs = waypoints.map(w => [w.lat, w.lon]);
-    lrs.route = L.polyline(latlngs, { color:'#00B4D8', weight:2.5, opacity:0.9, dashArray:'8 4' }).addTo(map);
+    // FIX: Normalize longitudes to prevent antimeridian double-earth bug
+    // Ensures trans-pacific routes (e.g. Ecuador → China) render on one earth copy
+    const norm = [waypoints[0]];
+    for (let i = 1; i < waypoints.length; i++) {
+      let lon = waypoints[i].lon;
+      while (lon - norm[i-1].lon >  180) lon -= 360;
+      while (lon - norm[i-1].lon < -180) lon += 360;
+      norm.push({ ...waypoints[i], lon });
+    }
 
-    waypoints.forEach((wp, i) => {
-      const isFirst = i===0, isLast = i===waypoints.length-1;
+    const latlngs = norm.map(w => [w.lat, w.lon]);
+    lrs.route = L.polyline(latlngs, { color:'#00B4D8', weight:2.5, opacity:0.9, dashArray:'8 4', noClip:true }).addTo(map);
+
+    norm.forEach((wp, i) => {
+      const isFirst = i===0, isLast = i===norm.length-1;
       const color = isFirst?'#00C896':isLast?'#FF4757':'#00B4D8';
       const size  = isFirst||isLast?14:9;
       const icon  = L.divIcon({
@@ -166,12 +174,12 @@ function MapView({
       m.addTo(map); lrs.markers.push(m);
     });
 
-    if (waypoints.length > 1) map.fitBounds(lrs.route.getBounds(), { padding:[50,50] });
+    if (norm.length > 1) map.fitBounds(lrs.route.getBounds(), { padding:[50,50] });
 
     // Leg course/distance labels
-    waypoints.forEach((wp, i) => {
+    norm.forEach((wp, i) => {
       if (i===0) return;
-      const prev=waypoints[i-1], midLat=(prev.lat+wp.lat)/2, midLon=(prev.lon+wp.lon)/2;
+      const prev=norm[i-1], midLat=(prev.lat+wp.lat)/2, midLon=(prev.lon+wp.lon)/2;
       const lbl = L.marker([midLat,midLon], {
         icon: L.divIcon({
           html:`<div style="transform:translate(-50%,-50%);background:rgba(0,0,0,0.82);border:1px solid rgba(0,180,216,0.45);border-radius:4px;padding:2px 7px;white-space:nowrap;pointer-events:none;"><span style="font-family:Orbitron,monospace;font-size:9.5px;color:#00B4D8;">&#9658; ${(wp.bearing||0).toFixed(0)}&deg;</span><span style="font-family:monospace;font-size:9.5px;color:#FFD700;margin-left:5px;">${(wp.distance||0).toFixed(1)}NM</span></div>`,
@@ -183,8 +191,8 @@ function MapView({
     });
 
     const pts=[];
-    for (let i=0; i<waypoints.length-1; i++) {
-      const seg=greatCircle(waypoints[i].lat,waypoints[i].lon,waypoints[i+1].lat,waypoints[i+1].lon,30);
+    for (let i=0; i<norm.length-1; i++) {
+      const seg=greatCircle(norm[i].lat,norm[i].lon,norm[i+1].lat,norm[i+1].lon,30);
       pts.push(...(i>0?seg.slice(1):seg));
     }
     animPtsRef.current=pts; animIdxRef.current=0;
@@ -298,7 +306,6 @@ function MapView({
       });
       const m=L.marker([wp.lat,wp.lon], {icon, draggable:true, zIndexOffset:50});
 
-      // ← CHANGED: popup uses DOM element so buttons work on mobile
       const popupEl=document.createElement('div');
       popupEl.style.cssText='font-size:12px;min-width:170px;';
       popupEl.innerHTML=`
@@ -338,7 +345,6 @@ function MapView({
 
       m.addTo(map); lrs.manualMarkers.push(m);
 
-      // Leg label
       if (i>0) {
         const prev=manualWaypoints[i-1], midLat=(prev.lat+wp.lat)/2, midLon=(prev.lon+wp.lon)/2;
         const lbl=L.marker([midLat,midLon], {
