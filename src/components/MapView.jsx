@@ -85,13 +85,12 @@ function MapView({
   }, [mapMode, ready, overlays?.gebco]);
 
   const initMap = () => {
-    if (mapRef.current = L.map(containerRef.current, {
-  center: [15, 70], zoom: 3, preferCanvas: true, zoomControl: true,
-  tap: true, tapTolerance: 15,
-  worldCopyJump: true,   // ← ADD THIS
-  maxBounds: [[-90, -180], [90, 180]],  // ← ADD THIS
-  maxBoundsViscosity: 0.0,
-});
+    if (mapRef.current || !containerRef.current) return;
+    const L = window.L;
+    mapRef.current = L.map(containerRef.current, {
+      center: [15, 70], zoom: 3, preferCanvas: true, zoomControl: true,
+      tap: true, tapTolerance: 15,  // ← ADDED: improve mobile tap detection
+    });
     layersRef.current.baseTile = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
       { attribution: '© OpenStreetMap © CARTO', subdomains:'abcd', maxZoom:19 }).addTo(mapRef.current);
     layersRef.current.seamarkTile = L.tileLayer('https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png',
