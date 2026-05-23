@@ -1,6 +1,7 @@
 /* eslint-disable */
 import { useState, useEffect, useRef, useCallback } from "react";
 import ETACalculator from "../components/ETACalculator"; // Item 9
+import aisService from "../services/aisService";
 
 // ── CONSTANTS ──────────────────────────────────────────────────────────────
 const AISSTREAM_KEY = 'e66d76190c2bf6c206264e3cb894308b853d73df'; // Item 8
@@ -45,6 +46,8 @@ export default function NavModePage({ notify, sheetRoutes = [], portsDb = [], se
   const seamarkRef     = useRef(null);
   const gebcoRefTile   = useRef(null);
   const emodnetTileRef = useRef(null);
+  const localAisLayersRef = useRef({});
+  const localAisPaneRef = useRef(null);
   const encTileRef     = useRef(null);
   const esriBaseRef    = useRef(null);   // ADD: ESRI Ocean Base coloured depth zones
   const gebcoWmsRef    = useRef(null);   // ADD: GEBCO WMS gap-filler
@@ -82,6 +85,15 @@ export default function NavModePage({ notify, sheetRoutes = [], portsDb = [], se
   const [aisOn,       setAisOn]        = useState(() => localStorage.getItem('nav_aisOn')==='true');
   const [gebcoOn,     setGebcoOn]      = useState(() => localStorage.getItem('nav_gebcoOn')==='true');
   const [aisTargets,  setAisTargets]   = useState({});
+  // Local Pilot Plug / SafePilot AIS via WiFi
+  const [localAisOn,      setLocalAisOn]      = useState(() => localStorage.getItem('nav_localAisOn') === 'true');
+  const [localAisStatus,  setLocalAisStatus]  = useState('off');
+  const [localAisCount,   setLocalAisCount]   = useState(0);
+  const [localAisHost,    setLocalAisHost]    = useState(() => localStorage.getItem('nav_localAisHost') || 'ws://192.168.1.1:4002');
+  const [localAisAlert,   setLocalAisAlert]   = useState(null);
+  const [localAisRange,   setLocalAisRange]   = useState(() => Number(localStorage.getItem('nav_localAisRange') || 0));
+  const [showLocalAisCfg, setShowLocalAisCfg] = useState(false);
+
   const [autoCenter,  setAutoCenterRaw]= useState(() => localStorage.getItem('nav_autoCenter')!=='false');
 
   // ── NEW STATE ──
@@ -944,7 +956,86 @@ export default function NavModePage({ notify, sheetRoutes = [], portsDb = [], se
     fLabel:   '0.58rem',       // label (was 0.5rem)
   };
 
-  return (
+  
+  // ── LOCAL AIS SETTINGS ──────────────────────────────────────────────────
+  useEffect(()=>{ localStorage.setItem('nav_localAisOn', localAisOn); }, [localAisOn]);
+  useEffect(()=>{ localStorage.setItem('nav_localAisHost', localAisHost); }, [localAisHost]);
+  useEffect(()=>{ localStorage.setItem('nav_localAisRange', localAisRange); }, [localAisRange]);
+
+  useEffect(()=>{
+    if(!localAisOn){
+      aisService.stop();
+      setLocalAisStatus('off');
+      setLocalAisCount(0);
+      return;
+    }
+
+    aisService.start([localAisHost]);
+
+    const offStatus = aisService.on?.('status', ({ status, targets })=>{
+      setLocalAisStatus(status || 'connected');
+      setLocalAisCount(targets || 0);
+    });
+
+    const offAlert = aisService.on?.('alert', (alert)=>{
+      setLocalAisAlert(alert);
+      if(notify){
+        notify(`⚠ COLLISION RISK: ${alert?.name || alert?.mmsi}`, 'error');
+      }
+    });
+
+    return ()=>{
+      try{ offStatus && offStatus(); }catch{}
+      try{ offAlert && offAlert(); }catch{}
+      aisService.stop();
+    };
+  }, [localAisOn, localAisHost]);
+
+  const LocalAisHudSection = () => (
+    <div style={{borderTop:'1px solid rgba(0,212,255,0.12)',paddingTop:6,marginTop:4}}>
+      <label style={{display:'flex',alignItems:'center',gap:7,cursor:'pointer',fontSize:'0.78rem'}}>
+        <input type="checkbox" checked={localAisOn} onChange={e=>setLocalAisOn(e.target.checked)} />
+        📡 Pilot Plug AIS
+        <span style={{fontSize:'0.65rem',color:localAisStatus==='connected'?'#00FF88':'#FFD700'}}>
+          {localAisStatus==='connected' ? `✅ ${localAisCount}` : localAisStatus}
+        </span>
+      </label>
+
+      {localAisOn && (
+        <div style={{marginTop:6}}>
+          <input
+            value={localAisHost}
+            onChange={e=>setLocalAisHost(e.target.value)}
+            placeholder="ws://192.168.1.1:4002"
+            style={{
+              width:'100%',
+              background:'#06101C',
+              color:'#00D4FF',
+              border:'1px solid #1A3050',
+              borderRadius:4,
+              padding:'4px 6px',
+              fontSize:'0.65rem'
+            }}
+          />
+        </div>
+      )}
+
+      {localAisAlert && (
+        <div style={{
+          marginTop:6,
+          background:'rgba(255,32,32,0.12)',
+          border:'1px solid #FF3030',
+          borderRadius:5,
+          padding:'6px'
+        }}>
+          ⚠ CPA Alert: {localAisAlert?.name || localAisAlert?.mmsi}
+        </div>
+      )}
+    </div>
+  );
+
+
+return (
     <div style={{flex:1,display:'flex',flexDirection:'column',background:'#040C1A',position:'relative',overflow:'hidden',minHeight:0}}>
 
       {/* ── HEADER ── */}
@@ -1066,6 +1157,8 @@ export default function NavModePage({ notify, sheetRoutes = [], portsDb = [], se
           ) : (
             gpsOn ? <div style={{color:S.dim,fontSize:S.fSm,fontStyle:'italic'}}>Acquiring GPS…</div>
             : <div style={{color:S.vDim,fontSize:S.fXs}}>Enable GPS to track vessel</div>
+
+          <LocalAisHudSection />
           )}
         </div>
       </div>
