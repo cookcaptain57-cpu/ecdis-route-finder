@@ -1156,9 +1156,10 @@ return (
             </div>
           ) : (
             gpsOn ? <div style={{color:S.dim,fontSize:S.fSm,fontStyle:'italic'}}>Acquiring GPS…</div>
-            : <div style={{color:S.vDim,fontSize:S.fXs}}>Enable GPS to track vessel</div>
-
-          <LocalAisHudSection />
+            : <>
+                <div style={{color:S.vDim,fontSize:S.fXs}}>Enable GPS to track vessel</div>
+                <LocalAisHudSection />
+              </>
           )}
         </div>
       </div>
