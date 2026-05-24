@@ -147,12 +147,12 @@ function MapView({
     // FIX: Normalize longitudes to prevent antimeridian double-earth bug
     // Ensures trans-pacific routes (e.g. Ecuador → China) render on one earth copy
     const norm = [waypoints[0]];
-    for (let i = 1; i < waypoints.length; i++) {
-      let lon = waypoints[i].lon;
-      while (lon - norm[i-1].lon >  180) lon -= 360;
-      while (lon - norm[i-1].lon < -180) lon += 360;
-      norm.push({ ...waypoints[i], lon });
-    }
+for (let i = 1; i < waypoints.length; i++) {
+  let lon = waypoints[i].lon;
+  while (lon - norm[i-1].lon >  180) lon -= 360;
+  while (lon - norm[i-1].lon < -180) lon += 360;
+  norm.push({ ...waypoints[i], lon });
+}
 
     const latlngs = norm.map(w => [w.lat, w.lon]);
     lrs.route = L.polyline(latlngs, { color:'#00B4D8', weight:2.5, opacity:0.9, dashArray:'8 4', noClip:true }).addTo(map);
