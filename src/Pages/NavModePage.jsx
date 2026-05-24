@@ -731,8 +731,7 @@ export default function NavModePage({ notify, sheetRoutes = [], portsDb = [], se
     // Item 7: normalize coordinates across the antimeridian
     const wps=normalizeRouteCoords(activeRoute.waypoints);
     const c=colors;
-    lrs.route=L.polyline(wps.map(w=>[w.lat,w.lon]),{color:c.route,weight:2.5,opacity:0.9,dashArray:'8 4'}).addTo(map);
-
+    lrs.route=L.polyline(wps.map(w=>[w.lat,w.lon]),{color:c.route,weight:2.5,opacity:0.9,dashArray:'8 4',noClip:false}).addTo(map);
     wps.forEach((wp,i)=>{
       const isFirst=i===0,isLast=i===wps.length-1;
       const col=isFirst?'#00C896':isLast?'#FF4757':c.route, sz=isFirst||isLast?14:8;
@@ -857,7 +856,13 @@ export default function NavModePage({ notify, sheetRoutes = [], portsDb = [], se
     const initMap=()=>{
       if(!mapRef.current||!window.L) return;
       const L=window.L;
-      const opts={center:[20,70],zoom:4,worldCopyJump:true};
+      const opts={
+  center:[20,70],
+  zoom:4,
+  worldCopyJump:false,
+  maxBounds:[[-90,-180],[90,180]],
+  maxBoundsViscosity:1.0,
+};
       if(typeof L.Map.prototype.setBearing==='function'){try{opts.rotate=true;opts.rotateControl=false;}catch{}}
       leafRef.current=L.map(mapRef.current,opts);
       baseTileRef.current=L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{subdomains:'abcd',attribution:'© CARTO'}).addTo(leafRef.current);
