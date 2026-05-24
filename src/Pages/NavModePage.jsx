@@ -857,7 +857,7 @@ export default function NavModePage({ notify, sheetRoutes = [], portsDb = [], se
     const initMap=()=>{
       if(!mapRef.current||!window.L) return;
       const L=window.L;
-      const opts={center:[20,70],zoom:4};
+      const opts={center:[20,70],zoom:4,worldCopyJump:true};
       if(typeof L.Map.prototype.setBearing==='function'){try{opts.rotate=true;opts.rotateControl=false;}catch{}}
       leafRef.current=L.map(mapRef.current,opts);
       baseTileRef.current=L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{subdomains:'abcd',attribution:'© CARTO'}).addTo(leafRef.current);
