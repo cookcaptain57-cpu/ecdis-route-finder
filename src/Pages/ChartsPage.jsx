@@ -1,23 +1,55 @@
 /* eslint-disable */
 // src/pages/ChartsPage.jsx
 import { useState, useEffect, useRef } from "react";
+import { db } from "../firebase";
+import { doc, getDoc, setDoc } from "firebase/firestore";
 import { ECDIS_BRANDS } from "../constants";
+import { ADMIN_EMAIL } from "../constants";
 
-function ChartsPage({ notify, user, setTab, isAdmin, sheetCharts = [], sheetLoading }) {
-  const [selBrand, setSelBrand]         = useState(null);
-  const [q, setQ]                       = useState('');
-  const [globalQ, setGlobalQ]           = useState('');
+// ── Download limit helpers ─────────────────────────────────────────────────
+const getTodayKey = () => new Date().toISOString().slice(0, 10);
+
+const checkDownloadLimit = async (uid, isAdminUser) => {
+  if (isAdminUser) return { allowed: true, remaining: 9999, max: 9999 };
+  try {
+    const [limitsSnap, countSnap] = await Promise.all([
+      getDoc(doc(db, 'app_config', 'limits')),
+      getDoc(doc(db, 'download_counts', `${uid}_${getTodayKey()}`)),
+    ]);
+    const limits    = limitsSnap.exists() ? limitsSnap.data() : {};
+    const maxPerDay = Number(limits.maxChartsPerDay ?? 10);
+    const counts    = countSnap.exists() ? countSnap.data() : {};
+    const current   = Number(counts.charts ?? 0);
+    return { allowed: current < maxPerDay, remaining: Math.max(0, maxPerDay - current), max: maxPerDay, current };
+  } catch { return { allowed: true, remaining: 10, max: 10 }; }
+};
+
+const incrementDownloadCount = async (uid) => {
+  try {
+    const ref    = doc(db, 'download_counts', `${uid}_${getTodayKey()}`);
+    const snap   = await getDoc(ref);
+    const counts = snap.exists() ? snap.data() : {};
+    await setDoc(ref, { ...counts, charts: Number(counts.charts ?? 0) + 1 }, { merge: true });
+  } catch {}
+};
+
+// ──────────────────────────────────────────────────────────────────────────
+
+function ChartsPage({ notify, user, setTab, isAdmin: isAdminProp, sheetCharts = [], sheetLoading }) {
+  const [selBrand, setSelBrand]           = useState(null);
+  const [q, setQ]                         = useState('');
+  const [globalQ, setGlobalQ]             = useState('');
   const [globalResults, setGlobalResults] = useState([]);
   const [globalSearching, setGlobalSearching] = useState(false);
-  const [globalSearched, setGlobalSearched]   = useState(false);
-  const [brandResults, setBrandResults] = useState([]);
-  const [brandSearching, setBrandSearching] = useState(false);
+  const [globalSearched,  setGlobalSearched]  = useState(false);
+  const [brandResults,    setBrandResults]    = useState([]);
+  const [brandSearching,  setBrandSearching]  = useState(false);
   const debounceRef = useRef(null);
   const debRef2     = useRef(null);
 
+  const isAdmin = isAdminProp || user?.email === ADMIN_EMAIL;
   const sb = ECDIS_BRANDS.find(b => b.id === selBrand);
 
-  // ✅ Global search — instant local filter on Firebase-loaded data
   const doGlobalSearch = (sq) => {
     const s = (sq !== undefined ? sq : globalQ).trim();
     if (!s || s.length < 2) return;
@@ -38,10 +70,9 @@ function ChartsPage({ notify, user, setTab, isAdmin, sheetCharts = [], sheetLoad
     if (v.trim().length >= 2) debounceRef.current = setTimeout(() => doGlobalSearch(v), 200);
   };
 
-  // ✅ Brand search — instant local filter by brand
   const doBrandSearch = (sq, brand) => {
-    const s   = (sq !== undefined ? sq : q).trim();
-    const b   = brand || sb;
+    const s = (sq !== undefined ? sq : q).trim();
+    const b = brand || sb;
     if (!b) return;
     setBrandSearching(true);
     const ql  = s.toLowerCase();
@@ -59,7 +90,6 @@ function ChartsPage({ notify, user, setTab, isAdmin, sheetCharts = [], sheetLoad
     if (selBrand) { setQ(''); setBrandResults([]); doBrandSearch('', ECDIS_BRANDS.find(b => b.id === selBrand)); }
   }, [selBrand, sheetCharts]);
 
-  // Re-run search when Firebase data loads
   useEffect(() => {
     if (globalQ && globalQ.trim().length >= 2 && sheetCharts.length > 0) doGlobalSearch(globalQ);
     if (selBrand && sheetCharts.length > 0) doBrandSearch(q, ECDIS_BRANDS.find(b => b.id === selBrand));
@@ -73,10 +103,22 @@ function ChartsPage({ notify, user, setTab, isAdmin, sheetCharts = [], sheetLoad
 
   const handleDL = async (c) => {
     if (!user) { notify('Login required to download', 'error'); setTab('login'); return; }
+
+    // ── Check daily download limit ──────────────────────────────────────
+    const limit = await checkDownloadLimit(user.uid, isAdmin);
+    if (!limit.allowed) {
+      notify(
+        `⛔ Daily limit reached (${limit.max} charts/day). Try again tomorrow or contact admin: @manish_the_navigator`,
+        'error'
+      );
+      return;
+    }
+
     const url = c['File URL'] || c.fileUrl || c['Drive Link'] ||
       Object.values(c).find(v => typeof v === 'string' && v.includes('drive.google'));
     if (!url) { notify('No download link', 'error'); return; }
-    notify('⬇ Downloading…', 'success');
+
+    notify(`⬇ Downloading… (${isAdmin ? '∞' : limit.remaining - 1} remaining today)`, 'success');
     try {
       const gd = url.match(/\/d\/([a-zA-Z0-9_-]+)/);
       const direct = gd ? `https://drive.google.com/uc?export=download&id=${gd[1]}` : url;
@@ -88,8 +130,13 @@ function ChartsPage({ notify, user, setTab, isAdmin, sheetCharts = [], sheetLoad
       a.href = URL.createObjectURL(blob); a.download = fname;
       document.body.appendChild(a); a.click(); document.body.removeChild(a);
       URL.revokeObjectURL(a.href);
-      notify('✅ Downloaded', 'success');
-    } catch { window.open(url, '_blank'); notify('Opened in browser — save the file', 'success'); }
+      if (!isAdmin) await incrementDownloadCount(user.uid);
+      notify(`✅ Downloaded${isAdmin ? '' : ` (${limit.remaining - 1} left today)`}`, 'success');
+    } catch {
+      window.open(url, '_blank');
+      if (!isAdmin) await incrementDownloadCount(user.uid);
+      notify('Opened in browser — save the file', 'success');
+    }
   };
 
   const getName = r => r['File Name'] || r.fileName || r['Chart Name'] ||
@@ -128,6 +175,18 @@ function ChartsPage({ notify, user, setTab, isAdmin, sheetCharts = [], sheetLoad
           {sheetLoading && <span className="badge" style={{ background: 'rgba(0,180,216,0.08)', color: 'var(--cyan)' }}>⏳ Loading…</span>}
         </div>
       </div>
+
+      {/* Download limit notice */}
+      {user && !isAdmin && (
+        <div style={{ background: 'rgba(240,165,0,0.06)', border: '1px solid rgba(240,165,0,0.2)', borderRadius: 8, padding: '7px 12px', fontSize: '0.7rem', color: 'var(--text2)', marginBottom: '0.8rem' }}>
+          📥 Free account: up to <strong style={{ color: 'var(--gold)' }}>10 chart downloads per day</strong>. Resets at midnight.
+        </div>
+      )}
+      {isAdmin && (
+        <div style={{ background: 'rgba(0,200,100,0.06)', border: '1px solid rgba(0,200,100,0.2)', borderRadius: 8, padding: '7px 12px', fontSize: '0.7rem', color: 'var(--green)', marginBottom: '0.8rem' }}>
+          🛡 Admin account — unlimited downloads
+        </div>
+      )}
 
       {/* Global search */}
       <div style={{ marginBottom: '1rem' }}>
@@ -174,7 +233,6 @@ function ChartsPage({ notify, user, setTab, isAdmin, sheetCharts = [], sheetLoad
           {!selBrand && (
             <div className="brand-grid">
               {ECDIS_BRANDS.map(b => {
-                // Show count per brand from loaded data
                 const cnt = sheetCharts.filter(r => {
                   const hay = Object.values(r).filter(v => v && typeof v === 'string').join(' ').toLowerCase();
                   return hay.includes(b.name.toLowerCase()) || hay.includes(b.id.toLowerCase());
