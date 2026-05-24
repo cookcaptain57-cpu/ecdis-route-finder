@@ -29,8 +29,11 @@ const normalizeRouteCoords = (waypoints) => {
   for (let i = 1; i < waypoints.length; i++) {
     let lon = waypoints[i].lon;
     const prevLon = out[i - 1].lon;
-    while (lon - prevLon > 180) lon -= 360;
-    while (prevLon - lon > 180) lon += 360;
+    // This handles WP22(-178) → WP23(+179) jump correctly
+    // diff = 179 - (-178) = 357 > 180, so lon -= 360
+    // result: 179 - 360 = -181 → continues smoothly westward
+    while (lon - prevLon > 180)  lon -= 360;
+    while (lon - prevLon < -180) lon += 360;
     out.push({ ...waypoints[i], lon });
   }
   return out;
@@ -731,7 +734,7 @@ export default function NavModePage({ notify, sheetRoutes = [], portsDb = [], se
     // Item 7: normalize coordinates across the antimeridian
     const wps=normalizeRouteCoords(activeRoute.waypoints);
     const c=colors;
-    lrs.route=L.polyline(wps.map(w=>[w.lat,w.lon]),{color:c.route,weight:2.5,opacity:0.9,dashArray:'8 4',noClip:false}).addTo(map);
+    lrs.route=L.polyline(wps.map(w=>[w.lat,w.lon]),{color:c.route,weight:2.5,opacity:0.9,dashArray:'8 4',noClip:true}).addTo(map);
     wps.forEach((wp,i)=>{
       const isFirst=i===0,isLast=i===wps.length-1;
       const col=isFirst?'#00C896':isLast?'#FF4757':c.route, sz=isFirst||isLast?14:8;
@@ -859,9 +862,7 @@ export default function NavModePage({ notify, sheetRoutes = [], portsDb = [], se
       const opts={
   center:[20,70],
   zoom:4,
-  worldCopyJump:false,
-  maxBounds:[[-90,-180],[90,180]],
-  maxBoundsViscosity:1.0,
+  worldCopyJump:true,
 };
       if(typeof L.Map.prototype.setBearing==='function'){try{opts.rotate=true;opts.rotateControl=false;}catch{}}
       leafRef.current=L.map(mapRef.current,opts);
