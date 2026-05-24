@@ -1,6 +1,38 @@
 /* eslint-disable */
 // src/pages/RoutesPage.jsx
 import { useState, useEffect, useRef, useCallback } from "react";
+import { db } from "../firebase";
+import { doc, getDoc, setDoc } from "firebase/firestore";
+import { ADMIN_EMAIL } from "../constants";
+
+// ── Download limit helpers ─────────────────────────────────────────────────
+const getTodayKey = () => new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+
+const checkDownloadLimit = async (uid, isAdminUser) => {
+  if (isAdminUser) return { allowed: true, remaining: 9999, max: 9999 };
+  try {
+    const [limitsSnap, countSnap] = await Promise.all([
+      getDoc(doc(db, 'app_config', 'limits')),
+      getDoc(doc(db, 'download_counts', `${uid}_${getTodayKey()}`)),
+    ]);
+    const limits    = limitsSnap.exists() ? limitsSnap.data() : {};
+    const maxPerDay = Number(limits.maxRoutesPerDay ?? 10);
+    const counts    = countSnap.exists() ? countSnap.data() : {};
+    const current   = Number(counts.routes ?? 0);
+    return { allowed: current < maxPerDay, remaining: Math.max(0, maxPerDay - current), max: maxPerDay, current };
+  } catch { return { allowed: true, remaining: 10, max: 10 }; } // fail open
+};
+
+const incrementDownloadCount = async (uid) => {
+  try {
+    const ref   = doc(db, 'download_counts', `${uid}_${getTodayKey()}`);
+    const snap  = await getDoc(ref);
+    const counts = snap.exists() ? snap.data() : {};
+    await setDoc(ref, { ...counts, routes: Number(counts.routes ?? 0) + 1 }, { merge: true });
+  } catch {}
+};
+
+// ──────────────────────────────────────────────────────────────────────────
 
 function RoutesPage({ searchQuery, notify, user, setTab, sheetRoutes = [], sheetLoading }) {
   const [q, setQ]               = useState(searchQuery || '');
@@ -9,9 +41,10 @@ function RoutesPage({ searchQuery, notify, user, setTab, sheetRoutes = [], sheet
   const [searched, setSearched] = useState(false);
   const [sugg, setSugg]         = useState([]);
   const [showSugg, setShowSugg] = useState(false);
-  const debounceRef = useRef(null);
+  const debounceRef             = useRef(null);
 
-  // ✅ Local instant search — no API call, searches Firebase-loaded data in memory
+  const isAdmin = user?.email === ADMIN_EMAIL;
+
   const liveSearch = useCallback((searchQ) => {
     const sq = (searchQ !== undefined ? searchQ : q).trim();
     if (!sq || sq.length < 2) { setResults([]); setSearched(false); return; }
@@ -29,7 +62,6 @@ function RoutesPage({ searchQuery, notify, user, setTab, sheetRoutes = [], sheet
     if (searchQuery && searchQuery.trim()) { setQ(searchQuery); liveSearch(searchQuery); }
   }, [searchQuery]);
 
-  // Re-run search when Firebase data loads
   useEffect(() => {
     if (q && q.trim().length >= 2 && sheetRoutes.length > 0) liveSearch(q);
   }, [sheetRoutes]);
@@ -39,8 +71,6 @@ function RoutesPage({ searchQuery, notify, user, setTab, sheetRoutes = [], sheet
     setQ(v); setResults([]); setSearched(false);
     clearTimeout(debounceRef.current);
     if (v.trim().length < 2) { setSugg([]); setShowSugg(false); return; }
-
-    // Build autocomplete from already-loaded data
     const ql = v.toLowerCase();
     const names = new Set();
     sheetRoutes.forEach(r => {
@@ -49,16 +79,27 @@ function RoutesPage({ searchQuery, notify, user, setTab, sheetRoutes = [], sheet
     });
     setSugg([...names].slice(0, 8));
     setShowSugg(true);
-
     debounceRef.current = setTimeout(() => liveSearch(v), 200);
   };
 
   const handleDL = async (r) => {
     if (!user) { notify('Login required to download', 'error'); setTab('login'); return; }
+
+    // ── Check daily download limit ──────────────────────────────────────
+    const limit = await checkDownloadLimit(user.uid, isAdmin);
+    if (!limit.allowed) {
+      notify(
+        `⛔ Daily limit reached (${limit.max} routes/day). Try again tomorrow or contact admin on Instagram: @manish_the_navigator`,
+        'error'
+      );
+      return;
+    }
+
     const url = r['File URL'] || r.fileUrl || r['Drive Link'] || r['Download URL'] ||
       Object.values(r).find(v => typeof v === 'string' && (v.includes('drive.google') || v.includes('googleapis')));
     if (!url) { notify('No download link for this file', 'error'); return; }
-    notify('⬇ Downloading…', 'success');
+
+    notify(`⬇ Downloading… (${isAdmin ? '∞' : limit.remaining - 1} remaining today)`, 'success');
     try {
       const gd = url.match(/\/d\/([a-zA-Z0-9_-]+)/);
       const direct = gd ? `https://drive.google.com/uc?export=download&id=${gd[1]}` : url;
@@ -70,8 +111,14 @@ function RoutesPage({ searchQuery, notify, user, setTab, sheetRoutes = [], sheet
       a.href = URL.createObjectURL(blob); a.download = fname;
       document.body.appendChild(a); a.click();
       document.body.removeChild(a); URL.revokeObjectURL(a.href);
-      notify('✅ Downloaded: ' + fname, 'success');
-    } catch { window.open(url, '_blank'); notify('Opened — save from browser', 'success'); }
+      // ── Increment count after successful download ───────────────────
+      if (!isAdmin) await incrementDownloadCount(user.uid);
+      notify(`✅ Downloaded: ${fname}${isAdmin ? '' : ` (${limit.remaining - 1} left today)`}`, 'success');
+    } catch {
+      window.open(url, '_blank');
+      if (!isAdmin) await incrementDownloadCount(user.uid);
+      notify('Opened in browser — save the file', 'success');
+    }
   };
 
   const getName = r => r['File Name'] || r.fileName || r['Route Name'] ||
@@ -84,10 +131,22 @@ function RoutesPage({ searchQuery, notify, user, setTab, sheetRoutes = [], sheet
         <div className="sec-title">🛤 Route Files</div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           {sheetRoutes.length > 0 && <span className="badge">{sheetRoutes.length.toLocaleString()} in database</span>}
-          {results.length > 0 && <span className="badge" style={{ background: 'rgba(0,200,100,0.1)', color: 'var(--green)', border: '1px solid rgba(0,200,100,0.25)' }}>{results.length} results</span>}
+          {results.length > 0 && <span className="badge" style={{ background: 'rgba(0,200,100,0.1)', color: 'var(--green)', border: '1px solid rgba(0,200,100,0.2)' }}>{results.length} results</span>}
           {sheetLoading && <span className="badge" style={{ background: 'rgba(0,180,216,0.08)', color: 'var(--cyan)' }}>⏳ Loading…</span>}
         </div>
       </div>
+
+      {/* Download limit notice for non-admin */}
+      {user && !isAdmin && (
+        <div style={{ background: 'rgba(0,180,216,0.06)', border: '1px solid rgba(0,180,216,0.18)', borderRadius: 8, padding: '7px 12px', fontSize: '0.7rem', color: 'var(--text2)', marginBottom: '0.8rem' }}>
+          📥 Free account: up to <strong style={{ color: 'var(--cyan)' }}>10 route downloads per day</strong>. Resets at midnight.
+        </div>
+      )}
+      {isAdmin && (
+        <div style={{ background: 'rgba(0,200,100,0.06)', border: '1px solid rgba(0,200,100,0.2)', borderRadius: 8, padding: '7px 12px', fontSize: '0.7rem', color: 'var(--green)', marginBottom: '0.8rem' }}>
+          🛡 Admin account — unlimited downloads
+        </div>
+      )}
 
       <div style={{ position: 'relative', marginBottom: '0.8rem' }}>
         <div style={{ display: 'flex', gap: 8 }}>
@@ -120,12 +179,11 @@ function RoutesPage({ searchQuery, notify, user, setTab, sheetRoutes = [], sheet
       </div>
 
       <div className="fbar" style={{ marginBottom: '0.8rem' }}>
-        {['Mumbai', 'Singapore', 'Dubai', 'Rotterdam', 'Colombo', 'Karachi', 'Fujairah', 'Shanghai'].map(p => (
+        {['Mumbai','Singapore','Dubai','Rotterdam','Colombo','Karachi','Fujairah','Shanghai'].map(p => (
           <button key={p} className={`fbtn ${q === p ? 'active' : ''}`} onClick={() => { setQ(p); liveSearch(p); }}>{p}</button>
         ))}
       </div>
 
-      {/* States */}
       {sheetLoading && !searched && (
         <div className="loading"><div className="spin" /><span>Loading route database from Firebase…</span></div>
       )}
