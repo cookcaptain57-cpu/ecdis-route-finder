@@ -1,5 +1,8 @@
 /* eslint-disable */
 // src/Pages/RoutePlannerPage.jsx
+// NavisphereX Marine — Final Route Planner
+// Fixes: API routing, TSS lane display, port approach clutter, safety report UI
+
 import { useState, useEffect, useRef, useMemo } from "react";
 import { buildAutoRoute, buildAutoRouteCoords, buildProRoute, checkCanalPassage } from "../routing";
 import {
@@ -11,6 +14,9 @@ import {
 import { ECA_ZONES, SECA_ZONES, MARPOL_ZONES, PIRACY_ZONES, LAYOVER_ZONES } from "../constants";
 import MapView from "../components/MapView";
 import ETACalculator from "../components/ETACalculator";
+
+// ── Render API URL ─────────────────────────────────────────────────────────────
+const RENDER_API = 'https://navispherexrouter.onrender.com';
 
 // ── Land detection (tile-based) ───────────────────────────────────────────────
 const checkPointOnLand = (lat, lon) => new Promise(resolve => {
@@ -69,9 +75,9 @@ function RoutePlannerPage({ notify, sheetRoutes=[], portsDb=[] }){
   const[portF,          setPortF]          =useState(null);
   const[portT,          setPortT]          =useState(null);
   const[dbSuggestions,  setDbSuggestions]  =useState([]);
-  const[searchMode,     setSearchMode]     =useState(null); // null | 'choose' | 'generating' | 'done'
+  const[searchMode,     setSearchMode]     =useState(null);
 
-  // ── ADDED: manual lat/lon entry state ─────────────────────────────────────
+  // ── Manual lat/lon entry ───────────────────────────────────────────────────
   const[showManualFrom, setShowManualFrom] =useState(false);
   const[showManualTo,   setShowManualTo]   =useState(false);
   const[manualFromLat,  setManualFromLat]  =useState('');
@@ -101,6 +107,11 @@ function RoutePlannerPage({ notify, sheetRoutes=[], portsDb=[] }){
   const[isCheckingAuto, setIsCheckingAuto] =useState(false);
   const[exportFormat,   setExportFormat]   =useState('rtz');
 
+  // ── API Safety state ───────────────────────────────────────────────────────
+  const[apiSafetyReport,setApiSafetyReport]=useState(null);
+  const[isApiChecking,  setIsApiChecking]  =useState(false);
+  const[apiRouteInfo,   setApiRouteInfo]   =useState(null);
+
   // ── Memos ──────────────────────────────────────────────────────────────────
   const totalNM      =useMemo(()=>totalRouteNM(waypoints),[waypoints]);
   const totalManualNM=useMemo(()=>totalRouteNM(manualWps),[manualWps]);
@@ -114,8 +125,8 @@ function RoutePlannerPage({ notify, sheetRoutes=[], portsDb=[] }){
       return[];
     });
   }
-  const checkHL    =useMemo(()=>buildHighlights(checkResults, manualWps),[checkResults, manualWps]);
-  const checkAutoHL=useMemo(()=>buildHighlights(checkAutoRes, waypoints),[checkAutoRes, waypoints]);
+  const checkHL    =useMemo(()=>buildHighlights(checkResults,manualWps),[checkResults,manualWps]);
+  const checkAutoHL=useMemo(()=>buildHighlights(checkAutoRes,waypoints),[checkAutoRes,waypoints]);
   const allHL      =useMemo(()=>[...checkHL,...checkAutoHL],[checkHL,checkAutoHL]);
 
   // ── Persistence: restore ──────────────────────────────────────────────────
@@ -151,22 +162,22 @@ function RoutePlannerPage({ notify, sheetRoutes=[], portsDb=[] }){
 
   // ── Persistence: save ─────────────────────────────────────────────────────
   const s=(k,v)=>localStorage.setItem(k,v);
-  useEffect(()=>{s('mnp_mapMode', mapMode);},[mapMode]);
-  useEffect(()=>{s('mnp_panel',   panel);},[panel]);
+  useEffect(()=>{s('mnp_mapMode',mapMode);},[mapMode]);
+  useEffect(()=>{s('mnp_panel',panel);},[panel]);
   useEffect(()=>{s('mnp_overlays',JSON.stringify(overlays));},[overlays]);
   useEffect(()=>{s('mnp_fromPort',fromPort);},[fromPort]);
-  useEffect(()=>{s('mnp_toPort',  toPort);},[toPort]);
-  useEffect(()=>{s('mnp_vDraft',  String(vDraft));},[vDraft]);
-  useEffect(()=>{s('mnp_vBeam',   String(vBeam));},[vBeam]);
-  useEffect(()=>{s('mnp_vLoa',    String(vLoa));},[vLoa]);
-  useEffect(()=>{s('mnp_vAirDr',  String(vAirDraft));},[vAirDraft]);
-  useEffect(()=>{s('mnp_vType',   vType);},[vType]);
+  useEffect(()=>{s('mnp_toPort',toPort);},[toPort]);
+  useEffect(()=>{s('mnp_vDraft',String(vDraft));},[vDraft]);
+  useEffect(()=>{s('mnp_vBeam',String(vBeam));},[vBeam]);
+  useEffect(()=>{s('mnp_vLoa',String(vLoa));},[vLoa]);
+  useEffect(()=>{s('mnp_vAirDr',String(vAirDraft));},[vAirDraft]);
+  useEffect(()=>{s('mnp_vType',vType);},[vType]);
   useEffect(()=>{if(!hasRestoredRef.current)return;idbSavePref('mnp_waypoints',waypoints).catch(()=>{});},[waypoints]);
   useEffect(()=>{if(!hasRestoredRef.current)return;idbSavePref('mnp_routeName',routeName).catch(()=>{});},[routeName]);
   useEffect(()=>{if(!hasRestoredRef.current)return;idbSavePref('mnp_manualWps',manualWps).catch(()=>{});},[manualWps]);
-  useEffect(()=>{if(!hasRestoredRef.current)return;idbSavePref('mnp_manualRN', manualRouteName).catch(()=>{});},[manualRouteName]);
+  useEffect(()=>{if(!hasRestoredRef.current)return;idbSavePref('mnp_manualRN',manualRouteName).catch(()=>{});},[manualRouteName]);
   useEffect(()=>{setCheckResults([]);},[manualWps.length]);
-  useEffect(()=>{setCheckAutoRes([]);},[waypoints.length]);
+  useEffect(()=>{setCheckAutoRes([]);setApiSafetyReport(null);setApiRouteInfo(null);},[waypoints.length]);
 
   // ── Port search ────────────────────────────────────────────────────────────
   const searchPort=(q,setSugg)=>{
@@ -178,7 +189,7 @@ function RoutePlannerPage({ notify, sheetRoutes=[], portsDb=[] }){
     }).slice(0,8));
   };
   useEffect(()=>searchPort(fromPort,setFromSugg),[fromPort,portsList]);
-  useEffect(()=>searchPort(toPort,  setToSugg  ),[toPort,  portsList]);
+  useEffect(()=>searchPort(toPort,setToSugg),[toPort,portsList]);
 
   const searchEcdisRoutes=(dep,arr)=>{
     if(!dep&&!arr)return[];
@@ -189,51 +200,39 @@ function RoutePlannerPage({ notify, sheetRoutes=[], portsDb=[] }){
     }).slice(0,6);
   };
 
-  // ── ADDED: apply manual coordinates as departure port ─────────────────────
+  // ── Manual coordinate entry ────────────────────────────────────────────────
   const applyManualFrom=()=>{
-    const lat=parseFloat(manualFromLat), lon=parseFloat(manualFromLon);
-    if(isNaN(lat)||isNaN(lon)||lat<-90||lat>90||lon<-180||lon>180){
-      notify('Invalid coordinates. Latitude: -90 to 90, Longitude: -180 to 180','error'); return;
-    }
+    const lat=parseFloat(manualFromLat),lon=parseFloat(manualFromLon);
+    if(isNaN(lat)||isNaN(lon)||lat<-90||lat>90||lon<-180||lon>180){notify('Invalid coordinates','error');return;}
     const name=manualFromName.trim()||`${lat.toFixed(4)}°N, ${lon.toFixed(4)}°E`;
-    const customPort={id:'CUSTOM_DEP',lat,lon,name,city:'Manual Entry',country:'Custom',_isManual:true};
-    setPortF(customPort);
-    setFromPort(name);
-    setShowManualFrom(false);
-    setManualFromLat(''); setManualFromLon(''); setManualFromName('');
-    notify(`Departure set: ${name} (${lat.toFixed(4)}°N, ${lon.toFixed(4)}°E)`,'success');
+    setPortF({id:'CUSTOM_DEP',lat,lon,name,city:'Manual Entry',country:'Custom',_isManual:true});
+    setFromPort(name);setShowManualFrom(false);
+    setManualFromLat('');setManualFromLon('');setManualFromName('');
+    notify(`Departure set: ${name}`,'success');
   };
 
-  // ── ADDED: apply manual coordinates as arrival port ───────────────────────
   const applyManualTo=()=>{
-    const lat=parseFloat(manualToLat), lon=parseFloat(manualToLon);
-    if(isNaN(lat)||isNaN(lon)||lat<-90||lat>90||lon<-180||lon>180){
-      notify('Invalid coordinates. Latitude: -90 to 90, Longitude: -180 to 180','error'); return;
-    }
+    const lat=parseFloat(manualToLat),lon=parseFloat(manualToLon);
+    if(isNaN(lat)||isNaN(lon)||lat<-90||lat>90||lon<-180||lon>180){notify('Invalid coordinates','error');return;}
     const name=manualToName.trim()||`${lat.toFixed(4)}°N, ${lon.toFixed(4)}°E`;
-    const customPort={id:'CUSTOM_ARR',lat,lon,name,city:'Manual Entry',country:'Custom',_isManual:true};
-    setPortT(customPort);
-    setToPort(name);
-    setShowManualTo(false);
-    setManualToLat(''); setManualToLon(''); setManualToName('');
-    notify(`Arrival set: ${name} (${lat.toFixed(4)}°N, ${lon.toFixed(4)}°E)`,'success');
+    setPortT({id:'CUSTOM_ARR',lat,lon,name,city:'Manual Entry',country:'Custom',_isManual:true});
+    setToPort(name);setShowManualTo(false);
+    setManualToLat('');setManualToLon('');setManualToName('');
+    notify(`Arrival set: ${name}`,'success');
   };
 
-  // ── ECDIS-first: search ───────────────────────────────────────────────────
+  // ── Search ────────────────────────────────────────────────────────────────
   const handleSearch=()=>{
-    // Use portF/portT if already set by manual entry, otherwise look up from DB
     const f=portF?.id==='CUSTOM_DEP'?portF:portsList.find(p=>p.name?.toLowerCase()===fromPort.toLowerCase()||p.id?.toLowerCase()===fromPort.toLowerCase());
-    const t=portT?.id==='CUSTOM_ARR'?portT:portsList.find(p=>p.name?.toLowerCase()===toPort.toLowerCase()  ||p.id?.toLowerCase()===toPort.toLowerCase());
+    const t=portT?.id==='CUSTOM_ARR'?portT:portsList.find(p=>p.name?.toLowerCase()===toPort.toLowerCase()||p.id?.toLowerCase()===toPort.toLowerCase());
     if(!f||!t){notify('Select valid ports from suggestions or enter coordinates manually','error');return;}
-    setPortF(f); setPortT(t);
+    setPortF(f);setPortT(t);
     const dbMatches=searchEcdisRoutes(f.name,t.name);
-    setDbSuggestions(dbMatches);
-    setSearchMode('choose');
-    if(dbMatches.length>0) notify(`Found ${dbMatches.length} ECDIS route${dbMatches.length>1?'s':''} — select one or generate auto route`,'success');
-    else notify(`No ECDIS routes found — click Generate Auto Route`,'success');
+    setDbSuggestions(dbMatches);setSearchMode('choose');
+    if(dbMatches.length>0)notify(`Found ${dbMatches.length} ECDIS route${dbMatches.length>1?'s':''}`,'success');
+    else notify('No ECDIS routes found — click Generate Auto Route','success');
   };
 
-  // ── ECDIS-first: use database route ───────────────────────────────────────
   const useDbRoute=(r)=>{
     setSearchMode('generating');
     const url=r.fileUrl||r['File URL']||r['Download URL']||r['Drive Link']||Object.values(r).find(v=>typeof v==='string'&&v.includes('drive.google'));
@@ -247,19 +246,54 @@ function RoutePlannerPage({ notify, sheetRoutes=[], portsDb=[] }){
         const result=parseRTZ(text);
         if(result&&result.waypoints.length>0){
           setWaypoints(result.waypoints);
-          const name=r.fileName||r['File Name']||r['Route Name']||'ECDIS Route';
-          setRouteName(name);setRouteMeta(null);setSearchMode('done');
-          notify(`ECDIS route loaded: ${name} — ${result.waypoints.length} WPs`,'success');
+          setRouteName(r.fileName||r['File Name']||r['Route Name']||'ECDIS Route');
+          setRouteMeta(null);setSearchMode('done');
+          notify(`ECDIS route loaded: ${result.waypoints.length} WPs`,'success');
         }else fallback();
       }).catch(fallback);
     }else{notify('No file in ECDIS record — generating auto route','success');handleGenerateAutoRoute();}
   };
 
-  // ── ECDIS-first: generate auto route ──────────────────────────────────────
+  // ── MAIN: Generate auto route via Render API ───────────────────────────────
   const handleGenerateAutoRoute=async()=>{
-    const f=portF, t=portT;
+    const f=portF,t=portT;
     if(!f||!t)return;
-    setIsGenerating(true);setSearchMode('generating');setRouteMeta(null);
+    setIsGenerating(true);setSearchMode('generating');
+    setRouteMeta(null);setApiSafetyReport(null);setApiRouteInfo(null);
+
+    // Try Render API first
+    try{
+      const url=`${RENDER_API}/route?fromLon=${f.lon}&fromLat=${f.lat}&toLon=${t.lon}&toLat=${t.lat}&draft=${vDraft}&safety=2&beam=${vBeam}&loa=${vLoa}`;
+      const res=await fetch(url,{signal:AbortSignal.timeout(35000)});
+      if(res.ok){
+        const data=await res.json();
+        if(data.waypoints&&data.waypoints.length>=2){
+          const recalced=recalcWaypoints(data.waypoints.map((w,i)=>({lat:w.lat,lon:w.lon,name:`WP${String(i+1).padStart(2,'0')}`})));
+          setWaypoints(recalced);
+          setRouteName(`${f.name} → ${t.name}`);
+          const info={totalNM:data.totalNM||0,method:data.method||'api',landCrossing:data.landCrossing||false,tssZones:data.tssZones||[],portApproach:data.portApproach||{},warnings:data.warnings||[],overallSafe:data.overallSafe!==false};
+          setApiRouteInfo(info);
+          if(data.safetyReport)setApiSafetyReport(data.safetyReport);
+          setRouteMeta({
+            totalNM:data.totalNM||0,
+            etaAt12kn:((data.totalNM||0)/12).toFixed(1),
+            etaAt15kn:((data.totalNM||0)/15).toFixed(1),
+            confidence:'HIGH — api',
+            routeSource:'navispherex-router',
+            canalInfo:(data.tssZones||[]).map(z=>({canal:z.replace(/_/g,' ').toUpperCase(),status:'OK',reason:'TSS lane followed by API'})),
+            approachStartIdx:recalced.length-1,
+            waypoints:recalced,
+          });
+          setCheckAutoRes([]);setSearchMode('done');
+          if(data.warnings?.length>0)data.warnings.slice(0,3).forEach(w=>notify(w,'error'));
+          else notify(`Route ready: ${recalced.length} WPs — ${(data.totalNM||0).toFixed(0)} NM ✅`,'success');
+          setIsGenerating(false);
+          return;
+        }
+      }
+    }catch(e){console.warn('[NavisphereX] Render API failed, falling back:',e);}
+
+    // Fallback
     const vesselParams={draft:vDraft,beam:vBeam,loa:vLoa,airDraft:vAirDraft,vesselType:vType};
     const result=await buildProRoute(f,t,vesselParams);
     if(result.error||!result.waypoints||result.waypoints.length<2){
@@ -267,12 +301,11 @@ function RoutePlannerPage({ notify, sheetRoutes=[], portsDb=[] }){
       setIsGenerating(false);setSearchMode('choose');return;
     }
     setWaypoints(result.waypoints);
-    setRouteName(`${f.name} to ${t.name}`);
+    setRouteName(`${f.name} → ${t.name}`);
     setRouteMeta(result);setCheckAutoRes([]);setSearchMode('done');
     const blocked=result.canalInfo?.filter(c=>c.status==='BLOCKED');
     if(blocked?.length>0)blocked.forEach(c=>notify(`🚫 ${c.canal}: ${c.reason}. ${c.alternative}`,'error'));
-    const src=result.routeSource||'waypoint-graph';
-    notify(`Auto route (${src}): ${result.waypoints.length} WPs — ${result.totalNM.toFixed(0)} NM`,'success');
+    notify(`Auto route (fallback): ${result.waypoints.length} WPs — ${result.totalNM.toFixed(0)} NM`,'success');
     setIsGenerating(false);
   };
 
@@ -296,10 +329,10 @@ function RoutePlannerPage({ notify, sheetRoutes=[], portsDb=[] }){
     setWaypoints(wps=>recalcWaypoints([...wps,{lat:Math.round(lat*10000)/10000,lon:Math.round(lon*10000)/10000}]));
   };
 
-  const removeWP     =(i)=>setWaypoints(wps=>recalcWaypoints(wps.filter((_,j)=>j!==i)));
-  const clearRoute   =()=>{setWaypoints([]);setPlaying(false);setCheckAutoRes([]);setRouteMeta(null);setSearchMode(null);};
-  const toggleOverlay=(k)=>setOverlays(o=>({...o,[k]:!o[k]}));
-  const clearManual  =()=>{setManualWps([]);setCheckResults([]);};
+  const removeWP=i=>setWaypoints(wps=>recalcWaypoints(wps.filter((_,j)=>j!==i)));
+  const clearRoute=()=>{setWaypoints([]);setPlaying(false);setCheckAutoRes([]);setRouteMeta(null);setSearchMode(null);setApiSafetyReport(null);setApiRouteInfo(null);};
+  const toggleOverlay=k=>setOverlays(o=>({...o,[k]:!o[k]}));
+  const clearManual=()=>{setManualWps([]);setCheckResults([]);};
 
   const saveManualRoute=async()=>{
     if(manualWps.length<2){notify('Add at least 2 waypoints','error');return;}
@@ -307,7 +340,7 @@ function RoutePlannerPage({ notify, sheetRoutes=[], portsDb=[] }){
     try{await idbSaveRoute(route);setSavedRoutes(prev=>[route,...prev.filter(r=>r.id!==route.id)]);notify(`"${route.name}" saved`,'success');}
     catch{notify('Save failed','error');}
   };
-  const deleteSavedRoute=async(id)=>{
+  const deleteSavedRoute=async id=>{
     try{await idbDeleteRoute(id);setSavedRoutes(prev=>prev.filter(r=>r.id!==id));notify('Deleted','success');}
     catch{notify('Delete failed','error');}
   };
@@ -319,7 +352,7 @@ function RoutePlannerPage({ notify, sheetRoutes=[], portsDb=[] }){
     downloadFile(cfg.fn(),`${safe}${cfg.ext}`,cfg.mime);
   };
 
-  // ── Route check ───────────────────────────────────────────────────────────
+  // ── Local route check ──────────────────────────────────────────────────────
   const runRouteCheck=async(wps,setRes,setChecking)=>{
     if(wps.length<2){notify('Add at least 2 waypoints','error');return;}
     setChecking(true);setRes([]);
@@ -331,18 +364,18 @@ function RoutePlannerPage({ notify, sheetRoutes=[], portsDb=[] }){
     const midpoints=wps.slice(1).map((wp,idx)=>({lat:(wps[idx].lat+wp.lat)/2,lon:(wps[idx].lon+wp.lon)/2,segIdx:idx+1}));
     let tileWorked=false;
     try{
-      const queue=[...midpoints],tileResults=[]; let active=0,done=0;
+      const queue=[...midpoints],tileResults=[];let active=0,done=0;
       await new Promise(resolve=>{
         if(!midpoints.length){resolve();return;}
         const next=()=>{while(active<6&&queue.length>0){active++;const s=queue.shift();checkPointOnLand(s.lat,s.lon).then(onLand=>{if(onLand!==null)tileWorked=true;if(onLand===true)tileResults.push(s);active--;done++;if(done===midpoints.length)resolve();else next();});}};
         next();
       });
-      tileResults.forEach(s=>results.push({segIdx:s.segIdx,type:'land',severity:'error',message:`Leg WP${s.segIdx}→WP${s.segIdx+1}: route crosses land — move waypoint offshore`}));
+      tileResults.forEach(s=>results.push({segIdx:s.segIdx,type:'land',severity:'error',message:`Leg WP${s.segIdx}→WP${s.segIdx+1}: route crosses land`}));
     }catch{}
     if(!tileWorked&&midpoints.length>0){
       const batch=midpoints.slice(0,20),locs=batch.map(p=>`${p.lat.toFixed(5)},${p.lon.toFixed(5)}`).join('|');
       try{const ctl=new AbortController();setTimeout(()=>ctl.abort(),10000);const res=await fetch(`https://api.opentopodata.org/v1/gebco2020?locations=${locs}`,{signal:ctl.signal});if(res.ok){const data=await res.json();(data.results||[]).forEach((r,j)=>{if(r.elevation!==null&&r.elevation>2){const s=batch[j];results.push({segIdx:s.segIdx,type:'land',severity:'error',message:`Leg WP${s.segIdx}→WP${s.segIdx+1}: crosses land (${r.elevation.toFixed(0)}m)`})}});}}
-      catch{results.push({type:'apiError',severity:'warning',message:'Land check unavailable — verify route visually on Day map'});}
+      catch{results.push({type:'apiError',severity:'warning',message:'Land check unavailable — verify route visually'});}
     }
     const lats=wps.map(w=>w.lat),lons=wps.map(w=>w.lon);
     const bbox={s:Math.min(...lats)-0.05,n:Math.max(...lats)+0.05,w:Math.min(...lons)-0.05,e:Math.max(...lons)+0.05};
@@ -353,12 +386,12 @@ function RoutePlannerPage({ notify, sheetRoutes=[], portsDb=[] }){
         const nodes=data.elements.filter(e=>e.type==='node'&&e.lat!==undefined),ways=data.elements.filter(e=>e.type==='way');
         const rep=new Set();
         wps.forEach((wp,i)=>{
-          nodes.forEach(h=>{const distM=Math.sqrt((wp.lat-h.lat)**2+(wp.lon-h.lon)**2)*111000;const hType=h.tags?.['seamark:type']||h.tags?.natural||h.tags?.man_made||'hazard';const hName=h.tags?.name||h.tags?.['seamark:name']||'';const isDanger=['rock','wreck','obstruction','reef','rock_awash','fishing_facility'].includes(hType);const isTSS=['separation_zone','traffic_separation_scheme'].includes(hType);const threshold=isDanger?350:isTSS?200:80;if(distM<threshold){const key=`${hType}:${h.id}:${i}`;if(!rep.has(key)){rep.add(key);results.push({segIdx:i,type:'hazard',severity:isDanger?'error':'warning',message:`WP${i+1} within ${Math.round(distM)}m of ${hType.replace(/_/g,' ')}${hName?` "${hName}"`:''} — ${isDanger?'collision hazard':isTSS?'TSS — follow proper lane':'check clearance'}`});}}});
-          ways.filter(w=>w.tags?.man_made==='breakwater'&&w.bounds).forEach(w=>{const cLat=(w.bounds.minlat+w.bounds.maxlat)/2,cLon=(w.bounds.minlon+w.bounds.maxlon)/2;const distM=Math.sqrt((wp.lat-cLat)**2+(wp.lon-cLon)**2)*111000;if(distM<200){const key=`bw:${w.id}:${i}`;if(!rep.has(key)){rep.add(key);results.push({segIdx:i,type:'hazard',severity:'error',message:`WP${i+1} within ${Math.round(distM)}m of breakwater — grounding risk`});}}});
+          nodes.forEach(h=>{const distM=Math.sqrt((wp.lat-h.lat)**2+(wp.lon-h.lon)**2)*111000;const hType=h.tags?.['seamark:type']||h.tags?.natural||h.tags?.man_made||'hazard';const hName=h.tags?.name||h.tags?.['seamark:name']||'';const isDanger=['rock','wreck','obstruction','reef','rock_awash','fishing_facility'].includes(hType);const isTSS=['separation_zone','traffic_separation_scheme'].includes(hType);const threshold=isDanger?350:isTSS?200:80;if(distM<threshold){const key=`${hType}:${h.id}:${i}`;if(!rep.has(key)){rep.add(key);results.push({segIdx:i,type:'hazard',severity:isDanger?'error':'warning',message:`WP${i+1} within ${Math.round(distM)}m of ${hType.replace(/_/g,' ')}${hName?` "${hName}"`:''}`});}}});
+          ways.filter(w=>w.tags?.man_made==='breakwater'&&w.bounds).forEach(w=>{const cLat=(w.bounds.minlat+w.bounds.maxlat)/2,cLon=(w.bounds.minlon+w.bounds.maxlon)/2;const distM=Math.sqrt((wp.lat-cLat)**2+(wp.lon-cLon)**2)*111000;if(distM<200){const key=`bw:${w.id}:${i}`;if(!rep.has(key)){rep.add(key);results.push({segIdx:i,type:'hazard',severity:'error',message:`WP${i+1} within ${Math.round(distM)}m of breakwater`});}}});
         });
-        if(!results.some(r=>r.type==='hazard'))results.push({type:'hazardInfo',severity:'info',message:'OpenSeaMap: no hazards found near route in this area'});
-      }else results.push({type:'apiError',severity:'warning',message:'Hazard check unavailable — enable SeaMarks overlay for visual reference'});
-    }else results.push({type:'hazardInfo',severity:'info',message:'Global route — enable SeaMarks overlay to inspect for hazards'});
+        if(!results.some(r=>r.type==='hazard'))results.push({type:'hazardInfo',severity:'info',message:'OpenSeaMap: no hazards found near route'});
+      }else results.push({type:'apiError',severity:'warning',message:'Hazard check unavailable — enable SeaMarks overlay'});
+    }else results.push({type:'hazardInfo',severity:'info',message:'Global route — enable SeaMarks overlay to inspect hazards'});
     if(!results.filter(r=>!['apiError','hazardInfo','ok'].includes(r.type)).length)results.push({type:'ok',severity:'ok',message:'All checks passed — route looks safe!'});
     setRes(results);setChecking(false);
     const errors=results.filter(r=>r.severity==='error').length,warns=results.filter(r=>r.severity==='warning').length;
@@ -367,39 +400,172 @@ function RoutePlannerPage({ notify, sheetRoutes=[], portsDb=[] }){
     else notify('Route check passed ✅','success');
   };
 
-  const performRouteCheck    =()=>runRouteCheck(manualWps, setCheckResults, setIsChecking);
-  const performAutoRouteCheck=()=>runRouteCheck(waypoints, setCheckAutoRes, setIsCheckingAuto);
+  const performRouteCheck    =()=>runRouteCheck(manualWps,setCheckResults,setIsChecking);
+  const performAutoRouteCheck=()=>runRouteCheck(waypoints,setCheckAutoRes,setIsCheckingAuto);
 
-  const ovCfg=[{k:'eca',label:'ECA',color:'#FF6B35',desc:'Emission Control Area'},{k:'seca',label:'SECA',color:'#FFB347',desc:'Sulphur ECA'},{k:'marpol',label:'MARPOL',color:'#9B59B6',desc:'MARPOL Special Area'},{k:'piracy',label:'Piracy',color:'#E74C3C',desc:'Piracy HRA'},{k:'layover',label:'Anchorage',color:'#3498DB',desc:'Anchorage'},{k:'gebco',label:'GEBCO',color:'#00B4D8',desc:'GEBCO Bathymetry'},{k:'depthClick',label:'Depth Click',color:'#00C896',desc:'Depth on click'}];
+  // ── API Full Safety Check ──────────────────────────────────────────────────
+  const performApiSafetyCheck=async()=>{
+    const wps=waypoints.length>=2?waypoints:manualWps;
+    if(wps.length<2){notify('Need at least 2 waypoints','error');return;}
+    setIsApiChecking(true);setApiSafetyReport(null);
+    try{
+      const res=await fetch(`${RENDER_API}/safety-check`,{
+        method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({waypoints:wps.map(w=>({lat:w.lat,lon:w.lon})),draft:vDraft,safety:2,beam:vBeam,loa:vLoa}),
+        signal:AbortSignal.timeout(45000),
+      });
+      if(res.ok){
+        const data=await res.json();
+        setApiSafetyReport(data);
+        const errs=data.warnings?.length||0;
+        if(errs>0)notify(`${errs} safety issue(s) found — see report below`,'error');
+        else notify('Full Safety Check passed ✅','success');
+      }else notify('Safety check API error — try again','error');
+    }catch(e){notify('Safety check failed — check connection','error');}
+    setIsApiChecking(false);
+  };
 
+  // ── Overlay config ─────────────────────────────────────────────────────────
+  const ovCfg=[
+    {k:'eca',label:'ECA',color:'#FF6B35',desc:'Emission Control Area'},
+    {k:'seca',label:'SECA',color:'#FFB347',desc:'Sulphur ECA'},
+    {k:'marpol',label:'MARPOL',color:'#9B59B6',desc:'MARPOL Special Area'},
+    {k:'piracy',label:'Piracy',color:'#E74C3C',desc:'Piracy HRA'},
+    {k:'layover',label:'Anchorage',color:'#3498DB',desc:'Anchorage'},
+    {k:'gebco',label:'GEBCO',color:'#00B4D8',desc:'GEBCO Bathymetry'},
+    {k:'depthClick',label:'Depth Click',color:'#00C896',desc:'Depth on click'},
+  ];
+
+  // ── Render: local check results ────────────────────────────────────────────
   const renderCheckResults=res=>(
-    <div>{res.filter(r=>r.type!=='ok').map((r,i)=>(<div key={i} style={{padding:'6px 8px',marginBottom:4,borderRadius:6,fontSize:'0.7rem',lineHeight:1.4,background:r.severity==='error'?'rgba(231,76,60,0.14)':r.severity==='warning'?'rgba(255,179,71,0.13)':'rgba(0,180,216,0.09)',border:`1px solid ${r.severity==='error'?'rgba(231,76,60,0.4)':r.severity==='warning'?'rgba(255,179,71,0.4)':'rgba(0,180,216,0.3)'}`,color:r.severity==='error'?'#ff8080':r.severity==='warning'?'#FFB347':'var(--text2)'}}>
-      {r.severity==='error'?'🚫':r.severity==='warning'?'⚠️':'ℹ️'} {r.message}
-    </div>))}
-    {res.some(r=>r.type==='ok')&&<div style={{padding:'6px 8px',borderRadius:6,background:'rgba(0,200,150,0.14)',border:'1px solid rgba(0,200,150,0.4)',fontSize:'0.7rem',color:'#00C896'}}>✅ All checks passed — route looks safe!</div>}
+    <div>
+      {res.filter(r=>r.type!=='ok').map((r,i)=>(
+        <div key={i} style={{padding:'6px 8px',marginBottom:4,borderRadius:6,fontSize:'0.7rem',lineHeight:1.4,background:r.severity==='error'?'rgba(231,76,60,0.14)':r.severity==='warning'?'rgba(255,179,71,0.13)':'rgba(0,180,216,0.09)',border:`1px solid ${r.severity==='error'?'rgba(231,76,60,0.4)':r.severity==='warning'?'rgba(255,179,71,0.4)':'rgba(0,180,216,0.3)'}`,color:r.severity==='error'?'#ff8080':r.severity==='warning'?'#FFB347':'var(--text2)'}}>
+          {r.severity==='error'?'🚫':r.severity==='warning'?'⚠️':'ℹ️'} {r.message}
+        </div>
+      ))}
+      {res.some(r=>r.type==='ok')&&<div style={{padding:'6px 8px',borderRadius:6,background:'rgba(0,200,150,0.14)',border:'1px solid rgba(0,200,150,0.4)',fontSize:'0.7rem',color:'#00C896'}}>✅ All checks passed!</div>}
     </div>
   );
 
+  // ── Render: API route info (TSS + port approach shown after generation) ────
+  const renderApiRouteInfo=info=>{
+    if(!info)return null;
+    return(
+      <div style={{marginTop:6,marginBottom:4}}>
+        {info.tssZones?.length>0&&(
+          <div style={{padding:'5px 8px',borderRadius:6,marginBottom:4,fontSize:'0.68rem',background:'rgba(0,180,216,0.12)',border:'1px solid rgba(0,180,216,0.35)',color:'var(--cyan)'}}>
+            🚢 TSS lanes followed: {info.tssZones.map(z=>z.replace(/_/g,' ')).join(', ')}
+          </div>
+        )}
+        {(info.portApproach?.origin||info.portApproach?.destination)&&(
+          <div style={{padding:'5px 8px',borderRadius:6,marginBottom:4,fontSize:'0.68rem',background:'rgba(255,179,71,0.12)',border:'1px solid rgba(255,179,71,0.35)',color:'#FFB347'}}>
+            ⚓ Port approach: {[info.portApproach.origin,info.portApproach.destination].filter(Boolean).map(p=>p.replace(/_/g,' ')).join(' → ')}
+          </div>
+        )}
+        {info.landCrossing&&(
+          <div style={{padding:'5px 8px',borderRadius:6,marginBottom:4,fontSize:'0.68rem',background:'rgba(231,76,60,0.14)',border:'1px solid rgba(231,76,60,0.4)',color:'#ff8080'}}>
+            🚨 Land crossing detected — route may need manual adjustment
+          </div>
+        )}
+        {info.warnings?.map((w,i)=>(
+          <div key={i} style={{padding:'5px 8px',borderRadius:6,marginBottom:3,fontSize:'0.67rem',background:'rgba(231,76,60,0.10)',border:'1px solid rgba(231,76,60,0.3)',color:'#ff8080'}}>⚠️ {w}</div>
+        ))}
+      </div>
+    );
+  };
+
+  // ── Render: Full API safety report ────────────────────────────────────────
+  const renderApiSafetyReport=report=>{
+    if(!report)return null;
+    const{overall_safe,warnings=[],route_stats,land_check,tss_check,port_check,depth_check,danger_check}=report;
+    const sec={marginBottom:5,borderRadius:7,overflow:'hidden',border:'1px solid rgba(255,255,255,0.07)'};
+    const hdr=(ok,color)=>({padding:'5px 9px',fontSize:'0.67rem',fontWeight:700,display:'flex',justifyContent:'space-between',alignItems:'center',background:color||(ok?'rgba(0,200,150,0.18)':'rgba(231,76,60,0.22)'),color:ok?'#00C896':'#ff8080'});
+    const row={padding:'4px 9px',fontSize:'0.66rem',lineHeight:1.45,background:'rgba(0,0,0,0.22)',borderTop:'1px solid rgba(255,255,255,0.05)',color:'var(--text2)'};
+    const wrow={...row,color:'#ff8080'};
+    return(
+      <div style={{marginTop:8}}>
+        {/* Overall */}
+        <div style={{padding:'8px 10px',borderRadius:8,marginBottom:8,background:overall_safe?'rgba(0,200,150,0.14)':'rgba(231,76,60,0.16)',border:`1px solid ${overall_safe?'rgba(0,200,150,0.45)':'rgba(231,76,60,0.45)'}`,display:'flex',alignItems:'center',gap:8}}>
+          <span style={{fontSize:'1rem'}}>{overall_safe?'✅':'🚨'}</span>
+          <div style={{flex:1}}>
+            <div style={{fontSize:'0.72rem',fontWeight:700,color:overall_safe?'#00C896':'#ff8080'}}>{overall_safe?'Route is SAFE':'Safety Issues Found'}</div>
+            {warnings.length>0&&<div style={{fontSize:'0.63rem',color:'var(--text2)',marginTop:1}}>{warnings.length} warning(s) — see below</div>}
+          </div>
+          {route_stats&&<div style={{textAlign:'right'}}><div style={{fontSize:'0.7rem',fontFamily:'Orbitron,monospace',color:'var(--gold)'}}>{route_stats.total_nm} NM</div><div style={{fontSize:'0.6rem',color:'var(--text2)'}}>{route_stats.waypoint_count} WPs</div></div>}
+        </div>
+        {/* ETA */}
+        {route_stats?.eta&&(
+          <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:4,marginBottom:8}}>
+            {[['10kn',route_stats.eta['10kn']],['12kn',route_stats.eta['12kn']],['15kn',route_stats.eta['15kn']],['18kn',route_stats.eta['18kn']]].map(([spd,hrs])=>(
+              <div key={spd} style={{background:'var(--bg2)',borderRadius:6,padding:'4px 5px',textAlign:'center'}}>
+                <div style={{fontSize:'0.57rem',color:'var(--text2)'}}>@{spd}</div>
+                <div style={{fontSize:'0.7rem',color:'var(--gold)',fontFamily:'Orbitron,monospace'}}>{hrs}h</div>
+              </div>
+            ))}
+          </div>
+        )}
+        {/* Land */}
+        <div style={sec}>
+          <div style={hdr(land_check?.safe)}>
+            <span>{land_check?.safe?'✅':'🚨'} Land Crossing</span>
+            <span style={{fontWeight:400,fontSize:'0.63rem'}}>{land_check?.safe?'Clear':`${land_check?.problem_segments?.length||0} segment(s)`}</span>
+          </div>
+          {!land_check?.safe&&land_check?.problem_segments?.map((sg,i)=><div key={i} style={wrow}>🚨 Seg {sg.segment_index+1}: ({sg.from?.lat?.toFixed(2)},{sg.from?.lon?.toFixed(2)}) → ({sg.to?.lat?.toFixed(2)},{sg.to?.lon?.toFixed(2)})</div>)}
+          {land_check?.safe&&<div style={row}>✅ No land crossings detected</div>}
+        </div>
+        {/* TSS */}
+        <div style={sec}>
+          <div style={{...hdr(true),background:'rgba(0,180,216,0.18)',color:'var(--cyan)'}}>
+            <span>🚢 TSS Zones</span>
+            <span style={{fontWeight:400,fontSize:'0.63rem'}}>{tss_check?.zones_crossed||0} crossed</span>
+          </div>
+          {tss_check?.issues?.length>0
+            ?tss_check.issues.map((issue,i)=><div key={i} style={row}>🚢 <b style={{color:'var(--cyan)'}}>{issue.tss?.replace(/_/g,' ').toUpperCase()}</b> — use <b style={{color:'#FFB347'}}>{issue.correct_lane}</b> lane</div>)
+            :<div style={row}>✅ No TSS zones crossed</div>}
+        </div>
+        {/* Port approach */}
+        <div style={sec}>
+          <div style={{...hdr(true),background:'rgba(255,179,71,0.16)',color:'#FFB347'}}><span>⚓ Port Approach</span></div>
+          {port_check?.origin_port&&<div style={row}>🛳 Departure: <b style={{color:'#FFB347'}}>{port_check.origin_port.replace(/_/g,' ')}</b></div>}
+          {port_check?.destination_port&&<div style={row}>🏁 Arrival: <b style={{color:'#FFB347'}}>{port_check.destination_port.replace(/_/g,' ')}</b></div>}
+          {!port_check?.origin_port&&!port_check?.destination_port&&<div style={row}>ℹ️ No port approach match in database</div>}
+        </div>
+        {/* Depth */}
+        <div style={sec}>
+          <div style={hdr(depth_check?.safe)}>
+            <span>{depth_check?.safe?'✅':'⚠️'} Water Depth</span>
+            <span style={{fontWeight:400,fontSize:'0.63rem'}}>{depth_check?.min_depth_m!=null?`Min ${depth_check.min_depth_m}m / Need ${depth_check.required_depth}m`:'—'}</span>
+          </div>
+          {depth_check?.shallow_points?.map((sp,i)=><div key={i} style={wrow}>⚠️ Shallow {sp.depth}m at ({sp.lat?.toFixed(3)},{sp.lon?.toFixed(3)}) — need {sp.required}m</div>)}
+          {depth_check?.safe&&<div style={row}>✅ Depth OK — {depth_check.points_checked} points checked</div>}
+        </div>
+        {/* Dangers */}
+        <div style={sec}>
+          <div style={hdr(danger_check?.safe)}>
+            <span>{danger_check?.safe?'✅':'🪨'} Danger Marks</span>
+            <span style={{fontWeight:400,fontSize:'0.63rem'}}>{danger_check?.total_in_area||0} in area</span>
+          </div>
+          {danger_check?.dangers_near_route?.map((d,i)=><div key={i} style={wrow}>🪨 {d.type?.toUpperCase()} {d.name?`"${d.name}"`:''} — {d.nearest_route_nm} NM from route</div>)}
+          {danger_check?.safe&&<div style={row}>✅ No danger marks near route</div>}
+        </div>
+      </div>
+    );
+  };
+
   const inp={width:'100%',padding:'6px 8px',background:'var(--bg2)',border:'1px solid var(--border)',color:'var(--text)',borderRadius:7,fontSize:'0.78rem'};
+
   const manualCoordSection=(label,showState,setShow,latVal,setLat,lonVal,setLon,nameVal,setName,applyFn,isSet)=>(
     <div style={{marginTop:5}}>
-      {!isSet&&(<button onClick={()=>setShow(v=>!v)} style={{fontSize:'0.66rem',color:'var(--text2)',background:'none',border:'1px dashed var(--border)',borderRadius:5,padding:'3px 8px',cursor:'pointer',width:'100%'}}>
-        {showState?'▲ Hide manual entry':'📍 Port not in database? Enter coordinates manually'}
-      </button>)}
+      {!isSet&&<button onClick={()=>setShow(v=>!v)} style={{fontSize:'0.66rem',color:'var(--text2)',background:'none',border:'1px dashed var(--border)',borderRadius:5,padding:'3px 8px',cursor:'pointer',width:'100%'}}>{showState?'▲ Hide manual entry':'📍 Port not in database? Enter coordinates manually'}</button>}
       {isSet&&<div style={{fontSize:'0.66rem',color:'#00C896',padding:'3px 6px'}}>✅ Manual coordinates set</div>}
       {showState&&!isSet&&(
         <div style={{marginTop:6,padding:'8px 10px',background:'var(--bg2)',borderRadius:8,border:'1px solid var(--border)'}}>
           <div style={{fontSize:'0.68rem',color:'var(--text2)',marginBottom:6}}>Enter {label} coordinates:</div>
           <input className="fi" placeholder="Name / Description (optional)" value={nameVal} onChange={e=>setName(e.target.value)} style={{marginBottom:5}}/>
           <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:5,marginBottom:6}}>
-            <div>
-              <div style={{fontSize:'0.62rem',color:'var(--text2)',marginBottom:2}}>Latitude (-90 to 90)</div>
-              <input className="fi" type="number" step="0.0001" min="-90" max="90" placeholder="e.g. 22.8356" value={latVal} onChange={e=>setLat(e.target.value)}/>
-            </div>
-            <div>
-              <div style={{fontSize:'0.62rem',color:'var(--text2)',marginBottom:2}}>Longitude (-180 to 180)</div>
-              <input className="fi" type="number" step="0.0001" min="-180" max="180" placeholder="e.g. 69.7220" value={lonVal} onChange={e=>setLon(e.target.value)}/>
-            </div>
+            <div><div style={{fontSize:'0.62rem',color:'var(--text2)',marginBottom:2}}>Latitude (-90 to 90)</div><input className="fi" type="number" step="0.0001" min="-90" max="90" placeholder="e.g. 22.8356" value={latVal} onChange={e=>setLat(e.target.value)}/></div>
+            <div><div style={{fontSize:'0.62rem',color:'var(--text2)',marginBottom:2}}>Longitude (-180 to 180)</div><input className="fi" type="number" step="0.0001" min="-180" max="180" placeholder="e.g. 69.7220" value={lonVal} onChange={e=>setLon(e.target.value)}/></div>
           </div>
           <div style={{display:'flex',gap:5}}>
             <button className="btn btn-primary" style={{flex:1,justifyContent:'center',padding:'6px',fontSize:'0.72rem'}} onClick={applyFn}>✓ Use These Coordinates</button>
@@ -412,7 +578,6 @@ function RoutePlannerPage({ notify, sheetRoutes=[], portsDb=[] }){
 
   return(
     <div style={{display:'flex',flexDirection:'column',flex:1,minHeight:0}}>
-      {/* Top bar */}
       <div style={{display:'flex',alignItems:'center',gap:8,padding:'0.7rem 1rem',background:'var(--card)',borderBottom:'1px solid var(--border)',flexWrap:'wrap'}}>
         <input className="fi" style={{flex:1,minWidth:150,padding:'7px 12px',fontSize:'0.82rem'}} placeholder="Route Name…" value={routeName} onChange={e=>setRouteName(e.target.value)}/>
         {totalNM>0&&<span style={{fontFamily:'Orbitron,monospace',fontSize:'0.78rem',color:'var(--cyan)',whiteSpace:'nowrap'}}>📏 {totalNM.toFixed(1)} NM</span>}
@@ -430,56 +595,28 @@ function RoutePlannerPage({ notify, sheetRoutes=[], portsDb=[] }){
           <div className="p-tabs">
             {[['auto','🗺 Auto'],['manual','✏️ Manual'],['load','📂 Load RTZ'],['eta','⏱ ETA'],['wpts','📋 WPTs']].map(([k,l])=>(<button key={k} className={`p-tab ${panel===k?'active':''}`} onClick={()=>setPanel(k)}>{l}</button>))}
           </div>
-
           <div className="p-panel" style={{overflowY:'auto'}}>
 
-            {/* ═══ AUTO PANEL ════════════════════════════════════════════════ */}
+            {/* AUTO PANEL */}
             {panel==='auto'&&(<>
-              {/* Departure port */}
               <div className="p-section">
                 <span className="p-label">🛳 Departure Port</span>
                 <div style={{position:'relative'}}>
-                  <input className="fi" placeholder="Search port name, code or city…" value={fromPort}
-                    onChange={e=>{setFromPort(e.target.value);setSearchMode(null);setPortF(null);setShowManualFrom(false);}}
-                    onFocus={()=>searchPort(fromPort,setFromSugg)}/>
-                  {fromSugg.length>0&&(<div className="ac" style={{position:'absolute',zIndex:200}}>
-                    {fromSugg.map(p=>(<div key={p.id} className="ac-item" onClick={()=>{setFromPort(p.name);setFromSugg([]);setSearchMode(null);setPortF(null);setShowManualFrom(false);}}>
-                      <span>📍</span>
-                      <div>
-                        <div style={{fontWeight:600,fontSize:'0.82rem'}}>{p.name}</div>
-                        <div style={{fontSize:'0.67rem',color:'var(--text2)'}}>{p.city} · {p.country}</div>
-                        <div style={{fontSize:'0.62rem',color:'var(--text3)'}}>{p.lat?.toFixed(4)}°N / {p.lon?.toFixed(4)}°E · {p.id}</div>
-                      </div>
-                    </div>))}
-                  </div>)}
+                  <input className="fi" placeholder="Search port name, code or city…" value={fromPort} onChange={e=>{setFromPort(e.target.value);setSearchMode(null);setPortF(null);setShowManualFrom(false);}} onFocus={()=>searchPort(fromPort,setFromSugg)}/>
+                  {fromSugg.length>0&&(<div className="ac" style={{position:'absolute',zIndex:200}}>{fromSugg.map(p=>(<div key={p.id} className="ac-item" onClick={()=>{setFromPort(p.name);setFromSugg([]);setSearchMode(null);setPortF(p);setShowManualFrom(false);}}><span>📍</span><div><div style={{fontWeight:600,fontSize:'0.82rem'}}>{p.name}</div><div style={{fontSize:'0.67rem',color:'var(--text2)'}}>{p.city} · {p.country}</div><div style={{fontSize:'0.62rem',color:'var(--text3)'}}>{p.lat?.toFixed(4)}°N / {p.lon?.toFixed(4)}°E · {p.id}</div></div></div>))}</div>)}
                 </div>
-                {/* ADDED: manual lat/lon entry for departure */}
                 {manualCoordSection('Departure',showManualFrom,setShowManualFrom,manualFromLat,setManualFromLat,manualFromLon,setManualFromLon,manualFromName,setManualFromName,applyManualFrom,portF?.id==='CUSTOM_DEP')}
               </div>
 
-              {/* Arrival port */}
               <div className="p-section">
                 <span className="p-label">🏁 Arrival Port</span>
                 <div style={{position:'relative'}}>
-                  <input className="fi" placeholder="Search port name, code or city…" value={toPort}
-                    onChange={e=>{setToPort(e.target.value);setSearchMode(null);setPortT(null);setShowManualTo(false);}}
-                    onFocus={()=>searchPort(toPort,setToSugg)}/>
-                  {toSugg.length>0&&(<div className="ac" style={{position:'absolute',zIndex:200}}>
-                    {toSugg.map(p=>(<div key={p.id} className="ac-item" onClick={()=>{setToPort(p.name);setToSugg([]);setSearchMode(null);setPortT(null);setShowManualTo(false);}}>
-                      <span>🏁</span>
-                      <div>
-                        <div style={{fontWeight:600,fontSize:'0.82rem'}}>{p.name}</div>
-                        <div style={{fontSize:'0.67rem',color:'var(--text2)'}}>{p.city} · {p.country}</div>
-                        <div style={{fontSize:'0.62rem',color:'var(--text3)'}}>{p.lat?.toFixed(4)}°N / {p.lon?.toFixed(4)}°E · {p.id}</div>
-                      </div>
-                    </div>))}
-                  </div>)}
+                  <input className="fi" placeholder="Search port name, code or city…" value={toPort} onChange={e=>{setToPort(e.target.value);setSearchMode(null);setPortT(null);setShowManualTo(false);}} onFocus={()=>searchPort(toPort,setToSugg)}/>
+                  {toSugg.length>0&&(<div className="ac" style={{position:'absolute',zIndex:200}}>{toSugg.map(p=>(<div key={p.id} className="ac-item" onClick={()=>{setToPort(p.name);setToSugg([]);setSearchMode(null);setPortT(p);setShowManualTo(false);}}><span>🏁</span><div><div style={{fontWeight:600,fontSize:'0.82rem'}}>{p.name}</div><div style={{fontSize:'0.67rem',color:'var(--text2)'}}>{p.city} · {p.country}</div><div style={{fontSize:'0.62rem',color:'var(--text3)'}}>{p.lat?.toFixed(4)}°N / {p.lon?.toFixed(4)}°E · {p.id}</div></div></div>))}</div>)}
                 </div>
-                {/* ADDED: manual lat/lon entry for arrival */}
                 {manualCoordSection('Arrival',showManualTo,setShowManualTo,manualToLat,setManualToLat,manualToLon,setManualToLon,manualToName,setManualToName,applyManualTo,portT?.id==='CUSTOM_ARR')}
               </div>
 
-              {/* Vessel parameters */}
               <div className="p-section">
                 <button onClick={()=>setShowVessel(v=>!v)} style={{width:'100%',display:'flex',justifyContent:'space-between',alignItems:'center',background:'var(--bg2)',border:'1px solid var(--border)',borderRadius:8,padding:'8px 12px',cursor:'pointer',color:'var(--text)',fontSize:'0.78rem',fontWeight:600}}>
                   <span>🚢 Vessel Parameters</span>
@@ -495,49 +632,27 @@ function RoutePlannerPage({ notify, sheetRoutes=[], portsDb=[] }){
                 </div>)}
               </div>
 
-              {/* Search button */}
-              {(!searchMode||searchMode===null)&&(
-                <button className="btn btn-primary" style={{width:'100%',justifyContent:'center',marginBottom:'0.6rem'}} onClick={handleSearch}>
-                  🔍 Search Routes
-                </button>
-              )}
+              {(!searchMode||searchMode===null)&&<button className="btn btn-primary" style={{width:'100%',justifyContent:'center',marginBottom:'0.6rem'}} onClick={handleSearch}>🔍 Search Routes</button>}
 
-              {/* Choice panel */}
               {searchMode==='choose'&&(<>
-                {dbSuggestions.length>0&&(
-                  <div style={{marginBottom:'0.8rem',background:'rgba(0,180,216,0.07)',border:'1px solid rgba(0,180,216,0.3)',borderRadius:10,padding:10}}>
-                    <div style={{fontSize:'0.74rem',color:'var(--cyan)',fontWeight:700,marginBottom:6}}>📂 {dbSuggestions.length} ECDIS route{dbSuggestions.length>1?'s':''} found — select to use:</div>
-                    {dbSuggestions.map((r,i)=>{
-                      const allVals=Object.entries(r).filter(([k,v])=>v&&typeof v==='string'&&v.trim().length>2);
-                      const nameCols=allVals.filter(([k])=>/(name|route|file|rtz|title)/i.test(k));
-                      const portCols=allVals.filter(([k])=>/(port|from|to|dep|arr|desc)/i.test(k));
-                      const name=r.fileName||r['File Name']||r['Route Name']||nameCols[0]?.[1]||allVals[0]?.[1]||`Route ${i+1}`;
-                      const port=r.portName||r['Port Name']||r['From']||portCols[0]?.[1]||'';
-                      const hasUrl=!!(r.fileUrl||r['File URL']||r['Drive Link']||Object.values(r).find(v=>typeof v==='string'&&v.includes('drive.google')));
-                      return(<div key={i} style={{display:'flex',alignItems:'center',gap:8,padding:'8px 10px',borderRadius:8,background:'rgba(0,0,0,0.2)',marginBottom:5,cursor:'pointer',border:'1px solid rgba(255,255,255,0.06)'}} onClick={()=>useDbRoute(r)}>
-                        <span style={{fontSize:'1.1rem'}}>{hasUrl?'📥':'📋'}</span>
-                        <div style={{flex:1,minWidth:0}}>
-                          <div style={{fontSize:'0.8rem',fontWeight:600,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{name}</div>
-                          {port&&<div style={{fontSize:'0.68rem',color:'var(--cyan)',marginTop:1}}>📍 {port}</div>}
-                        </div>
-                        <button style={{background:'var(--cyan)',color:'#000',border:'none',borderRadius:6,padding:'4px 10px',fontSize:'0.68rem',fontWeight:700,cursor:'pointer'}}>USE</button>
-                      </div>);
-                    })}
-                    <div style={{fontSize:'0.67rem',color:'var(--text2)',marginTop:6,textAlign:'center'}}>— or generate a new route —</div>
-                  </div>
-                )}
-                <button className="btn btn-primary" style={{width:'100%',justifyContent:'center',marginBottom:6}} onClick={handleGenerateAutoRoute} disabled={isGenerating}>
-                  {isGenerating?'⏳ Computing via SeaRoute…':'🗺 Generate Auto Route'}
-                </button>
+                {dbSuggestions.length>0&&(<div style={{marginBottom:'0.8rem',background:'rgba(0,180,216,0.07)',border:'1px solid rgba(0,180,216,0.3)',borderRadius:10,padding:10}}>
+                  <div style={{fontSize:'0.74rem',color:'var(--cyan)',fontWeight:700,marginBottom:6}}>📂 {dbSuggestions.length} ECDIS route{dbSuggestions.length>1?'s':''} found:</div>
+                  {dbSuggestions.map((r,i)=>{
+                    const allVals=Object.entries(r).filter(([k,v])=>v&&typeof v==='string'&&v.trim().length>2);
+                    const nameCols=allVals.filter(([k])=>/(name|route|file|rtz|title)/i.test(k));
+                    const portCols=allVals.filter(([k])=>/(port|from|to|dep|arr|desc)/i.test(k));
+                    const name=r.fileName||r['File Name']||r['Route Name']||nameCols[0]?.[1]||allVals[0]?.[1]||`Route ${i+1}`;
+                    const port=r.portName||r['Port Name']||r['From']||portCols[0]?.[1]||'';
+                    const hasUrl=!!(r.fileUrl||r['File URL']||r['Drive Link']||Object.values(r).find(v=>typeof v==='string'&&v.includes('drive.google')));
+                    return(<div key={i} style={{display:'flex',alignItems:'center',gap:8,padding:'8px 10px',borderRadius:8,background:'rgba(0,0,0,0.2)',marginBottom:5,cursor:'pointer',border:'1px solid rgba(255,255,255,0.06)'}} onClick={()=>useDbRoute(r)}><span style={{fontSize:'1.1rem'}}>{hasUrl?'📥':'📋'}</span><div style={{flex:1,minWidth:0}}><div style={{fontSize:'0.8rem',fontWeight:600,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{name}</div>{port&&<div style={{fontSize:'0.68rem',color:'var(--cyan)',marginTop:1}}>📍 {port}</div>}</div><button style={{background:'var(--cyan)',color:'#000',border:'none',borderRadius:6,padding:'4px 10px',fontSize:'0.68rem',fontWeight:700,cursor:'pointer'}}>USE</button></div>);
+                  })}
+                  <div style={{fontSize:'0.67rem',color:'var(--text2)',marginTop:6,textAlign:'center'}}>— or generate a new route —</div>
+                </div>)}
+                <button className="btn btn-primary" style={{width:'100%',justifyContent:'center',marginBottom:6}} onClick={handleGenerateAutoRoute} disabled={isGenerating}>{isGenerating?'⏳ Computing via NavisphereX Router…':'🗺 Generate Auto Route'}</button>
                 <button className="btn btn-secondary" style={{width:'100%',justifyContent:'center',fontSize:'0.72rem',padding:'6px'}} onClick={resetSearch}>← Change Ports</button>
               </>)}
 
-              {searchMode==='generating'&&!routeMeta&&(
-                <div style={{textAlign:'center',padding:'1.5rem',color:'var(--text2)',fontSize:'0.8rem'}}>
-                  <div className="spin" style={{margin:'0 auto 10px'}}/>
-                  Computing via SeaRoute network…
-                </div>
-              )}
+              {searchMode==='generating'&&!routeMeta&&(<div style={{textAlign:'center',padding:'1.5rem',color:'var(--text2)',fontSize:'0.8rem'}}><div className="spin" style={{margin:'0 auto 10px'}}/>Computing route via NavisphereX Router…</div>)}
 
               {routeMeta&&searchMode==='done'&&(
                 <div style={{marginBottom:'0.8rem',background:'rgba(0,180,216,0.06)',border:'1px solid rgba(0,180,216,0.2)',borderRadius:10,padding:10}}>
@@ -545,9 +660,9 @@ function RoutePlannerPage({ notify, sheetRoutes=[], portsDb=[] }){
                   <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:4,marginBottom:8}}>
                     {[['Total',`${routeMeta.totalNM.toFixed(0)} NM`],['ETA @12kn',`${routeMeta.etaAt12kn}h`],['ETA @15kn',`${routeMeta.etaAt15kn}h`],['Data',routeMeta.confidence?.split('(')[0]?.trim().substring(0,8)||'—']].map(([k,v])=>(<div key={k} style={{background:'var(--bg2)',borderRadius:6,padding:'5px 8px'}}><div style={{fontSize:'0.6rem',color:'var(--text2)'}}>{k}</div><div style={{fontSize:'0.74rem',color:'var(--gold)',fontFamily:'Orbitron,monospace'}}>{v}</div></div>))}
                   </div>
-                  {routeMeta.canalInfo?.length>0&&routeMeta.canalInfo.map((c,i)=>(<div key={i} style={{padding:'5px 8px',borderRadius:6,marginBottom:3,fontSize:'0.7rem',background:c.status==='OK'?'rgba(0,200,150,0.12)':'rgba(231,76,60,0.14)',border:`1px solid ${c.status==='OK'?'rgba(0,200,150,0.35)':'rgba(231,76,60,0.4)'}`,color:c.status==='OK'?'#00C896':'#ff8080'}}>{c.status==='OK'?'✅':'🚫'} {c.canal}{c.reason&&<span style={{fontSize:'0.63rem',display:'block',opacity:0.85,marginTop:1}}>{c.reason} — {c.alternative}</span>}</div>))}
-                  {routeMeta.approachStartIdx<routeMeta.waypoints?.length-1&&(<div style={{padding:'5px 8px',borderRadius:6,background:'rgba(255,179,71,0.13)',border:'1px solid rgba(255,179,71,0.4)',fontSize:'0.68rem',color:'#FFB347',marginBottom:6}}>⚓ Port approach from WP{routeMeta.approachStartIdx+1}: manual planning required</div>)}
-                  <div style={{padding:'6px 8px',borderRadius:6,background:'rgba(231,76,60,0.08)',border:'1px solid rgba(231,76,60,0.2)',fontSize:'0.65rem',color:'#ff8080',lineHeight:1.45}}>⚠ NOT certified for navigation. Verify with official ENC.</div>
+                  {routeMeta.canalInfo?.length>0&&routeMeta.canalInfo.map((c,i)=>(<div key={i} style={{padding:'5px 8px',borderRadius:6,marginBottom:3,fontSize:'0.7rem',background:c.status==='OK'?'rgba(0,200,150,0.12)':'rgba(231,76,60,0.14)',border:`1px solid ${c.status==='OK'?'rgba(0,200,150,0.35)':'rgba(231,76,60,0.4)'}`,color:c.status==='OK'?'#00C896':'#ff8080'}}>{c.status==='OK'?'✅':'🚫'} {c.canal}{c.reason&&<span style={{fontSize:'0.63rem',display:'block',opacity:0.85,marginTop:1}}>{c.reason}</span>}</div>))}
+                  {renderApiRouteInfo(apiRouteInfo)}
+                  <div style={{padding:'6px 8px',borderRadius:6,background:'rgba(231,76,60,0.08)',border:'1px solid rgba(231,76,60,0.2)',fontSize:'0.65rem',color:'#ff8080',lineHeight:1.45,marginTop:4}}>⚠ NOT certified for navigation. Verify with official ENC.</div>
                   <button className="btn btn-secondary" style={{width:'100%',justifyContent:'center',fontSize:'0.7rem',padding:'5px',marginTop:8}} onClick={()=>setSearchMode('choose')}>↩ Change route selection</button>
                 </div>
               )}
@@ -560,8 +675,12 @@ function RoutePlannerPage({ notify, sheetRoutes=[], portsDb=[] }){
                 <div className="p-section">
                   <span className="p-label">🔍 Route Safety Check</span>
                   <div style={{fontSize:'0.68rem',color:'var(--text2)',marginBottom:6}}>Land (map tiles), rocks/wrecks (OpenSeaMap), piracy/ECA/SECA, TSS, turns.</div>
-                  <button className="btn btn-secondary" style={{width:'100%',justifyContent:'center',marginBottom:8}} disabled={waypoints.length<2||isCheckingAuto} onClick={performAutoRouteCheck}>{isCheckingAuto?'⏳ Checking…':'🔍 Run Route Check'}</button>
+                  <button className="btn btn-secondary" style={{width:'100%',justifyContent:'center',marginBottom:6}} disabled={waypoints.length<2||isCheckingAuto} onClick={performAutoRouteCheck}>{isCheckingAuto?'⏳ Checking…':'🔍 Run Local Check'}</button>
+                  <button style={{width:'100%',display:'flex',justifyContent:'center',alignItems:'center',gap:6,padding:'8px',marginBottom:8,borderRadius:8,cursor:waypoints.length<2||isApiChecking?'not-allowed':'pointer',fontSize:'0.72rem',fontWeight:600,background:'rgba(0,180,216,0.18)',border:'1px solid rgba(0,180,216,0.5)',color:'var(--cyan)',opacity:waypoints.length<2||isApiChecking?0.5:1}} disabled={waypoints.length<2||isApiChecking} onClick={performApiSafetyCheck}>
+                    {isApiChecking?<>⏳ Running API Safety Check…</>:'🛡 Run Full API Safety Check'}
+                  </button>
                   {checkAutoRes.length>0&&renderCheckResults(checkAutoRes)}
+                  {apiSafetyReport&&renderApiSafetyReport(apiSafetyReport)}
                 </div>
               </>)}
 
@@ -571,7 +690,7 @@ function RoutePlannerPage({ notify, sheetRoutes=[], portsDb=[] }){
               </div>
             </>)}
 
-            {/* ═══ MANUAL PANEL ══════════════════════════════════════════════ */}
+            {/* MANUAL PANEL */}
             {panel==='manual'&&(<>
               <div className="p-section">
                 <span className="p-label">✏️ Manual Route Builder</span>
@@ -590,9 +709,13 @@ function RoutePlannerPage({ notify, sheetRoutes=[], portsDb=[] }){
               <div className="p-section"><span className="p-label">🗺 Zone Overlays</span><div className="overlay-grid">{ovCfg.map(ov=>(<button key={ov.k} className={`ov-btn ${overlays[ov.k]?'active':''}`} style={{color:overlays[ov.k]?ov.color:'var(--text2)',borderColor:overlays[ov.k]?ov.color:'var(--border)'}} onClick={()=>toggleOverlay(ov.k)} title={ov.desc}>{overlays[ov.k]?'✓ ':''}{ov.label}</button>))}</div></div>
             </>)}
 
+            {/* LOAD RTZ PANEL */}
             {panel==='load'&&(<><div className="p-section"><span className="p-label">📂 Load RTZ File from your ECDIS</span><div style={{border:'2px dashed var(--border2)',borderRadius:10,padding:'1.5rem',textAlign:'center',background:'var(--bg2)',marginBottom:'0.8rem'}}><div style={{fontSize:'2rem',marginBottom:6}}>📂</div><div style={{fontWeight:600,fontSize:'0.84rem',marginBottom:3}}>Select RTZ File</div><div style={{fontSize:'0.72rem',color:'var(--text2)'}}>Accepts .rtz and .rtzp files</div><input type="file" accept=".rtz,.rtzp" onChange={handleRTZLoad} style={{display:'block',marginTop:10,width:'100%',fontSize:'0.75rem'}}/></div>{waypoints.length>0&&<div className="ok-box" style={{textAlign:'center',fontSize:'0.78rem'}}>✅ {waypoints.length} waypoints loaded</div>}</div><div className="p-section"><span className="p-label">🗺 Zone Overlays</span><div className="overlay-grid">{ovCfg.map(ov=>(<button key={ov.k} className={`ov-btn ${overlays[ov.k]?'active':''}`} style={{color:overlays[ov.k]?ov.color:'var(--text2)',borderColor:overlays[ov.k]?ov.color:'var(--border)'}} onClick={()=>toggleOverlay(ov.k)}>{overlays[ov.k]?'✓ ':''}{ov.label}</button>))}</div></div></>)}
+
             {panel==='eta'&&<ETACalculator totalNM={totalNM}/>}
+
             {panel==='wpts'&&(<><div style={{marginBottom:8,display:'flex',justifyContent:'space-between',alignItems:'center'}}><span style={{fontSize:'0.75rem',color:'var(--text2)'}}>{waypoints.length} waypoints</span>{waypoints.length>0&&<button className="btn btn-danger" style={{padding:'4px 9px',fontSize:'0.7rem'}} onClick={clearRoute}>Clear All</button>}</div>{waypoints.length===0?<div className="empty"><div className="empty-icon">📋</div><div className="empty-t">No Waypoints</div><div className="empty-d">Generate a route or load an RTZ file</div></div>:<div style={{overflowX:'auto'}}><table className="wp-table"><thead><tr><th>WP</th><th>Lat</th><th>Lon</th><th>Crs°</th><th>NM</th><th>Del</th></tr></thead><tbody>{waypoints.map((wp,i)=>(<tr key={i}><td style={{color:'var(--cyan)',fontFamily:'Orbitron,monospace'}}>WP{String(i+1).padStart(2,'0')}</td><td>{wp.lat.toFixed(4)}</td><td>{wp.lon.toFixed(4)}</td><td>{i>0?(wp.bearing||0).toFixed(0):'—'}</td><td>{i>0?(wp.distance||0).toFixed(1):'0'}</td><td><button onClick={()=>removeWP(i)} style={{background:'none',border:'none',color:'var(--red)',cursor:'pointer',fontSize:'0.9rem'}}>✕</button></td></tr>))}</tbody></table><div style={{marginTop:8,padding:'8px',background:'var(--bg2)',borderRadius:8,textAlign:'center',fontFamily:'Orbitron,monospace',fontSize:'0.76rem',color:'var(--gold)'}}>Total: {totalNM.toFixed(1)} NM</div></div>}</>)}
+
           </div>
         </div>
 
@@ -601,4 +724,5 @@ function RoutePlannerPage({ notify, sheetRoutes=[], portsDb=[] }){
     </div>
   );
 }
+
 export default RoutePlannerPage;
