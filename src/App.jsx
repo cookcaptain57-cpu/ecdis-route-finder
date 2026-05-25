@@ -429,7 +429,7 @@ export default function App() {
     setTimeout(() => setChartsSyncProgress(0), 3000);
   };
 
-  // ─── Admin: Sync Ports ONLY ───────────────────────────────────────────────
+  // ─── Admin: Sync Puorts ONLY ───────────────────────────────────────────────
   const refreshPorts = async () => {
     setPortsLoading(true); setPortsSyncProgress(2);
     notify('📡 Fetching ports from Sheet…', 'info');
@@ -558,11 +558,16 @@ export default function App() {
         </div>
       )}
 
-      {/* ── Thin auth shimmer bar — non-blocking, replaces full-screen overlay ── */}
+      {/* ── Full-screen auth loading overlay — completely prevents login flicker ── */}
       {!authChecked && (
-        <div style={{ position: 'fixed', top: 60, left: 0, right: 0, height: 3, zIndex: 200,
-          background: 'linear-gradient(90deg,var(--cyan),var(--blue),var(--cyan))',
-          backgroundSize: '200% 100%', animation: 'shimmer 1.4s linear infinite' }} />
+        <div style={{ position: 'fixed', inset: 0, background: 'var(--bg)', zIndex: 99999,
+          display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 16 }}>
+          <div style={{ fontFamily: 'Orbitron,monospace', fontSize: '1.5rem', fontWeight: 900, letterSpacing: '0.06em' }}>
+            NAVISPHERE<span style={{ color: 'var(--cyan)' }}>X</span>
+          </div>
+          <div style={{ fontSize: '0.64rem', color: 'var(--text3)', letterSpacing: '0.2em' }}>MARINE</div>
+          <div className="spin" style={{ marginTop: 8 }} />
+        </div>
       )}
 
       <div className="grid-bg" />
@@ -587,7 +592,7 @@ export default function App() {
                 </div>
               : authChecked
                 ? <button className="ntab" onClick={() => switchTab('login')}>🔐 Login</button>
-                : <div className="spin" style={{ width: 14, height: 14, flexShrink: 0, marginRight: 4 }} />
+                : null
             }
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
