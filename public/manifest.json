@@ -1,6 +1,6 @@
 {
-  "name": "NavispherX Marine",
-  "short_name": "NavispherX",
+  "name": "NavisphereX Marine",
+  "short_name": "NavisphereX",
   "description": "Smart maritime navigation, ECDIS charts, route planning and marine knowledge platform.",
   "start_url": "/",
   "display": "standalone",
