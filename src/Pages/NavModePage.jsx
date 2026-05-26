@@ -3,211 +3,205 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import ETACalculator from "../components/ETACalculator";
 import aisService from "../services/aisService";
 
-const AISSTREAM_KEY = 'e66d76190c2bf6c206264e3cb894308b853d73df';
 const VESSEL_API_KEY = '7da0c40c639a5f2a7532e75d9cdad6156b65f61932d778c1ce8580f9786e4506';
+const AISSTREAM_KEY  = 'e66d76190c2bf6c206264e3cb894308b853d73df';
 const DEFAULT_COLORS = { route:'#E74C3C', vector:'#00D4FF', ship:'#00D4FF', track:'#00FF88', xtd:'#FFB300' };
 
 const AIS_SOURCES = {
-  safepilot:{ label:'🛟 SafePilot', desc:'Pilot Plug WiFi — full NMEA', color:'#00FF88',
-    hosts:['ws://192.168.1.1:4002','ws://10.0.0.1:4002','ws://192.168.0.1:4002','ws://192.168.1.1:4001','ws://10.0.0.1:10110'] },
-  bridge:{ label:'🖥 Local Bridge', desc:'Termux on device', color:'#00D4FF',
-    hosts:['ws://localhost:4002','ws://127.0.0.1:4002'] },
-  internet:{ label:'🌐 Internet AIS', desc:'VesselAPI + aisstream', color:'#FFD700', hosts:[] },
-  off:{ label:'⭕ Off', desc:'', color:'#4A6080', hosts:[] },
+  safepilot:{ label:'SafePilot P3', color:'#00FF88', hosts:['ws://192.168.1.1:4002','ws://10.0.0.1:4002','ws://10.0.1.1:4002','ws://192.168.1.1:4001'] },
+  bridge:   { label:'Local Bridge',  color:'#00D4FF', hosts:['ws://localhost:4002','ws://127.0.0.1:4002'] },
+  internet: { label:'Internet AIS',  color:'#FFD700', hosts:[] },
+  off:      { label:'Off',           color:'#4A6080', hosts:[] },
 };
 
-const toDMS=(decimal,isLat)=>{
-  const abs=Math.abs(decimal),deg=Math.floor(abs);
-  const minFull=(abs-deg)*60,min=Math.floor(minFull);
-  const sec=((minFull-min)*60).toFixed(1);
-  const dir=isLat?(decimal>=0?'N':'S'):(decimal>=0?'E':'W');
-  return `${deg}\xb0${String(min).padStart(2,'0')}'${String(sec).padStart(4,'0')}"${dir}`;
+const DEPTH_SOURCES = [
+  { id:'none',     label:'Off',      flag:'',    desc:'Base map only' },
+  { id:'usa',      label:'USA',      flag:'',    desc:'NOAA ENC — S-57 detail' },
+  { id:'europe',   label:'Europe',   flag:'',    desc:'EMODnet — high-res coastal' },
+  { id:'global',   label:'Global',   flag:'',    desc:'GEBCO — worldwide coverage' },
+  { id:'soundings',label:'Soundings',flag:'',    desc:'ESRI depth numbers (zoom 9+)' },
+  { id:'all',      label:'All',      flag:'',    desc:'All layers combined' },
+];
+
+const toDMS = (d, isLat) => {
+  const a=Math.abs(d), deg=Math.floor(a), mf=(a-deg)*60, min=Math.floor(mf);
+  const sec=((mf-min)*60).toFixed(1), dir=isLat?(d>=0?'N':'S'):(d>=0?'E':'W');
+  return `${deg}\u00b0${String(min).padStart(2,'0')}'${String(sec).padStart(4,'0')}"${dir}`;
 };
 
-const normalizeRouteCoords=(waypoints)=>{
-  if(!waypoints?.length) return waypoints;
-  const out=[{...waypoints[0]}];
-  for(let i=1;i<waypoints.length;i++){
-    let lon=waypoints[i].lon;const prevLon=out[i-1].lon;
-    while(lon-prevLon>180) lon-=360;
-    while(lon-prevLon<-180) lon+=360;
-    out.push({...waypoints[i],lon});
+const normalizeRoute = (wps) => {
+  if (!wps?.length) return wps;
+  const out=[{...wps[0]}];
+  for(let i=1;i<wps.length;i++){
+    let lon=wps[i].lon; const p=out[i-1].lon;
+    while(lon-p>180) lon-=360; while(lon-p<-180) lon+=360;
+    out.push({...wps[i],lon});
   }
   return out;
 };
 
 export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
-  const mapRef=useRef(null);const leafRef=useRef(null);
-  const baseTileRef=useRef(null);const seamarkRef=useRef(null);
-  const gebcoRefTile=useRef(null);const emodnetTileRef=useRef(null);
-  const encTileRef=useRef(null);const esriBaseRef=useRef(null);
-  const gebcoWmsRef=useRef(null);
+  // ─── REFS ───────────────────────────────────────────────────────────────
+  const mapRef=useRef(null), leafRef=useRef(null);
+  const baseTileRef=useRef(null), seamarkRef=useRef(null);
+  const gebcoRefTile=useRef(null), emodnetTileRef=useRef(null);
+  const encTileRef=useRef(null), esriBaseRef=useRef(null), gebcoWmsRef=useRef(null);
   const layersRef=useRef({route:null,vessel:null,vector:null,ais:{},routeMarkers:[],rbLine:null,rbMarker:null,xtdPort:null,xtdStbd:null,xtdFill:null,pastTrack:null});
-  const chartLayersRef=useRef([]);const aisWsRef=useRef(null);const aisIntervalRef=useRef(null);
-  const invalidateTimers=useRef([]);const pastTrackRef=useRef([]);
-  const rbModeRef=useRef(false);const livePosRef=useRef(null);const vectorMinsRef=useRef(6);
-  const colorsRef=useRef(DEFAULT_COLORS);const rbTargetRef=useRef(null);const trackHoursRef=useRef(0);
-  const autoCenterRef=useRef(true);const hudDragRef=useRef(null);const mapBearingRef=useRef(0);
-  const depthCheckOnRef=useRef(false);const contoursRef=useRef({shallow:10,safety:20,deep:200});
-  const aisRangeRef=useRef(0);const aisSourceRef=useRef('internet');
+  const chartLayersRef=useRef([]), aisWsRef=useRef(null), aisIntervalRef=useRef(null);
+  const invalidateTimers=useRef([]), pastTrackRef=useRef([]);
+  const rbModeRef=useRef(false), livePosRef=useRef(null), vectorMinsRef=useRef(6);
+  const colorsRef=useRef(DEFAULT_COLORS), rbTargetRef=useRef(null), trackHoursRef=useRef(0);
+  const autoCenterRef=useRef(true), hudDragRef=useRef(null), mapBearingRef=useRef(0);
+  const depthCheckOnRef=useRef(false), contoursRef=useRef({shallow:10,safety:20,deep:200,draft:6});
+  const aisRangeRef=useRef(0), aisSourceRef=useRef('internet');
 
+  // ─── STATE ──────────────────────────────────────────────────────────────
+  const ls = k => localStorage.getItem(k);
   const [mapReady,setMapReady]=useState(false);
-  const [gpsOn,setGpsOn]=useState(()=>localStorage.getItem('nav_gpsOn')==='true');
-  const [aisOn,setAisOn]=useState(()=>localStorage.getItem('nav_aisOn')==='true');
-  const [gebcoOn,setGebcoOn]=useState(()=>localStorage.getItem('nav_gebcoOn')==='true');
+  const [gpsOn,setGpsOn]=useState(()=>ls('nav_gpsOn')==='true');
   const [aisTargets,setAisTargets]=useState({});
-  const [autoCenter,setAutoCenterRaw]=useState(()=>localStorage.getItem('nav_autoCenter')!=='false');
-  const [mapMode,setMapMode]=useState(()=>localStorage.getItem('nav_mapMode')||'night');
-  const [displayMode,setDisplayMode]=useState(()=>localStorage.getItem('nav_displayMode')||'north');
-  const [activeRoute,setActiveRoute]=useState(()=>{try{return JSON.parse(localStorage.getItem('nav_activeRoute')||'null');}catch{return null;}});
+  const [autoCenter,setAutoCenterRaw]=useState(()=>ls('nav_autoCenter')!=='false');
+  const [mapMode,setMapMode]=useState(()=>ls('nav_mapMode')||'night');
+  const [displayMode,setDisplayMode]=useState(()=>ls('nav_displayMode')||'north');
+  const [depthSource,setDepthSource]=useState(()=>ls('nav_depthSource')||'none');
+  const [activeRoute,setActiveRoute]=useState(()=>{try{return JSON.parse(ls('nav_activeRoute')||'null');}catch{return null;}});
   const [livePos,setLivePos]=useState(null);
   const [selectedWpIdx,setSelectedWpIdx]=useState(0);
-  const [rbMode,setRbMode]=useState(false);const [rbResult,setRbResult]=useState(null);
-  const [etaResult,setEtaResult]=useState(null);const [activePanel,setActivePanel]=useState('route');
-  const [vectorMins,setVectorMins]=useState(()=>Number(localStorage.getItem('nav_vectorMins')||6));
-  const [colors,setColors]=useState(()=>{try{return JSON.parse(localStorage.getItem('nav_colors')||'null')||DEFAULT_COLORS;}catch{return DEFAULT_COLORS;}});
-  const [hudCollapsed,setHudCollapsed]=useState(()=>localStorage.getItem('nav_hudCollapsed')==='true');
-  const [togCollapsed,setTogCollapsed]=useState(()=>localStorage.getItem('nav_togCollapsed')==='true');
+  const [rbMode,setRbMode]=useState(false), [rbResult,setRbResult]=useState(null);
+  const [etaResult,setEtaResult]=useState(null), [activePanel,setActivePanel]=useState('route');
+  const [vectorMins,setVectorMins]=useState(()=>Number(ls('nav_vectorMins')||6));
+  const [colors,setColors]=useState(()=>{try{return JSON.parse(ls('nav_colors')||'null')||DEFAULT_COLORS;}catch{return DEFAULT_COLORS;}});
+  const [hudCollapsed,setHudCollapsed]=useState(()=>ls('nav_hudCollapsed')==='true');
+  const [togCollapsed,setTogCollapsed]=useState(()=>ls('nav_togCollapsed')==='true');
   const [panelCollapsed,setPanelCollapsed]=useState(false);
-  const [hudPos,setHudPos]=useState(()=>{try{return JSON.parse(localStorage.getItem('nav_hudPos')||'{"x":8,"y":54}');}catch{return{x:8,y:54};}});
-  const [trackHours,setTrackHours]=useState(()=>Number(localStorage.getItem('nav_trackHours')||0));
-  const [savedRoutes,setSavedRoutes]=useState(()=>{try{return JSON.parse(localStorage.getItem('nav_savedRoutes')||'[]');}catch{return[];}});
-  const [savedSearch,setSavedSearch]=useState('');const [dbSearch,setDbSearch]=useState('');
-  const [chartOverlays,setChartOverlays]=useState([]);const [showMenu,setShowMenu]=useState(false);
-  const [menuCat,setMenuCat]=useState('colors');
-  const [aisRange,setAisRange]=useState(()=>Number(localStorage.getItem('nav_aisRange')||0));
-  const [shallowDepth,setShallowDepth]=useState(()=>Number(localStorage.getItem('nav_shallowDepth')||10));
-  const [safetyDepth,setSafetyDepth]=useState(()=>Number(localStorage.getItem('nav_safetyDepth')||20));
-  const [deepDepth,setDeepDepth]=useState(()=>Number(localStorage.getItem('nav_deepDepth')||200));
-  const [shipDraft,setShipDraft]=useState(()=>Number(localStorage.getItem('nav_draft')||6));
+  const [hudPos,setHudPos]=useState(()=>{try{return JSON.parse(ls('nav_hudPos')||'{"x":8,"y":54}');}catch{return{x:8,y:54};}});
+  const [trackHours,setTrackHours]=useState(()=>Number(ls('nav_trackHours')||0));
+  const [savedRoutes,setSavedRoutes]=useState(()=>{try{return JSON.parse(ls('nav_savedRoutes')||'[]');}catch{return[];}});
+  const [savedSearch,setSavedSearch]=useState(''), [dbSearch,setDbSearch]=useState('');
+  const [chartOverlays,setChartOverlays]=useState([]);
+  const [showMenu,setShowMenu]=useState(false), [menuCat,setMenuCat]=useState('colors');
+  const [aisRange,setAisRange]=useState(()=>Number(ls('nav_aisRange')||0));
+  const [shallowDepth,setShallowDepth]=useState(()=>Number(ls('nav_shallowDepth')||10));
+  const [safetyDepth,setSafetyDepth]=useState(()=>Number(ls('nav_safetyDepth')||20));
+  const [deepDepth,setDeepDepth]=useState(()=>Number(ls('nav_deepDepth')||200));
+  const [shipDraft,setShipDraft]=useState(()=>Number(ls('nav_draft')||6));
   const [depthCheckOn,setDepthCheckOn]=useState(false);
+  const [xtdNM,setXtdNM]=useState(()=>Number(ls('nav_xtdNM')||1.0));
+  const [aisSource,setAisSource]=useState(()=>ls('nav_aisSource')||'internet');
   const [aisStatus,setAisStatus]=useState('off');
-  const [xtdNM,setXtdNM]=useState(()=>Number(localStorage.getItem('nav_xtdNM')||1.0));
-  const [aisSource,setAisSource]=useState(()=>localStorage.getItem('nav_aisSource')||'internet');
   const [localAisStatus,setLocalAisStatus]=useState('off');
   const [localAisCount,setLocalAisCount]=useState(0);
-  const [localAisHost,setLocalAisHost]=useState(()=>localStorage.getItem('nav_localAisHost')||'ws://localhost:4002');
+  const [localAisHost,setLocalAisHost]=useState(()=>ls('nav_localAisHost')||'ws://localhost:4002');
   const [localAisAlert,setLocalAisAlert]=useState(null);
 
+  // ─── HELPERS ────────────────────────────────────────────────────────────
   const safeInvalidate=useCallback(()=>{
-    invalidateTimers.current.forEach(clearTimeout);invalidateTimers.current=[];
-    const fix=()=>{try{leafRef.current?.invalidateSize({animate:false});}catch{}};
-    fix();invalidateTimers.current=[100,300,600,1000,1800].map(t=>setTimeout(fix,t));
+    invalidateTimers.current.forEach(clearTimeout); invalidateTimers.current=[];
+    const f=()=>{try{leafRef.current?.invalidateSize({animate:false});}catch{}};
+    f(); invalidateTimers.current=[100,300,600,1000,1800].map(t=>setTimeout(f,t));
   },[]);
 
-  const distanceNM=(lat1,lon1,lat2,lon2)=>{
-    const R=3440.065,d=Math.PI/180;
-    const a=Math.sin(((lat2-lat1)*d)/2)**2+Math.cos(lat1*d)*Math.cos(lat2*d)*Math.sin(((lon2-lon1)*d)/2)**2;
-    return 2*R*Math.asin(Math.sqrt(a));
-  };
-  const calcCPA=(own,tgt)=>{const dx=tgt.lon-own.lon,dy=tgt.lat-own.lat;const tcpaHours=((dx*tgt.cog-dy*own.cog)||0)/1000;return{cpa:distanceNM(own.lat,own.lon,tgt.lat,tgt.lon),tcpa:Math.max(tcpaHours,0)};};
-  const getCOLREG=(own,tgt)=>{const bearing=(Math.atan2(tgt.lon-own.lon,tgt.lat-own.lat)*180)/Math.PI+360;const rel=(bearing-own.cog+360)%360;if(rel>345||rel<15) return "HEAD-ON \u26a0";if(rel>112.5&&rel<247.5) return "OVERTAKING \u26a0";if(rel>15&&rel<112.5) return "CROSSING (STBD GIVE WAY)";if(rel>247.5&&rel<345) return "CROSSING (YOU GIVE WAY)";return "SAFE";};
-  const calcBearing=(lat1,lon1,lat2,lon2)=>{const D=Math.PI/180,dLon=(lon2-lon1)*D;const y=Math.sin(dLon)*Math.cos(lat2*D);const x=Math.cos(lat1*D)*Math.sin(lat2*D)-Math.sin(lat1*D)*Math.cos(lat2*D)*Math.cos(dLon);return((Math.atan2(y,x)/D)+360)%360;};
-  const offsetPoint=(lat,lon,bearingDeg,distNM)=>{const R=3440.065,d=distNM/R,b=bearingDeg*Math.PI/180;const phi1=lat*Math.PI/180,lam1=lon*Math.PI/180;const phi2=Math.asin(Math.sin(phi1)*Math.cos(d)+Math.cos(phi1)*Math.sin(d)*Math.cos(b));const lam2=lam1+Math.atan2(Math.sin(b)*Math.sin(d)*Math.cos(phi1),Math.cos(d)-Math.sin(phi1)*Math.sin(phi2));return[phi2*180/Math.PI,lam2*180/Math.PI];};
+  const distNM=(a,b,c,d)=>{const R=3440.065,r=Math.PI/180,x=Math.sin(((d-b)*r)/2)**2+Math.cos(b*r)*Math.cos(d*r)*Math.sin(((c-a)*r)/2)**2;return 2*R*Math.asin(Math.sqrt(x));};
+  const brg=(a,b,c,d)=>{const r=Math.PI/180,dl=(d-b)*r,y=Math.sin(dl)*Math.cos(d*r),x=Math.cos(a*r)*Math.sin(d*r)-Math.sin(a*r)*Math.cos(d*r)*Math.cos(dl);return((Math.atan2(y,x)/r)+360)%360;};
+  const calcCPA=(o,t)=>{const dx=t.lon-o.lon,dy=t.lat-o.lat,h=((dx*t.cog-dy*o.cog)||0)/1000;return{cpa:distNM(o.lat,o.lon,t.lat,t.lon),tcpa:Math.max(h,0)};};
+  const colreg=(o,t)=>{const b=(Math.atan2(t.lon-o.lon,t.lat-o.lat)*180/Math.PI+360)%360,r=(b-o.cog+360)%360;if(r>345||r<15) return "HEAD-ON";if(r>112.5&&r<247.5) return "OVERTAKING";if(r>15&&r<112.5) return "CROSSING-STBD";return "CROSSING-PORT";};
+  const offsetPt=(lat,lon,bd,dn)=>{const R=3440.065,d=dn/R,b=bd*Math.PI/180,p1=lat*Math.PI/180,l1=lon*Math.PI/180,p2=Math.asin(Math.sin(p1)*Math.cos(d)+Math.cos(p1)*Math.sin(d)*Math.cos(b)),l2=l1+Math.atan2(Math.sin(b)*Math.sin(d)*Math.cos(p1),Math.cos(d)-Math.sin(p1)*Math.sin(p2));return[p2*180/Math.PI,l2*180/Math.PI];};
 
-  const renderShipMarker=(fix)=>{
+  const renderShip=(fix)=>{
     if(!leafRef.current||!window.L) return;
-    const L=window.L,c=colorsRef.current;
-    const iconRotation=(fix.cog-mapBearingRef.current+360)%360;
-    const shipIcon=L.divIcon({html:`<div style="transform:rotate(${iconRotation}deg);transform-origin:center;width:20px;height:28px;"><svg width="20" height="28" viewBox="0 0 20 28" fill="none"><polygon points="10,1 19,27 10,21 1,27" fill="${c.ship}" stroke="#fff" stroke-width="1.5"/></svg></div>`,className:'',iconSize:[20,28],iconAnchor:[10,14]});
-    if(!layersRef.current.vessel){layersRef.current.vessel=L.marker([fix.lat,fix.lon],{icon:shipIcon,zIndexOffset:9999}).addTo(leafRef.current);}
-    else{layersRef.current.vessel.setLatLng([fix.lat,fix.lon]);layersRef.current.vessel.setIcon(shipIcon);layersRef.current.vessel.setZIndexOffset(9999);}
-    const RAD=Math.PI/180,lookNM=Math.max(fix.sog,0.3)*(vectorMinsRef.current/60);
-    const vLat=fix.lat+(lookNM/60)*Math.cos(fix.cog*RAD),vLon=fix.lon+(lookNM/60)*Math.sin(fix.cog*RAD);
-    if(layersRef.current.vector){layersRef.current.vector.setLatLngs([[fix.lat,fix.lon],[vLat,vLon]]);layersRef.current.vector.setStyle({color:c.vector});}
-    else{layersRef.current.vector=L.polyline([[fix.lat,fix.lon],[vLat,vLon]],{color:c.vector,weight:2,opacity:0.85,dashArray:'5 3'}).addTo(leafRef.current);}
-    if(autoCenterRef.current){try{const map=leafRef.current,sz=map.getSize(),pt=map.project([fix.lat,fix.lon],map.getZoom());map.panTo(map.unproject(pt.subtract([0,sz.y*0.2]),map.getZoom()),{animate:true,duration:0.3});}catch{leafRef.current.panTo([fix.lat,fix.lon]);}}
+    const L=window.L,c=colorsRef.current,rot=(fix.cog-mapBearingRef.current+360)%360;
+    const icon=L.divIcon({html:`<div style="transform:rotate(${rot}deg);transform-origin:center;width:20px;height:28px;"><svg width="20" height="28" viewBox="0 0 20 28" fill="none"><polygon points="10,1 19,27 10,21 1,27" fill="${c.ship}" stroke="#fff" stroke-width="1.5"/></svg></div>`,className:'',iconSize:[20,28],iconAnchor:[10,14]});
+    if(!layersRef.current.vessel) layersRef.current.vessel=L.marker([fix.lat,fix.lon],{icon,zIndexOffset:9999}).addTo(leafRef.current);
+    else{layersRef.current.vessel.setLatLng([fix.lat,fix.lon]);layersRef.current.vessel.setIcon(icon);layersRef.current.vessel.setZIndexOffset(9999);}
+    const r=Math.PI/180,nm=Math.max(fix.sog,0.3)*(vectorMinsRef.current/60);
+    const vl=fix.lat+(nm/60)*Math.cos(fix.cog*r),vn=fix.lon+(nm/60)*Math.sin(fix.cog*r);
+    if(layersRef.current.vector){layersRef.current.vector.setLatLngs([[fix.lat,fix.lon],[vl,vn]]);layersRef.current.vector.setStyle({color:c.vector});}
+    else layersRef.current.vector=L.polyline([[fix.lat,fix.lon],[vl,vn]],{color:c.vector,weight:2,opacity:0.85,dashArray:'5 3'}).addTo(leafRef.current);
+    if(autoCenterRef.current){try{const m=leafRef.current,s=m.getSize(),p=m.project([fix.lat,fix.lon],m.getZoom());m.panTo(m.unproject(p.subtract([0,s.y*0.2]),m.getZoom()),{animate:true,duration:0.3});}catch{leafRef.current.panTo([fix.lat,fix.lon]);}}
   };
 
-  const tryParseXml=(text,filename)=>{try{const doc=new DOMParser().parseFromString(text,'application/xml');if(doc.querySelector('parsererror')) return null;const wps=[];doc.querySelectorAll('waypoint,Waypoint').forEach(w=>{const pos=w.querySelector('position,Position');if(!pos) return;const lat=parseFloat(pos.getAttribute('lat')||pos.getAttribute('Lat'));const lon=parseFloat(pos.getAttribute('lon')||pos.getAttribute('Lon'));if(!isNaN(lat)&&!isNaN(lon)) wps.push({lat,lon,name:w.getAttribute('name')||w.getAttribute('Name')||''});});if(!wps.length) doc.querySelectorAll('rtept,wpt,trkpt').forEach(pt=>{const lat=parseFloat(pt.getAttribute('lat')),lon=parseFloat(pt.getAttribute('lon'));if(!isNaN(lat)&&!isNaN(lon)) wps.push({lat,lon,name:pt.querySelector('name')?.textContent?.trim()||''});});if(!wps.length) doc.querySelectorAll('WP,wp,Point,point,Wpt').forEach(el=>{const lat=parseFloat(el.getAttribute('Lat')||el.getAttribute('lat')||el.getAttribute('latitude'));const lon=parseFloat(el.getAttribute('Lon')||el.getAttribute('lon')||el.getAttribute('longitude'));if(!isNaN(lat)&&!isNaN(lon)) wps.push({lat,lon,name:el.getAttribute('Name')||el.getAttribute('name')||''});});if(!wps.length) return null;const nm=doc.querySelector('route,Route')?.getAttribute('name')||doc.querySelector('route,Route')?.getAttribute('Name')||doc.querySelector('gpx>metadata>name,rte>name')?.textContent?.trim()||filename;return{name:nm,waypoints:wps};}catch{return null;}};
-  const tryParseJson=(text,filename)=>{try{const p=JSON.parse(text);if(Array.isArray(p)){const w=p.filter(x=>x.lat!=null&&x.lon!=null);if(w.length) return{name:filename,waypoints:w};}const w=p.waypoints||p.Waypoints||p.route?.waypoints;if(w?.length) return{name:p.name||p.Name||filename,waypoints:w};return null;}catch{return null;}};
-  const tryParseDelimited=(text,filename)=>{try{const lines=text.split('\n').map(l=>l.trim()).filter(l=>l&&!l.startsWith('#'));const wps=[];for(const line of lines){if(/^(lat|lon|name|waypoint|wp|no\.|id)/i.test(line)) continue;const parts=line.split(/[,\t;|]+/).map(p=>p.replace(/["']/g,'').trim());if(parts.length<2) continue;let lat=parseFloat(parts[0]),lon=parseFloat(parts[1]),name=parts[2]||'';if(!isNaN(parseFloat(parts[0]))&&isNaN(parseFloat(parts[1]))&&parts.length>=3){lat=parseFloat(parts[1]);lon=parseFloat(parts[2]);name=parts[3]||'';}if(!isNaN(lat)&&!isNaN(lon)&&Math.abs(lat)<=90&&Math.abs(lon)<=180) wps.push({lat,lon,name});}return wps.length?{name:filename,waypoints:wps}:null;}catch{return null;}};
-  const parseRouteFile=(text,filename)=>{const ext=filename.toLowerCase().split('.').pop();if(ext==='rtzp') throw new Error('RTZP is zipped — unzip the .rtz inside.');if(ext==='xlsx') throw new Error('XLSX — export as CSV from your ECDIS.');if(text.trim().startsWith('<')||['rtz','gpx','rte','rt3','rt4','rtx','rtu','xml','wpt'].includes(ext)){const r=tryParseXml(text,filename);if(r) return r;}if(ext==='json'||text.trim().startsWith('{')||text.trim().startsWith('[')){const r=tryParseJson(text,filename);if(r) return r;}const r1=tryParseXml(text,filename);if(r1) return r1;const r2=tryParseJson(text,filename);if(r2) return r2;const r3=tryParseDelimited(text,filename);if(r3) return r3;throw new Error('No waypoints found — check file format.');};
-  const loadRouteFromFile=(e)=>{const file=e.target.files?.[0];if(!file) return;const reader=new FileReader();reader.onload=(ev)=>{try{const route=parseRouteFile(ev.target.result,file.name);if(!route?.waypoints?.length) throw new Error('No waypoints');setActiveRoute(route);setSelectedWpIdx(route.waypoints.length-1);notify(`\u2713 ${route.name} (${route.waypoints.length} WPs)`,'error');}catch(err){notify(`Load failed: ${err.message}`,'error');}};reader.readAsText(file);e.target.value='';};
-  const saveCurrentRoute=()=>{if(!activeRoute) return;setSavedRoutes(prev=>{const idx=prev.findIndex(r=>r.name===activeRoute.name);const updated=idx>=0?prev.map((r,i)=>i===idx?activeRoute:r):[activeRoute,...prev].slice(0,100);localStorage.setItem('nav_savedRoutes',JSON.stringify(updated));return updated;});notify(`\u2713 Saved: ${activeRoute.name}`,'error');};
-  const deleteSavedRoute=(name)=>{setSavedRoutes(prev=>{const u=prev.filter(r=>r.name!==name);localStorage.setItem('nav_savedRoutes',JSON.stringify(u));return u;});};
+  // ─── ROUTE PARSERS ──────────────────────────────────────────────────────
+  const tryXml=(t,f)=>{try{const d=new DOMParser().parseFromString(t,'application/xml');if(d.querySelector('parsererror')) return null;const w=[];d.querySelectorAll('waypoint,Waypoint').forEach(e=>{const p=e.querySelector('position,Position');if(!p) return;const la=parseFloat(p.getAttribute('lat')||p.getAttribute('Lat')),lo=parseFloat(p.getAttribute('lon')||p.getAttribute('Lon'));if(!isNaN(la)&&!isNaN(lo)) w.push({lat:la,lon:lo,name:e.getAttribute('name')||e.getAttribute('Name')||''});});if(!w.length) d.querySelectorAll('rtept,wpt,trkpt').forEach(e=>{const la=parseFloat(e.getAttribute('lat')),lo=parseFloat(e.getAttribute('lon'));if(!isNaN(la)&&!isNaN(lo)) w.push({lat:la,lon:lo,name:e.querySelector('name')?.textContent?.trim()||''});});if(!w.length) return null;const n=d.querySelector('route,Route')?.getAttribute('name')||d.querySelector('gpx>metadata>name,rte>name')?.textContent?.trim()||f;return{name:n,waypoints:w};}catch{return null;}};
+  const tryJson=(t,f)=>{try{const p=JSON.parse(t);if(Array.isArray(p)){const w=p.filter(x=>x.lat!=null&&x.lon!=null);if(w.length) return{name:f,waypoints:w};}const w=p.waypoints||p.Waypoints;if(w?.length) return{name:p.name||f,waypoints:w};return null;}catch{return null;}};
+  const tryDelim=(t,f)=>{try{const w=[];for(const l of t.split('\n').map(x=>x.trim()).filter(x=>x&&!x.startsWith('#'))){if(/^(lat|lon|name|wp)/i.test(l)) continue;const p=l.split(/[,\t;|]+/).map(x=>x.replace(/["']/g,'').trim());if(p.length<2) continue;let la=parseFloat(p[0]),lo=parseFloat(p[1]);if(!isNaN(la)&&!isNaN(lo)&&Math.abs(la)<=90&&Math.abs(lo)<=180) w.push({lat:la,lon:lo,name:p[2]||''});}return w.length?{name:f,waypoints:w}:null;}catch{return null;}};
+  const parseRoute=(t,f)=>{const e=f.toLowerCase().split('.').pop();if(e==='rtzp') throw new Error('RTZP: unzip and load .rtz inside');if(t.trim().startsWith('<')||'rtz gpx rte rt3 rt4 rtx xml wpt'.includes(e)){const r=tryXml(t,f);if(r) return r;}const r2=tryJson(t,f);if(r2) return r2;const r3=tryXml(t,f);if(r3) return r3;const r4=tryDelim(t,f);if(r4) return r4;throw new Error('No waypoints found');};
+  const loadRoute=(e)=>{const fi=e.target.files?.[0];if(!fi) return;const r=new FileReader();r.onload=ev=>{try{const rt=parseRoute(ev.target.result,fi.name);if(!rt?.waypoints?.length) throw new Error('No waypoints');setActiveRoute(rt);setSelectedWpIdx(rt.waypoints.length-1);notify(`\u2713 ${rt.name} (${rt.waypoints.length} WPs)`,'error');}catch(er){notify(`Load failed: ${er.message}`,'error');}};r.readAsText(fi);e.target.value='';};
+  const saveRoute=()=>{if(!activeRoute) return;setSavedRoutes(prev=>{const i=prev.findIndex(r=>r.name===activeRoute.name);const u=i>=0?prev.map((r,j)=>j===i?activeRoute:r):[activeRoute,...prev].slice(0,100);localStorage.setItem('nav_savedRoutes',JSON.stringify(u));return u;});notify(`\u2713 Saved: ${activeRoute.name}`,'error');};
+  const delRoute=(n)=>{setSavedRoutes(prev=>{const u=prev.filter(r=>r.name!==n);localStorage.setItem('nav_savedRoutes',JSON.stringify(u));return u;});};
 
-  const tryParseUserChart=(text,filename)=>{try{const doc=new DOMParser().parseFromString(text,'application/xml');if(doc.querySelector('parsererror')) return null;const root=doc.querySelector('userchart');if(!root) return null;const chartName=root.getAttribute('name')||root.getAttribute('description')||filename;const features=[];doc.querySelectorAll('lines > line').forEach(el=>{const attr=el.querySelector('attribute'),tp=el.querySelector('type');const lineType=parseInt(attr?.getAttribute('lineType')||'1');const checkDanger=tp?.getAttribute('checkDanger')==='1';const coords=[];el.querySelectorAll('vertex').forEach(v=>{const lat=parseFloat(v.getAttribute('latitude')),lon=parseFloat(v.getAttribute('longitude'));if(!isNaN(lat)&&!isNaN(lon)) coords.push([lon,lat]);});if(coords.length>=2) features.push({type:'Feature',properties:{featureType:'line',name:el.getAttribute('name')||'',lineType,checkDanger},geometry:{type:'LineString',coordinates:coords}});});doc.querySelectorAll('labels > label').forEach(el=>{const attr=el.querySelector('attribute'),tp=el.querySelector('type');const labelText=attr?.getAttribute('labelText')||el.getAttribute('name')||'';const checkDanger=tp?.getAttribute('checkDanger')==='1';const v=el.querySelector('vertex');if(!v) return;const lat=parseFloat(v.getAttribute('latitude')),lon=parseFloat(v.getAttribute('longitude'));if(!isNaN(lat)&&!isNaN(lon)) features.push({type:'Feature',properties:{featureType:'label',labelText,checkDanger},geometry:{type:'Point',coordinates:[lon,lat]}});});doc.querySelectorAll('polygons > polygon, areas > area').forEach(el=>{const tp=el.querySelector('type'),checkDanger=tp?.getAttribute('checkDanger')==='1';const coords=[];el.querySelectorAll('vertex').forEach(v=>{const lat=parseFloat(v.getAttribute('latitude')),lon=parseFloat(v.getAttribute('longitude'));if(!isNaN(lat)&&!isNaN(lon)) coords.push([lon,lat]);});if(coords.length>=3){if(coords[0][0]!==coords[coords.length-1][0]||coords[0][1]!==coords[coords.length-1][1]) coords.push(coords[0]);features.push({type:'Feature',properties:{featureType:'polygon',name:el.getAttribute('name')||'',checkDanger},geometry:{type:'Polygon',coordinates:[coords]}});}});doc.querySelectorAll('circles > circle').forEach(el=>{const attr=el.querySelector('attribute'),tp=el.querySelector('type');const radiusNM=parseFloat(attr?.getAttribute('radius')||attr?.getAttribute('rangeOfNotes')||'0.5');const checkDanger=tp?.getAttribute('checkDanger')==='1';const v=el.querySelector('vertex');if(!v) return;const lat=parseFloat(v.getAttribute('latitude')),lon=parseFloat(v.getAttribute('longitude'));if(!isNaN(lat)&&!isNaN(lon)) features.push({type:'Feature',properties:{featureType:'circle',name:el.getAttribute('name')||'',radiusM:radiusNM*1852,checkDanger},geometry:{type:'Point',coordinates:[lon,lat]}});});if(!features.length) return null;return{type:'userchart',name:chartName,summary:`${features.filter(f=>f.properties.featureType==='line').length} lines \u00b7 ${features.filter(f=>f.properties.featureType==='label').length} labels \u00b7 ${features.filter(f=>f.properties.featureType==='polygon').length} areas`,data:{type:'FeatureCollection',features}};}catch{return null;}};
-  const tryParseGeoJSON=(text,filename)=>{try{const d=JSON.parse(text);if(['FeatureCollection','Feature','Point','LineString','Polygon','MultiPoint','MultiLineString','MultiPolygon'].includes(d.type)) return{type:'geojson',name:filename,data:d};return null;}catch{return null;}};
-  const tryParseKML=(text,filename)=>{try{const doc=new DOMParser().parseFromString(text,'application/xml');if(doc.querySelector('parsererror')) return null;const features=[],pc=str=>str.trim().split(/\s+/).map(p=>{const[lo,la]=p.split(',').map(Number);return(!isNaN(la)&&!isNaN(lo))?[lo,la]:null;}).filter(Boolean);doc.querySelectorAll('Placemark').forEach(pm=>{const name=pm.querySelector('name')?.textContent?.trim()||'';const ptEl=pm.querySelector('Point coordinates');if(ptEl){pc(ptEl.textContent).forEach(([lo,la])=>features.push({type:'Feature',properties:{name,featureType:'point'},geometry:{type:'Point',coordinates:[lo,la]}}));}const lsEl=pm.querySelector('LineString coordinates');if(lsEl){const c=pc(lsEl.textContent);if(c.length) features.push({type:'Feature',properties:{name,featureType:'line'},geometry:{type:'LineString',coordinates:c}});}const pgEl=pm.querySelector('Polygon outerBoundaryIs LinearRing coordinates');if(pgEl){const c=pc(pgEl.textContent);if(c.length) features.push({type:'Feature',properties:{name,featureType:'polygon'},geometry:{type:'Polygon',coordinates:[c]}});}});if(!features.length) return null;return{type:'kml',name:doc.querySelector('Document>name')?.textContent?.trim()||filename,data:{type:'FeatureCollection',features}};}catch{return null;}};
-  const loadChartFile=(e)=>{const file=e.target.files?.[0];if(!file) return;const reader=new FileReader();reader.onload=(ev)=>{try{const text=ev.target.result;const overlay=tryParseUserChart(text,file.name)||tryParseGeoJSON(text,file.name)||tryParseKML(text,file.name);if(!overlay) throw new Error('Unsupported format.');if(leafRef.current&&window.L){const L=window.L,map=leafRef.current;if(!map.getPane('chartPane')){const cp=map.createPane('chartPane');cp.style.zIndex='450';cp.style.pointerEvents='none';}const layer=L.geoJSON(overlay.data,{pane:'chartPane',style:(feature)=>{const p=feature.properties,danger=p.checkDanger,dash=p.lineType===2?'8 5':p.lineType===3?'3 5':null;return{color:danger?'#FF2020':'#0055CC',weight:3,opacity:1,dashArray:dash,fillColor:danger?'#FF2020':'#0055CC',fillOpacity:0.12};},pointToLayer:(feature,latlng)=>{const p=feature.properties;if(p.featureType==='label'){return L.marker(latlng,{icon:L.divIcon({html:`<div style="background:rgba(0,0,80,0.75);color:${p.checkDanger?'#FF6060':'#FFFFFF'};font-size:11px;font-weight:700;white-space:nowrap;font-family:monospace;padding:1px 4px;border-radius:3px;pointer-events:none;line-height:1.3;">${p.labelText||''}</div>`,className:'',iconAnchor:[0,8]}),interactive:false,zIndexOffset:300});}if(p.featureType==='circle') return L.circle(latlng,{radius:p.radiusM||926,color:'#0055CC',fillColor:'#0055CC',fillOpacity:0.08,weight:2});return L.circleMarker(latlng,{radius:6,color:'#0055CC',fillOpacity:0.85,weight:2}).bindPopup(`<div style="font-size:12px"><b>${p.name||p.labelText||'Point'}</b></div>`);},onEachFeature:(feature,l)=>{const p=feature.properties;if(['line','polygon'].includes(p.featureType)&&p.name) l.bindPopup(`<div style="font-size:12px"><b style="color:#0055CC">${p.name}</b><br/>${p.checkDanger?'\ud83d\udd34 Danger area':p.featureType}</div>`);}}).addTo(leafRef.current);layer.bringToFront();chartLayersRef.current.push({id:overlay.name,layer});try{const b=layer.getBounds();if(b.isValid()) map.fitBounds(b,{padding:[40,40]});}catch{}}setChartOverlays(prev=>[...prev,{name:overlay.name,summary:overlay.summary||''}]);notify(`\u2713 ${overlay.name}${overlay.summary?' ('+overlay.summary+')':''}`,'error');}catch(err){notify(`Chart load failed: ${err.message}`,'error');}};reader.readAsText(file);e.target.value='';};
-  const removeChart=(name)=>{const idx=chartLayersRef.current.findIndex(c=>c.id===name);if(idx>=0){try{leafRef.current?.removeLayer(chartLayersRef.current[idx].layer);}catch{}chartLayersRef.current.splice(idx,1);}setChartOverlays(prev=>prev.filter(c=>c.name!==name));};
+  // ─── CHART PARSERS ──────────────────────────────────────────────────────
+  const tryUserChart=(t,f)=>{try{const d=new DOMParser().parseFromString(t,'application/xml');if(d.querySelector('parsererror')||!d.querySelector('userchart')) return null;const name=d.querySelector('userchart').getAttribute('name')||f,ft=[];d.querySelectorAll('lines > line').forEach(el=>{const a=el.querySelector('attribute'),tp=el.querySelector('type'),lt=parseInt(a?.getAttribute('lineType')||'1'),cd=tp?.getAttribute('checkDanger')==='1',co=[];el.querySelectorAll('vertex').forEach(v=>{const la=parseFloat(v.getAttribute('latitude')),lo=parseFloat(v.getAttribute('longitude'));if(!isNaN(la)&&!isNaN(lo)) co.push([lo,la]);});if(co.length>=2) ft.push({type:'Feature',properties:{featureType:'line',name:el.getAttribute('name')||'',lineType:lt,checkDanger:cd},geometry:{type:'LineString',coordinates:co}});});d.querySelectorAll('labels > label').forEach(el=>{const a=el.querySelector('attribute'),tp=el.querySelector('type'),lt=a?.getAttribute('labelText')||'',cd=tp?.getAttribute('checkDanger')==='1',v=el.querySelector('vertex');if(!v) return;const la=parseFloat(v.getAttribute('latitude')),lo=parseFloat(v.getAttribute('longitude'));if(!isNaN(la)&&!isNaN(lo)) ft.push({type:'Feature',properties:{featureType:'label',labelText:lt,checkDanger:cd},geometry:{type:'Point',coordinates:[lo,la]}});});d.querySelectorAll('polygons > polygon, areas > area').forEach(el=>{const tp=el.querySelector('type'),cd=tp?.getAttribute('checkDanger')==='1',co=[];el.querySelectorAll('vertex').forEach(v=>{const la=parseFloat(v.getAttribute('latitude')),lo=parseFloat(v.getAttribute('longitude'));if(!isNaN(la)&&!isNaN(lo)) co.push([lo,la]);});if(co.length>=3){if(co[0][0]!==co[co.length-1][0]) co.push(co[0]);ft.push({type:'Feature',properties:{featureType:'polygon',name:el.getAttribute('name')||'',checkDanger:cd},geometry:{type:'Polygon',coordinates:[co]}});}});if(!ft.length) return null;const lines=ft.filter(x=>x.properties.featureType==='line').length,labels=ft.filter(x=>x.properties.featureType==='label').length;return{name,summary:`${lines} lines \u00b7 ${labels} labels`,data:{type:'FeatureCollection',features:ft}};}catch{return null;}};
+  const tryGeoJSON=(t,f)=>{try{const d=JSON.parse(t);if(['FeatureCollection','Feature','Point','LineString','Polygon'].includes(d.type)) return{name:f,data:d};return null;}catch{return null;}};
+  const tryKML=(t,f)=>{try{const d=new DOMParser().parseFromString(t,'application/xml');if(d.querySelector('parsererror')) return null;const ft=[],pc=s=>s.trim().split(/\s+/).map(p=>{const[lo,la]=p.split(',').map(Number);return(!isNaN(la)&&!isNaN(lo))?[lo,la]:null;}).filter(Boolean);d.querySelectorAll('Placemark').forEach(pm=>{const n=pm.querySelector('name')?.textContent?.trim()||'';const pt=pm.querySelector('Point coordinates');if(pt) pc(pt.textContent).forEach(([lo,la])=>ft.push({type:'Feature',properties:{name:n,featureType:'point'},geometry:{type:'Point',coordinates:[lo,la]}}));const ls=pm.querySelector('LineString coordinates');if(ls){const c=pc(ls.textContent);if(c.length) ft.push({type:'Feature',properties:{name:n,featureType:'line'},geometry:{type:'LineString',coordinates:c}});}});if(!ft.length) return null;return{name:f,data:{type:'FeatureCollection',features:ft}};}catch{return null;}};
+  const loadChart=(e)=>{const fi=e.target.files?.[0];if(!fi) return;const r=new FileReader();r.onload=ev=>{try{const t=ev.target.result;const ov=tryUserChart(t,fi.name)||tryGeoJSON(t,fi.name)||tryKML(t,fi.name);if(!ov) throw new Error('Unsupported format. Supported: ECDIS XML, GeoJSON, KML');if(leafRef.current&&window.L){const L=window.L,m=leafRef.current;if(!m.getPane('chartPane')){const cp=m.createPane('chartPane');cp.style.zIndex='450';cp.style.pointerEvents='none';}const layer=L.geoJSON(ov.data,{pane:'chartPane',style:ft=>{const p=ft.properties,dg=p.checkDanger,da=p.lineType===2?'8 5':p.lineType===3?'3 5':null;return{color:dg?'#FF2020':'#0055CC',weight:3,opacity:1,dashArray:da,fillColor:dg?'#FF2020':'#0055CC',fillOpacity:0.12};},pointToLayer:(ft,ll)=>{const p=ft.properties;if(p.featureType==='label') return L.marker(ll,{icon:L.divIcon({html:`<div style="background:rgba(0,0,80,0.75);color:${p.checkDanger?'#FF6060':'#FFF'};font-size:11px;font-weight:700;white-space:nowrap;font-family:monospace;padding:1px 4px;border-radius:3px;pointer-events:none;line-height:1.3;">${p.labelText||''}</div>`,className:'',iconAnchor:[0,8]}),interactive:false,zIndexOffset:300});return L.circleMarker(ll,{radius:6,color:'#0055CC',fillOpacity:0.85,weight:2}).bindPopup(`<b>${p.name||''}</b>`);},onEachFeature:(ft,l)=>{if(ft.properties.name&&ft.properties.featureType!=='label') l.bindPopup(`<b>${ft.properties.name}</b><br/>${ft.properties.checkDanger?'Danger':'Feature'}`);}}).addTo(m);layer.bringToFront();chartLayersRef.current.push({id:ov.name,layer});try{const b=layer.getBounds();if(b.isValid()) m.fitBounds(b,{padding:[40,40]});}catch{}}setChartOverlays(prev=>[...prev,{name:ov.name,summary:ov.summary||''}]);notify(`\u2713 ${ov.name}${ov.summary?' ('+ov.summary+')':''}`,'error');}catch(er){notify(`Chart failed: ${er.message}`,'error');}};r.readAsText(fi);e.target.value='';};
+  const removeChart=(n)=>{const i=chartLayersRef.current.findIndex(c=>c.id===n);if(i>=0){try{leafRef.current?.removeLayer(chartLayersRef.current[i].layer);}catch{}chartLayersRef.current.splice(i,1);}setChartOverlays(prev=>prev.filter(c=>c.name!==n));};
 
-  // AIS SOURCE SELECTOR EFFECT
+  // ─── AIS SOURCE EFFECT ──────────────────────────────────────────────────
   useEffect(()=>{
     aisSourceRef.current=aisSource;
-    aisService.stop();
-    aisWsRef.current?.close();aisWsRef.current=null;
-    clearInterval(aisIntervalRef.current);aisIntervalRef.current=null;
-    setAisStatus('off');setLocalAisStatus('off');setLocalAisCount(0);
+    aisService.stop(); aisWsRef.current?.close(); aisWsRef.current=null;
+    clearInterval(aisIntervalRef.current); aisIntervalRef.current=null;
+    setAisStatus('off'); setLocalAisStatus('off'); setLocalAisCount(0);
     if(aisSource==='off'){setAisTargets({});return;}
 
     if(aisSource==='safepilot'||aisSource==='bridge'){
-      const src=AIS_SOURCES[aisSource];
-      const hosts=aisSource==='bridge'?[localAisHost,...src.hosts]:src.hosts;
+      const hosts=aisSource==='bridge'?[localAisHost,...AIS_SOURCES.bridge.hosts]:AIS_SOURCES.safepilot.hosts;
       aisService.start(hosts);
       if(livePosRef.current) aisService.setOwnShip(livePosRef.current);
-      const offStatus=aisService.on('status',({status,targets})=>{setLocalAisStatus(status||'connected');setLocalAisCount(typeof targets==='number'?targets:(targets?.size||0));});
-      const offAlert=aisService.on('alert',(alert)=>{setLocalAisAlert(alert);notify(`\u26a0 COLLISION RISK: ${alert?.name||alert?.mmsi} CPA ${alert?.cpa} NM`,'error');setTimeout(()=>setLocalAisAlert(null),30000);});
-      const offUpdate=aisService.on('update',({target,targets})=>{if(!target?.lat||!target?.lon) return;setAisTargets(prev=>({...prev,[target.mmsi]:{mmsi:target.mmsi,lat:target.lat,lon:target.lon,cog:target.cog||0,sog:target.sog||0,name:target.name||'',cpa:target.cpa,tcpa:target.tcpa,ts:Date.now()}}));setLocalAisCount(targets?.size||0);});
-      return()=>{try{offStatus();}catch{}try{offAlert();}catch{}try{offUpdate();}catch{}aisService.stop();};
+      const off1=aisService.on('status',({status,targets})=>{setLocalAisStatus(status||'connected');setLocalAisCount(typeof targets==='number'?targets:(targets?.size||0));});
+      const off2=aisService.on('alert',al=>{setLocalAisAlert(al);notify(`\u26a0 COLLISION: ${al?.name||al?.mmsi} CPA ${al?.cpa}NM`,'error');setTimeout(()=>setLocalAisAlert(null),30000);});
+      const off3=aisService.on('update',({target,targets})=>{if(!target?.lat||!target?.lon) return;setAisTargets(prev=>({...prev,[target.mmsi]:{mmsi:target.mmsi,lat:target.lat,lon:target.lon,cog:target.cog||0,sog:target.sog||0,name:target.name||'',cpa:target.cpa,tcpa:target.tcpa,ts:Date.now()}}));setLocalAisCount(targets?.size||0);});
+      return()=>{try{off1();off2();off3();}catch{}aisService.stop();};
     }
 
     if(aisSource==='internet'){
-      let retryWs=null;
-      const fetchVesselApi=async()=>{
-        const pos=livePosRef.current,range=aisRangeRef.current||50,lat=pos?.lat||0,lng=pos?.lon||0;
-        const endpoints=[{url:`https://api.vesselapi.com/v1/vessel/list?lat=${lat}&lng=${lng}&radius=${range}`,auth:'header'},{url:`https://api.vesselapi.com/v1/vessels?lat=${lat}&lng=${lng}&radius=${range}`,auth:'header'},{url:`https://api.vesselapi.com/v1/vessel/area?lat=${lat}&lng=${lng}&radius_nm=${range}`,auth:'header'}];
-        for(const ep of endpoints){try{const res=await fetch(ep.url,{headers:{'Authorization':VESSEL_API_KEY,'x-api-key':VESSEL_API_KEY}});if(!res.ok) continue;const data=await res.json();const vessels=data?.vessels||data?.data||data?.results||data?.ships||(Array.isArray(data)?data:[]);if(Array.isArray(vessels)){setAisStatus('connected');const targets={};vessels.forEach(v=>{const mmsi=v.mmsi||v.MMSI||v.id;const lat=parseFloat(v.lat||v.latitude||v.Latitude||0);const lon=parseFloat(v.lon||v.lng||v.longitude||v.Longitude||0);if(mmsi&&lat&&lon&&!(lat===0&&lon===0)) targets[mmsi]={mmsi,lat,lon,cog:parseFloat(v.cog||v.CourseOverGround||0),sog:parseFloat(v.sog||v.SpeedOverGround||v.speed||0),name:(v.name||v.shipName||v.ShipName||'').trim(),ts:Date.now()};});if(Object.keys(targets).length>0){setAisTargets(targets);return;}}}catch{}}
-        startAisstream();
+      let retry=null;
+      const fetchAPI=async()=>{
+        const pos=livePosRef.current,range=aisRangeRef.current||50,la=pos?.lat||0,ln=pos?.lon||0;
+        for(const url of[`https://api.vesselapi.com/v1/vessel/list?lat=${la}&lng=${ln}&radius=${range}`,`https://api.vesselapi.com/v1/vessels?lat=${la}&lng=${ln}&radius=${range}`]){
+          try{const r=await fetch(url,{headers:{'Authorization':VESSEL_API_KEY,'x-api-key':VESSEL_API_KEY}});if(!r.ok) continue;const data=await r.json();const v=data?.vessels||data?.data||data?.results||(Array.isArray(data)?data:[]);if(Array.isArray(v)&&v.length>0){setAisStatus('connected');const t={};v.forEach(x=>{const m=x.mmsi||x.MMSI;const la=parseFloat(x.lat||x.latitude||0),ln=parseFloat(x.lon||x.lng||x.longitude||0);if(m&&la&&ln) t[m]={mmsi:m,lat:la,lon:ln,cog:parseFloat(x.cog||0),sog:parseFloat(x.sog||x.speed||0),name:(x.name||x.shipName||'').trim(),ts:Date.now()};});setAisTargets(t);return;}}catch{}}
+        setAisStatus('connecting');
+        if(aisWsRef.current?.readyState===WebSocket.OPEN) return;
+        const ws=new WebSocket("wss://stream.aisstream.io/v0/stream");
+        aisWsRef.current=ws;
+        ws.onopen=()=>{setAisStatus('connected');ws.send(JSON.stringify({APIKey:AISSTREAM_KEY,BoundingBoxes:[[[-90,-180],[90,180]]],FilterMessageTypes:["PositionReport"]}));};
+        ws.onmessage=msg=>{try{const d=JSON.parse(msg.data);const p=d?.Message?.PositionReport,m=d?.MetaData;if(!p||!m||p.Latitude===0) return;setAisTargets(prev=>({...prev,[m.MMSI]:{mmsi:m.MMSI,name:(m.ShipName||'').trim(),lat:p.Latitude,lon:p.Longitude,cog:p.CourseOverGround||0,sog:p.SpeedOverGround||0,ts:Date.now()}}));}catch{}};
+        ws.onerror=()=>setAisStatus('error');
+        ws.onclose=ev=>{if(ev.code!==1000){setAisStatus('connecting');retry=setTimeout(()=>{if(aisSourceRef.current==='internet') fetchAPI();},5000);}};
       };
-      const startAisstream=()=>{if(aisWsRef.current?.readyState===WebSocket.OPEN) return;setAisStatus('connecting');const ws=new WebSocket("wss://stream.aisstream.io/v0/stream");aisWsRef.current=ws;ws.onopen=()=>{setAisStatus('connected');ws.send(JSON.stringify({APIKey:AISSTREAM_KEY,BoundingBoxes:[[[-90,-180],[90,180]]],FilterMessageTypes:["PositionReport"]}));};ws.onmessage=(msg)=>{try{const d=JSON.parse(msg.data);const p=d?.Message?.PositionReport,m=d?.MetaData;if(!p||!m) return;if(p.Latitude===0&&p.Longitude===0) return;setAisTargets(prev=>({...prev,[m.MMSI]:{mmsi:m.MMSI,name:(m.ShipName||'').trim(),lat:p.Latitude,lon:p.Longitude,cog:p.CourseOverGround||0,sog:p.SpeedOverGround||0,ts:Date.now()}}));}catch{}};ws.onerror=()=>setAisStatus('error');ws.onclose=(ev)=>{if(ev.code!==1000&&ev.code!==1001){setAisStatus('connecting');retryWs=setTimeout(startAisstream,5000);}};};
-      setAisStatus('connecting');fetchVesselApi();aisIntervalRef.current=setInterval(fetchVesselApi,30000);
-      return()=>{clearTimeout(retryWs);clearInterval(aisIntervalRef.current);aisWsRef.current?.close();};
+      setAisStatus('connecting'); fetchAPI();
+      aisIntervalRef.current=setInterval(fetchAPI,30000);
+      return()=>{clearTimeout(retry);clearInterval(aisIntervalRef.current);aisWsRef.current?.close();};
     }
   },[aisSource,localAisHost]);
 
-  // SafePilot own-ship position from $GPRMC
+  // SafePilot own position from $GPRMC
   useEffect(()=>{
     if(aisSource!=='safepilot'&&aisSource!=='bridge') return;
-    const offOwnPos=aisService.on('ownPos',(pos)=>{
-      if(!pos?.lat) return;
-      const fix={lat:pos.lat,lon:pos.lon,sog:pos.sog||0,cog:pos.cog||0,heading:pos.hdg||pos.cog||0,acc:5,fromSafePilot:true};
-      setLivePos(fix);livePosRef.current=fix;aisService.setOwnShip(fix);
-      renderShipMarker(fix);
-      const now=Date.now();pastTrackRef.current.push({lat:fix.lat,lon:fix.lon,t:now});pastTrackRef.current=pastTrackRef.current.filter(p=>p.t>now-24*3600000);
-    });
-    return()=>{try{offOwnPos();}catch{}};
+    const off=aisService.on('ownPos',pos=>{if(!pos?.lat) return;const fix={lat:pos.lat,lon:pos.lon,sog:pos.sog||0,cog:pos.cog||0,heading:pos.hdg||pos.cog||0,acc:5,fromSafePilot:true};setLivePos(fix);livePosRef.current=fix;aisService.setOwnShip(fix);renderShip(fix);const now=Date.now();pastTrackRef.current.push({lat:fix.lat,lon:fix.lon,t:now});pastTrackRef.current=pastTrackRef.current.filter(p=>p.t>now-86400000);});
+    return()=>{try{off();}catch{}};
   },[aisSource]);
 
   useEffect(()=>{if(livePos&&(aisSource==='safepilot'||aisSource==='bridge')) aisService.setOwnShip(livePos);},[livePos,aisSource]);
 
-  // GPS watchPosition (Android — skips when SafePilot active)
+  // GPS
   useEffect(()=>{
     if(!gpsOn) return;
     if(!navigator.geolocation){notify("GPS not supported","error");return;}
-    const id=navigator.geolocation.watchPosition(
-      (pos)=>{
-        try{
-          if((aisSourceRef.current==='safepilot'||aisSourceRef.current==='bridge')&&livePosRef.current?.fromSafePilot) return;
-          const lat=pos.coords.latitude,lon=pos.coords.longitude;
-          const sog=(pos.coords.speed!=null?pos.coords.speed:0)*1.94384;
-          const cog=pos.coords.heading!=null?pos.coords.heading:0;
-          const heading=pos.coords.heading!=null?pos.coords.heading:0;
-          const acc=pos.coords.accuracy!=null?pos.coords.accuracy:0;
-          const fix={lat,lon,sog,cog,heading,acc};
-          setLivePos(fix);livePosRef.current=fix;
-          const now=Date.now();pastTrackRef.current.push({lat,lon,t:now});pastTrackRef.current=pastTrackRef.current.filter(p=>p.t>now-24*3600000);
-          renderShipMarker(fix);
-          const th=trackHoursRef.current;
-          if(th>0&&window.L){const cutoff=now-th*3600000;const pts=pastTrackRef.current.filter(p=>p.t>cutoff).map(p=>[p.lat,p.lon]);if(pts.length>1){const L=window.L,c=colorsRef.current;if(layersRef.current.pastTrack){layersRef.current.pastTrack.setLatLngs(pts);layersRef.current.pastTrack.setStyle({color:c.track});}else{layersRef.current.pastTrack=L.polyline(pts,{color:c.track,weight:2,opacity:0.7}).addTo(leafRef.current);}}}
-          else if(layersRef.current.pastTrack){leafRef.current?.removeLayer(layersRef.current.pastTrack);layersRef.current.pastTrack=null;}
-          if(rbModeRef.current&&rbTargetRef.current){const tgt=rbTargetRef.current;const rangeNM=distanceNM(lat,lon,tgt.lat,tgt.lon);const bearing=calcBearing(lat,lon,tgt.lat,tgt.lon);setRbResult({rangeNM:rangeNM.toFixed(2),bearing:bearing.toFixed(1),lat:tgt.lat.toFixed(5),lon:tgt.lon.toFixed(5)});if(layersRef.current.rbLine) leafRef.current?.removeLayer(layersRef.current.rbLine);}
-        }catch(err){console.warn('[GPS]',err);}
-      },
-      ()=>notify("GPS error","error"),
-      {enableHighAccuracy:true,maximumAge:0,timeout:30000}
-    );
+    const id=navigator.geolocation.watchPosition(pos=>{
+      try{
+        if((aisSourceRef.current==='safepilot'||aisSourceRef.current==='bridge')&&livePosRef.current?.fromSafePilot) return;
+        const la=pos.coords.latitude,ln=pos.coords.longitude;
+        const sog=(pos.coords.speed||0)*1.94384,cog=pos.coords.heading||0,acc=pos.coords.accuracy||0;
+        const fix={lat:la,lon:ln,sog,cog,heading:cog,acc};
+        setLivePos(fix);livePosRef.current=fix;
+        const now=Date.now();pastTrackRef.current.push({lat:la,lon:ln,t:now});pastTrackRef.current=pastTrackRef.current.filter(p=>p.t>now-86400000);
+        renderShip(fix);
+        if(trackHoursRef.current>0&&window.L){const cut=now-trackHoursRef.current*3600000,pts=pastTrackRef.current.filter(p=>p.t>cut).map(p=>[p.lat,p.lon]);if(pts.length>1){const L=window.L,c=colorsRef.current;if(layersRef.current.pastTrack){layersRef.current.pastTrack.setLatLngs(pts);layersRef.current.pastTrack.setStyle({color:c.track});}else layersRef.current.pastTrack=L.polyline(pts,{color:c.track,weight:2,opacity:0.7}).addTo(leafRef.current);}}
+        else if(layersRef.current.pastTrack){leafRef.current?.removeLayer(layersRef.current.pastTrack);layersRef.current.pastTrack=null;}
+        if(rbModeRef.current&&rbTargetRef.current){const t=rbTargetRef.current;setRbResult({rangeNM:distNM(la,ln,t.lat,t.lon).toFixed(2),bearing:brg(la,ln,t.lat,t.lon).toFixed(1),lat:t.lat.toFixed(5),lon:t.lon.toFixed(5)});if(layersRef.current.rbLine) layersRef.current.rbLine.setLatLngs([[la,ln],[t.lat,t.lon]]);}
+      }catch(e){console.warn('[GPS]',e);}
+    },()=>notify("GPS error","error"),{enableHighAccuracy:true,maximumAge:0,timeout:30000});
     return()=>navigator.geolocation.clearWatch(id);
   },[gpsOn]);
 
@@ -215,41 +209,49 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
   useEffect(()=>{
     if(!leafRef.current||!window.L) return;
     const L=window.L;
-    Object.values(layersRef.current.ais).forEach(m=>{try{leafRef.current.removeLayer(m);}catch{}});layersRef.current.ais={};
-    const range=aisRangeRef.current,pos=livePosRef.current;
+    Object.values(layersRef.current.ais).forEach(m=>{try{leafRef.current.removeLayer(m);}catch{}});
+    layersRef.current.ais={};
+    const rng=aisRangeRef.current,pos=livePosRef.current;
     Object.values(aisTargets).forEach(v=>{
       if(!v.lat||!v.lon) return;
-      if(range>0&&pos){const d=distanceNM(pos.lat,pos.lon,v.lat,v.lon);if(d>range) return;}
-      const ownLL=layersRef.current.vessel?.getLatLng();
-      const cpaData=ownLL&&pos?calcCPA({lat:ownLL.lat,lon:ownLL.lng,cog:pos.cog,sog:pos.sog},v):null;
-      const colreg=ownLL&&pos?getCOLREG({lat:ownLL.lat,lon:ownLL.lng,cog:pos.cog},v):"N/A";
-      const color=cpaData?.cpa<1?"#FF3030":cpaData?.cpa<3?"#FF9500":"#00D4FF";
-      const rangeToTarget=ownLL&&pos?distanceNM(pos.lat,pos.lon,v.lat,v.lon).toFixed(1):'\u2014';
-      const srcLabel=aisSource==='safepilot'?'\ud83d\udce1 SafePilot AIS':aisSource==='bridge'?'\ud83d\udda5 Bridge AIS':'\ud83c\udf10 Internet AIS';
-      const marker=L.circleMarker([v.lat,v.lon],{radius:7,color,fillColor:color,fillOpacity:0.7,weight:2})
-        .bindPopup(`<div style="font-size:13px;min-width:190px;line-height:1.7;padding:4px"><b style="color:${color}">\ud83d\udea2 ${v.name||'AIS Vessel'}</b><br/><span style="font-size:11px;color:#aaa">MMSI: ${v.mmsi}</span><br/><b>SOG</b>: ${v.sog?.toFixed(1)} kn &nbsp; <b>COG</b>: ${v.cog?.toFixed(0)}\xb0<br/><b>Range</b>: ${rangeToTarget} NM<br/><hr style="margin:4px 0;border-color:#333"/><b>CPA</b>: ${cpaData?.cpa?.toFixed(2)||'\u2014'} NM &nbsp;<b>TCPA</b>: ${cpaData?.tcpa?.toFixed(1)||'\u2014'} h<br/><b>COLREG</b>: ${colreg}<br/>${cpaData?.cpa<1.5?'<span style="color:#FF3030;font-weight:700">\u26a0 COLLISION RISK</span>':''}<br/><span style="font-size:10px;color:#555">${srcLabel}</span></div>`)
+      if(rng>0&&pos&&distNM(pos.lat,pos.lon,v.lat,v.lon)>rng) return;
+      const own=layersRef.current.vessel?.getLatLng();
+      const cp=own&&pos?calcCPA({lat:own.lat,lon:own.lng,cog:pos.cog,sog:pos.sog},v):null;
+      const col=cp?.cpa<1?'#FF3030':cp?.cpa<3?'#FF9500':'#00D4FF';
+      const rng2=own&&pos?distNM(pos.lat,pos.lon,v.lat,v.lon).toFixed(1):'-';
+      const cl=own&&pos?colreg({lat:own.lat,lon:own.lng,cog:pos.cog},v):'N/A';
+      const mk=L.circleMarker([v.lat,v.lon],{radius:7,color:col,fillColor:col,fillOpacity:0.7,weight:2})
+        .bindPopup(`<div style="font-size:13px;min-width:180px;line-height:1.7"><b style="color:${col}">${v.name||'AIS Vessel'}</b><br/><small>MMSI: ${v.mmsi}</small><br/>SOG: ${v.sog?.toFixed(1)}kn COG: ${v.cog?.toFixed(0)}\u00b0<br/>Range: ${rng2}NM<br/>CPA: ${cp?.cpa?.toFixed(2)||'-'}NM TCPA: ${cp?.tcpa?.toFixed(1)||'-'}h<br/>COLREG: ${cl}${cp?.cpa<1.5?'<br/><b style="color:#FF3030">\u26a0 COLLISION RISK</b>':''}</div>`)
         .addTo(leafRef.current);
-      layersRef.current.ais[v.mmsi]=marker;
-      if(cpaData?.cpa<1.5) notify(`\u26a0 CPA Risk: MMSI ${v.mmsi} \u2014 ${cpaData?.cpa?.toFixed(1)} NM`,"error");
+      layersRef.current.ais[v.mmsi]=mk;
+      if(cp?.cpa<1.5) notify(`\u26a0 CPA: MMSI ${v.mmsi} ${cp.cpa.toFixed(1)}NM`,'error');
     });
   },[aisTargets,livePos]);
 
-  // Tile swap - 7 layers
+  // ─── REGIONAL DEPTH TILE SWAP ────────────────────────────────────────────
+  // Each source loads ONLY its specific layers — no clutter from other regions
   useEffect(()=>{
     if(!mapReady||!leafRef.current||!window.L) return;
-    const L=window.L,map=leafRef.current;
-    [baseTileRef,esriBaseRef,emodnetTileRef,gebcoWmsRef,gebcoRefTile,encTileRef,seamarkRef].forEach(r=>{if(r.current){try{map.removeLayer(r.current);}catch{}r.current=null;}});
-    const TILES={night:{url:'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'},day:{url:'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png'},dusk:{url:'https://{s}.basemaps.cartocdn.com/rastertiles/voyager_nolabels/{z}/{x}/{y}{r}.png'}};
-    baseTileRef.current=L.tileLayer((TILES[mapMode]||TILES.night).url,{subdomains:'abcd',maxZoom:20,zIndex:1,attribution:'\xa9 CARTO \xa9 OpenStreetMap'}).addTo(map);
-    if(gebcoOn){
-      esriBaseRef.current=L.tileLayer('https://server.arcgisonline.com/arcgis/rest/services/Ocean/World_Ocean_Base/MapServer/tile/{z}/{y}/{x}',{maxZoom:13,opacity:0.75,zIndex:2,attribution:'\xa9 Esri Ocean'}).addTo(map);
-      try{emodnetTileRef.current=L.tileLayer.wms('https://ows.emodnet-bathymetry.eu/wms',{layers:'emodnet:mean_atlas_land,emodnet:mean_rainbowcolour',format:'image/png',transparent:true,version:'1.3.0',opacity:0.55,zIndex:3,attribution:'\xa9 EMODnet'}).addTo(map);}catch{}
-      try{gebcoWmsRef.current=L.tileLayer.wms('https://www.gebco.net/data_and_products/gebco_web_services/web_map_service/mapserv',{layers:'GEBCO_LATEST_2',format:'image/png',transparent:true,version:'1.3.0',opacity:0.4,zIndex:4,attribution:'\xa9 GEBCO'}).addTo(map);}catch{}
-      gebcoRefTile.current=L.tileLayer('https://server.arcgisonline.com/arcgis/rest/services/Ocean/World_Ocean_Reference/MapServer/tile/{z}/{y}/{x}',{maxZoom:18,opacity:1.0,zIndex:5,attribution:'\xa9 Esri'}).addTo(map);
-      try{encTileRef.current=L.tileLayer.wms('https://gis.charttools.noaa.gov/arcgis/rest/services/MCS/ENCOnline/MapServer/exts/MaritimeChartService/WMSServer',{layers:'0,1,2,3,4,5,6,7',format:'image/png',transparent:true,version:'1.3.0',opacity:0.9,zIndex:6,attribution:'\xa9 NOAA'}).addTo(map);}catch{}
+    const L=window.L,m=leafRef.current;
+    [baseTileRef,esriBaseRef,emodnetTileRef,gebcoWmsRef,gebcoRefTile,encTileRef,seamarkRef].forEach(r=>{if(r.current){try{m.removeLayer(r.current);}catch{}r.current=null;}});
+    const TILES={night:'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',day:'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',dusk:'https://{s}.basemaps.cartocdn.com/rastertiles/voyager_nolabels/{z}/{x}/{y}{r}.png'};
+    baseTileRef.current=L.tileLayer(TILES[mapMode]||TILES.night,{subdomains:'abcd',maxZoom:20,zIndex:1,attribution:'\u00a9 CARTO'}).addTo(m);
+    const ds=depthSource;
+    if(ds==='usa'||ds==='all'){
+      esriBaseRef.current=L.tileLayer('https://server.arcgisonline.com/arcgis/rest/services/Ocean/World_Ocean_Base/MapServer/tile/{z}/{y}/{x}',{maxZoom:13,opacity:0.7,zIndex:2,attribution:'\u00a9 Esri'}).addTo(m);
+      try{encTileRef.current=L.tileLayer.wms('https://gis.charttools.noaa.gov/arcgis/rest/services/MCS/ENCOnline/MapServer/exts/MaritimeChartService/WMSServer',{layers:'0,1,2,3,4,5,6,7',format:'image/png',transparent:true,version:'1.3.0',opacity:0.9,zIndex:6,attribution:'\u00a9 NOAA'}).addTo(m);}catch{}
     }
-    seamarkRef.current=L.tileLayer('https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png',{opacity:gebcoOn?0.9:0.6,maxZoom:18,zIndex:10,attribution:'\xa9 OpenSeaMap'}).addTo(map);
-  },[gebcoOn,mapMode,mapReady]);
+    if(ds==='europe'||ds==='all'){
+      try{emodnetTileRef.current=L.tileLayer.wms('https://ows.emodnet-bathymetry.eu/wms',{layers:'emodnet:mean_atlas_land,emodnet:mean_rainbowcolour',format:'image/png',transparent:true,version:'1.3.0',opacity:0.6,zIndex:3,attribution:'\u00a9 EMODnet'}).addTo(m);}catch{}
+    }
+    if(ds==='global'||ds==='all'){
+      try{gebcoWmsRef.current=L.tileLayer.wms('https://www.gebco.net/data_and_products/gebco_web_services/web_map_service/mapserv',{layers:'GEBCO_LATEST_2',format:'image/png',transparent:true,version:'1.3.0',opacity:0.45,zIndex:4,attribution:'\u00a9 GEBCO'}).addTo(m);}catch{}
+    }
+    if(ds==='soundings'||ds==='all'){
+      gebcoRefTile.current=L.tileLayer('https://server.arcgisonline.com/arcgis/rest/services/Ocean/World_Ocean_Reference/MapServer/tile/{z}/{y}/{x}',{maxZoom:18,opacity:1.0,zIndex:5,attribution:'\u00a9 Esri'}).addTo(m);
+    }
+    seamarkRef.current=L.tileLayer('https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png',{opacity:ds==='none'?0.55:0.9,maxZoom:18,zIndex:10,attribution:'\u00a9 OpenSeaMap'}).addTo(m);
+  },[depthSource,mapMode,mapReady]);
 
   // Ref syncs
   useEffect(()=>{rbModeRef.current=rbMode;},[rbMode]);
@@ -266,8 +268,7 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
   useEffect(()=>{localStorage.setItem('nav_mapMode',mapMode);},[mapMode]);
   useEffect(()=>{localStorage.setItem('nav_displayMode',displayMode);},[displayMode]);
   useEffect(()=>{localStorage.setItem('nav_gpsOn',gpsOn);},[gpsOn]);
-  useEffect(()=>{localStorage.setItem('nav_aisOn',aisOn);},[aisOn]);
-  useEffect(()=>{localStorage.setItem('nav_gebcoOn',gebcoOn);},[gebcoOn]);
+  useEffect(()=>{localStorage.setItem('nav_depthSource',depthSource);},[depthSource]);
   useEffect(()=>{localStorage.setItem('nav_autoCenter',autoCenter);},[autoCenter]);
   useEffect(()=>{localStorage.setItem('nav_vectorMins',vectorMins);},[vectorMins]);
   useEffect(()=>{localStorage.setItem('nav_trackHours',trackHours);},[trackHours]);
@@ -288,62 +289,55 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
   // Route render
   useEffect(()=>{
     if(!mapReady||!leafRef.current||!window.L) return;
-    const L=window.L,map=leafRef.current,lrs=layersRef.current;
-    if(lrs.route){map.removeLayer(lrs.route);lrs.route=null;}
-    lrs.routeMarkers?.forEach(m=>{try{map.removeLayer(m);}catch{}});lrs.routeMarkers=[];
-    [lrs.xtdPort,lrs.xtdStbd,lrs.xtdFill].forEach(l=>{if(l) try{map.removeLayer(l);}catch{}});
+    const L=window.L,m=leafRef.current,lrs=layersRef.current;
+    if(lrs.route){m.removeLayer(lrs.route);lrs.route=null;}
+    lrs.routeMarkers?.forEach(x=>{try{m.removeLayer(x);}catch{}});lrs.routeMarkers=[];
+    [lrs.xtdPort,lrs.xtdStbd,lrs.xtdFill].forEach(l=>{if(l) try{m.removeLayer(l);}catch{}});
     lrs.xtdPort=lrs.xtdStbd=lrs.xtdFill=null;
     if(!activeRoute?.waypoints?.length) return;
-    const wps=normalizeRouteCoords(activeRoute.waypoints),c=colors;
-    lrs.route=L.polyline(wps.map(w=>[w.lat,w.lon]),{color:c.route,weight:2.5,opacity:0.9,dashArray:'8 4',noClip:true}).addTo(map);
+    const wps=normalizeRoute(activeRoute.waypoints),c=colors;
+    lrs.route=L.polyline(wps.map(w=>[w.lat,w.lon]),{color:c.route,weight:2.5,opacity:0.9,dashArray:'8 4',noClip:true}).addTo(m);
     wps.forEach((wp,i)=>{
-      const isFirst=i===0,isLast=i===wps.length-1;
-      const col=isFirst?'#00C896':isLast?'#FF4757':c.route,sz=isFirst||isLast?14:8;
-      const dotIcon=L.divIcon({html:`<div style="background:${col};border:2.5px solid #fff;border-radius:50%;width:${sz}px;height:${sz}px;box-shadow:0 0 4px rgba(0,0,0,0.5);"></div>`,className:'',iconSize:[sz,sz],iconAnchor:[sz/2,sz/2]});
-      const wpLabel=`WP${String(i+1).padStart(2,'0')}${wp.name?' '+wp.name:''}`;
-      const labelIcon=L.divIcon({html:`<div style="color:#fff;font-size:10px;font-weight:700;font-family:monospace;white-space:nowrap;text-shadow:1px 1px 2px #000,-1px -1px 2px #000;margin-top:2px;line-height:1.2;pointer-events:none;">${wpLabel}</div>`,className:'',iconSize:[0,0],iconAnchor:[-4,-sz/2-2]});
-      const m=L.marker([wp.lat,wp.lon],{icon:dotIcon}).bindPopup(`<div style="font-size:13px;min-width:160px;line-height:1.7"><b style="color:${col}">${wpLabel}</b><br/>${toDMS(wp.lat,true)}<br/>${toDMS(wp.lon,false)}${i>0?`<hr style="margin:4px 0;border-color:#333"/>Leg ${i}: ${calcBearing(wps[i-1].lat,wps[i-1].lon,wp.lat,wp.lon).toFixed(1)}\xb0T \xb7 ${distanceNM(wps[i-1].lat,wps[i-1].lon,wp.lat,wp.lon).toFixed(1)} NM`:''}</div>`).addTo(map);
-      const lbl=L.marker([wp.lat,wp.lon],{icon:labelIcon,interactive:false,zIndexOffset:200}).addTo(map);
-      lrs.routeMarkers.push(m,lbl);
+      const first=i===0,last=i===wps.length-1,col=first?'#00C896':last?'#FF4757':c.route,sz=first||last?14:8;
+      const di=L.divIcon({html:`<div style="background:${col};border:2.5px solid #fff;border-radius:50%;width:${sz}px;height:${sz}px;box-shadow:0 0 4px rgba(0,0,0,0.5);"></div>`,className:'',iconSize:[sz,sz],iconAnchor:[sz/2,sz/2]});
+      const lbl=`WP${String(i+1).padStart(2,'0')}${wp.name?' '+wp.name:''}`;
+      const li=L.divIcon({html:`<div style="color:#fff;font-size:10px;font-weight:700;font-family:monospace;white-space:nowrap;text-shadow:1px 1px 2px #000,-1px -1px 2px #000;pointer-events:none;">${lbl}</div>`,className:'',iconSize:[0,0],iconAnchor:[-4,-sz/2-2]});
+      const mk=L.marker([wp.lat,wp.lon],{icon:di}).bindPopup(`<div style="font-size:13px;min-width:150px"><b style="color:${col}">${lbl}</b><br/>${toDMS(wp.lat,true)}<br/>${toDMS(wp.lon,false)}${i>0?`<hr style="margin:4px 0"/>Leg ${i}: ${brg(wps[i-1].lat,wps[i-1].lon,wp.lat,wp.lon).toFixed(1)}\u00b0T \u00b7 ${distNM(wps[i-1].lat,wps[i-1].lon,wp.lat,wp.lon).toFixed(1)} NM`:''}</div>`).addTo(m);
+      const ll=L.marker([wp.lat,wp.lon],{icon:li,interactive:false,zIndexOffset:200}).addTo(m);
+      lrs.routeMarkers.push(mk,ll);
     });
     for(let i=0;i<wps.length-1;i++){
       const mid=[(wps[i].lat+wps[i+1].lat)/2,(wps[i].lon+wps[i+1].lon)/2];
-      const brg=calcBearing(wps[i].lat,wps[i].lon,wps[i+1].lat,wps[i+1].lon);
-      const dist=distanceNM(wps[i].lat,wps[i].lon,wps[i+1].lat,wps[i+1].lon);
-      const legIcon=L.divIcon({html:`<div style="background:rgba(0,0,0,0.65);color:#FFD700;font-size:10px;font-weight:600;font-family:monospace;white-space:nowrap;padding:1px 4px;border-radius:3px;border:1px solid rgba(255,215,0,0.4);pointer-events:none;">${brg.toFixed(0)}\xb0T \xb7 ${dist.toFixed(1)} NM</div>`,className:'',iconSize:[0,0],iconAnchor:[-4,8]});
-      lrs.routeMarkers.push(L.marker(mid,{icon:legIcon,interactive:false,zIndexOffset:100}).addTo(map));
+      const bd=brg(wps[i].lat,wps[i].lon,wps[i+1].lat,wps[i+1].lon),dn=distNM(wps[i].lat,wps[i].lon,wps[i+1].lat,wps[i+1].lon);
+      const li=L.divIcon({html:`<div style="background:rgba(0,0,0,0.65);color:#FFD700;font-size:10px;font-weight:600;font-family:monospace;white-space:nowrap;padding:1px 4px;border-radius:3px;pointer-events:none;">${bd.toFixed(0)}\u00b0T \u00b7 ${dn.toFixed(1)} NM</div>`,className:'',iconSize:[0,0],iconAnchor:[-4,8]});
+      lrs.routeMarkers.push(L.marker(mid,{icon:li,interactive:false,zIndexOffset:100}).addTo(m));
     }
-    if(wps.length>=2){
-      const XTD=xtdNM,portPts=[],stbdPts=[];
-      wps.forEach((wp,i)=>{let brg;if(i===0) brg=calcBearing(wp.lat,wp.lon,wps[1].lat,wps[1].lon);else if(i===wps.length-1) brg=calcBearing(wps[i-1].lat,wps[i-1].lon,wp.lat,wp.lon);else{const b1=calcBearing(wps[i-1].lat,wps[i-1].lon,wp.lat,wp.lon),b2=calcBearing(wp.lat,wp.lon,wps[i+1].lat,wps[i+1].lon),diff=((b2-b1+540)%360)-180;brg=(b1+diff/2+360)%360;}portPts.push(offsetPoint(wp.lat,wp.lon,(brg-90+360)%360,XTD));stbdPts.push(offsetPoint(wp.lat,wp.lon,(brg+90)%360,XTD));});
-      lrs.xtdPort=L.polyline(portPts,{color:c.xtd,weight:1.5,opacity:0.8,dashArray:'10 6'}).addTo(map);
-      lrs.xtdStbd=L.polyline(stbdPts,{color:c.xtd,weight:1.5,opacity:0.8,dashArray:'10 6'}).addTo(map);
-      lrs.xtdFill=L.polygon([...portPts,...[...stbdPts].reverse()],{color:'transparent',fillColor:c.xtd,fillOpacity:0.06,weight:0}).addTo(map);
-    }
-    map.fitBounds(lrs.route.getBounds(),{padding:[60,60]});
+    if(wps.length>=2){const X=xtdNM,pp=[],sp=[];wps.forEach((wp,i)=>{let b;if(i===0) b=brg(wp.lat,wp.lon,wps[1].lat,wps[1].lon);else if(i===wps.length-1) b=brg(wps[i-1].lat,wps[i-1].lon,wp.lat,wp.lon);else{const b1=brg(wps[i-1].lat,wps[i-1].lon,wp.lat,wp.lon),b2=brg(wp.lat,wp.lon,wps[i+1].lat,wps[i+1].lon),df=((b2-b1+540)%360)-180;b=(b1+df/2+360)%360;}pp.push(offsetPt(wp.lat,wp.lon,(b-90+360)%360,X));sp.push(offsetPt(wp.lat,wp.lon,(b+90)%360,X));});lrs.xtdPort=L.polyline(pp,{color:c.xtd,weight:1.5,opacity:0.8,dashArray:'10 6'}).addTo(m);lrs.xtdStbd=L.polyline(sp,{color:c.xtd,weight:1.5,opacity:0.8,dashArray:'10 6'}).addTo(m);lrs.xtdFill=L.polygon([...pp,...[...sp].reverse()],{color:'transparent',fillColor:c.xtd,fillOpacity:0.06,weight:0}).addTo(m);}
+    m.fitBounds(lrs.route.getBounds(),{padding:[60,60]});
   },[activeRoute,mapReady,colors,xtdNM]);
 
-  // ETA calc - min distance fix
+  // ETA — FIXED: route-following leg-by-leg distance (not direct line)
   useEffect(()=>{
     if(!livePos||!activeRoute?.waypoints?.length){setEtaResult(null);return;}
     if(livePos.sog<0.2){setEtaResult(null);return;}
-    const wps=activeRoute.waypoints,targetIdx=Math.min(Math.max(selectedWpIdx,0),wps.length-1);
-    const legSum=(from,to)=>{let d=0;for(let i=from;i<to;i++) d+=distanceNM(wps[i].lat,wps[i].lon,wps[i+1].lat,wps[i+1].lon);return d;};
-    let remainNM=Infinity;
-    for(let i=0;i<=targetIdx;i++){const d=distanceNM(livePos.lat,livePos.lon,wps[i].lat,wps[i].lon)+legSum(i,targetIdx);if(d<remainNM) remainNM=d;}
-    const hours=remainNM/livePos.sog,hrs=Math.floor(hours),mins=Math.round((hours%1)*60);
-    const arr=new Date(Date.now()+hours*3600000),p=n=>String(n).padStart(2,'0');
+    const wps=activeRoute.waypoints,ti=Math.min(Math.max(selectedWpIdx,0),wps.length-1);
+    const legSum=(a,b)=>{let d=0;for(let i=a;i<b;i++) d+=distNM(wps[i].lat,wps[i].lon,wps[i+1].lat,wps[i+1].lon);return d;};
+    // For each WP 0..target, compute ship->WP[i] + legSum(i,target). Minimum = correct remaining.
+    let rem=Infinity;
+    for(let i=0;i<=ti;i++){const d=distNM(livePos.lat,livePos.lon,wps[i].lat,wps[i].lon)+legSum(i,ti);if(d<rem) rem=d;}
+    const hrs=rem/livePos.sog,h=Math.floor(hrs),mn=Math.round((hrs%1)*60);
+    const arr=new Date(Date.now()+hrs*3600000),pd=n=>String(n).padStart(2,'0');
     const mo=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][arr.getMonth()];
-    setEtaResult({remainNM:remainNM.toFixed(1),hours,hrs,mins,wpName:wps[targetIdx].name||`WP${String(targetIdx+1).padStart(2,'0')}`,arrivalStr:`${p(arr.getDate())} ${mo} ${arr.getFullYear()}  ${p(arr.getHours())}:${p(arr.getMinutes())} LT`});
+    setEtaResult({remainNM:rem.toFixed(1),hrs:h,mins:mn,wpName:wps[ti].name||`WP${String(ti+1).padStart(2,'0')}`,arrivalStr:`${pd(arr.getDate())} ${mo} ${arr.getFullYear()} ${pd(arr.getHours())}:${pd(arr.getMinutes())} LT`});
   },[livePos,activeRoute,selectedWpIdx]);
 
   // Map orientation
   useEffect(()=>{
     if(!mapReady||!mapRef.current||!leafRef.current) return;
-    const bearing=displayMode==='north'?0:displayMode==='course'?(livePos?.cog||0):(livePos?.heading||livePos?.cog||0);
-    mapBearingRef.current=bearing;
-    if(typeof leafRef.current.setBearing==='function'){try{leafRef.current.setBearing(bearing);return;}catch{}}
-    mapRef.current.style.transform=bearing!==0?`rotate(${bearing}deg)`:'';
+    const b=displayMode==='north'?0:displayMode==='course'?(livePos?.cog||0):(livePos?.heading||livePos?.cog||0);
+    mapBearingRef.current=b;
+    if(typeof leafRef.current.setBearing==='function'){try{leafRef.current.setBearing(b);return;}catch{}}
+    mapRef.current.style.transform=b!==0?`rotate(${b}deg)`:'';
     mapRef.current.style.transformOrigin='center center';
     setTimeout(()=>{try{leafRef.current?.invalidateSize({animate:false});}catch{}},100);
   },[displayMode,livePos?.cog,livePos?.heading,mapReady]);
@@ -351,243 +345,200 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
   // Init map
   useEffect(()=>{
     if(leafRef.current) return;
-    const initMap=()=>{
+    const init=()=>{
       if(!mapRef.current||!window.L) return;
-      const L=window.L;
-      const opts={center:[20,70],zoom:4,worldCopyJump:true};
+      const L=window.L,opts={center:[20,70],zoom:4,worldCopyJump:true};
       if(typeof L.Map.prototype.setBearing==='function'){try{opts.rotate=true;opts.rotateControl=false;}catch{}}
       leafRef.current=L.map(mapRef.current,opts);
-      baseTileRef.current=L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{subdomains:'abcd',attribution:'\xa9 CARTO'}).addTo(leafRef.current);
-      seamarkRef.current=L.tileLayer('https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png',{opacity:0.55,maxZoom:18,attribution:'\xa9 OpenSeaMap'}).addTo(leafRef.current);
-      leafRef.current.on('click',(e)=>{
-        if(rbModeRef.current){const pos=livePosRef.current;if(!pos){notify('Enable GPS first','error');return;}rbTargetRef.current={lat:e.latlng.lat,lon:e.latlng.lng};const rNM=distanceNM(pos.lat,pos.lon,e.latlng.lat,e.latlng.lng);const brg=calcBearing(pos.lat,pos.lon,e.latlng.lat,e.latlng.lng);setRbResult({rangeNM:rNM.toFixed(2),bearing:brg.toFixed(1),lat:e.latlng.lat.toFixed(5),lon:e.latlng.lng.toFixed(5)});if(layersRef.current.rbLine) leafRef.current.removeLayer(layersRef.current.rbLine);if(layersRef.current.rbMarker) leafRef.current.removeLayer(layersRef.current.rbMarker);layersRef.current.rbLine=L.polyline([[pos.lat,pos.lon],[e.latlng.lat,e.latlng.lng]],{color:'#FFD700',weight:1.5,dashArray:'5 4',opacity:0.85}).addTo(leafRef.current);layersRef.current.rbMarker=L.circleMarker([e.latlng.lat,e.latlng.lng],{radius:5,color:'#FFD700',fillColor:'#FFD700',fillOpacity:1}).addTo(leafRef.current);return;}
-        if(depthCheckOnRef.current){const ct=contoursRef.current;L.popup({closeOnClick:true,autoClose:true}).setLatLng(e.latlng).setContent(`<div style="font-size:13px;min-width:170px;line-height:1.8;padding:4px"><b style="color:#00D4FF">\ud83d\udccd ${toDMS(e.latlng.lat,true)}</b><br/><b style="color:#00D4FF">${toDMS(e.latlng.lng,false)}</b><hr style="margin:4px 0;border-color:#333"/><span style="color:#FFB300">\ud83c\udf0a Enable Ocean Depth + zoom \u22659</span><br/><span style="font-size:11px">\ud83d\udd34&lt;${ct.shallow}m \ud83d\udfe1&lt;${ct.safety}m \ud83d\udfe2\u2265${ct.safety}m \ud83d\udd35&gt;${ct.deep}m</span></div>`).openOn(leafRef.current);return;}
+      baseTileRef.current=L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{subdomains:'abcd',attribution:'\u00a9 CARTO'}).addTo(leafRef.current);
+      seamarkRef.current=L.tileLayer('https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png',{opacity:0.55,maxZoom:18,attribution:'\u00a9 OpenSeaMap'}).addTo(leafRef.current);
+      leafRef.current.on('click',e=>{
+        if(rbModeRef.current){const pos=livePosRef.current;if(!pos){notify('Enable GPS first','error');return;}rbTargetRef.current={lat:e.latlng.lat,lon:e.latlng.lng};const rn=distNM(pos.lat,pos.lon,e.latlng.lat,e.latlng.lng),bg=brg(pos.lat,pos.lon,e.latlng.lat,e.latlng.lng);setRbResult({rangeNM:rn.toFixed(2),bearing:bg.toFixed(1),lat:e.latlng.lat.toFixed(5),lon:e.latlng.lng.toFixed(5)});if(layersRef.current.rbLine) leafRef.current.removeLayer(layersRef.current.rbLine);if(layersRef.current.rbMarker) leafRef.current.removeLayer(layersRef.current.rbMarker);layersRef.current.rbLine=L.polyline([[pos.lat,pos.lon],[e.latlng.lat,e.latlng.lng]],{color:'#FFD700',weight:1.5,dashArray:'5 4'}).addTo(leafRef.current);layersRef.current.rbMarker=L.circleMarker([e.latlng.lat,e.latlng.lng],{radius:5,color:'#FFD700',fillColor:'#FFD700',fillOpacity:1}).addTo(leafRef.current);return;}
+        if(depthCheckOnRef.current){const ct=contoursRef.current;L.popup({closeOnClick:true}).setLatLng(e.latlng).setContent(`<div style="font-size:13px;padding:4px"><b style="color:#00D4FF">${toDMS(e.latlng.lat,true)}</b><br/><b style="color:#00D4FF">${toDMS(e.latlng.lng,false)}</b><hr style="margin:4px 0"/>Enable depth layer + zoom \u22659 to see soundings<br/><small>\ud83d\udd34&lt;${ct.shallow}m \ud83d\udfe1&lt;${ct.safety}m \ud83d\udfe2\u2265${ct.safety}m</small></div>`).openOn(leafRef.current);return;}
       });
-      setMapReady(true);safeInvalidate();
-      [100,300,600,1200].forEach(t=>setTimeout(()=>{try{leafRef.current?.invalidateSize({animate:false});}catch{}},t));
+      setMapReady(true);safeInvalidate();[100,300,600,1200].forEach(t=>setTimeout(()=>{try{leafRef.current?.invalidateSize({animate:false});}catch{}},t));
     };
-    const loadPluginThenInit=()=>{if(!document.getElementById('lrotate')){const r=document.createElement('script');r.id='lrotate';r.src='https://cdn.jsdelivr.net/npm/leaflet-rotate@0.3.0/dist/leaflet-rotate-src.js';r.onload=initMap;r.onerror=initMap;document.head.appendChild(r);}else initMap();};
-    if(window.L){loadPluginThenInit();return;}
-    if(!document.getElementById('lcss')){const c=document.createElement('link');c.id='lcss';c.rel='stylesheet';c.href='https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css';document.head.appendChild(c);}
-    if(!document.getElementById('ljs')){const s=document.createElement('script');s.id='ljs';s.src='https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js';s.onload=loadPluginThenInit;document.head.appendChild(s);}
-    else{const r=setInterval(()=>{if(window.L){clearInterval(r);loadPluginThenInit();}},50);setTimeout(()=>clearInterval(r),5000);}
+    const load=()=>{if(!document.getElementById('lrotate')){const s=document.createElement('script');s.id='lrotate';s.src='https://cdn.jsdelivr.net/npm/leaflet-rotate@0.3.0/dist/leaflet-rotate-src.js';s.onload=init;s.onerror=init;document.head.appendChild(s);}else init();};
+    if(window.L){load();return;}
+    if(!document.getElementById('lcss')){const l=document.createElement('link');l.id='lcss';l.rel='stylesheet';l.href='https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css';document.head.appendChild(l);}
+    if(!document.getElementById('ljs')){const s=document.createElement('script');s.id='ljs';s.src='https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js';s.onload=load;document.head.appendChild(s);}
+    else{const r=setInterval(()=>{if(window.L){clearInterval(r);load();}},50);setTimeout(()=>clearInterval(r),5000);}
     return()=>{invalidateTimers.current.forEach(clearTimeout);if(leafRef.current){leafRef.current.remove();leafRef.current=null;}};
   },[]);
 
   // Derived
-  const filteredSheetRoutes=(sheetRoutes||[]).filter(r=>{if(!dbSearch.trim()) return true;const kw=dbSearch.toLowerCase();const hay=[r.name,r.Name,r['Route Name'],r['File Name'],r.routeName,r.from,r.to,r.From,r.To,r.origin,r.destination].filter(Boolean).join(' ').toLowerCase();return hay.includes(kw);}).slice(0,50);
-  const filteredSavedRoutes=savedRoutes.filter(r=>!savedSearch.trim()||(r.name||'').toLowerCase().includes(savedSearch.toLowerCase())).slice(0,100);
-  const onHudTS=(e)=>{const t=e.touches[0];hudDragRef.current={dx:t.clientX-hudPos.x,dy:t.clientY-hudPos.y};};
-  const onHudTM=(e)=>{if(!hudDragRef.current) return;e.stopPropagation();const t=e.touches[0];setHudPos({x:Math.max(0,Math.min(window.innerWidth-180,t.clientX-hudDragRef.current.dx)),y:Math.max(50,Math.min(window.innerHeight-200,t.clientY-hudDragRef.current.dy))});};
-  const onHudTE=()=>{hudDragRef.current=null;};
-  const S={panelBg:'rgba(4,12,26,0.97)',border:'rgba(0,212,255,0.28)',text:'#D0E8F8',dim:'#5A7A90',vDim:'#243850',cyan:'#00D4FF',green:'#00FF88',gold:'#FFD700',red:'#FF4757',fSm:'0.78rem',fXs:'0.68rem',fLabel:'0.58rem'};
+  const filteredSaved=savedRoutes.filter(r=>!savedSearch.trim()||(r.name||'').toLowerCase().includes(savedSearch.toLowerCase())).slice(0,100);
+  const filteredDB=(sheetRoutes||[]).filter(r=>{if(!dbSearch.trim()) return true;const k=dbSearch.toLowerCase(),h=[r.name,r.Name,r['Route Name'],r.from,r.to,r.origin,r.destination].filter(Boolean).join(' ').toLowerCase();return h.includes(k);}).slice(0,50);
+  const onTS=e=>{const t=e.touches[0];hudDragRef.current={dx:t.clientX-hudPos.x,dy:t.clientY-hudPos.y};};
+  const onTM=e=>{if(!hudDragRef.current) return;e.stopPropagation();const t=e.touches[0];setHudPos({x:Math.max(0,Math.min(window.innerWidth-185,t.clientX-hudDragRef.current.dx)),y:Math.max(50,Math.min(window.innerHeight-200,t.clientY-hudDragRef.current.dy))});};
+  const onTE=()=>{hudDragRef.current=null;};
+
+  const S={bg:'rgba(4,12,26,0.97)',bd:'rgba(0,212,255,0.28)',tx:'#D0E8F8',dm:'#5A7A90',vd:'#243850',cy:'#00D4FF',gn:'#00FF88',gd:'#FFD700',rd:'#FF4757',sm:'0.78rem',xs:'0.68rem',lb:'0.58rem'};
 
   // AIS Source Selector UI
-  const AisSourceSection=()=>{
-    const srcList=[['safepilot','\ud83d\udee1 SafePilot Pilot Plug','#00FF88'],['bridge','\ud83d\udda5 Local Bridge (Termux)','#00D4FF'],['internet','\ud83c\udf10 Internet AIS','#FFD700'],['off','\u2b55 AIS Off','#4A6080']];
+  const AisSrc=()=>{
+    const src=[['safepilot','\ud83d\udee1 SafePilot P3','#00FF88'],['bridge','\ud83d\udda5 Local Bridge','#00D4FF'],['internet','\ud83c\udf10 Internet','#FFD700'],['off','\u2b55 Off','#4A6080']];
+    const st=aisSource==='internet'?aisStatus:localAisStatus;
+    const cn=aisSource==='internet'?Object.keys(aisTargets).length:localAisCount;
     return(
       <div style={{borderTop:'1px solid rgba(0,212,255,0.12)',paddingTop:6,marginTop:4}}>
-        <div style={{color:S.dim,fontSize:S.fLabel,letterSpacing:0.5,marginBottom:5}}>AIS SOURCE</div>
-        <div style={{display:'flex',flexDirection:'column',gap:3}}>
-          {srcList.map(([src,lbl,col])=>{
-            const isActive=aisSource===src;
-            const status=src==='safepilot'||src==='bridge'?localAisStatus:src==='internet'?aisStatus:'';
-            const count=src==='internet'?Object.keys(aisTargets).length:localAisCount;
-            return(
-              <label key={src} style={{display:'flex',alignItems:'center',gap:6,cursor:'pointer',fontSize:'0.72rem',color:isActive?col:S.dim,background:isActive?`${col}18`:'transparent',border:`1px solid ${isActive?col+'50':'transparent'}`,borderRadius:5,padding:'3px 7px',minHeight:26}}>
-                <input type="radio" name="aisSource" value={src} checked={isActive} onChange={()=>setAisSource(src)} style={{accentColor:col}}/>
-                <span style={{flex:1}}>{lbl}</span>
-                {isActive&&src!=='off'&&(
-                  <span style={{fontSize:'0.6rem',color:status==='connected'?'#00FF88':status.startsWith('connect')?'#FFD700':status==='error'?'#FF4757':S.dim}}>
-                    {status==='connected'?`\u2705${count}`:status.startsWith('connect')?'\u23f3':status==='error'?'\u274c':''}
-                  </span>
-                )}
-              </label>
-            );
-          })}
-        </div>
-        {aisSource==='bridge'&&(
-          <div style={{marginTop:5}}>
-            <div style={{color:S.dim,fontSize:'0.58rem',marginBottom:3}}>BRIDGE WebSocket URL</div>
-            <input value={localAisHost} onChange={e=>setLocalAisHost(e.target.value)} placeholder="ws://localhost:4002" style={{width:'100%',boxSizing:'border-box',background:'#06101C',color:S.cyan,border:'1px solid #1A3050',borderRadius:4,padding:'4px 6px',fontSize:'0.63rem',outline:'none'}}/>
-            <div style={{color:'#2A4050',fontSize:'0.55rem',marginTop:3}}>Run tcp-ws-bridge.js in Termux first.</div>
-          </div>
-        )}
-        {aisSource==='safepilot'&&localAisStatus==='connected'&&(
-          <div style={{marginTop:4,color:'#00FF8870',fontSize:'0.58rem',lineHeight:1.5}}>\u2705 SafePilot = primary GPS + AIS + heading. Android GPS is fallback only.</div>
-        )}
-        {localAisAlert&&(
-          <div style={{marginTop:5,background:'rgba(255,32,32,0.15)',border:'1px solid #FF3030',borderRadius:5,padding:'5px 8px',cursor:'pointer'}} onClick={()=>setLocalAisAlert(null)}>
-            <div style={{color:'#FF5050',fontSize:'0.72rem',fontWeight:700}}>\u26a0 COLLISION \u2014 CPA {localAisAlert?.cpa} NM</div>
-            <div style={{color:'#FF8080',fontSize:'0.62rem'}}>{localAisAlert?.name||localAisAlert?.mmsi} \xb7 {localAisAlert?.colreg}</div>
-            <div style={{color:'#3A2020',fontSize:'0.55rem'}}>Tap to dismiss</div>
-          </div>
-        )}
+        <div style={{color:S.dm,fontSize:S.lb,letterSpacing:0.5,marginBottom:4}}>AIS SOURCE</div>
+        {src.map(([id,lb,col])=>(<label key={id} style={{display:'flex',alignItems:'center',gap:6,cursor:'pointer',fontSize:'0.72rem',color:aisSource===id?col:S.dm,background:aisSource===id?`${col}18`:'transparent',border:`1px solid ${aisSource===id?col+'50':'transparent'}`,borderRadius:5,padding:'3px 6px',marginBottom:2,minHeight:24}}>
+          <input type="radio" name="aisSource" value={id} checked={aisSource===id} onChange={()=>setAisSource(id)} style={{accentColor:col}}/>
+          <span style={{flex:1}}>{lb}</span>
+          {aisSource===id&&id!=='off'&&<span style={{fontSize:'0.6rem',color:st==='connected'?'#00FF88':st.startsWith('conn')?'#FFD700':'#FF4757'}}>{st==='connected'?`\u2705${cn}`:st.startsWith('conn')?'\u23f3':'\u274c'}</span>}
+        </label>))}
+        {aisSource==='bridge'&&<input value={localAisHost} onChange={e=>setLocalAisHost(e.target.value)} placeholder="ws://localhost:4002" style={{width:'100%',boxSizing:'border-box',background:'#06101C',color:S.cy,border:'1px solid #1A3050',borderRadius:4,padding:'4px 6px',fontSize:'0.63rem',outline:'none',marginTop:3}}/>}
+        {localAisAlert&&(<div style={{marginTop:4,background:'rgba(255,32,32,0.15)',border:'1px solid #FF3030',borderRadius:5,padding:'5px 7px',cursor:'pointer'}} onClick={()=>setLocalAisAlert(null)}><div style={{color:'#FF5050',fontSize:'0.72rem',fontWeight:700}}>\u26a0 CPA {localAisAlert?.cpa}NM — {localAisAlert?.name||localAisAlert?.mmsi}</div><div style={{color:'#3A2020',fontSize:'0.55rem'}}>Tap to dismiss</div></div>)}
       </div>
     );
   };
 
-  return (
+  // Depth Source Selector UI (regional — no clutter)
+  const DepthSrc=()=>(
+    <div style={{borderTop:'1px solid rgba(0,212,255,0.12)',paddingTop:6,marginTop:4}}>
+      <div style={{color:S.dm,fontSize:S.lb,letterSpacing:0.5,marginBottom:4}}>ENC DEPTH</div>
+      <div style={{display:'flex',gap:3,flexWrap:'wrap'}}>
+        {DEPTH_SOURCES.map(d=>(<button key={d.id} onClick={()=>setDepthSource(d.id)} style={{background:depthSource===d.id?'rgba(0,212,255,0.2)':'transparent',border:`1px solid ${depthSource===d.id?S.cy:S.vd}`,color:depthSource===d.id?S.cy:S.dm,borderRadius:5,padding:'3px 7px',fontSize:'0.62rem',cursor:'pointer'}} title={d.desc}>{d.id==='none'?'Off':d.id==='usa'?'USA':d.id==='europe'?'Europe':d.id==='global'?'Global':d.id==='soundings'?'Soundings':'All'}</button>))}
+      </div>
+      {depthSource!=='none'&&<div style={{color:S.dm,fontSize:'0.56rem',marginTop:3}}>{DEPTH_SOURCES.find(d=>d.id===depthSource)?.desc}</div>}
+    </div>
+  );
+
+  // ─── UI ─────────────────────────────────────────────────────────────────
+  return(
     <div style={{flex:1,display:'flex',flexDirection:'column',background:'#040C1A',position:'relative',overflow:'hidden',minHeight:0}}>
+
       {/* HEADER */}
-      <div style={{height:48,display:'flex',alignItems:'center',padding:'0 10px',background:'#020810',borderBottom:`1px solid ${S.border}`,flexShrink:0,gap:5}}>
-        <span style={{color:S.cyan,fontWeight:700,fontSize:'0.82rem',letterSpacing:1,flex:1}}>\u2693 NAV MODE</span>
-        <div style={{display:'flex',gap:2}}>
-          {[['north','N\u2191'],['course','C\u2191'],['head','H\u2191']].map(([m,l])=>(<button key={m} onClick={()=>setDisplayMode(m)} style={{background:displayMode===m?'rgba(0,212,255,0.2)':'transparent',border:`1px solid ${displayMode===m?S.cyan:S.vDim}`,color:displayMode===m?S.cyan:S.dim,borderRadius:5,padding:'3px 7px',fontSize:'0.65rem',cursor:'pointer'}}>{l}</button>))}
-        </div>
-        <div style={{display:'flex',gap:2}}>
-          {[['night','\ud83c\udf19'],['day','\u2600\ufe0f'],['dusk','\ud83c\udfc7']].map(([m,l])=>(<button key={m} onClick={()=>setMapMode(m)} style={{background:mapMode===m?'rgba(255,215,0,0.18)':'transparent',border:`1px solid ${mapMode===m?S.gold:S.vDim}`,color:mapMode===m?S.gold:S.dim,borderRadius:5,padding:'3px 6px',fontSize:'0.72rem',cursor:'pointer'}}>{l}</button>))}
-        </div>
-        <button onClick={()=>setShowMenu(v=>!v)} style={{background:showMenu?'rgba(0,212,255,0.2)':'transparent',border:`1px solid ${showMenu?S.cyan:S.vDim}`,color:showMenu?S.cyan:S.dim,borderRadius:5,padding:'3px 9px',fontSize:'1rem',cursor:'pointer'}}>\u2630</button>
+      <div style={{height:48,display:'flex',alignItems:'center',padding:'0 10px',background:'#020810',borderBottom:`1px solid ${S.bd}`,flexShrink:0,gap:5}}>
+        <span style={{color:S.cy,fontWeight:700,fontSize:'0.82rem',letterSpacing:1,flex:1}}>\u2693 NAV MODE</span>
+        <div style={{display:'flex',gap:2}}>{[['north','N\u2191'],['course','C\u2191'],['head','H\u2191']].map(([v,l])=>(<button key={v} onClick={()=>setDisplayMode(v)} style={{background:displayMode===v?'rgba(0,212,255,0.2)':'transparent',border:`1px solid ${displayMode===v?S.cy:S.vd}`,color:displayMode===v?S.cy:S.dm,borderRadius:5,padding:'3px 7px',fontSize:'0.65rem',cursor:'pointer'}}>{l}</button>))}</div>
+        <div style={{display:'flex',gap:2}}>{[['night','\ud83c\udf19'],['day','\u2600\ufe0f'],['dusk','\ud83c\udfc7']].map(([v,l])=>(<button key={v} onClick={()=>setMapMode(v)} style={{background:mapMode===v?'rgba(255,215,0,0.18)':'transparent',border:`1px solid ${mapMode===v?S.gd:S.vd}`,color:mapMode===v?S.gd:S.dm,borderRadius:5,padding:'3px 6px',fontSize:'0.72rem',cursor:'pointer'}}>{l}</button>))}</div>
+        <button onClick={()=>setShowMenu(v=>!v)} style={{background:showMenu?'rgba(0,212,255,0.2)':'transparent',border:`1px solid ${showMenu?S.cy:S.vd}`,color:showMenu?S.cy:S.dm,borderRadius:5,padding:'3px 9px',fontSize:'1rem',cursor:'pointer'}}>\u2630</button>
       </div>
 
       {/* MAP */}
       <div ref={mapRef} style={{flex:1,minHeight:0}}/>
 
       {/* HUD */}
-      <div style={{position:'absolute',left:hudPos.x,top:hudPos.y,zIndex:600,background:S.panelBg,border:`1px solid ${gpsOn?S.border:'rgba(42,64,85,0.4)'}`,borderRadius:10,minWidth:182,touchAction:'none',boxShadow:'0 4px 20px rgba(0,0,0,0.5)'}} onTouchStart={onHudTS} onTouchMove={onHudTM} onTouchEnd={onHudTE}>
-        <div style={{display:'flex',alignItems:'center',padding:'6px 10px',gap:6,cursor:'grab',borderBottom:'1px solid rgba(0,212,255,0.12)'}}>
-          <span style={{color:S.dim,fontSize:'0.7rem',flex:1}}>\u2838 SHIP DATA</span>
-          <button onClick={()=>setTogCollapsed(v=>!v)} style={{background:'transparent',border:`1px solid ${S.vDim}`,color:S.dim,borderRadius:4,padding:'1px 5px',fontSize:'0.62rem',cursor:'pointer'}}>{togCollapsed?'\u25bc CTRL':'\u25b2 CTRL'}</button>
-          <button onClick={()=>setAutoCenterRaw(v=>!v)} style={{background:autoCenter?'rgba(0,255,136,0.15)':'transparent',border:`1px solid ${autoCenter?S.green:S.vDim}`,color:autoCenter?S.green:S.dim,borderRadius:4,padding:'1px 5px',fontSize:'0.62rem',cursor:'pointer'}}>{autoCenter?'CTR':'FREE'}</button>
-          <button onClick={()=>setHudCollapsed(v=>!v)} style={{background:'transparent',border:'none',color:S.dim,fontSize:'0.8rem',cursor:'pointer',padding:'0 2px'}}>{hudCollapsed?'\u25bc':'\u25b2'}</button>
+      <div style={{position:'absolute',left:hudPos.x,top:hudPos.y,zIndex:600,background:S.bg,border:`1px solid ${gpsOn?S.bd:'rgba(42,64,85,0.4)'}`,borderRadius:10,minWidth:182,touchAction:'none',boxShadow:'0 4px 20px rgba(0,0,0,0.5)'}} onTouchStart={onTS} onTouchMove={onTM} onTouchEnd={onTE}>
+        <div style={{display:'flex',alignItems:'center',padding:'6px 10px',gap:5,cursor:'grab',borderBottom:'1px solid rgba(0,212,255,0.12)'}}>
+          <span style={{color:S.dm,fontSize:'0.7rem',flex:1}}>\u2838 SHIP DATA</span>
+          <button onClick={()=>setTogCollapsed(v=>!v)} style={{background:'transparent',border:`1px solid ${S.vd}`,color:S.dm,borderRadius:4,padding:'1px 5px',fontSize:'0.62rem',cursor:'pointer'}}>{togCollapsed?'\u25bc':'\u25b2'} CTRL</button>
+          <button onClick={()=>setAutoCenterRaw(v=>!v)} style={{background:autoCenter?'rgba(0,255,136,0.15)':'transparent',border:`1px solid ${autoCenter?S.gn:S.vd}`,color:autoCenter?S.gn:S.dm,borderRadius:4,padding:'1px 5px',fontSize:'0.62rem',cursor:'pointer'}}>{autoCenter?'CTR':'FREE'}</button>
+          <button onClick={()=>setHudCollapsed(v=>!v)} style={{background:'transparent',border:'none',color:S.dm,fontSize:'0.8rem',cursor:'pointer'}}>{hudCollapsed?'\u25bc':'\u25b2'}</button>
         </div>
-        <div style={{padding:'8px 10px',display:'flex',flexDirection:'column',gap:6}}>
+        <div style={{padding:'8px 10px',display:'flex',flexDirection:'column',gap:5}}>
           {!togCollapsed&&(
-            <div style={{display:'flex',flexDirection:'column',gap:5,paddingBottom:5,borderBottom:'1px solid rgba(0,212,255,0.1)'}}>
-              {[[gpsOn,setGpsOn,'\ud83d\udccd GPS'],[gebcoOn,setGebcoOn,'\ud83c\udf0a Depth'],[depthCheckOn,setDepthCheckOn,'\ud83d\udd0d Depth Check']].map(([v,s,lb])=>(
-                <label key={lb} style={{display:'flex',alignItems:'center',gap:7,cursor:'pointer',fontSize:S.fSm,color:S.text,minHeight:26}}>
-                  <input type="checkbox" checked={v} onChange={e=>s(e.target.checked)}/>{lb}
-                </label>
-              ))}
-              <AisSourceSection/>
-              <label style={{display:'flex',alignItems:'center',gap:7,cursor:'pointer',fontSize:S.fSm,color:rbMode?S.gold:S.text,minHeight:26,borderTop:'1px solid rgba(0,212,255,0.1)',paddingTop:4,marginTop:2}}>
+            <div style={{display:'flex',flexDirection:'column',gap:4,paddingBottom:6,borderBottom:'1px solid rgba(0,212,255,0.1)'}}>
+              <label style={{display:'flex',alignItems:'center',gap:7,cursor:'pointer',fontSize:S.sm,color:S.tx,minHeight:26}}><input type="checkbox" checked={gpsOn} onChange={e=>setGpsOn(e.target.checked)}/>\ud83d\udccd GPS</label>
+              <AisSrc/>
+              <DepthSrc/>
+              <label style={{display:'flex',alignItems:'center',gap:7,cursor:'pointer',fontSize:S.sm,color:depthCheckOn?S.cy:S.tx,minHeight:24,marginTop:2}}><input type="checkbox" checked={depthCheckOn} onChange={e=>setDepthCheckOn(e.target.checked)}/>\ud83d\udd0d Depth Check</label>
+              <label style={{display:'flex',alignItems:'center',gap:7,cursor:'pointer',fontSize:S.sm,color:rbMode?S.gd:S.tx,minHeight:24,borderTop:'1px solid rgba(0,212,255,0.1)',paddingTop:4}}>
                 <input type="checkbox" checked={rbMode} onChange={e=>{const on=e.target.checked;rbModeRef.current=on;setRbMode(on);if(!on){rbTargetRef.current=null;setRbResult(null);if(leafRef.current){if(layersRef.current.rbLine) leafRef.current.removeLayer(layersRef.current.rbLine);if(layersRef.current.rbMarker) leafRef.current.removeLayer(layersRef.current.rbMarker);layersRef.current.rbLine=null;layersRef.current.rbMarker=null;}}}}/>
-                \ud83d\udcd0 {rbMode?'Tap map \u2192 R/B live':'Range & Bearing'}
+                \ud83d\udcd0 {rbMode?'Tap map \u2192 R/B':'Range & Bearing'}
               </label>
-              {rbResult&&rbMode&&(
-                <div style={{background:'rgba(0,0,0,0.4)',borderRadius:5,padding:'5px 7px',border:'1px solid rgba(255,215,0,0.3)'}}>
-                  <div style={{display:'flex',gap:10}}>
-                    <div><div style={{color:S.dim,fontSize:S.fLabel}}>RANGE</div><div style={{color:S.gold,fontFamily:'monospace',fontSize:'0.78rem',fontWeight:700}}>{rbResult.rangeNM} NM</div></div>
-                    <div><div style={{color:S.dim,fontSize:S.fLabel}}>BRG</div><div style={{color:S.gold,fontFamily:'monospace',fontSize:'0.78rem',fontWeight:700}}>{rbResult.bearing}\xb0T</div></div>
-                    {livePos?.sog>0.2&&<div><div style={{color:S.dim,fontSize:S.fLabel}}>TTG</div><div style={{color:S.green,fontFamily:'monospace',fontSize:'0.78rem',fontWeight:700}}>{(()=>{const h=parseFloat(rbResult.rangeNM)/livePos.sog;const hr=Math.floor(h);const mn=Math.round((h-hr)*60);return hr>0?`${hr}h${mn}m`:`${mn}m`;})()}</div></div>}
-                  </div>
+              {rbResult&&rbMode&&(<div style={{background:'rgba(0,0,0,0.4)',borderRadius:5,padding:'5px 7px',border:'1px solid rgba(255,215,0,0.3)'}}>
+                <div style={{display:'flex',gap:10}}>
+                  {[['RNG',rbResult.rangeNM+' NM',S.gd],['BRG',rbResult.bearing+'\u00b0T',S.gd]].map(([k,v,c])=>(<div key={k}><div style={{color:S.dm,fontSize:S.lb}}>{k}</div><div style={{color:c,fontFamily:'monospace',fontSize:'0.78rem',fontWeight:700}}>{v}</div></div>))}
+                  {livePos?.sog>0.2&&<div><div style={{color:S.dm,fontSize:S.lb}}>TTG</div><div style={{color:S.gn,fontFamily:'monospace',fontSize:'0.78rem',fontWeight:700}}>{(()=>{const h=parseFloat(rbResult.rangeNM)/livePos.sog,hr=Math.floor(h),mn=Math.round((h-hr)*60);return hr>0?`${hr}h${mn}m`:`${mn}m`;})()}</div></div>}
                 </div>
-              )}
-              {gpsOn&&(<div><div style={{color:S.dim,fontSize:S.fLabel,marginBottom:3,letterSpacing:0.5}}>COG VECTOR</div><div style={{display:'flex',gap:3}}>{[6,12,20,30,60].map(m=>(<button key={m} onClick={()=>setVectorMins(m)} style={{background:vectorMins===m?'rgba(0,212,255,0.2)':'transparent',border:`1px solid ${vectorMins===m?S.cyan:S.vDim}`,color:vectorMins===m?S.cyan:S.dim,borderRadius:4,padding:'2px 5px',fontSize:'0.62rem',cursor:'pointer'}}>{m}m</button>))}</div></div>)}
-              {activeRoute&&(<div><div style={{color:S.dim,fontSize:S.fLabel,marginBottom:3,letterSpacing:0.5}}>XTD LIMIT</div><div style={{display:'flex',gap:3,flexWrap:'wrap'}}>{[0.1,0.25,0.5,1.0,2.0].map(n=>(<button key={n} onClick={()=>setXtdNM(n)} style={{background:xtdNM===n?'rgba(255,179,0,0.2)':'transparent',border:`1px solid ${xtdNM===n?S.gold:S.vDim}`,color:xtdNM===n?S.gold:S.dim,borderRadius:4,padding:'2px 5px',fontSize:'0.58rem',cursor:'pointer'}}>{n} NM</button>))}</div></div>)}
+              </div>)}
+              {gpsOn&&(<div><div style={{color:S.dm,fontSize:S.lb,marginBottom:3}}>COG VECTOR</div><div style={{display:'flex',gap:3}}>{[6,12,20,30,60].map(n=>(<button key={n} onClick={()=>setVectorMins(n)} style={{background:vectorMins===n?'rgba(0,212,255,0.2)':'transparent',border:`1px solid ${vectorMins===n?S.cy:S.vd}`,color:vectorMins===n?S.cy:S.dm,borderRadius:4,padding:'2px 5px',fontSize:'0.62rem',cursor:'pointer'}}>{n}m</button>))}</div></div>)}
+              {activeRoute&&(<div><div style={{color:S.dm,fontSize:S.lb,marginBottom:3}}>XTD</div><div style={{display:'flex',gap:3,flexWrap:'wrap'}}>{[0.1,0.25,0.5,1.0,2.0].map(n=>(<button key={n} onClick={()=>setXtdNM(n)} style={{background:xtdNM===n?'rgba(255,179,0,0.2)':'transparent',border:`1px solid ${xtdNM===n?S.gd:S.vd}`,color:xtdNM===n?S.gd:S.dm,borderRadius:4,padding:'2px 5px',fontSize:'0.58rem',cursor:'pointer'}}>{n}NM</button>))}</div></div>)}
             </div>
           )}
           {livePos?(
             <div>
-              <div style={{color:S.cyan,fontFamily:'monospace',fontSize:'0.75rem',lineHeight:1.8}}>{toDMS(livePos.lat,true)}<br/>{toDMS(livePos.lon,false)}</div>
-              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'4px 8px',marginTop:5}}>
-                {[['SOG',`${livePos.sog.toFixed(1)} kn`,S.green],['COG',`${livePos.cog.toFixed(0)}\xb0T`,S.green]].map(([k,v,c])=>(<div key={k}><div style={{color:S.dim,fontSize:S.fLabel}}>{k}</div><div style={{color:c,fontFamily:'monospace',fontSize:'0.82rem',fontWeight:700}}>{v}</div></div>))}
-              </div>
-              {!hudCollapsed&&(<div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'4px 8px',marginTop:4}}>{[['HDG',`${livePos.heading.toFixed(0)}\xb0`,S.gold],['ACC',`${livePos.acc.toFixed(0)} m`,S.gold]].map(([k,v,c])=>(<div key={k}><div style={{color:S.dim,fontSize:S.fLabel}}>{k}</div><div style={{color:c,fontFamily:'monospace',fontSize:'0.82rem',fontWeight:700}}>{v}</div></div>))}</div>)}
-              {!hudCollapsed&&etaResult&&(
-                <div style={{marginTop:6,borderTop:'1px solid rgba(0,255,136,0.15)',paddingTop:5}}>
-                  <div style={{display:'flex',justifyContent:'space-between'}}>{[['REMAIN',etaResult.remainNM+' NM'],['ETA',etaResult.hrs+'h '+etaResult.mins+'m']].map(([k,v])=>(<div key={k}><div style={{color:S.dim,fontSize:S.fLabel}}>{k}</div><div style={{color:S.green,fontFamily:'monospace',fontSize:'0.8rem',fontWeight:700}}>{v}</div></div>))}</div>
-                  <div style={{color:S.dim,fontSize:'0.6rem',marginTop:2}}>\u2192 {etaResult.wpName}</div>
-                  {etaResult.arrivalStr&&<div style={{color:S.gold,fontFamily:'monospace',fontSize:'0.65rem',marginTop:2}}>\ud83d\udd50 {etaResult.arrivalStr}</div>}
-                </div>
-              )}
+              <div style={{color:S.cy,fontFamily:'monospace',fontSize:'0.75rem',lineHeight:1.8}}>{toDMS(livePos.lat,true)}<br/>{toDMS(livePos.lon,false)}</div>
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'3px 8px',marginTop:4}}>{[['SOG',`${livePos.sog.toFixed(1)} kn`,S.gn],['COG',`${livePos.cog.toFixed(0)}\u00b0T`,S.gn]].map(([k,v,c])=>(<div key={k}><div style={{color:S.dm,fontSize:S.lb}}>{k}</div><div style={{color:c,fontFamily:'monospace',fontSize:'0.82rem',fontWeight:700}}>{v}</div></div>))}</div>
+              {!hudCollapsed&&(<div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'3px 8px',marginTop:3}}>{[['HDG',`${livePos.heading.toFixed(0)}\u00b0`,S.gd],['ACC',`${livePos.acc.toFixed(0)}m`,S.gd]].map(([k,v,c])=>(<div key={k}><div style={{color:S.dm,fontSize:S.lb}}>{k}</div><div style={{color:c,fontFamily:'monospace',fontSize:'0.82rem',fontWeight:700}}>{v}</div></div>))}</div>)}
+              {!hudCollapsed&&etaResult&&(<div style={{marginTop:5,borderTop:'1px solid rgba(0,255,136,0.15)',paddingTop:4}}>
+                <div style={{display:'flex',justifyContent:'space-between'}}>{[['REMAIN',etaResult.remainNM+' NM'],['ETA',etaResult.hrs+'h '+etaResult.mins+'m']].map(([k,v])=>(<div key={k}><div style={{color:S.dm,fontSize:S.lb}}>{k}</div><div style={{color:S.gn,fontFamily:'monospace',fontSize:'0.8rem',fontWeight:700}}>{v}</div></div>))}</div>
+                <div style={{color:S.dm,fontSize:'0.58rem',marginTop:2}}>\u2192 {etaResult.wpName}</div>
+                {etaResult.arrivalStr&&<div style={{color:S.gd,fontFamily:'monospace',fontSize:'0.62rem',marginTop:2}}>\ud83d\udd50 {etaResult.arrivalStr}</div>}
+              </div>)}
             </div>
-          ):(gpsOn?<div style={{color:S.dim,fontSize:S.fSm,fontStyle:'italic'}}>Acquiring GPS\u2026</div>:<div style={{color:S.vDim,fontSize:S.fXs}}>Enable GPS to track vessel</div>)}
+          ):(gpsOn?<div style={{color:S.dm,fontSize:S.sm,fontStyle:'italic'}}>Acquiring GPS\u2026</div>:<div style={{color:S.vd,fontSize:S.xs}}>Enable GPS to track vessel</div>)}
         </div>
       </div>
 
       {/* SIDE PANEL */}
       {panelCollapsed?(
-        <button onClick={()=>setPanelCollapsed(false)} style={{position:'absolute',top:'50%',right:0,transform:'translateY(-50%)',background:'rgba(4,12,26,0.95)',border:`1px solid ${S.border}`,color:S.cyan,borderRadius:'8px 0 0 8px',padding:'12px 6px',fontSize:'0.7rem',cursor:'pointer',zIndex:500,writingMode:'vertical-rl'}}>\u25c0 PANEL</button>
+        <button onClick={()=>setPanelCollapsed(false)} style={{position:'absolute',top:'50%',right:0,transform:'translateY(-50%)',background:'rgba(4,12,26,0.95)',border:`1px solid ${S.bd}`,color:S.cy,borderRadius:'8px 0 0 8px',padding:'12px 6px',fontSize:'0.7rem',cursor:'pointer',zIndex:500,writingMode:'vertical-rl'}}>\u25c0 PANEL</button>
       ):(
-        <div style={{position:'absolute',top:56,right:8,background:S.panelBg,border:`1px solid ${S.border}`,borderRadius:10,padding:'8px 10px',zIndex:500,width:172,backdropFilter:'blur(10px)',maxHeight:'82vh',overflowY:'auto',boxShadow:'0 4px 20px rgba(0,0,0,0.5)'}}>
+        <div style={{position:'absolute',top:56,right:8,background:S.bg,border:`1px solid ${S.bd}`,borderRadius:10,padding:'8px 10px',zIndex:500,width:172,backdropFilter:'blur(10px)',maxHeight:'82vh',overflowY:'auto',boxShadow:'0 4px 20px rgba(0,0,0,0.5)'}}>
           <div style={{display:'flex',alignItems:'center',marginBottom:8,gap:4}}>
-            {[['route','ROUTE'],['rb','R/B'],['charts','CHARTS'],['eta','ETA']].map(([p,l])=>(<button key={p} onClick={()=>setActivePanel(p)} style={{flex:1,background:activePanel===p?'rgba(0,212,255,0.18)':'transparent',border:`1px solid ${activePanel===p?S.cyan:S.vDim}`,color:activePanel===p?S.cyan:S.dim,borderRadius:5,padding:'3px 2px',fontSize:'0.62rem',cursor:'pointer'}}>{l}</button>))}
-            <button onClick={()=>setPanelCollapsed(true)} style={{background:'transparent',border:`1px solid ${S.vDim}`,color:S.dim,borderRadius:5,padding:'3px 5px',fontSize:'0.65rem',cursor:'pointer'}}>\u25b6</button>
+            {[['route','ROUTE'],['rb','R/B'],['charts','CHARTS'],['eta','ETA']].map(([p,l])=>(<button key={p} onClick={()=>setActivePanel(p)} style={{flex:1,background:activePanel===p?'rgba(0,212,255,0.18)':'transparent',border:`1px solid ${activePanel===p?S.cy:S.vd}`,color:activePanel===p?S.cy:S.dm,borderRadius:5,padding:'3px 2px',fontSize:'0.62rem',cursor:'pointer'}}>{l}</button>))}
+            <button onClick={()=>setPanelCollapsed(true)} style={{background:'transparent',border:`1px solid ${S.vd}`,color:S.dm,borderRadius:5,padding:'3px 5px',fontSize:'0.65rem',cursor:'pointer'}}>\u25b6</button>
           </div>
 
           {activePanel==='route'&&(
-            <div style={{display:'flex',flexDirection:'column',gap:7}}>
-              <label style={{background:'#060F1C',border:`1px solid ${S.vDim}`,color:S.text,borderRadius:6,padding:'7px 10px',fontSize:S.fSm,cursor:'pointer',display:'block',textAlign:'center'}}>\ud83d\udcc2 Load Route File<input type="file" style={{display:'none'}} onChange={loadRouteFromFile}/></label>
-              <div style={{color:S.vDim,fontSize:'0.55rem',lineHeight:1.4}}>RTZ\xb7GPX\xb7RTE\xb7RT3\xb7RT4\xb7RTX\xb7CSV\xb7JSON\xb7BVS\u2026</div>
-              {activeRoute?.waypoints?.length>0&&(
-                <div style={{borderTop:'1px solid rgba(0,212,255,0.15)',paddingTop:7}}>
-                  <div style={{color:S.cyan,fontSize:S.fSm,fontWeight:600,marginBottom:2,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{activeRoute.name}</div>
-                  <div style={{color:S.dim,fontSize:S.fXs,marginBottom:5}}>{activeRoute.waypoints.length} WPs \xb7 XTD \xb1{xtdNM} NM</div>
-                  <button onClick={saveCurrentRoute} style={{width:'100%',background:'transparent',border:'1px solid rgba(0,212,255,0.4)',color:S.cyan,borderRadius:5,padding:'5px',fontSize:S.fXs,cursor:'pointer',marginBottom:5}}>\ud83d\udcbe Save to My Routes</button>
-                  <div style={{color:S.dim,fontSize:S.fLabel,marginBottom:3}}>ETA TO WAYPOINT</div>
-                  <select value={selectedWpIdx} onChange={e=>setSelectedWpIdx(Number(e.target.value))} style={{width:'100%',background:'#060F1C',color:S.cyan,border:`1px solid ${S.vDim}`,borderRadius:5,padding:'5px',fontSize:S.fXs,marginBottom:5}}>
-                    {activeRoute.waypoints.map((wp,i)=><option key={i} value={i}>WP{String(i+1).padStart(2,'0')}{wp.name?' '+wp.name:''}</option>)}
-                  </select>
-                  {etaResult&&<div style={{background:'#020810',borderRadius:5,padding:'6px 8px',border:'1px solid rgba(0,255,136,0.18)',marginBottom:5}}><div style={{display:'flex',justifyContent:'space-between'}}>{[['REMAIN',etaResult.remainNM+' NM'],['ETA',etaResult.hrs+'h '+etaResult.mins+'m']].map(([k,v])=>(<div key={k}><div style={{color:S.dim,fontSize:'0.5rem'}}>{k}</div><div style={{color:S.green,fontFamily:'monospace',fontSize:'0.82rem',fontWeight:700}}>{v}</div></div>))}</div>{etaResult.arrivalStr&&<div style={{color:S.gold,fontFamily:'monospace',fontSize:'0.65rem',marginTop:4}}>\ud83d\udd50 {etaResult.arrivalStr}</div>}<div style={{color:S.dim,fontSize:'0.53rem',marginTop:2}}>\u2192 {etaResult.wpName}</div></div>}
-                  <button onClick={()=>{setActiveRoute(null);setEtaResult(null);setSelectedWpIdx(0);}} style={{width:'100%',background:'transparent',border:'1px solid rgba(255,71,87,0.45)',color:S.red,borderRadius:5,padding:'5px',fontSize:S.fXs,cursor:'pointer'}}>\u2715 Clear Route</button>
-                </div>
-              )}
-              <div style={{borderTop:'1px solid rgba(0,212,255,0.12)',paddingTop:6}}>
-                <div style={{color:S.dim,fontSize:S.fLabel,letterSpacing:0.5,marginBottom:4}}>MY ROUTES ({savedRoutes.length}/100)</div>
-                <input placeholder="Search saved\u2026" value={savedSearch} onChange={e=>setSavedSearch(e.target.value)} style={{width:'100%',boxSizing:'border-box',background:'#060F1C',color:S.text,border:`1px solid ${S.vDim}`,borderRadius:5,padding:'5px 7px',fontSize:S.fXs,outline:'none',marginBottom:4}}/>
-                <div style={{maxHeight:110,overflowY:'auto',display:'flex',flexDirection:'column',gap:3}}>
-                  {filteredSavedRoutes.map((r,i)=>(<div key={i} style={{display:'flex',gap:3}}><button onClick={()=>{setActiveRoute(r);setSelectedWpIdx((r.waypoints?.length||1)-1);}} style={{flex:1,background:'#060F1C',border:`1px solid ${activeRoute?.name===r.name?S.cyan:S.vDim}`,color:activeRoute?.name===r.name?S.cyan:S.text,borderRadius:5,padding:'4px 6px',fontSize:S.fXs,cursor:'pointer',textAlign:'left',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{r.name||'\u2014'}</button><button onClick={()=>deleteSavedRoute(r.name)} style={{background:'transparent',border:'1px solid rgba(255,71,87,0.35)',color:S.red,borderRadius:4,padding:'3px 6px',fontSize:'0.65rem',cursor:'pointer'}}>\u2715</button></div>))}
-                  {filteredSavedRoutes.length===0&&<div style={{color:S.vDim,fontSize:S.fXs,fontStyle:'italic'}}>No saved routes</div>}
+            <div style={{display:'flex',flexDirection:'column',gap:6}}>
+              <label style={{background:'#060F1C',border:`1px solid ${S.vd}`,color:S.tx,borderRadius:6,padding:'7px 10px',fontSize:S.sm,cursor:'pointer',display:'block',textAlign:'center'}}>\ud83d\udcc2 Load Route File<input type="file" style={{display:'none'}} onChange={loadRoute}/></label>
+              <div style={{color:S.vd,fontSize:'0.55rem'}}>RTZ\u00b7GPX\u00b7RTE\u00b7CSV\u00b7JSON\u2026</div>
+              {activeRoute?.waypoints?.length>0&&(<div style={{borderTop:'1px solid rgba(0,212,255,0.15)',paddingTop:6}}>
+                <div style={{color:S.cy,fontSize:S.sm,fontWeight:600,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',marginBottom:2}}>{activeRoute.name}</div>
+                <div style={{color:S.dm,fontSize:S.xs,marginBottom:4}}>{activeRoute.waypoints.length} WPs \u00b7 XTD \u00b1{xtdNM}NM</div>
+                <button onClick={saveRoute} style={{width:'100%',background:'transparent',border:'1px solid rgba(0,212,255,0.4)',color:S.cy,borderRadius:5,padding:'5px',fontSize:S.xs,cursor:'pointer',marginBottom:4}}>\ud83d\udcbe Save to My Routes</button>
+                <div style={{color:S.dm,fontSize:S.lb,marginBottom:3}}>ETA TO WAYPOINT</div>
+                <select value={selectedWpIdx} onChange={e=>setSelectedWpIdx(Number(e.target.value))} style={{width:'100%',background:'#060F1C',color:S.cy,border:`1px solid ${S.vd}`,borderRadius:5,padding:'5px',fontSize:S.xs,marginBottom:4}}>
+                  {activeRoute.waypoints.map((w,i)=><option key={i} value={i}>WP{String(i+1).padStart(2,'0')}{w.name?' '+w.name:''}</option>)}
+                </select>
+                {etaResult&&(<div style={{background:'#020810',borderRadius:5,padding:'6px 8px',border:'1px solid rgba(0,255,136,0.18)',marginBottom:4}}>
+                  <div style={{display:'flex',justifyContent:'space-between'}}>{[['REMAIN',etaResult.remainNM+' NM'],['ETA',etaResult.hrs+'h '+etaResult.mins+'m']].map(([k,v])=>(<div key={k}><div style={{color:S.dm,fontSize:'0.5rem'}}>{k}</div><div style={{color:S.gn,fontFamily:'monospace',fontSize:'0.82rem',fontWeight:700}}>{v}</div></div>))}</div>
+                  {etaResult.arrivalStr&&<div style={{color:S.gd,fontFamily:'monospace',fontSize:'0.62rem',marginTop:3}}>\ud83d\udd50 {etaResult.arrivalStr}</div>}
+                  <div style={{color:S.dm,fontSize:'0.52rem',marginTop:2}}>\u2192 {etaResult.wpName}</div>
+                </div>)}
+                <button onClick={()=>{setActiveRoute(null);setEtaResult(null);setSelectedWpIdx(0);}} style={{width:'100%',background:'transparent',border:'1px solid rgba(255,71,87,0.45)',color:S.rd,borderRadius:5,padding:'5px',fontSize:S.xs,cursor:'pointer'}}>\u2715 Clear Route</button>
+              </div>)}
+              <div style={{borderTop:'1px solid rgba(0,212,255,0.12)',paddingTop:5}}>
+                <div style={{color:S.dm,fontSize:S.lb,letterSpacing:0.5,marginBottom:3}}>MY ROUTES ({savedRoutes.length}/100)</div>
+                <input placeholder="Search saved\u2026" value={savedSearch} onChange={e=>setSavedSearch(e.target.value)} style={{width:'100%',boxSizing:'border-box',background:'#060F1C',color:S.tx,border:`1px solid ${S.vd}`,borderRadius:5,padding:'5px 7px',fontSize:S.xs,outline:'none',marginBottom:3}}/>
+                <div style={{maxHeight:100,overflowY:'auto',display:'flex',flexDirection:'column',gap:3}}>
+                  {filteredSaved.map((r,i)=>(<div key={i} style={{display:'flex',gap:3}}><button onClick={()=>{setActiveRoute(r);setSelectedWpIdx((r.waypoints?.length||1)-1);}} style={{flex:1,background:'#060F1C',border:`1px solid ${activeRoute?.name===r.name?S.cy:S.vd}`,color:activeRoute?.name===r.name?S.cy:S.tx,borderRadius:5,padding:'4px 6px',fontSize:S.xs,cursor:'pointer',textAlign:'left',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{r.name||'\u2014'}</button><button onClick={()=>delRoute(r.name)} style={{background:'transparent',border:'1px solid rgba(255,71,87,0.35)',color:S.rd,borderRadius:4,padding:'3px 6px',fontSize:'0.65rem',cursor:'pointer'}}>\u2715</button></div>))}
+                  {filteredSaved.length===0&&<div style={{color:S.vd,fontSize:S.xs,fontStyle:'italic'}}>No saved routes</div>}
                 </div>
               </div>
-              {sheetRoutes.length>0&&(
-                <div style={{borderTop:'1px solid rgba(0,212,255,0.12)',paddingTop:6}}>
-                  <div style={{color:S.dim,fontSize:S.fLabel,letterSpacing:0.5,marginBottom:4}}>DATABASE ({sheetRoutes.length})</div>
-                  <input placeholder="Search by name, port, route\u2026" value={dbSearch} onChange={e=>setDbSearch(e.target.value)} style={{width:'100%',boxSizing:'border-box',background:'#060F1C',color:S.text,border:`1px solid ${S.vDim}`,borderRadius:5,padding:'5px 7px',fontSize:S.fXs,outline:'none',marginBottom:4}}/>
-                  <div style={{maxHeight:110,overflowY:'auto',display:'flex',flexDirection:'column',gap:3}}>
-                    {filteredSheetRoutes.length===0&&<div style={{color:S.vDim,fontSize:S.fXs,fontStyle:'italic'}}>{dbSearch?`No match for "${dbSearch}"`:' No routes in database'}</div>}
-                    {filteredSheetRoutes.map((r,i)=>(<button key={i} onClick={()=>{setActiveRoute(r);setSelectedWpIdx((r.waypoints?.length||1)-1);setDbSearch('');}} style={{background:'#060F1C',border:`1px solid ${S.vDim}`,color:S.text,borderRadius:5,padding:'5px 7px',fontSize:S.fXs,cursor:'pointer',textAlign:'left',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{r.name||r.Name||r['Route Name']||r['File Name']||'Unnamed Route'}</button>))}
-                  </div>
+              {sheetRoutes.length>0&&(<div style={{borderTop:'1px solid rgba(0,212,255,0.12)',paddingTop:5}}>
+                <div style={{color:S.dm,fontSize:S.lb,letterSpacing:0.5,marginBottom:3}}>DATABASE ({sheetRoutes.length})</div>
+                <input placeholder="Search by name, port\u2026" value={dbSearch} onChange={e=>setDbSearch(e.target.value)} style={{width:'100%',boxSizing:'border-box',background:'#060F1C',color:S.tx,border:`1px solid ${S.vd}`,borderRadius:5,padding:'5px 7px',fontSize:S.xs,outline:'none',marginBottom:3}}/>
+                <div style={{maxHeight:100,overflowY:'auto',display:'flex',flexDirection:'column',gap:2}}>
+                  {filteredDB.length===0&&<div style={{color:S.vd,fontSize:S.xs,fontStyle:'italic'}}>{dbSearch?`No match for "${dbSearch}"`:''}</div>}
+                  {filteredDB.map((r,i)=>(<button key={i} onClick={()=>{setActiveRoute(r);setSelectedWpIdx((r.waypoints?.length||1)-1);setDbSearch('');}} style={{background:'#060F1C',border:`1px solid ${S.vd}`,color:S.tx,borderRadius:5,padding:'5px 7px',fontSize:S.xs,cursor:'pointer',textAlign:'left',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{r.name||r.Name||r['Route Name']||'Unnamed'}</button>))}
                 </div>
-              )}
-            </div>
-          )}
-
-          {activePanel==='rb'&&(
-            <div style={{display:'flex',flexDirection:'column',gap:8}}>
-              <label style={{display:'flex',alignItems:'center',gap:7,cursor:'pointer',fontSize:S.fSm,color:S.text,minHeight:28}}><input type="checkbox" checked={rbMode} onChange={e=>{const on=e.target.checked;rbModeRef.current=on;setRbMode(on);if(!on){rbTargetRef.current=null;setRbResult(null);if(leafRef.current){if(layersRef.current.rbLine) leafRef.current.removeLayer(layersRef.current.rbLine);if(layersRef.current.rbMarker) leafRef.current.removeLayer(layersRef.current.rbMarker);layersRef.current.rbLine=null;layersRef.current.rbMarker=null;}}}}/>\ud83d\udcd0 Range & Bearing</label>
-              <div style={{color:rbMode?S.gold:S.dim,fontSize:S.fXs,lineHeight:1.6}}>{rbMode?'\u2b61 Tap map \u2014 updates live as ship moves':'Enable then tap map point'}</div>
-              {rbResult&&(<div style={{background:'#020810',borderRadius:7,padding:'8px 10px',border:'1px solid rgba(255,215,0,0.3)'}}>
-                <div style={{display:'flex',justifyContent:'space-between',marginBottom:4}}>{[['RANGE',rbResult.rangeNM+' NM'],['BRG',rbResult.bearing+'\xb0T']].map(([k,v])=>(<div key={k}><div style={{color:S.dim,fontSize:S.fLabel}}>{k}</div><div style={{color:S.gold,fontFamily:'monospace',fontSize:'0.9rem',fontWeight:700}}>{v}</div></div>))}</div>
-                {livePos?.sog>0.2&&(<div style={{borderTop:'1px solid rgba(255,215,0,0.2)',paddingTop:4,marginBottom:4}}><div style={{color:S.dim,fontSize:S.fLabel}}>TTG @ {livePos.sog.toFixed(1)} kn</div><div style={{color:S.green,fontFamily:'monospace',fontSize:'0.82rem',fontWeight:700}}>{(()=>{const h=parseFloat(rbResult.rangeNM)/livePos.sog;const hr=Math.floor(h);const mn=Math.round((h-hr)*60);return hr>0?`${hr}h ${mn}m`:`${mn} min`;})()}</div></div>)}
-                <div style={{color:S.dim,fontSize:S.fXs}}>{toDMS(parseFloat(rbResult.lat),true)}<br/>{toDMS(parseFloat(rbResult.lon),false)}</div>
               </div>)}
-              {rbMode&&!livePos&&<div style={{color:S.red,fontSize:S.fXs}}>\u26a0 Enable GPS first</div>}
             </div>
           )}
 
-          {activePanel==='charts'&&(
-            <div style={{display:'flex',flexDirection:'column',gap:7}}>
-              <label style={{background:'#060F1C',border:`1px solid ${S.vDim}`,color:S.text,borderRadius:6,padding:'7px 10px',fontSize:S.fSm,cursor:'pointer',display:'block',textAlign:'center'}}>\ud83d\uddfa\ufe0f Load Chart Overlay<input type="file" accept=".xml,.geojson,.json,.kml,.kmz,.gpx" style={{display:'none'}} onChange={loadChartFile}/></label>
-              <div style={{color:S.vDim,fontSize:'0.55rem',lineHeight:1.5}}>ECDIS User Chart XML (Furuno/Kongsberg/JRC)<br/>GeoJSON \xb7 KML \xb7 GPX</div>
-              {chartOverlays.map((c,i)=>(<div key={i} style={{display:'flex',alignItems:'center',gap:4}}><div style={{flex:1}}><div style={{color:'#00E5FF',fontSize:S.fXs,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>\ud83d\uddfa {c.name}</div>{c.summary&&<div style={{color:S.dim,fontSize:'0.55rem'}}>{c.summary}</div>}</div><button onClick={()=>removeChart(c.name)} style={{background:'transparent',border:'1px solid rgba(255,71,87,0.35)',color:S.red,borderRadius:4,padding:'2px 6px',fontSize:'0.65rem',cursor:'pointer'}}>\u2715</button></div>))}
-              {chartOverlays.length===0&&<div style={{color:S.vDim,fontSize:S.fXs,fontStyle:'italic'}}>No overlays loaded</div>}
-            </div>
-          )}
+          {activePanel==='rb'&&(<div style={{display:'flex',flexDirection:'column',gap:7}}>
+            <label style={{display:'flex',alignItems:'center',gap:7,cursor:'pointer',fontSize:S.sm,color:S.tx}}><input type="checkbox" checked={rbMode} onChange={e=>{const on=e.target.checked;rbModeRef.current=on;setRbMode(on);if(!on){rbTargetRef.current=null;setRbResult(null);if(leafRef.current){if(layersRef.current.rbLine) leafRef.current.removeLayer(layersRef.current.rbLine);if(layersRef.current.rbMarker) leafRef.current.removeLayer(layersRef.current.rbMarker);layersRef.current.rbLine=null;layersRef.current.rbMarker=null;}}}}/>\ud83d\udcd0 Range & Bearing</label>
+            <div style={{color:rbMode?S.gd:S.dm,fontSize:S.xs}}>{rbMode?'\u2b61 Tap map \u2014 live updates':'Enable then tap map'}</div>
+            {rbResult&&(<div style={{background:'#020810',borderRadius:7,padding:'8px 10px',border:'1px solid rgba(255,215,0,0.3)'}}>
+              <div style={{display:'flex',justifyContent:'space-between',marginBottom:4}}>{[['RANGE',rbResult.rangeNM+' NM'],['BRG',rbResult.bearing+'\u00b0T']].map(([k,v])=>(<div key={k}><div style={{color:S.dm,fontSize:S.lb}}>{k}</div><div style={{color:S.gd,fontFamily:'monospace',fontSize:'0.9rem',fontWeight:700}}>{v}</div></div>))}</div>
+              {livePos?.sog>0.2&&(<div style={{borderTop:'1px solid rgba(255,215,0,0.2)',paddingTop:4,marginBottom:4}}><div style={{color:S.dm,fontSize:S.lb}}>TTG @ {livePos.sog.toFixed(1)}kn</div><div style={{color:S.gn,fontFamily:'monospace',fontSize:'0.82rem',fontWeight:700}}>{(()=>{const h=parseFloat(rbResult.rangeNM)/livePos.sog,hr=Math.floor(h),mn=Math.round((h-hr)*60);return hr>0?`${hr}h ${mn}m`:`${mn} min`;})()}</div></div>)}
+              <div style={{color:S.dm,fontSize:S.xs}}>{toDMS(parseFloat(rbResult.lat),true)}<br/>{toDMS(parseFloat(rbResult.lon),false)}</div>
+            </div>)}
+          </div>)}
 
-          {activePanel==='eta'&&(
-            <div>{activeRoute?.waypoints?.length>0?(<ETACalculator totalNM={etaResult?.remainNM?parseFloat(etaResult.remainNM):0}/>):(<div style={{color:S.dim,fontSize:S.fSm,fontStyle:'italic',textAlign:'center',padding:'16px 0'}}>Load a route to use the ETA calculator</div>)}</div>
-          )}
+          {activePanel==='charts'&&(<div style={{display:'flex',flexDirection:'column',gap:6}}>
+            <label style={{background:'#060F1C',border:`1px solid ${S.vd}`,color:S.tx,borderRadius:6,padding:'7px 10px',fontSize:S.sm,cursor:'pointer',display:'block',textAlign:'center'}}>\ud83d\uddfa\ufe0f Load Chart<input type="file" accept=".xml,.geojson,.json,.kml,.gpx" style={{display:'none'}} onChange={loadChart}/></label>
+            <div style={{color:S.vd,fontSize:'0.55rem',lineHeight:1.5}}>ECDIS User Chart XML<br/>GeoJSON \u00b7 KML \u00b7 GPX</div>
+            {chartOverlays.map((c,i)=>(<div key={i} style={{display:'flex',alignItems:'center',gap:4}}><div style={{flex:1}}><div style={{color:'#00E5FF',fontSize:S.xs,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>\ud83d\uddfa {c.name}</div>{c.summary&&<div style={{color:S.dm,fontSize:'0.55rem'}}>{c.summary}</div>}</div><button onClick={()=>removeChart(c.name)} style={{background:'transparent',border:'1px solid rgba(255,71,87,0.35)',color:S.rd,borderRadius:4,padding:'2px 6px',fontSize:'0.65rem',cursor:'pointer'}}>\u2715</button></div>))}
+            {chartOverlays.length===0&&<div style={{color:S.vd,fontSize:S.xs,fontStyle:'italic'}}>No overlays loaded</div>}
+          </div>)}
+
+          {activePanel==='eta'&&(<div>{activeRoute?.waypoints?.length>0?<ETACalculator totalNM={etaResult?.remainNM?parseFloat(etaResult.remainNM):0}/>:<div style={{color:S.dm,fontSize:S.sm,fontStyle:'italic',textAlign:'center',padding:'16px 0'}}>Load a route first</div>}</div>)}
         </div>
       )}
 
-      {/* SETTINGS MENU */}
-      {showMenu&&(
-        <div style={{position:'absolute',inset:0,zIndex:800,background:'rgba(0,0,0,0.6)'}} onClick={()=>setShowMenu(false)}>
-          <div style={{position:'absolute',bottom:0,left:0,right:0,background:'#030A15',borderTop:`1px solid ${S.border}`,borderRadius:'14px 14px 0 0',padding:'14px 16px',maxHeight:'78vh',overflowY:'auto'}} onClick={e=>e.stopPropagation()}>
-            <div style={{display:'flex',gap:4,marginBottom:14,flexWrap:'wrap'}}>
-              {[['colors','\ud83c\udfa8'],['track','\ud83d\udccd'],['ais','\ud83d\udce1'],['contours','\ud83c\udf0a'],['display','\ud83d\uddfa\ufe0f']].map(([c,l])=>(<button key={c} onClick={()=>setMenuCat(c)} style={{flex:1,minWidth:52,background:menuCat===c?'rgba(0,212,255,0.18)':'#060F1C',border:`1px solid ${menuCat===c?S.cyan:S.vDim}`,color:menuCat===c?S.cyan:S.dim,borderRadius:7,padding:'7px 4px',fontSize:'0.72rem',cursor:'pointer'}}>{l}</button>))}
-            </div>
-            {menuCat==='colors'&&(<div style={{display:'flex',flexDirection:'column',gap:12}}>{[['route','Route Line'],['vector','COG Vector'],['ship','Ship Icon'],['track','Past Track'],['xtd','XTD Corridor']].map(([key,label])=>(<div key={key} style={{display:'flex',alignItems:'center',justifyContent:'space-between'}}><div style={{display:'flex',alignItems:'center',gap:10}}><div style={{width:18,height:18,borderRadius:4,background:colors[key],border:'1px solid rgba(255,255,255,0.25)'}}/><span style={{color:S.text,fontSize:S.fSm}}>{label}</span></div><input type="color" value={colors[key]} onChange={e=>setColors({...colors,[key]:e.target.value})} style={{width:40,height:28,border:'none',borderRadius:6,cursor:'pointer',background:'transparent'}}/></div>))}<button onClick={()=>setColors(DEFAULT_COLORS)} style={{marginTop:4,background:'transparent',border:`1px solid ${S.vDim}`,color:S.dim,borderRadius:6,padding:'7px',fontSize:S.fXs,cursor:'pointer'}}>\u21ba Reset to defaults</button></div>)}
-            {menuCat==='track'&&(<div style={{display:'flex',flexDirection:'column',gap:10}}><div style={{color:S.dim,fontSize:S.fXs,letterSpacing:0.5}}>PAST TRACK DURATION</div><div style={{display:'flex',gap:5,flexWrap:'wrap'}}>{[[0,'OFF'],[1,'1H'],[2,'2H'],[6,'6H'],[12,'12H'],[24,'24H']].map(([h,l])=>(<button key={h} onClick={()=>setTrackHours(h)} style={{background:trackHours===h?'rgba(0,255,136,0.18)':'#060F1C',border:`1px solid ${trackHours===h?S.green:S.vDim}`,color:trackHours===h?S.green:S.text,borderRadius:7,padding:'7px 12px',fontSize:S.fSm,cursor:'pointer'}}>{l}</button>))}</div></div>)}
-            {menuCat==='ais'&&(<div style={{display:'flex',flexDirection:'column',gap:10}}><div style={{color:S.dim,fontSize:S.fXs,letterSpacing:0.5}}>AIS RANGE FILTER</div><div style={{display:'flex',gap:4,flexWrap:'wrap'}}>{[[0,'World'],[10,'10NM'],[20,'20NM'],[50,'50NM'],[100,'100NM']].map(([r,l])=>(<button key={r} onClick={()=>setAisRange(r)} style={{background:aisRange===r?'rgba(0,212,255,0.2)':'#060F1C',border:`1px solid ${aisRange===r?S.cyan:S.vDim}`,color:aisRange===r?S.cyan:S.text,borderRadius:7,padding:'7px 10px',fontSize:S.fSm,cursor:'pointer'}}>{l}</button>))}</div><div style={{color:S.dim,fontSize:S.fXs}}>Source: {AIS_SOURCES[aisSource]?.label} \xb7 {Object.keys(aisTargets).length} targets</div></div>)}
-            {menuCat==='contours'&&(<div style={{display:'flex',flexDirection:'column',gap:10}}><div style={{color:S.dim,fontSize:S.fXs,letterSpacing:0.5}}>DEPTH CONTOUR SETTINGS</div>{[[shipDraft,setShipDraft,'nav_draft','\u2693 Ship Draft (m)',"Your vessel's draft"],[shallowDepth,setShallowDepth,'nav_shallowDepth','\ud83d\udd34 Shallow Contour (m)','Depths less than this = danger'],[safetyDepth,setSafetyDepth,'nav_safetyDepth','\ud83d\udfe1 Safety Contour (m)','Minimum safe depth'],[deepDepth,setDeepDepth,'nav_deepDepth','\ud83d\udd35 Deep Contour (m)','Depths greater than this = deep']].map(([val,setter,key,label,desc])=>(<div key={key}><div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:4}}><span style={{color:S.text,fontSize:S.fSm}}>{label}</span><input type="number" value={val} onChange={e=>{setter(Number(e.target.value));localStorage.setItem(key,e.target.value);}} style={{width:70,background:'#060F1C',color:S.cyan,border:`1px solid ${S.vDim}`,borderRadius:5,padding:'4px 7px',fontSize:S.fSm,textAlign:'right'}}/></div><div style={{color:S.dim,fontSize:'0.6rem'}}>{desc}</div></div>))}<label style={{display:'flex',alignItems:'center',gap:8,cursor:'pointer',fontSize:S.fSm,color:S.text,padding:'4px 0'}}><input type="checkbox" checked={depthCheckOn} onChange={e=>setDepthCheckOn(e.target.checked)}/>\ud83d\udd0d Depth Check Mode</label></div>)}
-            {menuCat==='display'&&(<div style={{display:'flex',flexDirection:'column',gap:12}}><div><div style={{color:S.dim,fontSize:S.fXs,marginBottom:6}}>MAP ORIENTATION</div><div style={{display:'flex',gap:4}}>{[['north','N\u2191 North Up'],['course','C\u2191 Course Up'],['head','H\u2191 Head Up']].map(([m,l])=>(<button key={m} onClick={()=>setDisplayMode(m)} style={{flex:1,background:displayMode===m?'rgba(0,212,255,0.2)':'#060F1C',border:`1px solid ${displayMode===m?S.cyan:S.vDim}`,color:displayMode===m?S.cyan:S.text,borderRadius:7,padding:'8px 4px',fontSize:'0.68rem',cursor:'pointer'}}>{l}</button>))}</div></div><div><div style={{color:S.dim,fontSize:S.fXs,marginBottom:6}}>MAP STYLE</div><div style={{display:'flex',gap:4}}>{[['night','\ud83c\udf19 Night'],['day','\u2600\ufe0f Day'],['dusk','\ud83c\udfc7 Dusk']].map(([m,l])=>(<button key={m} onClick={()=>setMapMode(m)} style={{flex:1,background:mapMode===m?'rgba(255,215,0,0.18)':'#060F1C',border:`1px solid ${mapMode===m?S.gold:S.vDim}`,color:mapMode===m?S.gold:S.text,borderRadius:7,padding:'8px 4px',fontSize:'0.68rem',cursor:'pointer'}}>{l}</button>))}</div></div><div><div style={{color:S.dim,fontSize:S.fXs,marginBottom:6}}>GPS CENTER MODE</div><div style={{display:'flex',gap:4}}><button onClick={()=>setAutoCenterRaw(true)} style={{flex:1,background:autoCenter?'rgba(0,255,136,0.18)':'#060F1C',border:`1px solid ${autoCenter?S.green:S.vDim}`,color:autoCenter?S.green:S.text,borderRadius:7,padding:'8px',fontSize:'0.68rem',cursor:'pointer'}}>\ud83c\udfaf Look-Ahead</button><button onClick={()=>setAutoCenterRaw(false)} style={{flex:1,background:!autoCenter?'rgba(255,215,0,0.18)':'#060F1C',border:`1px solid ${!autoCenter?S.gold:S.vDim}`,color:!autoCenter?S.gold:S.text,borderRadius:7,padding:'8px',fontSize:'0.68rem',cursor:'pointer'}}>\ud83d\udd90 Free Nav</button></div></div></div>)}
+      {/* SETTINGS */}
+      {showMenu&&(<div style={{position:'absolute',inset:0,zIndex:800,background:'rgba(0,0,0,0.6)'}} onClick={()=>setShowMenu(false)}>
+        <div style={{position:'absolute',bottom:0,left:0,right:0,background:'#030A15',borderTop:`1px solid ${S.bd}`,borderRadius:'14px 14px 0 0',padding:'14px 16px',maxHeight:'78vh',overflowY:'auto'}} onClick={e=>e.stopPropagation()}>
+          <div style={{display:'flex',gap:4,marginBottom:14,flexWrap:'wrap'}}>
+            {[['colors','\ud83c\udfa8'],['track','\ud83d\udccd'],['ais','\ud83d\udce1'],['contours','\ud83c\udf0a'],['display','\ud83d\uddfa\ufe0f']].map(([c,l])=>(<button key={c} onClick={()=>setMenuCat(c)} style={{flex:1,minWidth:52,background:menuCat===c?'rgba(0,212,255,0.18)':'#060F1C',border:`1px solid ${menuCat===c?S.cy:S.vd}`,color:menuCat===c?S.cy:S.dm,borderRadius:7,padding:'7px 4px',fontSize:'0.72rem',cursor:'pointer'}}>{l}</button>))}
           </div>
-        </div>
-      )}
-    </div>
-  );
-}
+          {menuCat==='colors'&&(<div style={{display:'flex',flexDirection:'column',gap:12}}>{[['route','Route Line'],['vector','COG Vector'],['ship','Ship Icon'],['track','Past Track'],['xtd','XTD Corridor']].map(([k,lb])=>(<div key={k} style={{display:'flex',alignItems:'center',justifyContent:'space-between'}}><div style={{display:'flex',alignItems:'center',gap:10}}><div style={{width:18,height:18,borderRadius:4,background:colors[k],border:'1px solid rgba(255,255,255,0.25)'}}/><span style={{color:S.tx,fontSize:S.sm}}>{lb}</span></div><input type="color" value={colors[k]} onChange={e=>setColors({...colors,[k]:e.target.value})} style={{width:40,height:28,border:'none',borderRadius:6,cursor:'pointer',background:'transparent'}}/></div>))}<button onClick={()=>setColors(DEFAULT_COLORS)} style={{marginTop:4,background:'transparent',border:`1px solid ${S.vd}`,color:S.dm,borderRadius:6,padding:'7px',fontSize:S.xs,cursor:'pointer'}}>\u21ba Reset defaults</button></div>)}
+          {menuCat==='track'&&(<div style={{display:'flex',flexDirection:'column',gap:10}}><div style={{color:S.dm,fontSize:S.xs}}>PAST TRACK DURATION</div><div style={{display:'flex',gap:5,flexWrap:'wrap'}}>{[[0,'OFF'],[1,'1H'],[2,'2H'],[6,'6H'],[12,'12H'],[24,'24H']].map(([h,l])=>(<button key={h} onClick={()=>setTrackHours(h)} style={{background:trackHours===h?'rgba(0,255,136,0.18)':'#060F1C',border:`1px solid ${trackHours===h?S.gn:S.vd}`,color:trackHours===h?S.gn:S.tx,borderRadius:7,padding:'7px 12px',fontSize:S.sm,cursor:'pointer'}}>{l}</button>))}</div></div>)}
+          {menuCat==='ais'&&(<div style={{display:'flex',flexDirection:'column',gap:10}}><div style={{color:S.dm,fontSize:S.xs}}>AIS RANGE FILTER</div><div style={{display:'flex',gap:4,flexWrap:'wrap'}}>{[[0,'World'],[
