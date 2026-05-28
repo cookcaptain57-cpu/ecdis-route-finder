@@ -248,7 +248,9 @@ export default function App() {
   const [showDisclaimer, setShowDisclaimer]     = useState(false);
   const [navDiscBanner,  setNavDiscBanner]       = useState(false);
   // Welcome popup — typewriter message shown on login / signup
-  const [welcomePopup,   setWelcomePopup]        = useState(null); // null | {type,name,rank}
+  const [welcomePopup,   setWelcomePopup]        = useState(null);
+  // Auth loading progress bar (0-100) shown on the welcome splash screen
+  const [authProgress,   setAuthProgress]        = useState(0); // null | {type,name,rank}
 
   // Per-sync progress for admin panel progress bars (0-100)
   const [routesSyncProgress, setRoutesSyncProgress] = useState(0);
@@ -429,7 +431,7 @@ export default function App() {
     setTimeout(() => setChartsSyncProgress(0), 3000);
   };
 
-  // ─── Admin: Sync Puorts ONLY ───────────────────────────────────────────────
+  // ─── Admin: Sync Ports ONLY ───────────────────────────────────────────────
   const refreshPorts = async () => {
     setPortsLoading(true); setPortsSyncProgress(2);
     notify('📡 Fetching ports from Sheet…', 'info');
@@ -511,6 +513,18 @@ export default function App() {
     if (!sessionStorage.getItem('disclaimer_ok')) setShowDisclaimer(true);
   }, []);
 
+  // Animate auth loading progress bar
+  useEffect(() => {
+    if (authChecked) { setAuthProgress(100); return; }
+    let p = 0;
+    const t = setInterval(() => {
+      p += Math.random() * 12;
+      if (p >= 85) { p = 85; clearInterval(t); }
+      setAuthProgress(Math.round(p));
+    }, 120);
+    return () => clearInterval(t);
+  }, [authChecked]);
+
   const TABS = [
     { k: 'home',    i: '🏠', l: 'Dashboard' },
     { k: 'routes',  i: '🛤', l: 'Routes' },
@@ -558,15 +572,26 @@ export default function App() {
         </div>
       )}
 
-      {/* ── Full-screen auth loading overlay — completely prevents login flicker ── */}
+      {/* ── Welcome splash screen — shown while Firebase checks auth ── */}
       {!authChecked && (
         <div style={{ position: 'fixed', inset: 0, background: 'var(--bg)', zIndex: 99999,
-          display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 16 }}>
-          <div style={{ fontFamily: 'Orbitron,monospace', fontSize: '1.5rem', fontWeight: 900, letterSpacing: '0.06em' }}>
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          flexDirection: 'column', gap: 14, padding: '2rem', textAlign: 'center' }}>
+          <div style={{ fontFamily: 'Orbitron,monospace', fontSize: '1.6rem', fontWeight: 900, letterSpacing: '0.06em' }}>
             NAVISPHERE<span style={{ color: 'var(--cyan)' }}>X</span>
           </div>
-          <div style={{ fontSize: '0.64rem', color: 'var(--text3)', letterSpacing: '0.2em' }}>MARINE</div>
-          <div className="spin" style={{ marginTop: 8 }} />
+          <div style={{ fontSize: '0.6rem', color: 'var(--cyan)', letterSpacing: '0.22em', textTransform: 'uppercase' }}>Marine Systems</div>
+          <div style={{ marginTop: 8, fontSize: '0.88rem', color: 'var(--text2)', lineHeight: 1.8 }}>
+            🙏 Welcome to NavisphereX Marine Systems
+          </div>
+          <div style={{ fontSize: '0.72rem', color: 'var(--text3)' }}>Please wait while the app is loading…</div>
+          {/* Progress bar */}
+          <div style={{ width: 220, height: 4, background: 'rgba(255,255,255,0.08)', borderRadius: 4, overflow: 'hidden', marginTop: 6 }}>
+            <div style={{ height: '100%', borderRadius: 4, transition: 'width 0.35s ease',
+              background: 'linear-gradient(90deg,var(--cyan),var(--blue))',
+              width: `${authProgress}%` }} />
+          </div>
+          <div style={{ fontSize: '0.62rem', color: 'var(--text3)', fontFamily: 'Orbitron,monospace' }}>{authProgress}%</div>
         </div>
       )}
 
@@ -592,7 +617,7 @@ export default function App() {
                 </div>
               : authChecked
                 ? <button className="ntab" onClick={() => switchTab('login')}>🔐 Login</button>
-                : null
+                : <div className="spin" style={{ width: 14, height: 14, flexShrink: 0, marginRight: 4 }} />
             }
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
