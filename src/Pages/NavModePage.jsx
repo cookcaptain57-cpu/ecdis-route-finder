@@ -8,7 +8,7 @@ const AISSTREAM_KEY  = 'e66d76190c2bf6c206264e3cb894308b853d73df';
 const DEFAULT_COLORS = { route:'#E74C3C', vector:'#00D4FF', ship:'#00D4FF', track:'#00FF88', xtd:'#FFB300', chart:'#FF2020' };
 
 // China ENC — host china_enc_EA200004.geojson in your GitHub repo and update this URL
-const CHINA_ENC_URL = 'https://raw.githubusercontent.com/YOUR_REPO/YOUR_PATH/china_enc_EA200004.geojson';
+const CHINA_ENC_URL = 'https://github.com/cookcaptain57-cpu/ecdis-route-finder/blob/0de3cf2ea486439a31732ce87004cc63be4b2aa5/public/china%20enc%20EA200004.json';
 
 const AIS_SOURCES = {
   safepilot:{ label:'SafePilot P3', color:'#00FF88', hosts:['ws://192.168.1.1:4002','ws://10.0.0.1:4002','ws://10.0.1.1:4002','ws://192.168.1.1:4001'] },
@@ -31,7 +31,7 @@ const DEPTH_SOURCES = [
   { id:'finland',   label:'Finland',    emoji:'🇫🇮', desc:'Traficom' },
   { id:'germany',   label:'Germany',    emoji:'🇩🇪', desc:'BSH' },
   { id:'ireland',   label:'Ireland',    emoji:'🇮🇪', desc:'INFOMAR' },
-  { id:'china',     label:'China',      emoji:'🇨🇳', desc:'EA200004 S-57' },
+  { id:'china',     label:'Indonesia',  emoji:'🇮🇩', desc:'EA200004 S-57' },
 ];
 
 const toDMS = (d, isLat) => {
