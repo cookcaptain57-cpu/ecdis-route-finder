@@ -1,263 +1,249 @@
 // src/Pages/MaritimeLibraryPage.jsx
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect } from "react";
 import { fetchLibrarySheet } from "../sheets";
 
-/* ─────────────────────────────
-   IndexedDB (UNCHANGED CORE)
-───────────────────────────── */
-const DB_NAME = "maritime_lib_db";
-const STORE = "files";
-
-function openDB() {
-  return new Promise((resolve) => {
-    const req = indexedDB.open(DB_NAME, 1);
-
-    req.onupgradeneeded = () => {
-      const db = req.result;
-      if (!db.objectStoreNames.contains(STORE)) {
-        db.createObjectStore(STORE, { keyPath: "id" });
-      }
-    };
-
-    req.onsuccess = () => resolve(req.result);
-  });
-}
-
-async function saveToDB(data) {
-  const db = await openDB();
-  const tx = db.transaction(STORE, "readwrite");
-  const store = tx.objectStore(STORE);
-  data.forEach(d => store.put(d));
-}
-
-async function loadFromDB() {
-  const db = await openDB();
-  return new Promise((res) => {
-    const tx = db.transaction(STORE, "readonly");
-    const store = tx.objectStore(STORE);
-    const req = store.getAll();
-    req.onsuccess = () => res(req.result || []);
-  });
-}
-
-/* ─────────────────────────────
-   VIEWER (UNCHANGED)
-───────────────────────────── */
-const getViewerInfo = (title = "", url = "", fileId = "", mimeType = "") => {
+// ─── Smart viewer URL builder ─────────────────────────────────────────────
+const getViewerInfo = (title = '', url = '', fileId = '', mimeType = '') => {
   const t = (title || "").toLowerCase();
 
-  const isPdf = t.endsWith(".pdf") || (mimeType || "").includes("pdf");
-  const isImage = t.match(/\.(jpg|jpeg|png|gif)$/);
+  const isPdf =
+    t.endsWith('.pdf') || (mimeType || "").includes('pdf');
+
+  const isImage =
+    t.endsWith('.jpg') ||
+    t.endsWith('.jpeg') ||
+    t.endsWith('.png') ||
+    t.endsWith('.gif');
+
   const isOffice =
-    t.match(/\.(docx|doc|xlsx|xls|pptx)$/) ||
-    (mimeType || "").includes("officedocument");
+    t.endsWith('.docx') ||
+    t.endsWith('.doc') ||
+    t.endsWith('.xlsx') ||
+    t.endsWith('.xls') ||
+    t.endsWith('.xlsm') ||
+    t.endsWith('.pptx') ||
+    (mimeType || "").includes('officedocument') ||
+    (mimeType || "").includes('ms-excel');
 
-  const isNoPreview = t.match(/\.(zip|exe)$/);
+  const isNoPreview =
+    t.endsWith('.zip') ||
+    t.endsWith('.exe') ||
+    (mimeType || "").includes('zip') ||
+    (mimeType || "").includes('compressed') ||
+    (mimeType || "").includes('msdownload');
 
-  if (isNoPreview) return { type: "none" };
+  if (isNoPreview)
+    return { type: 'none', src: '' };
 
   if (isPdf && fileId) {
-    const d = `https://drive.google.com/uc?export=download&id=${fileId}`;
+    const directUrl =
+      `https://drive.google.com/uc?export=download&id=${fileId}`;
+
     return {
-      type: "pdf",
-      src: `https://mozilla.github.io/pdf.js/web/viewer.html?file=${encodeURIComponent(d)}`
+      type: 'pdf',
+      src:
+        `https://mozilla.github.io/pdf.js/web/viewer.html?file=${encodeURIComponent(directUrl)}`,
     };
   }
 
   if (isImage && fileId) {
-    return { type: "image", src: `https://drive.google.com/uc?export=view&id=${fileId}` };
-  }
-
-  if (isOffice && fileId) {
-    const d = `https://drive.google.com/uc?export=download&id=${fileId}`;
     return {
-      type: "office",
-      src: `https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(d)}`
+      type: 'image',
+      src:
+        `https://drive.google.com/uc?export=view&id=${fileId}`,
     };
   }
 
-  return { type: "drive", src: url };
+  if (isOffice && fileId) {
+    const directUrl =
+      `https://drive.google.com/uc?export=download&id=${fileId}`;
+
+    return {
+      type: 'office',
+      src:
+        `https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(directUrl)}`,
+    };
+  }
+
+  if (url)
+    return { type: 'drive', src: url };
+
+  return { type: 'none', src: '' };
 };
 
 function MaritimeLibraryPage() {
 
-  /* ───────────────────────────── */
   const [libData, setLibData] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [libLoading, setLibLoading] = useState(true);
+  const [libError, setLibError] = useState(null);
 
   const [currentFolderId, setCurrentFolderId] = useState("root");
-  const [path, setPath] = useState([{ id: "root", name: "Root" }]);
+  const [folderHistory, setFolderHistory] = useState([]);
 
-  const [search, setSearch] = useState("");
   const [previewFile, setPreviewFile] = useState(null);
+  const [iframeError, setIframeError] = useState(false);
 
-  /* ─────────────────────────────
-     LOAD (cache + fresh sync)
-  ───────────────────────────── */
   useEffect(() => {
-    (async () => {
-      setLoading(true);
+    let cancelled = false;
 
-      const cached = await loadFromDB();
-      if (cached.length) setLibData(cached);
+    setLibLoading(true);
+    setLibError(null);
 
-      const fresh = await fetchLibrarySheet();
-      setLibData(fresh);
-      saveToDB(fresh);
+    fetchLibrarySheet()
+      .then(rows => {
+        if (!cancelled) {
+          setLibData(rows || []);
+          setLibLoading(false);
+        }
+      })
+      .catch(e => {
+        if (!cancelled) {
+          setLibError(e.message || "Failed to load library");
+          setLibLoading(false);
+        }
+      });
 
-      setLoading(false);
-    })();
+    return () => { cancelled = true; };
   }, []);
 
-  /* ─────────────────────────────
-     FILTER BY FOLDER
-  ───────────────────────────── */
-  const folderItems = useMemo(() => {
-    return libData.filter(
-      i => (i.parentId || "root") === currentFolderId
-    );
-  }, [libData, currentFolderId]);
+  useEffect(() => {
+    setIframeError(false);
+  }, [previewFile]);
 
-  /* ─────────────────────────────
-     SEARCH (GLOBAL FAST SEARCH)
-  ───────────────────────────── */
-  const filteredItems = useMemo(() => {
-    if (!search) return folderItems;
+  // 🔥 FIX: support BOTH old + new formats
+  const currentItems = libData.filter(item => {
 
-    const q = search.toLowerCase();
+    const parent =
+      item.parentId || item.category || "root";
 
-    return folderItems.filter(i =>
-      (i.name || "").toLowerCase().includes(q)
-    );
-  }, [folderItems, search]);
+    return parent === currentFolderId;
+  });
 
-  /* ─────────────────────────────
-     FOLDER OPEN
-  ───────────────────────────── */
   const openFolder = (folder) => {
-    setCurrentFolderId(folder.id);
+    const id = folder.id || folder.category || folder.name;
 
-    setPath(prev => [...prev, {
-      id: folder.id,
-      name: folder.name
-    }]);
+    setFolderHistory(prev => [...prev, currentFolderId]);
+    setCurrentFolderId(id);
   };
 
-  /* ─────────────────────────────
-     BREADCRUMB
-  ───────────────────────────── */
-  const goTo = (i) => {
-    const newPath = path.slice(0, i + 1);
-    setPath(newPath);
-    setCurrentFolderId(newPath[i].id);
+  const goBackFolder = () => {
+    if (folderHistory.length === 0) return;
+
+    const prev = [...folderHistory];
+    const last = prev.pop();
+
+    setFolderHistory(prev);
+    setCurrentFolderId(last);
   };
 
-  const goBack = () => {
-    if (path.length <= 1) return;
-    const p = [...path];
-    p.pop();
-    setPath(p);
-    setCurrentFolderId(p[p.length - 1].id);
+  const fileIcon = (title = '', mimeType = '') => {
+    const t = (title || "").toLowerCase();
+
+    if (t.endsWith('.pdf')) return '📄';
+    if (t.endsWith('.xlsx') || t.endsWith('.xls') || t.endsWith('.xlsm')) return '📊';
+    if (t.endsWith('.docx') || t.endsWith('.doc')) return '📝';
+    if (t.endsWith('.zip')) return '🗜';
+    if (t.endsWith('.exe')) return '⚙️';
+    if (t.endsWith('.jpg') || t.endsWith('.png') || t.endsWith('.jpeg')) return '🖼';
+
+    return '📄';
   };
 
-  /* ─────────────────────────────
-     FILE TYPE BADGE
-  ───────────────────────────── */
-  const getTag = (name="") => {
-    const t = name.toLowerCase();
-    if (t.endsWith(".pdf")) return "PDF";
-    if (t.match(/\.(xls|xlsx)$/)) return "EXCEL";
-    if (t.match(/\.(doc|docx)$/)) return "WORD";
-    if (t.match(/\.(jpg|png|jpeg)$/)) return "IMAGE";
-    return "FILE";
+  const renderViewer = (file) => {
+    if (!file) return null;
+
+    const viewer = getViewerInfo(
+      file.title || file.name,
+      file.url,
+      file.fileId || file.id,
+      file.mimeType
+    );
+
+    if (viewer.type === 'image') {
+      return (
+        <img
+          src={viewer.src}
+          style={{ maxWidth: "100%", maxHeight: "100%" }}
+        />
+      );
+    }
+
+    if (viewer.type === 'none') {
+      return <div style={{ padding: 20 }}>No preview available</div>;
+    }
+
+    return (
+      <iframe
+        src={viewer.src}
+        style={{ width: "100%", height: "100%", border: "none" }}
+      />
+    );
   };
 
   return (
     <div className="section">
 
-      {/* HEADER */}
       <div className="sec-hdr">
         <div className="sec-title">📁 Maritime Library</div>
-        <span className="badge">{libData.length}</span>
+        {!libLoading && (
+          <span className="badge">{libData.length} items</span>
+        )}
       </div>
 
-      {/* SEARCH */}
-      <input
-        value={search}
-        onChange={(e) => setSearch(e.target.value)}
-        placeholder="🔍 Search files..."
-        style={{
-          width: "100%",
-          padding: 10,
-          marginBottom: 10,
-          borderRadius: 8
-        }}
-      />
-
-      {/* BREADCRUMB */}
-      <div style={{ marginBottom: 10 }}>
-        {path.map((p, i) => (
-          <span key={i} onClick={() => goTo(i)}
-            style={{ cursor: "pointer", marginRight: 6 }}>
-            {p.name} {i < path.length - 1 && ">"}
-          </span>
-        ))}
+      <div className="info-box">
+        🗂 Browse folders and files like a real file manager.
       </div>
 
-      {path.length > 1 && (
-        <button onClick={goBack}>← Back</button>
+      {libLoading && (
+        <div>Loading...</div>
       )}
 
-      {/* LIST */}
-      {loading && <div>Loading...</div>}
+      {libError && (
+        <div style={{ color: "red" }}>
+          {libError}
+        </div>
+      )}
 
-      {!loading && filteredItems.map((item, i) => {
+      {!libLoading && currentItems.length === 0 && (
+        <div>No library files found.</div>
+      )}
 
-        const isFolder = item.type === "folder";
+      {!libLoading && currentItems.length > 0 && (
 
-        return (
-          <div
-            key={i}
-            onClick={() => isFolder && openFolder(item)}
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              padding: 10,
-              border: "1px solid #333",
-              marginBottom: 6,
-              cursor: isFolder ? "pointer" : "default"
-            }}
-          >
-            <div>
-              {isFolder ? "📁" : "📄"} {item.name}
-            </div>
-
-            {!isFolder && (
-              <span style={{
-                fontSize: 10,
-                background: "#222",
-                padding: "2px 6px",
-                borderRadius: 4
-              }}>
-                {getTag(item.name)}
-              </span>
-            )}
-          </div>
-        );
-      })}
-
-      {/* PREVIEW */}
-      {previewFile && (
         <div>
-          <iframe
-            src={getViewerInfo(
-              previewFile.name,
-              previewFile.url,
-              previewFile.id,
-              previewFile.mimeType
-            ).src}
-            style={{ width: "100%", height: "80vh" }}
-          />
+
+          {currentFolderId !== "root" && (
+            <button onClick={goBackFolder}>
+              ← Back
+            </button>
+          )}
+
+          {currentItems.map((item, i) => {
+
+            const isFolder = item.type === "folder";
+
+            return (
+              <div
+                key={i}
+                onClick={() => isFolder && openFolder(item)}
+                style={{
+                  padding: 10,
+                  border: "1px solid #ccc",
+                  marginBottom: 6,
+                  cursor: isFolder ? "pointer" : "default"
+                }}
+              >
+                {isFolder ? "📁" : "📄"} {" "}
+                {item.name || item.title}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {previewFile && (
+        <div onClick={() => setPreviewFile(null)}>
+          {renderViewer(previewFile)}
         </div>
       )}
 
