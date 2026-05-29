@@ -1,8 +1,8 @@
 /* eslint-disable */
 import { useState, useEffect } from "react";
 import { db, auth } from "../firebase";
-import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
-import { signOut } from "firebase/auth";
+import { doc, getDoc, setDoc, deleteDoc, serverTimestamp } from "firebase/firestore";
+import { signOut, deleteUser, reauthenticateWithCredential, EmailAuthProvider } from "firebase/auth";
 
 const MARITIME_RANKS = [
   'Captain / Master','Superintendent','Chief Officer (1st Officer)','2nd Officer',
@@ -78,7 +78,25 @@ function AccountPage({ user, userProfile, setUserProfile, notify, setTab }) {
     setLoading(false);
   };
 
-  const rankEmoji = RANK_EMOJI[userProfile?.rank] || RANK_EMOJI[customRank] || '👤';
+  const deleteAccount = async () => {
+    const confirmMsg = 'Are you sure you want to DELETE your account?\n\nThis will permanently remove all your data from NavisphereX Marine.\n\nType your password to confirm.';
+    const password = window.prompt(confirmMsg);
+    if (!password) return;
+    try {
+      // Re-authenticate before deleting
+      const credential = EmailAuthProvider.credential(user.email, password);
+      await reauthenticateWithCredential(user, credential);
+      // Delete Firestore data
+      await deleteDoc(doc(db, 'users', user.uid));
+      // Delete Auth account
+      await deleteUser(user);
+      notify('Account deleted. Goodbye! 👋', 'info');
+      setTab('home');
+    } catch (e) {
+      if (e.code === 'auth/wrong-password') notify('Wrong password. Account not deleted.', 'error');
+      else notify('Delete failed: ' + e.message, 'error');
+    }
+  };
 
   if (fetching) return (
     <div className="section">
@@ -224,6 +242,22 @@ function AccountPage({ user, userProfile, setUserProfile, notify, setTab }) {
         <div style={{ textAlign:'center', padding:'1rem 0', color:'var(--text3)', fontSize:'0.76rem' }}>
           <div style={{ fontSize:'1.8rem', marginBottom:6 }}>📊</div>Save favourite ECDIS charts for quick access.
         </div>
+      </div>
+
+      {/* GDPR — Delete account */}
+      <div style={{ background:'rgba(255,71,87,0.05)', border:'1px solid rgba(255,71,87,0.2)',
+        borderRadius:14, padding:'1.2rem', marginTop:'1rem' }}>
+        <div style={{ fontFamily:'Orbitron,monospace', fontSize:'0.72rem', color:'var(--red)', marginBottom:'0.4rem' }}>
+          🗑 Delete Account (GDPR)
+        </div>
+        <div style={{ fontSize:'0.72rem', color:'var(--text3)', marginBottom:'0.8rem', lineHeight:1.5 }}>
+          Permanently removes your account and all personal data from NavisphereX Marine. This cannot be undone.
+        </div>
+        <button className="btn btn-secondary"
+          style={{ padding:'6px 14px', fontSize:'0.72rem', color:'var(--red)', borderColor:'rgba(255,71,87,0.4)' }}
+          onClick={deleteAccount}>
+          🗑 Delete My Account
+        </button>
       </div>
     </div>
   );
