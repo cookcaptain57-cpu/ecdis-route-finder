@@ -1,7 +1,7 @@
 /* eslint-disable */
 import { useState, useEffect } from "react";
 import { auth, db } from "../firebase";
-import { collection, getDocs, deleteDoc, doc, setDoc, getDoc, serverTimestamp } from "firebase/firestore";
+import { collection, getDocs, deleteDoc, doc, setDoc, getDoc, addDoc, serverTimestamp } from "firebase/firestore";
 import { onAuthStateChanged, signInWithEmailAndPassword, signOut, sendPasswordResetEmail } from "firebase/auth";
 import * as XLSX from "xlsx";
 import { ADMIN_EMAIL, ECDIS_BRANDS } from "../constants";
@@ -34,6 +34,11 @@ function AdminPage({
   // Download limits (loaded from Firestore app_config/limits)
   const [limits, setLimits]             = useState({ maxRoutesPerDay: 10, maxChartsPerDay: 10 });
   const [limitsLoading, setLimitsLoading] = useState(false);
+
+  // Port notices
+  const [notices,     setNotices]     = useState([]);
+  const [noticeForm,  setNoticeForm]  = useState({ title:'', portName:'', type:'info', description:'', expiryDate:'' });
+  const [showNoticeForm, setShowNoticeForm] = useState(false);
 
   // Live sheet preview
   const [liveRoutes,        setLiveRoutes]        = useState([]);
@@ -109,8 +114,34 @@ function AdminPage({
   };
 
   useEffect(() => { const u = onAuthStateChanged(auth, u => setUser(u)); return () => u(); }, []);
-  useEffect(() => { if (user && section === 'users') loadUsers(); }, [user, section]);
-  useEffect(() => { if (user && section === 'settings') loadLimits(); }, [user, section]);
+  useEffect(() => { if (user && section === 'users')   loadUsers();   }, [user, section]);
+  useEffect(() => { if (user && section === 'settings') loadLimits();  }, [user, section]);
+  useEffect(() => { if (user && section === 'notices') loadNotices(); }, [user, section]);
+
+  const loadNotices = async () => {
+    try {
+      const snap = await getDocs(collection(db, 'notices'));
+      setNotices(snap.docs.map(d => ({ id: d.id, ...d.data() }))
+        .sort((a,b) => (b.createdAt?.seconds||0) - (a.createdAt?.seconds||0)));
+    } catch {}
+  };
+
+  const addNotice = async () => {
+    if (!noticeForm.title) { notify('Enter a title', 'error'); return; }
+    try {
+      await addDoc(collection(db, 'notices'), { ...noticeForm, createdAt: serverTimestamp() });
+      notify('✅ Notice published', 'success');
+      setNoticeForm({ title:'', portName:'', type:'info', description:'', expiryDate:'' });
+      setShowNoticeForm(false);
+      loadNotices();
+    } catch (e) { notify('Failed: ' + e.message, 'error'); }
+  };
+
+  const deleteNotice = async (id) => {
+    if (!window.confirm('Delete this notice?')) return;
+    try { await deleteDoc(doc(db, 'notices', id)); loadNotices(); notify('Deleted', 'success'); }
+    catch { notify('Delete failed', 'error'); }
+  };
 
   // Confirmation wrappers
   const confirmAndRefreshRoutes = () => {
@@ -269,6 +300,7 @@ function AdminPage({
     { k: 'sheet-routes', i: '🔄', l: 'Sync Routes' },
     { k: 'sheet-charts', i: '🔄', l: 'Sync Charts' },
     { k: 'port-search',  i: '⚓', l: 'Sync Ports' },
+    { k: 'notices',      i: '📢', l: 'Port Notices' },
     { k: 'settings',     i: '⚙️', l: 'Settings' },
     { k: 'users',        i: '👥', l: 'User Database' },
   ];
@@ -512,6 +544,80 @@ function AdminPage({
                   </div>
                 </>
               )}
+            </>
+          )}
+
+          {/* ─── PORT NOTICES ──────────────────────────────────────────── */}
+          {section === 'notices' && (
+            <>
+              <div className="a-hdr">
+                <div className="a-title">📢 Port Notices</div>
+                <button className="btn btn-primary" style={{ padding:'5px 12px', fontSize:'0.72rem' }}
+                  onClick={() => setShowNoticeForm(s => !s)}>
+                  {showNoticeForm ? '✕ Cancel' : '+ New Notice'}
+                </button>
+              </div>
+
+              {showNoticeForm && (
+                <div style={{ background:'var(--card)', border:'1px solid rgba(0,180,216,0.3)', borderRadius:12, padding:'1.2rem', marginBottom:'1rem' }}>
+                  <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
+                    <div className="ff" style={{ gridColumn:'1/-1', margin:0 }}>
+                      <label className="fl">Title *</label>
+                      <input className="fi" placeholder="e.g. Mumbai Anchorage — Temporary Restriction"
+                        value={noticeForm.title} onChange={e=>setNoticeForm(n=>({...n,title:e.target.value}))} />
+                    </div>
+                    <div className="ff" style={{ margin:0 }}>
+                      <label className="fl">Port / Area</label>
+                      <input className="fi" placeholder="e.g. Mumbai, Arabian Sea"
+                        value={noticeForm.portName} onChange={e=>setNoticeForm(n=>({...n,portName:e.target.value}))} />
+                    </div>
+                    <div className="ff" style={{ margin:0 }}>
+                      <label className="fl">Type</label>
+                      <select className="fi" value={noticeForm.type} onChange={e=>setNoticeForm(n=>({...n,type:e.target.value}))}>
+                        <option value="info">ℹ️ Info</option>
+                        <option value="warning">⚠️ Warning</option>
+                        <option value="closure">🚫 Closure</option>
+                        <option value="restricted">⛔ Restricted</option>
+                      </select>
+                    </div>
+                    <div className="ff" style={{ margin:0 }}>
+                      <label className="fl">Expiry Date (optional)</label>
+                      <input className="fi" type="date" value={noticeForm.expiryDate}
+                        onChange={e=>setNoticeForm(n=>({...n,expiryDate:e.target.value}))} />
+                    </div>
+                    <div className="ff" style={{ gridColumn:'1/-1', margin:0 }}>
+                      <label className="fl">Description</label>
+                      <textarea className="fi" rows={3} style={{ resize:'vertical' }}
+                        placeholder="Detailed notice information…"
+                        value={noticeForm.description} onChange={e=>setNoticeForm(n=>({...n,description:e.target.value}))} />
+                    </div>
+                  </div>
+                  <button className="btn btn-primary" style={{ marginTop:10 }} onClick={addNotice}>
+                    📢 Publish Notice
+                  </button>
+                </div>
+              )}
+
+              {notices.length === 0
+                ? <div className="empty"><div className="empty-icon">📢</div><div className="empty-t">No Notices Yet</div><div className="empty-d">Click "+ New Notice" to publish a port notice.</div></div>
+                : <div style={{ display:'grid', gap:'0.7rem' }}>
+                  {notices.map(n => (
+                    <div key={n.id} style={{ background:'var(--card)', border:'1px solid var(--border)', borderRadius:12, padding:'1rem', display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:10 }}>
+                      <div style={{ flex:1 }}>
+                        <div style={{ fontWeight:700, fontSize:'0.86rem', color:'var(--cyan)', marginBottom:4 }}>{n.title}</div>
+                        <div style={{ display:'flex', gap:8, flexWrap:'wrap', fontSize:'0.7rem', color:'var(--text3)' }}>
+                          <span>Type: {n.type}</span>
+                          {n.portName && <span>Port: {n.portName}</span>}
+                          {n.expiryDate && <span>Expires: {n.expiryDate}</span>}
+                        </div>
+                        {n.description && <div style={{ fontSize:'0.74rem', color:'var(--text2)', marginTop:6 }}>{n.description}</div>}
+                      </div>
+                      <button className="btn btn-danger" style={{ padding:'4px 8px', fontSize:'0.7rem', flexShrink:0 }}
+                        onClick={() => deleteNotice(n.id)}>🗑</button>
+                    </div>
+                  ))}
+                </div>
+              }
             </>
           )}
 
