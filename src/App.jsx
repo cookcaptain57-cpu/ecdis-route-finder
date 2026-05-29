@@ -24,10 +24,13 @@ import RoutePlannerPage    from "./Pages/RoutePlannerPage";
 import PortSearchPage      from "./Pages/PortSearchPage";
 import LoginPage           from "./Pages/LoginPage";
 import NavModePage         from "./Pages/NavModePage";
-import MaritimeLibraryPage from "./Pages/MaritimeLibraryPage";
-import AdminPage           from "./Pages/AdminPage";
-import VesselSearchPage    from "./Pages/VesselSearchPage";
-import AccountPage         from "./Pages/AccountPage";
+import MaritimeLibraryPage    from "./Pages/MaritimeLibraryPage";
+import AdminPage               from "./Pages/AdminPage";
+import VesselSearchPage        from "./Pages/VesselSearchPage";
+import AccountPage             from "./Pages/AccountPage";
+import VoyageCalculatorPage    from "./Pages/VoyageCalculatorPage";
+import CertificateTrackerPage  from "./Pages/CertificateTrackerPage";
+import NoticesPage             from "./Pages/NoticesPage";
 
 const S = `
   @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700;900&family=Exo+2:wght@300;400;500;600&display=swap');
@@ -169,6 +172,26 @@ const S = `
   .spin{width:20px;height:20px;border:2px solid var(--border2);border-top-color:var(--cyan);border-radius:50%;animation:spin 0.8s linear infinite;flex-shrink:0;}
   @keyframes spin{to{transform:rotate(360deg);}}
   @keyframes shimmer{0%{background-position:200% 0;}100%{background-position:-200% 0;}}
+
+  /* ── Light mode overrides ── */
+  [data-theme="light"] {
+    --bg:     #f0f5fa;
+    --bg2:    #e4ecf4;
+    --card:   #ffffff;
+    --text:   #0a1628;
+    --text2:  #3a4a6a;
+    --text3:  #6a7a9a;
+    --border: rgba(0,0,0,0.1);
+    --border2:rgba(0,0,0,0.18);
+    --cyan:   #0070cc;
+    --blue:   #0050aa;
+    --green:  #007a50;
+    --gold:   #b07000;
+    --red:    #cc2233;
+  }
+  [data-theme="light"] .nav-bar { background: rgba(240,245,250,0.97); border-color: rgba(0,0,0,0.1); }
+  [data-theme="light"] .file-card { background: #ffffff; }
+  [data-theme="light"] .auth-card { background: #ffffff; }
   .empty{text-align:center;padding:3rem 1rem;color:var(--text3);}
   .empty-icon{font-size:2.8rem;margin-bottom:1rem;}
   .empty-t{font-family:'Orbitron',monospace;font-size:0.82rem;margin-bottom:6px;color:var(--text2);}
@@ -250,7 +273,11 @@ export default function App() {
   // Welcome popup — typewriter message shown on login / signup
   const [welcomePopup,   setWelcomePopup]        = useState(null);
   // Auth loading progress bar (0-100) shown on the welcome splash screen
-  const [authProgress,   setAuthProgress]        = useState(0); // null | {type,name,rank}
+  const [authProgress,   setAuthProgress]        = useState(0);
+  // Online/offline detection
+  const [isOnline,       setIsOnline]             = useState(navigator.onLine);
+  // Dark / Light theme
+  const [theme,          setTheme]                = useState(() => localStorage.getItem('nav_theme') || 'dark'); // null | {type,name,rank}
 
   // Per-sync progress for admin panel progress bars (0-100)
   const [routesSyncProgress, setRoutesSyncProgress] = useState(0);
@@ -513,8 +540,22 @@ export default function App() {
     if (!sessionStorage.getItem('disclaimer_ok')) setShowDisclaimer(true);
   }, []);
 
-  // Animate auth loading progress bar
+  // Online / offline detection
   useEffect(() => {
+    const goOnline  = () => setIsOnline(true);
+    const goOffline = () => setIsOnline(false);
+    window.addEventListener('online',  goOnline);
+    window.addEventListener('offline', goOffline);
+    return () => { window.removeEventListener('online', goOnline); window.removeEventListener('offline', goOffline); };
+  }, []);
+
+  // Apply theme class + save to localStorage
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem('nav_theme', theme);
+  }, [theme]);
+
+  const toggleTheme = () => setTheme(t => t === 'dark' ? 'light' : 'dark');
     if (authChecked) { setAuthProgress(100); return; }
     let p = 0;
     const t = setInterval(() => {
@@ -533,6 +574,9 @@ export default function App() {
     { k: 'navmode', i: '🧭', l: 'Nav Mode', cls: 'green' },
     { k: 'ports',   i: '⚓', l: 'Ports Database' },
     { k: 'vessel',  i: '🚢', l: 'Vessel Search' },
+    { k: 'voyage',  i: '🧮', l: 'Voyage Calculator' },
+    { k: 'certs',   i: '📜', l: 'Certificates' },
+    { k: 'notices', i: '📢', l: 'Port Notices' },
     { k: 'library', i: '📖', l: 'Maritime Library' },
     ...(user ? [{ k: 'account', i: '👤', l: 'My Account' }] : []),
     ...(isAdmin ? [{ k: 'admin', i: '🛡', l: 'Admin' }] : []),
@@ -561,14 +605,17 @@ export default function App() {
     <>
       <style>{S}</style>
 
-      {!authChecked && (
-        <div style={{
-          position: 'fixed', top: 68, right: 12, zIndex: 9998,
-          background: 'rgba(4,12,26,0.95)', border: '1px solid var(--border)',
-          borderRadius: 8, padding: '5px 10px', fontSize: '0.68rem',
-          color: 'var(--cyan)', display: 'flex', alignItems: 'center', gap: 6,
-        }}>
-          <div className="spin" style={{ width: 10, height: 10 }} /> Connecting…
+      {/* ── Offline banner ── */}
+      {!isOnline && (
+        <div style={{ position:'fixed', bottom:72, left:'50%', transform:'translateX(-50%)', zIndex:9994,
+          background:'rgba(4,12,26,0.97)', border:'1px solid rgba(240,165,0,0.4)', borderRadius:12,
+          padding:'10px 18px', display:'flex', alignItems:'center', gap:10,
+          boxShadow:'0 6px 24px rgba(0,0,0,0.5)', backdropFilter:'blur(20px)', maxWidth:'92vw' }}>
+          <span style={{ fontSize:'1.1rem' }}>📵</span>
+          <div>
+            <div style={{ fontSize:'0.74rem', fontWeight:700, color:'var(--gold)', fontFamily:'Orbitron,monospace' }}>No Internet</div>
+            <div style={{ fontSize:'0.68rem', color:'var(--text2)' }}>Showing cached data — some features unavailable</div>
+          </div>
         </div>
       )}
 
@@ -622,6 +669,12 @@ export default function App() {
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <div className="sd" />
+            {/* Dark / Light mode toggle */}
+            <button onClick={toggleTheme} title={theme==='dark'?'Light Mode':'Dark Mode'}
+              style={{ background:'rgba(255,255,255,0.06)', border:'1px solid var(--border)', borderRadius:8,
+                padding:'5px 9px', cursor:'pointer', fontSize:'1rem', color:'var(--text2)' }}>
+              {theme==='dark' ? '☀️' : '🌙'}
+            </button>
             <button className="burger" onClick={() => setMenuOpen(o => !o)}><span /><span /><span /></button>
           </div>
         </nav>
@@ -701,6 +754,9 @@ export default function App() {
           {tab === 'planner' && <RoutePlannerPage notify={notify} sheetRoutes={[...routes, ...sheetRoutes]} portsDb={portsDb} />}
           {tab === 'ports'   && <PortSearchPage portsDb={portsDb} sheetLoading={portsLoading} refreshSheets={refreshPorts} />}
           {tab === 'vessel'  && <VesselSearchPage />}
+          {tab === 'voyage'  && <VoyageCalculatorPage portsDb={portsDb} />}
+          {tab === 'certs'   && <CertificateTrackerPage user={user} notify={notify} />}
+          {tab === 'notices' && <NoticesPage notify={notify} />}
           {tab === 'account' && user && <AccountPage user={user} userProfile={userProfile} setUserProfile={setUserProfile} notify={notify} setTab={switchTab} />}
           {tab === 'library' && <MaritimeLibraryPage setTab={switchTab} />}
           {tab === 'navmode' && <NavModePage notify={notify} sheetRoutes={[...routes, ...sheetRoutes]} portsDb={portsDb} setTab={switchTab} />}
