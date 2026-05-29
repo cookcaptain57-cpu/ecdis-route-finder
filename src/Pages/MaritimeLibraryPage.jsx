@@ -1,5 +1,5 @@
 // src/Pages/MaritimeLibraryPage.jsx
-import { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { fetchLibrarySheet } from "../sheets";
 
 // ─── Virtual List ─────────────────────────────────────────────────────────────
