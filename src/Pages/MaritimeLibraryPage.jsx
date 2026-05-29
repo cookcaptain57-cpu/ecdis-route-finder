@@ -17,15 +17,20 @@ const isNoPreview = t.endsWith('.zip') || t.endsWith('.exe') ||
 mimeType.includes('zip') || mimeType.includes('compressed') ||
 mimeType.includes('msdownload');
 
-if (isNoPreview) return { type: 'none', src: '' };
-
-// PDF.js viewer for PDFs — works on all mobile browsers
 if (isPdf && fileId) {
-const directUrl = https://drive.google.com/uc?export=download&confirm=t&id=${fileId};
-return {
-type: 'pdf',
-src:  https://mozilla.github.io/pdf.js/web/viewer.html?file=${encodeURIComponent(directUrl)},
-};
+  const directUrl = `https://drive.google.com/uc?export=download&confirm=t&id=${fileId}`;
+  return {
+    type: 'pdf',
+    src:  `https://mozilla.github.io/pdf.js/web/viewer.html?file=${encodeURIComponent(directUrl)}`,
+  };
+}
+
+// Direct image tag for images
+if (isImage && fileId) {
+  return {
+    type: 'image',
+    src:  `https://drive.google.com/uc?export=view&id=${fileId}`,
+  };
 }
 
 // Direct image tag for images
