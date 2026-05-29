@@ -556,6 +556,8 @@ export default function App() {
   }, [theme]);
 
   const toggleTheme = () => setTheme(t => t === 'dark' ? 'light' : 'dark');
+
+  useEffect(() => {                          // ← ADD THIS LINE
     if (authChecked) { setAuthProgress(100); return; }
     let p = 0;
     const t = setInterval(() => {
@@ -565,7 +567,7 @@ export default function App() {
     }, 120);
     return () => clearInterval(t);
   }, [authChecked]);
-
+  
   const TABS = [
     { k: 'home',    i: '🏠', l: 'Dashboard' },
     { k: 'routes',  i: '🛤', l: 'Routes' },
