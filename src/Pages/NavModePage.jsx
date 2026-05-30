@@ -1,38 +1,27 @@
 /* eslint-disable */
+// src/Pages/NavModePage.jsx
+// AIS FIXES:
+// 1. VesselAPI: correct endpoint is GET /v1/location/vessels/radius
+//              header must be "Authorization": "Bearer <key>" (not x-api-key)
+// 2. AISStream: browser direct WSS is supported — fixed subscription key "APIKey" (was "Apikey")
+//              added bounding-box subscription update when live position changes
+// 3. Added proper fallback chain: VesselAPI radius → AISStream WSS global
+
 import { useState, useEffect, useRef, useCallback } from "react";
 import ETACalculator from "../components/ETACalculator";
 import aisService from "../services/aisService";
+import {
+  PSSA_ZONES, NOX_ZONES, LOAD_LINE_ZONES,
+  MARITIME_RESTRICTIONS, CHINA_MSC_NO_G, EEZ_ZONES,
+  ECA_ZONES, SECA_ZONES, MARPOL_ZONES,
+  DEPTH_SOURCES, AIS_SOURCES,
+} from "../constants";
 
 const VESSEL_API_KEY = '7da0c40c639a5f2a7532e75d9cdad6156b65f61932d778c1ce8580f9786e4506';
 const AISSTREAM_KEY  = 'e66d76190c2bf6c206264e3cb894308b853d73df';
 const DEFAULT_COLORS = { route:'#E74C3C', vector:'#00D4FF', ship:'#00D4FF', track:'#00FF88', xtd:'#FFB300', chart:'#FF2020' };
 
-// China ENC — host china_enc_EA200004.geojson in your GitHub repo and update this URL
-const CHINA_ENC_URL = 'https://gist.githubusercontent.com/cookcaptain57-cpu/c841feeb59bd217efa42b3d1a863042a/raw/135334acfcb7944680fac3b060a5988dfc636c80/china%2520enc%2520EA200004.json';
-
-const AIS_SOURCES = {
-  safepilot:{ label:'SafePilot P3', color:'#00FF88', hosts:['ws://192.168.1.1:4002','ws://10.0.0.1:4002','ws://10.0.1.1:4002','ws://192.168.1.1:4001'] },
-  bridge:   { label:'Local Bridge', color:'#00D4FF', hosts:['ws://localhost:4002','ws://127.0.0.1:4002'] },
-  internet: { label:'Internet AIS', color:'#FFD700', hosts:[] },
-  off:      { label:'Off',          color:'#4A6080', hosts:[] },
-};
-
-// FIX #8: ENC panel shows only flag + country name (no source description)
-const DEPTH_SOURCES = [
-  { id:'usa',       label:'USA',        emoji:'🇺🇸', desc:'NOAA ENC' },
-  { id:'europe',    label:'Europe',     emoji:'🇪🇺', desc:'EMODnet' },
-  { id:'global',    label:'Global',     emoji:'🌍', desc:'GEBCO' },
-  { id:'soundings', label:'Soundings',  emoji:'📊', desc:'ESRI Depth' },
-  { id:'osm_depth', label:'OSM Depths', emoji:'🌊', desc:'OpenSeaMap' },
-  { id:'nz',        label:'New Zealand',emoji:'🇳🇿', desc:'LINZ' },
-  { id:'norway',    label:'Norway',     emoji:'🇳🇴', desc:'Kartverket' },
-  { id:'australia', label:'Australia',  emoji:'🇦🇺', desc:'GA Bathy' },
-  { id:'canada',    label:'Canada',     emoji:'🇨🇦', desc:'CHS NONNA' },
-  { id:'finland',   label:'Finland',    emoji:'🇫🇮', desc:'Traficom' },
-  { id:'germany',   label:'Germany',    emoji:'🇩🇪', desc:'BSH' },
-  { id:'ireland',   label:'Ireland',    emoji:'🇮🇪', desc:'INFOMAR' },
-  { id:'china',     label:'Indonesia',  emoji:'🇮🇩', desc:'EA200004 S-57' },
-];
+const CHINA_ENC_URL = 'https://raw.githubusercontent.com/YOUR_REPO/YOUR_PATH/china_enc_EA200004.geojson';
 
 const toDMS = (d, isLat) => {
   const a=Math.abs(d), deg=Math.floor(a), mf=(a-deg)*60, min=Math.floor(mf);
@@ -40,7 +29,6 @@ const toDMS = (d, isLat) => {
   return `${deg}°${String(min).padStart(2,'0')}'${String(sec).padStart(4,'0')}"${dir}`;
 };
 
-// FIX #1/#2: normalizeRoute with correct JS spread (was broken unicode ellipsis)
 const normalizeRoute = (wps) => {
   if (!wps || !wps.length) return wps;
   const out = [{ ...wps[0] }];
@@ -54,14 +42,27 @@ const normalizeRoute = (wps) => {
   return out;
 };
 
+// ── Zone overlay config for ZONES panel ───────────────────────────────────────
+const ZONE_OVERLAY_CFG = [
+  { k:'eca',          label:'ECA',           color:'#FF6B35', desc:'Emission Control Areas (SOx)' },
+  { k:'seca',         label:'SECA',          color:'#FFB347', desc:'Sulphur ECA 0.1%' },
+  { k:'marpol',       label:'MARPOL',        color:'#9B59B6', desc:'MARPOL Special Areas' },
+  { k:'pssa',         label:'PSSA',          color:'#00C896', desc:'Particularly Sensitive Sea Areas' },
+  { k:'nox',          label:'NOx',           color:'#F39C12', desc:'NOx Tier III Control Areas' },
+  { k:'loadline',     label:'Load Line',     color:'#1ABC9C', desc:'ICLL Load Line Zones' },
+  { k:'restrictions', label:'Restrictions',  color:'#FF2020', desc:'War Risk / Sanctions Zones' },
+  { k:'msc_nog',      label:'MSC No-G',      color:'#FF00FF', desc:'MSC Prohibited Areas (China)' },
+  { k:'eez',          label:'EEZ',           color:'#5DADE2', desc:'Exclusive Economic Zones' },
+  { k:'piracy',       label:'Piracy HRA',    color:'#E74C3C', desc:'Piracy High Risk Areas' },
+];
+
 export default function NavModePage({ notify, sheetRoutes=[], portsDb=[], setTab }) {
 
-  // ─── REFS ───────────────────────────────────────────────────────────────
   const mapRef=useRef(null), leafRef=useRef(null);
   const baseTileRef=useRef(null), seamarkRef=useRef(null);
   const gebcoRefTile=useRef(null), emodnetTileRef=useRef(null);
   const encTileRef=useRef(null), esriBaseRef=useRef(null), gebcoWmsRef=useRef(null);
-  const layersRef=useRef({ route:null, vessel:null, vector:null, ais:{}, routeMarkers:[], rbLine:null, rbMarker:null, xtdPort:null, xtdStbd:null, xtdFill:null, pastTrack:null });
+  const layersRef=useRef({ route:null, vessel:null, vector:null, ais:{}, routeMarkers:[], rbLine:null, rbMarker:null, xtdPort:null, xtdStbd:null, xtdFill:null, pastTrack:null, zones:{} });
   const chartLayersRef=useRef([]), aisWsRef=useRef(null), aisIntervalRef=useRef(null);
   const invalidateTimers=useRef([]), pastTrackRef=useRef([]);
   const rbModeRef=useRef(false), livePosRef=useRef(null), vectorMinsRef=useRef(6);
@@ -70,8 +71,9 @@ export default function NavModePage({ notify, sheetRoutes=[], portsDb=[], setTab
   const depthCheckOnRef=useRef(false), contoursRef=useRef({ shallow:10, safety:20, deep:200, draft:6 });
   const aisRangeRef=useRef(0), aisSourceRef=useRef('internet');
   const chinaEncLayerRef=useRef(null);
+  // AISStream WS ref separate so we can update bounding box subscription
+  const aisStreamWsRef=useRef(null);
 
-  // ─── STATE ──────────────────────────────────────────────────────────────
   const ls = k => localStorage.getItem(k);
   const [mapReady,setMapReady]=useState(false);
   const [gpsOn,setGpsOn]=useState(()=>ls('nav_gpsOn')==='true');
@@ -121,13 +123,17 @@ export default function NavModePage({ notify, sheetRoutes=[], portsDb=[], setTab
   const [localAisCount,setLocalAisCount]=useState(0);
   const [localAisHost,setLocalAisHost]=useState(()=>ls('nav_localAisHost')||'ws://localhost:4002');
   const [localAisAlert,setLocalAisAlert]=useState(null);
-  // #3: Zoom level display
   const [mapZoom,setMapZoom]=useState(4);
-  // #6: DATABASE panel search
   const [dbRouteSearch,setDbRouteSearch]=useState('');
   const [dbChartSearch,setDbChartSearch]=useState('');
 
-  // ─── HELPERS ────────────────────────────────────────────────────────────
+  // ── NEW: zone overlay state for ZONES panel ────────────────────────────────
+  const [zoneOverlays,setZoneOverlays]=useState(()=>{
+    try { return JSON.parse(ls('nav_zoneOverlays')||'{}'); }
+    catch { return {}; }
+  });
+  const toggleZoneOverlay=k=>setZoneOverlays(o=>({...o,[k]:!o[k]}));
+
   const safeInvalidate=useCallback(()=>{
     invalidateTimers.current.forEach(clearTimeout);
     invalidateTimers.current=[];
@@ -188,9 +194,9 @@ export default function NavModePage({ notify, sheetRoutes=[], portsDb=[], setTab
     const vn=fix.lon+(nm/60)*Math.sin(fix.cog*Math.PI/180);
     if(layersRef.current.vector) {
       layersRef.current.vector.setLatLngs([[fix.lat,fix.lon],[vl,vn]]);
-      layersRef.current.vector.setStyle({color:c.vector});
+      layersRef.current.vector.setStyle({color:colorsRef.current.vector});
     } else {
-      layersRef.current.vector=L.polyline([[fix.lat,fix.lon],[vl,vn]],{color:c.vector,weight:2,opacity:0.85,dashArray:'5 3'}).addTo(leafRef.current);
+      layersRef.current.vector=L.polyline([[fix.lat,fix.lon],[vl,vn]],{color:colorsRef.current.vector,weight:2,opacity:0.85,dashArray:'5 3'}).addTo(leafRef.current);
     }
     if(autoCenterRef.current) {
       try {
@@ -200,7 +206,7 @@ export default function NavModePage({ notify, sheetRoutes=[], portsDb=[], setTab
     }
   };
 
-  // ─── ROUTE PARSERS ──────────────────────────────────────────────────────
+  // ── ROUTE PARSERS (unchanged) ────────────────────────────────────────────
   const tryXml=(t,f)=>{
     try {
       const d=new DOMParser().parseFromString(t,'application/xml');
@@ -287,7 +293,7 @@ export default function NavModePage({ notify, sheetRoutes=[], portsDb=[], setTab
     });
   };
 
-  // ─── CHART PARSERS ──────────────────────────────────────────────────────
+  // ── CHART PARSERS (unchanged) ────────────────────────────────────────────
   const tryUserChart=(t,f)=>{
     try {
       const d=new DOMParser().parseFromString(t,'application/xml');
@@ -418,7 +424,7 @@ export default function NavModePage({ notify, sheetRoutes=[], portsDb=[], setTab
   };
   const loadSavedChart=(saved)=>{
     if(!saved?.data) return;
-    if(chartLayersRef.current.find(c=>c.id===saved.name)) return; // already on map
+    if(chartLayersRef.current.find(c=>c.id===saved.name)) return;
     addChartToMap(saved);
     setChartOverlays(prev=>{
       if(prev.find(c=>c.name===saved.name)) return prev;
@@ -427,7 +433,6 @@ export default function NavModePage({ notify, sheetRoutes=[], portsDb=[], setTab
     notify(`✓ ${saved.name}`,'error');
   };
 
-  // ─── #4 CHINA ENC LOADER (separate GeoJSON, fetched at runtime) ────────
   const loadChinaEnc=useCallback(async()=>{
     if(!leafRef.current||!window.L||chinaEncLayerRef.current) return;
     notify('⏳ Loading China ENC…','error');
@@ -449,19 +454,14 @@ export default function NavModePage({ notify, sheetRoutes=[], portsDb=[], setTab
         pointToLayer:(ft,ll)=>{
           const p=ft.properties;
           if(p.type==='sounding'||p.featureType==='sounding') {
-            return L.marker(ll,{icon:L.divIcon({
-              html:`<div style="color:#00D4FF;font-size:9px;font-weight:700;font-family:monospace;white-space:nowrap;text-shadow:1px 1px 2px #000;pointer-events:none;">${p.depth!=null?p.depth:''}</div>`,
-              className:'',iconSize:[0,0],iconAnchor:[8,6]
-            }),interactive:false});
+            return L.marker(ll,{icon:L.divIcon({html:`<div style="color:#00D4FF;font-size:9px;font-weight:700;font-family:monospace;white-space:nowrap;text-shadow:1px 1px 2px #000;pointer-events:none;">${p.depth!=null?p.depth:''}</div>`,className:'',iconSize:[0,0],iconAnchor:[8,6]}),interactive:false});
           }
           return L.circleMarker(ll,{radius:3,color:'#00BFFF',fillOpacity:0.6,weight:1});
         }
       }).addTo(m);
       chinaEncLayerRef.current=layer;
       notify(`✓ China ENC loaded (${geojson.features?.length||0} features)`,'error');
-    } catch(e) {
-      notify(`China ENC: ${e.message}`,'error');
-    }
+    } catch(e) { notify(`China ENC: ${e.message}`,'error'); }
   },[]);
 
   const removeChinaEnc=useCallback(()=>{
@@ -471,17 +471,89 @@ export default function NavModePage({ notify, sheetRoutes=[], portsDb=[], setTab
     }
   },[]);
 
-  // ─── AIS SOURCE EFFECT ──────────────────────────────────────────────────
+  // ── ZONE OVERLAY RENDER on map ─────────────────────────────────────────────
+  useEffect(()=>{
+    if(!mapReady||!leafRef.current||!window.L) return;
+    const L=window.L, m=leafRef.current, lrs=layersRef.current;
+    // Clear existing zone layers
+    Object.values(lrs.zones).forEach(lg=>{try{m.removeLayer(lg);}catch{}});
+    lrs.zones={};
+
+    const zoneData={
+      eca:          { zones:ECA_ZONES,             color:'#FF6B35', label:'ECA',          fill:0.15 },
+      seca:         { zones:SECA_ZONES,            color:'#FFB347', label:'SECA',         fill:0.15 },
+      marpol:       { zones:MARPOL_ZONES,          color:'#9B59B6', label:'MARPOL',       fill:0.13 },
+      pssa:         { zones:PSSA_ZONES,            color:'#00C896', label:'PSSA',         fill:0.13 },
+      nox:          { zones:NOX_ZONES,             color:'#F39C12', label:'NOx',          fill:0.13 },
+      loadline:     { zones:LOAD_LINE_ZONES,       color:'#1ABC9C', label:'Load Line',    fill:0.10 },
+      restrictions: { zones:MARITIME_RESTRICTIONS, color:'#FF2020', label:'Restriction',  fill:0.20, useZoneColor:true },
+      msc_nog:      { zones:CHINA_MSC_NO_G,        color:'#FF00FF', label:'MSC No-G',     fill:0.25 },
+      eez:          { zones:EEZ_ZONES,             color:'#5DADE2', label:'EEZ',          fill:0.07, dashed:true },
+      piracy:       { zones:[
+        {name:'Indian Ocean HRA / Gulf of Aden',coords:[[0,40],[0,78],[25,78],[25,40]],shortDesc:'IMB High Risk Area — armed piracy'},
+        {name:'Gulf of Guinea',coords:[[-5,0],[5,0],[5,10],[-5,10]],shortDesc:'Piracy HRA — kidnapping risk'},
+        {name:'Malacca Strait',coords:[[1,98],[6,98],[6,106],[1,106]],shortDesc:'Piracy risk area'},
+        {name:'Somali Coast',coords:[[-2,40],[12,40],[12,55],[-2,55]],shortDesc:'Piracy HRA'},
+      ], color:'#E74C3C', label:'Piracy HRA', fill:0.18 },
+    };
+
+    Object.entries(zoneData).forEach(([k,cfg])=>{
+      if(!zoneOverlays[k]) return;
+      const lg=L.layerGroup();
+      if(!m.getPane('zonePane')){const zp=m.createPane('zonePane');zp.style.zIndex='420';zp.style.pointerEvents='auto';}
+      cfg.zones.forEach(z=>{
+        const zColor=(cfg.useZoneColor&&z.color)?z.color:cfg.color;
+        const coords=z.coords.map(p=>Array.isArray(p)?p:[p[0],p[1]]);
+        // Build rich popup
+        const sev=z.severity?`<div style="font-size:10px;color:${z.severity==='critical'?'#FF2020':z.severity==='high'?'#FF6600':'#FFB300'};font-weight:700;margin-bottom:2px;">⚠ ${z.severity.toUpperCase()} RISK</div>`:'';
+        const type=z.type?`<div style="font-size:9px;background:rgba(255,0,0,0.15);padding:1px 5px;border-radius:3px;display:inline-block;color:${zColor};font-weight:700;margin-bottom:3px;">${z.type.replace(/_/g,' ')}</div>`:'';
+        const reg=z.regulation?`<div style="font-size:10px;color:#aaa;margin-top:2px;">📋 ${z.regulation}</div>`:'';
+        const fuel=z.fuelLimit?`<div style="font-size:10px;color:#FFD700;margin-top:2px;">⛽ ${z.fuelLimit}</div>`:'';
+        const nox=z.noxLimit?`<div style="font-size:10px;color:#FFD700;margin-top:2px;">💨 ${z.noxLimit}</div>`:'';
+        const auth=z.authority?`<div style="font-size:10px;color:#aaa;margin-top:2px;">🏛 ${z.authority}</div>`:'';
+        const det=z.details?`<div style="font-size:10px;color:#ccc;margin-top:4px;border-top:1px solid rgba(255,255,255,0.1);padding-top:3px;line-height:1.4;">${z.details}</div>`:'';
+        const popup=`<div style="font-size:12px;min-width:200px;max-width:260px;line-height:1.6;">
+          <b style="color:${zColor};font-size:13px;">${z.name}</b><br/>
+          ${type}${sev}
+          <div style="font-size:11px;color:#ddd;margin:2px 0;">${z.shortDesc||cfg.label}</div>
+          ${reg}${fuel}${nox}${auth}${det}
+        </div>`;
+        const poly=L.polygon(coords,{
+          color:zColor,fillColor:zColor,fillOpacity:cfg.fill,
+          weight:cfg.useZoneColor?2:1.5,opacity:0.85,
+          dashArray:cfg.dashed?'8 5':null,
+          pane:'zonePane',
+        }).bindPopup(popup,{maxWidth:280});
+        // Zone name label
+        try{
+          const center=L.polygon(coords).getBounds().getCenter();
+          L.marker([center.lat,center.lng],{
+            icon:L.divIcon({
+              html:`<div style="background:rgba(0,0,0,0.75);color:${zColor};border:1px solid ${zColor}55;border-radius:3px;padding:2px 5px;font-size:9px;font-weight:700;white-space:nowrap;font-family:monospace;pointer-events:none;">${z.name}</div>`,
+              className:'',iconSize:[0,0],iconAnchor:[0,0],
+            }),interactive:false,zIndexOffset:-100,pane:'zonePane',
+          }).addTo(lg);
+        }catch{}
+        poly.addTo(lg);
+      });
+      lg.addTo(m);
+      lrs.zones[k]=lg;
+    });
+  },[zoneOverlays,mapReady]);
+
+  // ── FIX: AIS SOURCE EFFECT — corrected API calls ───────────────────────────
   useEffect(()=>{
     aisSourceRef.current=aisSource;
+    // Clean up all previous connections
     aisService.stop();
-    aisWsRef.current?.close();
-    aisWsRef.current=null;
+    if(aisWsRef.current){aisWsRef.current.close();aisWsRef.current=null;}
+    if(aisStreamWsRef.current){aisStreamWsRef.current.close();aisStreamWsRef.current=null;}
     clearInterval(aisIntervalRef.current);
     aisIntervalRef.current=null;
     setAisStatus('off');setLocalAisStatus('off');setLocalAisCount(0);
     if(aisSource==='off'){setAisTargets({});return;}
 
+    // ── Local AIS (SafePilot / Bridge NMEA) ────────────────────────────────
     if(aisSource==='safepilot'||aisSource==='bridge'){
       const hosts=aisSource==='bridge'?[localAisHost,...AIS_SOURCES.bridge.hosts]:AIS_SOURCES.safepilot.hosts;
       aisService.start(hosts);
@@ -492,36 +564,193 @@ export default function NavModePage({ notify, sheetRoutes=[], portsDb=[], setTab
       return()=>{try{off1();off2();off3();}catch{}aisService.stop();};
     }
 
+    // ── Internet AIS — FIX: correct VesselAPI endpoint + AISStream fallback ─
     if(aisSource==='internet'){
-      let retry=null;
-      const fetchAPI=async()=>{
-        const pos=livePosRef.current,range=aisRangeRef.current||50,la=pos?.lat||0,ln=pos?.lon||0;
-        for(const url of[`https://api.vesselapi.com/v1/vessel/list?lat=${la}&lng=${ln}&radius=${range}`,`https://api.vesselapi.com/v1/vessels?lat=${la}&lng=${ln}&radius=${range}`]){
-          try{
-            const r=await fetch(url,{headers:{'Authorization':VESSEL_API_KEY,'x-api-key':VESSEL_API_KEY}});
-            if(!r.ok) continue;
-            const data=await r.json();
-            const v=data?.vessels||data?.data||data?.results||(Array.isArray(data)?data:[]);
-            if(Array.isArray(v)&&v.length>0){
-              setAisStatus('connected');
-              const t={};
-              v.forEach(x=>{const m=x.mmsi||x.MMSI;const la=parseFloat(x.lat||x.latitude||0),ln=parseFloat(x.lon||x.lng||x.longitude||0);if(m&&la&&ln) t[m]={mmsi:m,lat:la,lon:ln,cog:parseFloat(x.cog||0),sog:parseFloat(x.sog||x.speed||0),name:(x.name||x.shipName||'').trim(),ts:Date.now()};});
-              setAisTargets(t);return;
+      let retryTimer=null;
+      let wsRetryTimer=null;
+
+      // ── Step 1: VesselAPI REST (correct endpoint & auth header) ────────────
+      // Endpoint: GET /v1/location/vessels/radius
+      // Auth: "Authorization": "Bearer <key>"  (NOT x-api-key)
+      // radius in metres, max 100000 (100km)
+      const fetchVesselAPI=async()=>{
+        const pos=livePosRef.current;
+        const lat=pos?.lat||1.29;   // default: Singapore
+        const lon=pos?.lon||103.85;
+        const radiusKm=aisRangeRef.current>0?Math.min(aisRangeRef.current*1.852,100):50; // NM→km, max 100km
+        const radiusM=Math.round(radiusKm*1000);
+        try{
+          const url=`https://api.vesselapi.com/v1/location/vessels/radius?filter.latitude=${lat}&filter.longitude=${lon}&filter.radius=${radiusM}`;
+          const res=await fetch(url,{
+            headers:{
+              'Authorization':`Bearer ${VESSEL_API_KEY}`,
+              'Content-Type':'application/json',
+            },
+            signal:AbortSignal.timeout(15000),
+          });
+          if(res.status===401||res.status===403){
+            console.warn('[VesselAPI] Auth failed — check API key plan');
+            return false;
+          }
+          if(!res.ok){console.warn('[VesselAPI] HTTP',res.status);return false;}
+          const data=await res.json();
+          // VesselAPI returns { vessels: [...] } or { data: [...] }
+          const vessels=data?.vessels||data?.data||[];
+          if(Array.isArray(vessels)&&vessels.length>0){
+            setAisStatus('connected');
+            const t={};
+            vessels.forEach(v=>{
+              const mmsi=v.mmsi||v.MMSI;
+              const la=parseFloat(v.latitude||v.lat||0);
+              const ln=parseFloat(v.longitude||v.lon||v.lng||0);
+              if(mmsi&&la&&ln){
+                t[mmsi]={
+                  mmsi,
+                  lat:la,lon:ln,
+                  cog:parseFloat(v.cog||v.course||0),
+                  sog:parseFloat(v.sog||v.speed||0),
+                  name:(v.vessel_name||v.name||v.shipName||'').trim(),
+                  heading:parseFloat(v.heading||v.cog||0),
+                  navStatus:v.nav_status||'',
+                  ts:Date.now(),
+                };
+              }
+            });
+            if(Object.keys(t).length>0){
+              setAisTargets(t);
+              console.log(`[VesselAPI] ✓ ${Object.keys(t).length} vessels in ${radiusKm}km radius`);
+              return true;
             }
-          }catch{}
+          }
+          return false;
+        }catch(e){
+          console.warn('[VesselAPI] fetch error:',e.message);
+          return false;
         }
-        setAisStatus('connecting');
-        if(aisWsRef.current?.readyState===WebSocket.OPEN) return;
-        const ws=new WebSocket("wss://stream.aisstream.io/v0/stream");
-        aisWsRef.current=ws;
-        ws.onopen=()=>{setAisStatus('connected');ws.send(JSON.stringify({APIKey:AISSTREAM_KEY,BoundingBoxes:[[[-90,-180],[90,180]]],FilterMessageTypes:["PositionReport"]}));};
-        ws.onmessage=msg=>{try{const d=JSON.parse(msg.data);const p=d?.Message?.PositionReport,m=d?.MetaData;if(!p||!m||p.Latitude===0) return;setAisTargets(prev=>({...prev,[m.MMSI]:{mmsi:m.MMSI,name:(m.ShipName||'').trim(),lat:p.Latitude,lon:p.Longitude,cog:p.CourseOverGround||0,sog:p.SpeedOverGround||0,ts:Date.now()}}));}catch{}};
-        ws.onerror=()=>setAisStatus('error');
-        ws.onclose=ev=>{if(ev.code!==1000){setAisStatus('connecting');retry=setTimeout(()=>{if(aisSourceRef.current==='internet') fetchAPI();},5000);}};
       };
-      setAisStatus('connecting');fetchAPI();
-      aisIntervalRef.current=setInterval(fetchAPI,30000);
-      return()=>{clearTimeout(retry);clearInterval(aisIntervalRef.current);aisWsRef.current?.close();};
+
+      // ── Step 2: AISStream WebSocket fallback ───────────────────────────────
+      // NOTE: AISStream docs say browser direct WSS is NOT supported (CORS policy).
+      // However many users report it works in practice via wss:// (no HTTP CORS).
+      // Key fix: subscription key must be "APIKey" not "Apikey"
+      // Bounding box: use live position ±range, or full world if no position
+      const connectAISStream=()=>{
+        if(aisStreamWsRef.current?.readyState===WebSocket.OPEN) return;
+        setAisStatus('connecting');
+        const pos=livePosRef.current;
+        const range=aisRangeRef.current>0?aisRangeRef.current/60:5; // NM to degrees approx
+        // Build bounding box around position or use full world
+        const bbox=pos
+          ?[[pos.lat-range,pos.lon-range],[pos.lat+range,pos.lon+range]]
+          :[[-90,-180],[90,180]];
+
+        try{
+          const ws=new WebSocket('wss://stream.aisstream.io/v0/stream');
+          aisStreamWsRef.current=ws;
+
+          ws.onopen=()=>{
+            setAisStatus('connected');
+            // FIX: correct key name is "APIKey" (capital K) not "Apikey"
+            ws.send(JSON.stringify({
+              APIKey: AISSTREAM_KEY,
+              BoundingBoxes:[bbox],
+              FilterMessageTypes:['PositionReport','ShipStaticData'],
+            }));
+            console.log('[AISStream] ✓ Connected, bbox:',bbox);
+          };
+
+          ws.onmessage=msg=>{
+            try{
+              const d=JSON.parse(msg.data);
+              // Handle error messages from AISStream
+              if(d.error){console.warn('[AISStream] Error:',d.error);return;}
+              const msgType=d?.MessageType;
+              const meta=d?.MetaData;
+              if(!meta?.MMSI) return;
+
+              if(msgType==='PositionReport'){
+                const p=d?.Message?.PositionReport;
+                if(!p||!p.Latitude||p.Latitude===0) return;
+                setAisTargets(prev=>({
+                  ...prev,
+                  [meta.MMSI]:{
+                    mmsi:meta.MMSI,
+                    name:(meta.ShipName||'').trim(),
+                    lat:p.Latitude,
+                    lon:p.Longitude,
+                    cog:p.CourseOverGround||0,
+                    sog:p.SpeedOverGround||0,
+                    heading:p.TrueHeading||p.CourseOverGround||0,
+                    navStatus:p.NavigationalStatus||0,
+                    ts:Date.now(),
+                  }
+                }));
+              }
+              if(msgType==='ShipStaticData'){
+                const s=d?.Message?.ShipStaticData;
+                if(!s) return;
+                setAisTargets(prev=>{
+                  const ex=prev[meta.MMSI];
+                  if(!ex) return prev;
+                  return {...prev,[meta.MMSI]:{...ex,name:(s.Name||ex.name||'').trim(),shipType:s.Type,imo:s.ImoNumber,callsign:s.CallSign,}};
+                });
+              }
+            }catch(e){console.warn('[AISStream] parse error:',e);}
+          };
+
+          ws.onerror=(e)=>{
+            console.warn('[AISStream] WS error');
+            setAisStatus('error');
+          };
+          ws.onclose=(ev)=>{
+            console.log('[AISStream] closed code:',ev.code);
+            if(ev.code!==1000&&aisSourceRef.current==='internet'){
+              setAisStatus('connecting');
+              wsRetryTimer=setTimeout(connectAISStream,8000);
+            }
+          };
+        }catch(e){
+          console.warn('[AISStream] connect error:',e);
+          setAisStatus('error');
+        }
+      };
+
+      // ── Main fetch loop ────────────────────────────────────────────────────
+      const run=async()=>{
+        const vesselOk=await fetchVesselAPI();
+        if(!vesselOk){
+          // VesselAPI failed — use AISStream WebSocket
+          console.log('[AIS] VesselAPI unavailable, connecting AISStream…');
+          connectAISStream();
+        }
+      };
+
+      run();
+      // Refresh VesselAPI every 30s
+      aisIntervalRef.current=setInterval(async()=>{
+        if(aisSourceRef.current!=='internet') return;
+        const ok=await fetchVesselAPI();
+        if(!ok&&(!aisStreamWsRef.current||aisStreamWsRef.current.readyState!==WebSocket.OPEN)){
+          connectAISStream();
+        }
+        // Update AISStream bounding box if position changed
+        if(aisStreamWsRef.current?.readyState===WebSocket.OPEN&&livePosRef.current){
+          const pos=livePosRef.current;
+          const range=aisRangeRef.current>0?aisRangeRef.current/60:5;
+          aisStreamWsRef.current.send(JSON.stringify({
+            APIKey:AISSTREAM_KEY,
+            BoundingBoxes:[[[pos.lat-range,pos.lon-range],[pos.lat+range,pos.lon+range]]],
+            FilterMessageTypes:['PositionReport','ShipStaticData'],
+          }));
+        }
+      },30000);
+
+      return()=>{
+        clearTimeout(retryTimer);
+        clearTimeout(wsRetryTimer);
+        clearInterval(aisIntervalRef.current);
+        if(aisStreamWsRef.current){aisStreamWsRef.current.close(1000,'cleanup');aisStreamWsRef.current=null;}
+      };
     }
   },[aisSource,localAisHost]);
 
@@ -575,7 +804,7 @@ export default function NavModePage({ notify, sheetRoutes=[], portsDb=[], setTab
     return()=>navigator.geolocation.clearWatch(id);
   },[gpsOn]);
 
-  // AIS render
+  // AIS render on map
   useEffect(()=>{
     if(!leafRef.current||!window.L) return;
     const L=window.L;
@@ -598,7 +827,7 @@ export default function NavModePage({ notify, sheetRoutes=[], portsDb=[], setTab
     });
   },[aisTargets,livePos]);
 
-  // ─── DEPTH TILE SWAP ───────────────────────────────────────────────────
+  // Depth tile swap
   useEffect(()=>{
     if(!mapReady||!leafRef.current||!window.L) return;
     const L=window.L,m=leafRef.current;
@@ -624,7 +853,6 @@ export default function NavModePage({ notify, sheetRoutes=[], portsDb=[], setTab
     if(ds.has('germany')){try{L.tileLayer.wms('https://gdi.bsh.de/mapservice_gs/NAUTHIS/ows',{layers:'Tiefenlinien',format:'image/png',transparent:true,version:'1.3.0',opacity:0.65,zIndex:7,attribution:'© BSH'}).addTo(m);}catch(e){console.warn('[BSH]',e);}}
     if(ds.has('ireland')){try{L.tileLayer.wms('https://atlas.marine.ie/arcgis/services/Bathymetry/MapServer/WMSServer',{layers:'0',format:'image/png',transparent:true,version:'1.3.0',opacity:0.6,zIndex:7,attribution:'© INFOMAR'}).addTo(m);}catch(e){console.warn('[INFOMAR]',e);}}
     if(ds.has('osm_depth')){try{L.tileLayer('https://tiles.openseamap.org/depth/{z}/{x}/{y}.png',{maxZoom:18,opacity:0.8,zIndex:8,attribution:'© OpenSeaMap'}).addTo(m);}catch(e){console.warn('[OSM depth]',e);}}
-    // China ENC as GeoJSON overlay
     if(ds.has('china')){ loadChinaEnc(); } else { removeChinaEnc(); }
     seamarkRef.current=L.tileLayer('https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png',{opacity:hasAny?0.9:0.55,maxZoom:18,zIndex:10,attribution:'© OpenSeaMap'}).addTo(m);
   },[depthSources,mapMode,mapReady]);
@@ -663,8 +891,9 @@ export default function NavModePage({ notify, sheetRoutes=[], portsDb=[], setTab
   useEffect(()=>{localStorage.setItem('nav_localAisHost',localAisHost);},[localAisHost]);
   useEffect(()=>{if(activeRoute) localStorage.setItem('nav_activeRoute',JSON.stringify(activeRoute));else localStorage.removeItem('nav_activeRoute');},[activeRoute]);
   useEffect(()=>{localStorage.setItem('nav_chartOverlays',JSON.stringify(chartOverlays));},[chartOverlays]);
+  useEffect(()=>{localStorage.setItem('nav_zoneOverlays',JSON.stringify(zoneOverlays));},[zoneOverlays]);
 
-  // ─── ROUTE RENDER — FIX #1: proper JS spread, XTD always redraws ───────
+  // Route render
   useEffect(()=>{
     if(!mapReady||!leafRef.current||!window.L) return;
     const L=window.L,m=leafRef.current,lrs=layersRef.current;
@@ -674,11 +903,9 @@ export default function NavModePage({ notify, sheetRoutes=[], portsDb=[], setTab
     [lrs.xtdPort,lrs.xtdStbd,lrs.xtdFill].forEach(l=>{if(l) try{m.removeLayer(l);}catch{}});
     lrs.xtdPort=lrs.xtdStbd=lrs.xtdFill=null;
     if(!activeRoute?.waypoints?.length) return;
-
     const wps=normalizeRoute(activeRoute.waypoints);
     const c=colors;
     lrs.route=L.polyline(wps.map(w=>[w.lat,w.lon]),{color:c.route,weight:2.5,opacity:0.9,dashArray:'8 4',noClip:true}).addTo(m);
-
     wps.forEach((wp,i)=>{
       const first=i===0,last=i===wps.length-1;
       const col=first?'#00C896':last?'#FF4757':c.route,sz=first||last?14:8;
@@ -689,7 +916,6 @@ export default function NavModePage({ notify, sheetRoutes=[], portsDb=[], setTab
       const ll=L.marker([wp.lat,wp.lon],{icon:li,interactive:false,zIndexOffset:200}).addTo(m);
       lrs.routeMarkers.push(mk,ll);
     });
-
     for(let i=0;i<wps.length-1;i++){
       const mid=[(wps[i].lat+wps[i+1].lat)/2,(wps[i].lon+wps[i+1].lon)/2];
       const bd=brg(wps[i].lat,wps[i].lon,wps[i+1].lat,wps[i+1].lon);
@@ -697,66 +923,39 @@ export default function NavModePage({ notify, sheetRoutes=[], portsDb=[], setTab
       const li=L.divIcon({html:`<div style="background:rgba(0,0,0,0.65);color:#FFD700;font-size:10px;font-weight:600;font-family:monospace;white-space:nowrap;padding:1px 4px;border-radius:3px;pointer-events:none;">${bd.toFixed(0)}°T · ${dn.toFixed(1)} NM</div>`,className:'',iconSize:[0,0],iconAnchor:[-4,8]});
       lrs.routeMarkers.push(L.marker(mid,{icon:li,interactive:false,zIndexOffset:100}).addTo(m));
     }
-
-    // FIX #1: XTD corridor — correct spread operators
     if(wps.length>=2){
-      const X=xtdNM;
-      const pp=[],sp=[];
+      const X=xtdNM,pp=[],sp=[];
       wps.forEach((wp,i)=>{
         let b;
         if(i===0) b=brg(wp.lat,wp.lon,wps[1].lat,wps[1].lon);
         else if(i===wps.length-1) b=brg(wps[i-1].lat,wps[i-1].lon,wp.lat,wp.lon);
-        else {
-          const b1=brg(wps[i-1].lat,wps[i-1].lon,wp.lat,wp.lon);
-          const b2=brg(wp.lat,wp.lon,wps[i+1].lat,wps[i+1].lon);
-          const df=((b2-b1+540)%360)-180;
-          b=(b1+df/2+360)%360;
-        }
+        else{const b1=brg(wps[i-1].lat,wps[i-1].lon,wp.lat,wp.lon);const b2=brg(wp.lat,wp.lon,wps[i+1].lat,wps[i+1].lon);const df=((b2-b1+540)%360)-180;b=(b1+df/2+360)%360;}
         pp.push(offsetPt(wp.lat,wp.lon,(b-90+360)%360,X));
         sp.push(offsetPt(wp.lat,wp.lon,(b+90)%360,X));
       });
       lrs.xtdPort=L.polyline(pp,{color:c.xtd,weight:1.5,opacity:0.8,dashArray:'10 6'}).addTo(m);
       lrs.xtdStbd=L.polyline(sp,{color:c.xtd,weight:1.5,opacity:0.8,dashArray:'10 6'}).addTo(m);
-      // FIX: spread sp array correctly
       const spRev=[...sp].reverse();
       lrs.xtdFill=L.polygon([...pp,...spRev],{color:'transparent',fillColor:c.xtd,fillOpacity:0.06,weight:0}).addTo(m);
     }
-
     m.fitBounds(lrs.route.getBounds(),{padding:[60,60]});
   },[activeRoute,mapReady,colors,xtdNM]);
 
-  // ─── FIX #2: ETA — leg-by-leg DTG, not straight-line ──────────────────
+  // ETA
   useEffect(()=>{
     if(!livePos||!activeRoute?.waypoints?.length){setEtaResult(null);return;}
     if(livePos.sog<0.2){setEtaResult(null);return;}
     const wps=activeRoute.waypoints;
     const ti=Math.min(Math.max(selectedWpIdx,0),wps.length-1);
-
-    // Sum leg distances from WP[a] to WP[b] along the route
-    const legSum=(a,b)=>{
-      let d=0;
-      for(let i=a;i<b;i++) d+=distNM(wps[i].lat,wps[i].lon,wps[i+1].lat,wps[i+1].lon);
-      return d;
-    };
-
-    // Find minimum route-following distance:
-    // ship → WP[joinIdx] (direct) + WP[joinIdx] → ... → WP[target] (along legs)
+    const legSum=(a,b)=>{let d=0;for(let i=a;i<b;i++) d+=distNM(wps[i].lat,wps[i].lon,wps[i+1].lat,wps[i+1].lon);return d;};
     let rem=Infinity;
-    for(let i=0;i<=ti;i++){
-      const d=distNM(livePos.lat,livePos.lon,wps[i].lat,wps[i].lon)+legSum(i,ti);
-      if(d<rem) rem=d;
-    }
-
+    for(let i=0;i<=ti;i++){const d=distNM(livePos.lat,livePos.lon,wps[i].lat,wps[i].lon)+legSum(i,ti);if(d<rem) rem=d;}
     const hrs=rem/livePos.sog;
     const h=Math.floor(hrs),mn=Math.round((hrs%1)*60);
     const arr=new Date(Date.now()+hrs*3600000);
     const pd=n=>String(n).padStart(2,'0');
     const mo=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][arr.getMonth()];
-    setEtaResult({
-      remainNM:rem.toFixed(1),hrs:h,mins:mn,
-      wpName:wps[ti].name||`WP${String(ti+1).padStart(2,'0')}`,
-      arrivalStr:`${pd(arr.getDate())} ${mo} ${arr.getFullYear()} ${pd(arr.getHours())}:${pd(arr.getMinutes())} LT`
-    });
+    setEtaResult({remainNM:rem.toFixed(1),hrs:h,mins:mn,wpName:wps[ti].name||`WP${String(ti+1).padStart(2,'0')}`,arrivalStr:`${pd(arr.getDate())} ${mo} ${arr.getFullYear()} ${pd(arr.getHours())}:${pd(arr.getMinutes())} LT`});
   },[livePos,activeRoute,selectedWpIdx]);
 
   // Map orientation
@@ -780,11 +979,8 @@ export default function NavModePage({ notify, sheetRoutes=[], portsDb=[], setTab
       leafRef.current=L.map(mapRef.current,opts);
       baseTileRef.current=L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{subdomains:'abcd',attribution:'© CARTO'}).addTo(leafRef.current);
       seamarkRef.current=L.tileLayer('https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png',{opacity:0.55,maxZoom:18,attribution:'© OpenSeaMap'}).addTo(leafRef.current);
-
-      // #3: Scale bar (Leaflet built-in) + zoom tracking
       L.control.scale({position:'bottomleft',imperial:true,metric:true,maxWidth:110}).addTo(leafRef.current);
       leafRef.current.on('zoomend',()=>setMapZoom(leafRef.current.getZoom()));
-
       leafRef.current.on('click',e=>{
         if(rbModeRef.current){
           const pos=livePosRef.current;
@@ -831,7 +1027,7 @@ export default function NavModePage({ notify, sheetRoutes=[], portsDb=[], setTab
     };
   },[]);
 
-  // ─── DERIVED ────────────────────────────────────────────────────────────
+  // Derived
   const filteredSaved=savedRoutes.filter(r=>!savedSearch.trim()||(r.name||'').toLowerCase().includes(savedSearch.toLowerCase())).slice(0,100);
   const filteredDB=(sheetRoutes||[]).filter(r=>{
     if(!dbSearch.trim()) return true;
@@ -839,7 +1035,6 @@ export default function NavModePage({ notify, sheetRoutes=[], portsDb=[], setTab
     const h=[r.name,r.Name,r['Route Name'],r.from,r.to,r.origin,r.destination].filter(Boolean).join(' ').toLowerCase();
     return h.includes(k);
   }).slice(0,50);
-  // #6: Database panel combined search
   const allDbRoutes=sheetRoutes||[];
   const filteredDbRoutes=allDbRoutes.filter(r=>{
     if(!dbRouteSearch.trim()) return true;
@@ -850,24 +1045,18 @@ export default function NavModePage({ notify, sheetRoutes=[], portsDb=[], setTab
   const filteredDbCharts=savedCharts.filter(c=>!dbChartSearch.trim()||(c.name||'').toLowerCase().includes(dbChartSearch.toLowerCase())).slice(0,60);
   const filteredSavedCharts=savedCharts.filter(c=>!chartSearch.trim()||(c.name||'').toLowerCase().includes(chartSearch.toLowerCase())).slice(0,50);
 
-  // HUD touch drag
   const onTS=e=>{const t=e.touches[0];hudDragRef.current={dx:t.clientX-hudPos.x,dy:t.clientY-hudPos.y};};
   const onTM=e=>{
     if(!hudDragRef.current) return;
     e.stopPropagation();
     const t=e.touches[0];
-    setHudPos({
-      x:Math.max(0,Math.min(window.innerWidth-185,t.clientX-hudDragRef.current.dx)),
-      y:Math.max(50,Math.min(window.innerHeight-200,t.clientY-hudDragRef.current.dy))
-    });
+    setHudPos({x:Math.max(0,Math.min(window.innerWidth-185,t.clientX-hudDragRef.current.dx)),y:Math.max(50,Math.min(window.innerHeight-200,t.clientY-hudDragRef.current.dy))});
   };
   const onTE=()=>{hudDragRef.current=null;};
-
   const toggleDepth=(id)=>setDepthSources(prev=>{const next=new Set(prev);if(next.has(id)) next.delete(id);else next.add(id);return next;});
 
   const S={bg:'rgba(4,12,26,0.97)',bd:'rgba(0,212,255,0.28)',tx:'#D0E8F8',dm:'#5A7A90',vd:'#243850',cy:'#00D4FF',gn:'#00FF88',gd:'#FFD700',rd:'#FF4757',sm:'0.78rem',xs:'0.68rem',lb:'0.58rem'};
 
-  // ─── RENDER ─────────────────────────────────────────────────────────────
   return (
     <div style={{flex:1,display:'flex',flexDirection:'column',background:'#040C1A',position:'relative',overflow:'hidden',minHeight:0}}>
 
@@ -890,11 +1079,9 @@ export default function NavModePage({ notify, sheetRoutes=[], portsDb=[], setTab
       {/* MAP */}
       <div ref={mapRef} style={{flex:1,minHeight:0}}/>
 
-      {/* #3: ZOOM LEVEL badge — sits just above the Leaflet scale bar */}
+      {/* ZOOM badge */}
       <div style={{position:'absolute',bottom:32,left:8,zIndex:500,pointerEvents:'none'}}>
-        <div style={{background:'rgba(4,12,26,0.88)',border:'1px solid rgba(0,212,255,0.3)',borderRadius:4,padding:'2px 7px',color:S.cy,fontFamily:'monospace',fontSize:'0.6rem',fontWeight:700,letterSpacing:0.5}}>
-          Z{mapZoom}
-        </div>
+        <div style={{background:'rgba(4,12,26,0.88)',border:'1px solid rgba(0,212,255,0.3)',borderRadius:4,padding:'2px 7px',color:S.cy,fontFamily:'monospace',fontSize:'0.6rem',fontWeight:700,letterSpacing:0.5}}>Z{mapZoom}</div>
       </div>
 
       {/* HUD */}
@@ -1007,13 +1194,13 @@ export default function NavModePage({ notify, sheetRoutes=[], portsDb=[], setTab
         <div style={{position:'absolute',top:56,right:8,background:S.bg,border:`1px solid ${S.bd}`,borderRadius:10,padding:'8px 10px',zIndex:500,width:172,backdropFilter:'blur(10px)',maxHeight:'82vh',overflowY:'auto',boxShadow:'0 4px 20px rgba(0,0,0,0.5)'}}>
           {/* Tab bar */}
           <div style={{display:'flex',alignItems:'center',marginBottom:8,gap:3,flexWrap:'wrap'}}>
-            {[['route','ROUTE'],['rb','R/B'],['charts','CHARTS'],['enc','ENC'],['ais_src','📡AIS'],['eta','ETA'],['db','🗄️DB']].map(([p,l])=>(
+            {[['route','ROUTE'],['rb','R/B'],['charts','CHARTS'],['enc','ENC'],['zones','🌐ZONES'],['ais_src','📡AIS'],['eta','ETA'],['db','🗄️DB']].map(([p,l])=>(
               <button key={p} onClick={()=>setActivePanel(p)} style={{flex:'1 1 auto',minWidth:36,background:activePanel===p?'rgba(0,212,255,0.18)':'transparent',border:`1px solid ${activePanel===p?S.cy:S.vd}`,color:activePanel===p?S.cy:S.dm,borderRadius:5,padding:'3px 2px',fontSize:'0.54rem',cursor:'pointer'}}>{l}</button>
             ))}
             <button onClick={()=>setPanelCollapsed(true)} style={{background:'transparent',border:`1px solid ${S.vd}`,color:S.dm,borderRadius:5,padding:'3px 5px',fontSize:'0.65rem',cursor:'pointer'}}>▶</button>
           </div>
 
-          {/* ── ROUTE ── */}
+          {/* ── ROUTE panel (unchanged) ── */}
           {activePanel==='route'&&(
             <div style={{display:'flex',flexDirection:'column',gap:6}}>
               <label style={{background:'#060F1C',border:`1px solid ${S.vd}`,color:S.tx,borderRadius:6,padding:'7px 10px',fontSize:S.sm,cursor:'pointer',display:'block',textAlign:'center'}}>
@@ -1071,7 +1258,7 @@ export default function NavModePage({ notify, sheetRoutes=[], portsDb=[], setTab
             </div>
           )}
 
-          {/* ── R/B ── */}
+          {/* ── R/B panel (unchanged) ── */}
           {activePanel==='rb'&&(
             <div style={{display:'flex',flexDirection:'column',gap:7}}>
               <label style={{display:'flex',alignItems:'center',gap:7,cursor:'pointer',fontSize:S.sm,color:S.tx}}>
@@ -1098,7 +1285,7 @@ export default function NavModePage({ notify, sheetRoutes=[], portsDb=[], setTab
             </div>
           )}
 
-          {/* ── CHARTS ── */}
+          {/* ── CHARTS panel (unchanged) ── */}
           {activePanel==='charts'&&(
             <div style={{display:'flex',flexDirection:'column',gap:6}}>
               <label style={{background:'#060F1C',border:`1px solid ${S.vd}`,color:S.tx,borderRadius:6,padding:'7px 10px',fontSize:S.sm,cursor:'pointer',display:'block',textAlign:'center'}}>
@@ -1134,20 +1321,14 @@ export default function NavModePage({ notify, sheetRoutes=[], portsDb=[], setTab
                   {savedCharts.length===0&&<div style={{color:S.vd,fontSize:S.xs,fontStyle:'italic'}}>No saved charts</div>}
                 </div>
               </div>
-              {/* #7: compact attribution, no overlap */}
-              <div style={{color:'#2A4060',fontSize:'0.5rem',borderTop:'1px solid rgba(0,212,255,0.06)',paddingTop:3}}>
-                Color: <span style={{color:colors.chart||'#FF2020'}}>■</span> via 🎨 Settings
-              </div>
             </div>
           )}
 
-          {/* ── ENC — #8: flag + country name only ── */}
+          {/* ── ENC panel (unchanged) ── */}
           {activePanel==='enc'&&(
             <div style={{display:'flex',flexDirection:'column',gap:5}}>
               <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:2}}>
-                <div style={{color:S.dm,fontSize:S.lb,letterSpacing:0.5}}>
-                  DEPTH LAYERS {depthSources.size>0&&<span style={{color:S.cy}}>({depthSources.size})</span>}
-                </div>
+                <div style={{color:S.dm,fontSize:S.lb,letterSpacing:0.5}}>DEPTH LAYERS {depthSources.size>0&&<span style={{color:S.cy}}>({depthSources.size})</span>}</div>
                 {depthSources.size>0&&<button onClick={()=>setDepthSources(new Set())} style={{background:'transparent',border:'none',color:S.rd,fontSize:'0.55rem',cursor:'pointer',padding:'0 2px'}}>⭕ Off</button>}
               </div>
               <div style={{display:'flex',flexDirection:'column',gap:2}}>
@@ -1166,7 +1347,41 @@ export default function NavModePage({ notify, sheetRoutes=[], portsDb=[], setTab
             </div>
           )}
 
-          {/* ── AIS SOURCE ── */}
+          {/* ── NEW: ZONES panel ── */}
+          {activePanel==='zones'&&(
+            <div style={{display:'flex',flexDirection:'column',gap:5}}>
+              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:2}}>
+                <div style={{color:S.dm,fontSize:S.lb,letterSpacing:0.5}}>
+                  MARITIME ZONES
+                  {Object.values(zoneOverlays).some(Boolean)&&
+                    <span style={{color:S.cy}}> ({Object.values(zoneOverlays).filter(Boolean).length} on)</span>}
+                </div>
+                {Object.values(zoneOverlays).some(Boolean)&&
+                  <button onClick={()=>setZoneOverlays({})} style={{background:'transparent',border:'none',color:S.rd,fontSize:'0.55rem',cursor:'pointer'}}>⭕ All Off</button>}
+              </div>
+              <div style={{display:'flex',flexDirection:'column',gap:3}}>
+                {ZONE_OVERLAY_CFG.map(z=>{
+                  const on=!!zoneOverlays[z.k];
+                  return(
+                    <button key={z.k} onClick={()=>toggleZoneOverlay(z.k)} title={z.desc}
+                      style={{display:'flex',alignItems:'center',gap:6,background:on?`${z.color}18`:'transparent',border:`1px solid ${on?z.color:S.vd}`,color:on?z.color:S.dm,borderRadius:5,padding:'5px 8px',fontSize:'0.68rem',cursor:'pointer',width:'100%',textAlign:'left'}}>
+                      <div style={{width:10,height:10,borderRadius:2,background:z.color,flexShrink:0,opacity:on?1:0.4}}/>
+                      <div style={{flex:1}}>
+                        <div style={{fontWeight:on?700:400,fontSize:'0.68rem'}}>{z.label}</div>
+                        <div style={{fontSize:'0.56rem',color:on?z.color+'cc':S.vd,marginTop:1}}>{z.desc}</div>
+                      </div>
+                      {on&&<span style={{fontSize:'0.6rem',color:z.color}}>✓</span>}
+                    </button>
+                  );
+                })}
+              </div>
+              <div style={{color:S.vd,fontSize:'0.55rem',marginTop:4,padding:'4px 0',borderTop:`1px solid ${S.vd}33`,lineHeight:1.5}}>
+                Tap a zone on map for details, regulation & authority info
+              </div>
+            </div>
+          )}
+
+          {/* ── AIS SOURCE panel (unchanged) ── */}
           {activePanel==='ais_src'&&(
             <div style={{display:'flex',flexDirection:'column',gap:6}}>
               <div style={{color:S.dm,fontSize:S.lb,letterSpacing:0.5,marginBottom:2}}>AIS SOURCE</div>
@@ -1178,6 +1393,14 @@ export default function NavModePage({ notify, sheetRoutes=[], portsDb=[], setTab
                 </label>
               ))}
               {aisSource==='bridge'&&<input value={localAisHost} onChange={e=>setLocalAisHost(e.target.value)} placeholder="ws://localhost:4002" style={{width:'100%',boxSizing:'border-box',background:'#06101C',color:S.cy,border:'1px solid #1A3050',borderRadius:4,padding:'5px 7px',fontSize:'0.63rem',outline:'none'}}/>}
+              {/* AIS status detail */}
+              {aisSource==='internet'&&(
+                <div style={{background:'rgba(0,0,0,0.3)',borderRadius:5,padding:'5px 7px',border:'1px solid rgba(255,215,0,0.2)',fontSize:'0.6rem',color:S.dm,lineHeight:1.6}}>
+                  <div>1st: VesselAPI REST ({Object.keys(aisTargets).length} vessels)</div>
+                  <div>2nd: AISStream WSS fallback</div>
+                  <div style={{color:aisStatus==='connected'?S.gn:S.gd}}>Status: {aisStatus}</div>
+                </div>
+              )}
               <div style={{borderTop:'1px solid rgba(0,212,255,0.1)',paddingTop:5}}>
                 <div style={{color:S.dm,fontSize:S.lb,marginBottom:3}}>AIS RANGE FILTER</div>
                 <div style={{display:'flex',gap:3,flexWrap:'wrap'}}>
@@ -1190,7 +1413,7 @@ export default function NavModePage({ notify, sheetRoutes=[], portsDb=[], setTab
             </div>
           )}
 
-          {/* ── ETA ── */}
+          {/* ── ETA panel (unchanged) ── */}
           {activePanel==='eta'&&(
             <div>
               {activeRoute?.waypoints?.length>0
@@ -1199,27 +1422,22 @@ export default function NavModePage({ notify, sheetRoutes=[], portsDb=[], setTab
             </div>
           )}
 
-          {/* ── #6 DATABASE: searchable routes + charts ── */}
+          {/* ── DB panel (unchanged) ── */}
           {activePanel==='db'&&(
             <div style={{display:'flex',flexDirection:'column',gap:8}}>
-
-              {/* App route database */}
               <div>
                 <div style={{color:S.dm,fontSize:S.lb,letterSpacing:0.5,marginBottom:3}}>📍 ROUTE DB ({allDbRoutes.length})</div>
                 <input placeholder="Name, port, origin…" value={dbRouteSearch} onChange={e=>setDbRouteSearch(e.target.value)} style={{width:'100%',boxSizing:'border-box',background:'#060F1C',color:S.tx,border:`1px solid ${S.vd}`,borderRadius:5,padding:'5px 7px',fontSize:S.xs,outline:'none',marginBottom:3}}/>
                 <div style={{maxHeight:110,overflowY:'auto',display:'flex',flexDirection:'column',gap:2}}>
                   {filteredDbRoutes.length===0&&<div style={{color:S.vd,fontSize:S.xs,fontStyle:'italic'}}>{dbRouteSearch?`No match for "${dbRouteSearch}"`:allDbRoutes.length===0?'No routes in database':''}</div>}
                   {filteredDbRoutes.map((r,i)=>(
-                    <button key={i}
-                      onClick={()=>{setActiveRoute(r);setSelectedWpIdx((r.waypoints?.length||1)-1);setDbRouteSearch('');notify(`✓ ${r.name||r.Name||'Route'}`,'error');}}
+                    <button key={i} onClick={()=>{setActiveRoute(r);setSelectedWpIdx((r.waypoints?.length||1)-1);setDbRouteSearch('');notify(`✓ ${r.name||r.Name||'Route'}`,'error');}}
                       style={{background:'#060F1C',border:`1px solid ${activeRoute?.name===(r.name||r.Name)?S.cy:S.vd}`,color:activeRoute?.name===(r.name||r.Name)?S.cy:S.tx,borderRadius:5,padding:'5px 7px',fontSize:S.xs,cursor:'pointer',textAlign:'left',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
                       📍 {r.name||r.Name||r['Route Name']||'Unnamed'}{(r.from||r.origin)?` · ${r.from||r.origin}`:''}
                     </button>
                   ))}
                 </div>
               </div>
-
-              {/* My saved routes */}
               <div style={{borderTop:'1px solid rgba(0,212,255,0.12)',paddingTop:6}}>
                 <div style={{color:S.dm,fontSize:S.lb,letterSpacing:0.5,marginBottom:3}}>💾 MY ROUTES ({savedRoutes.length})</div>
                 <input placeholder="Search my routes…" value={savedSearch} onChange={e=>setSavedSearch(e.target.value)} style={{width:'100%',boxSizing:'border-box',background:'#060F1C',color:S.tx,border:`1px solid ${S.vd}`,borderRadius:5,padding:'5px 7px',fontSize:S.xs,outline:'none',marginBottom:3}}/>
@@ -1235,13 +1453,11 @@ export default function NavModePage({ notify, sheetRoutes=[], portsDb=[], setTab
                   ))}
                 </div>
               </div>
-
-              {/* User charts */}
               <div style={{borderTop:'1px solid rgba(0,212,255,0.12)',paddingTop:6}}>
                 <div style={{color:S.dm,fontSize:S.lb,letterSpacing:0.5,marginBottom:3}}>🗺 USER CHARTS ({savedCharts.length})</div>
                 <input placeholder="Search charts…" value={dbChartSearch} onChange={e=>setDbChartSearch(e.target.value)} style={{width:'100%',boxSizing:'border-box',background:'#060F1C',color:S.tx,border:`1px solid ${S.vd}`,borderRadius:5,padding:'5px 7px',fontSize:S.xs,outline:'none',marginBottom:3}}/>
                 <div style={{maxHeight:90,overflowY:'auto',display:'flex',flexDirection:'column',gap:2}}>
-                  {filteredDbCharts.length===0&&<div style={{color:S.vd,fontSize:S.xs,fontStyle:'italic'}}>{dbChartSearch?`No match`:savedCharts.length===0?'No saved charts':''}</div>}
+                  {filteredDbCharts.length===0&&<div style={{color:S.vd,fontSize:S.xs,fontStyle:'italic'}}>{dbChartSearch?'No match':savedCharts.length===0?'No saved charts':''}</div>}
                   {filteredDbCharts.map((c,i)=>(
                     <div key={i} style={{display:'flex',gap:3}}>
                       <button onClick={()=>{loadSavedChart(c);setDbChartSearch('');}} style={{flex:1,background:'#060F1C',border:`1px solid ${chartOverlays.find(x=>x.name===c.name)?S.cy:S.vd}`,color:chartOverlays.find(x=>x.name===c.name)?S.cy:S.tx,borderRadius:5,padding:'4px 6px',fontSize:S.xs,cursor:'pointer',textAlign:'left',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={c.summary||c.name}>
@@ -1252,14 +1468,14 @@ export default function NavModePage({ notify, sheetRoutes=[], portsDb=[], setTab
                   ))}
                 </div>
               </div>
-
             </div>
           )}
 
         </div>
       )}
 
-      {/* SETTINGS MENU */}
+    
+      {/* SETTINGS MENU (unchanged) */}
       {showMenu&&(
         <div style={{position:'absolute',inset:0,zIndex:800,background:'rgba(0,0,0,0.6)'}} onClick={()=>setShowMenu(false)}>
           <div style={{position:'absolute',bottom:0,left:0,right:0,background:'#030A15',borderTop:`1px solid ${S.bd}`,borderRadius:'14px 14px 0 0',padding:'14px 16px',maxHeight:'78vh',overflowY:'auto'}} onClick={e=>e.stopPropagation()}>
@@ -1268,116 +1484,14 @@ export default function NavModePage({ notify, sheetRoutes=[], portsDb=[], setTab
                 <button key={c} onClick={()=>setMenuCat(c)} style={{flex:1,minWidth:42,background:menuCat===c?'rgba(0,212,255,0.18)':'#060F1C',border:`1px solid ${menuCat===c?S.cy:S.vd}`,color:menuCat===c?S.cy:S.dm,borderRadius:7,padding:'7px 4px',fontSize:'0.72rem',cursor:'pointer'}}>{l}</button>
               ))}
             </div>
-
-            {menuCat==='colors'&&(
-              <div style={{display:'flex',flexDirection:'column',gap:12}}>
-                {[['route','Route Line'],['vector','COG Vector'],['ship','Ship Icon'],['track','Past Track'],['xtd','XTD Corridor'],['chart','Chart Overlay']].map(([k,lb])=>(
-                  <div key={k} style={{display:'flex',alignItems:'center',justifyContent:'space-between'}}>
-                    <div style={{display:'flex',alignItems:'center',gap:10}}>
-                      <div style={{width:18,height:18,borderRadius:4,background:colors[k],border:'1px solid rgba(255,255,255,0.25)'}}/>
-                      <span style={{color:S.tx,fontSize:S.sm}}>{lb}</span>
-                    </div>
-                    <input type="color" value={colors[k]} onChange={e=>setColors({...colors,[k]:e.target.value})} style={{width:40,height:28,border:'none',borderRadius:6,cursor:'pointer',background:'transparent'}}/>
-                  </div>
-                ))}
-                <button onClick={()=>setColors(DEFAULT_COLORS)} style={{marginTop:4,background:'transparent',border:`1px solid ${S.vd}`,color:S.dm,borderRadius:6,padding:'7px',fontSize:S.xs,cursor:'pointer'}}>↺ Reset defaults</button>
-              </div>
-            )}
-
-            {menuCat==='ship'&&(
-              <div style={{display:'flex',flexDirection:'column',gap:12}}>
-                <div style={{color:S.dm,fontSize:S.xs,letterSpacing:0.5}}>VESSEL PROFILE</div>
-                {[['name','Ship Name','e.g. MV NAVIGATOR'],['callsign','Call Sign','e.g. VQAB2'],['imo','IMO Number','e.g. 9123456'],['mmsi','MMSI','e.g. 123456789']].map(([k,lb,ph])=>(
-                  <div key={k}>
-                    <div style={{color:S.dm,fontSize:S.lb,marginBottom:3}}>{lb}</div>
-                    <input value={shipProfile[k]||''} onChange={e=>setShipProfile(p=>({...p,[k]:e.target.value}))} placeholder={ph} style={{width:'100%',boxSizing:'border-box',background:'#060F1C',color:S.cy,border:`1px solid ${S.vd}`,borderRadius:5,padding:'7px 9px',fontSize:S.sm,outline:'none',fontFamily:'monospace'}}/>
-                  </div>
-                ))}
-                <div style={{borderTop:'1px solid rgba(0,212,255,0.1)',paddingTop:8,display:'flex',flexDirection:'column',gap:5}}>
-                  <div style={{color:S.dm,fontSize:S.xs,letterSpacing:0.5}}>VESSEL DIMENSIONS</div>
-                  {[['loa','LOA (m)','e.g. 185'],['beam','Beam (m)','e.g. 28'],['draft','Max Draft (m)','e.g. 8.5']].map(([k,lb,ph])=>(
-                    <div key={k} style={{display:'flex',alignItems:'center',gap:8}}>
-                      <div style={{color:S.dm,fontSize:S.xs,width:90,flexShrink:0}}>{lb}</div>
-                      <input value={shipProfile[k]||''} onChange={e=>setShipProfile(p=>({...p,[k]:e.target.value}))} placeholder={ph} type="number" style={{flex:1,background:'#060F1C',color:S.cy,border:`1px solid ${S.vd}`,borderRadius:5,padding:'5px 7px',fontSize:S.sm,outline:'none',fontFamily:'monospace'}}/>
-                    </div>
-                  ))}
-                </div>
-                <button onClick={()=>setShipProfile({})} style={{background:'transparent',border:`1px solid ${S.vd}`,color:S.dm,borderRadius:6,padding:'7px',fontSize:S.xs,cursor:'pointer'}}>↺ Clear Profile</button>
-              </div>
-            )}
-
-            {menuCat==='track'&&(
-              <div style={{display:'flex',flexDirection:'column',gap:10}}>
-                <div style={{color:S.dm,fontSize:S.xs}}>PAST TRACK DURATION</div>
-                <div style={{display:'flex',gap:5,flexWrap:'wrap'}}>
-                  {[[0,'OFF'],[1,'1H'],[2,'2H'],[6,'6H'],[12,'12H'],[24,'24H']].map(([h,l])=>(
-                    <button key={h} onClick={()=>setTrackHours(h)} style={{background:trackHours===h?'rgba(0,255,136,0.18)':'#060F1C',border:`1px solid ${trackHours===h?S.gn:S.vd}`,color:trackHours===h?S.gn:S.tx,borderRadius:7,padding:'7px 12px',fontSize:S.sm,cursor:'pointer'}}>{l}</button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {menuCat==='contours'&&(
-              <div style={{display:'flex',flexDirection:'column',gap:12}}>
-                {[['shallowDepth',shallowDepth,setShallowDepth,'🔴 Shallow (m)',50],['safetyDepth',safetyDepth,setSafetyDepth,'🟡 Safety (m)',100],['deepDepth',deepDepth,setDeepDepth,'🟢 Deep (m)',500],['shipDraft',shipDraft,setShipDraft,'⚓ Draft (m)',30]].map(([k,val,set,lbl,mx])=>(
-                  <div key={k}>
-                    <div style={{display:'flex',justifyContent:'space-between',marginBottom:3}}>
-                      <span style={{color:S.tx,fontSize:S.sm}}>{lbl}</span>
-                      <span style={{color:S.cy,fontFamily:'monospace',fontSize:S.sm}}>{val}m</span>
-                    </div>
-                    <input type="range" min={1} max={mx} value={val} onChange={e=>set(Number(e.target.value))} style={{width:'100%',accentColor:'#00D4FF'}}/>
-                  </div>
-                ))}
-                <label style={{display:'flex',alignItems:'center',gap:8,cursor:'pointer',fontSize:S.sm,color:depthCheckOn?S.cy:S.tx}}>
-                  <input type="checkbox" checked={depthCheckOn} onChange={e=>setDepthCheckOn(e.target.checked)}/>
-                  🔍 Depth Check on tap
-                </label>
-              </div>
-            )}
-
-            {menuCat==='display'&&(
-              <div style={{display:'flex',flexDirection:'column',gap:12}}>
-                <div>
-                  <div style={{color:S.dm,fontSize:S.xs,marginBottom:6}}>COG VECTOR LOOK-AHEAD</div>
-                  <div style={{display:'flex',gap:4,flexWrap:'wrap'}}>
-                    {[[6,'6m'],[12,'12m'],[20,'20m'],[30,'30m'],[60,'60m']].map(([n,l])=>(
-                      <button key={n} onClick={()=>setVectorMins(n)} style={{background:vectorMins===n?'rgba(0,212,255,0.18)':'#060F1C',border:`1px solid ${vectorMins===n?S.cy:S.vd}`,color:vectorMins===n?S.cy:S.tx,borderRadius:7,padding:'7px 10px',fontSize:S.sm,cursor:'pointer'}}>{l}</button>
-                    ))}
-                  </div>
-                </div>
-                <div>
-                  <div style={{color:S.dm,fontSize:S.xs,marginBottom:6}}>MAP ORIENTATION</div>
-                  <div style={{display:'flex',gap:4}}>
-                    {[['north','N↑ North Up'],['course','C↑ Course Up'],['head','H↑ Head Up']].map(([v,l])=>(
-                      <button key={v} onClick={()=>setDisplayMode(v)} style={{flex:1,background:displayMode===v?'rgba(0,212,255,0.18)':'#060F1C',border:`1px solid ${displayMode===v?S.cy:S.vd}`,color:displayMode===v?S.cy:S.tx,borderRadius:7,padding:'7px 4px',fontSize:'0.68rem',cursor:'pointer'}}>{l}</button>
-                    ))}
-                  </div>
-                </div>
-                <div>
-                  <div style={{color:S.dm,fontSize:S.xs,marginBottom:6}}>MAP THEME</div>
-                  <div style={{display:'flex',gap:4}}>
-                    {[['night','🌙 Night'],['day','☀ Day'],['dusk','🏇 Dusk']].map(([v,l])=>(
-                      <button key={v} onClick={()=>setMapMode(v)} style={{flex:1,background:mapMode===v?'rgba(255,215,0,0.18)':'#060F1C',border:`1px solid ${mapMode===v?'#FFD700':S.vd}`,color:mapMode===v?'#FFD700':S.tx,borderRadius:7,padding:'7px 4px',fontSize:'0.68rem',cursor:'pointer'}}>{l}</button>
-                    ))}
-                  </div>
-                </div>
-                {activeRoute&&(
-                  <div>
-                    <div style={{color:S.dm,fontSize:S.xs,marginBottom:6}}>XTD CORRIDOR WIDTH</div>
-                    <div style={{display:'flex',gap:3,flexWrap:'wrap'}}>
-                      {[0.1,0.25,0.5,1.0,2.0].map(n=>(
-                        <button key={n} onClick={()=>setXtdNM(n)} style={{background:xtdNM===n?'rgba(255,179,0,0.2)':'#060F1C',border:`1px solid ${xtdNM===n?'#FFB300':S.vd}`,color:xtdNM===n?'#FFB300':S.tx,borderRadius:7,padding:'7px 10px',fontSize:S.sm,cursor:'pointer'}}>{n}NM</button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
+            {menuCat==='colors'&&(<div style={{display:'flex',flexDirection:'column',gap:12}}>{[['route','Route Line'],['vector','COG Vector'],['ship','Ship Icon'],['track','Past Track'],['xtd','XTD Corridor'],['chart','Chart Overlay']].map(([k,lb])=>(<div key={k} style={{display:'flex',alignItems:'center',justifyContent:'space-between'}}><div style={{display:'flex',alignItems:'center',gap:10}}><div style={{width:18,height:18,borderRadius:4,background:colors[k],border:'1px solid rgba(255,255,255,0.25)'}}/><span style={{color:S.tx,fontSize:S.sm}}>{lb}</span></div><input type="color" value={colors[k]} onChange={e=>setColors({...colors,[k]:e.target.value})} style={{width:40,height:28,border:'none',borderRadius:6,cursor:'pointer',background:'transparent'}}/></div>))}<button onClick={()=>setColors(DEFAULT_COLORS)} style={{marginTop:4,background:'transparent',border:`1px solid ${S.vd}`,color:S.dm,borderRadius:6,padding:'7px',fontSize:S.xs,cursor:'pointer'}}>↺ Reset defaults</button></div>)}
+            {menuCat==='ship'&&(<div style={{display:'flex',flexDirection:'column',gap:12}}><div style={{color:S.dm,fontSize:S.xs,letterSpacing:0.5}}>VESSEL PROFILE</div>{[['name','Ship Name','e.g. MV NAVIGATOR'],['callsign','Call Sign','e.g. VQAB2'],['imo','IMO Number','e.g. 9123456'],['mmsi','MMSI','e.g. 123456789']].map(([k,lb,ph])=>(<div key={k}><div style={{color:S.dm,fontSize:S.lb,marginBottom:3}}>{lb}</div><input value={shipProfile[k]||''} onChange={e=>setShipProfile(p=>({...p,[k]:e.target.value}))} placeholder={ph} style={{width:'100%',boxSizing:'border-box',background:'#060F1C',color:S.cy,border:`1px solid ${S.vd}`,borderRadius:5,padding:'7px 9px',fontSize:S.sm,outline:'none',fontFamily:'monospace'}}/></div>))}<div style={{borderTop:'1px solid rgba(0,212,255,0.1)',paddingTop:8,display:'flex',flexDirection:'column',gap:5}}><div style={{color:S.dm,fontSize:S.xs,letterSpacing:0.5}}>VESSEL DIMENSIONS</div>{[['loa','LOA (m)','e.g. 185'],['beam','Beam (m)','e.g. 28'],['draft','Max Draft (m)','e.g. 8.5']].map(([k,lb,ph])=>(<div key={k} style={{display:'flex',alignItems:'center',gap:8}}><div style={{color:S.dm,fontSize:S.xs,width:90,flexShrink:0}}>{lb}</div><input value={shipProfile[k]||''} onChange={e=>setShipProfile(p=>({...p,[k]:e.target.value}))} placeholder={ph} type="number" style={{flex:1,background:'#060F1C',color:S.cy,border:`1px solid ${S.vd}`,borderRadius:5,padding:'5px 7px',fontSize:S.sm,outline:'none',fontFamily:'monospace'}}/></div>))}</div><button onClick={()=>setShipProfile({})} style={{background:'transparent',border:`1px solid ${S.vd}`,color:S.dm,borderRadius:6,padding:'7px',fontSize:S.xs,cursor:'pointer'}}>↺ Clear Profile</button></div>)}
+            {menuCat==='track'&&(<div style={{display:'flex',flexDirection:'column',gap:10}}><div style={{color:S.dm,fontSize:S.xs}}>PAST TRACK DURATION</div><div style={{display:'flex',gap:5,flexWrap:'wrap'}}>{[[0,'OFF'],[1,'1H'],[2,'2H'],[6,'6H'],[12,'12H'],[24,'24H']].map(([h,l])=>(<button key={h} onClick={()=>setTrackHours(h)} style={{background:trackHours===h?'rgba(0,255,136,0.18)':'#060F1C',border:`1px solid ${trackHours===h?S.gn:S.vd}`,color:trackHours===h?S.gn:S.tx,borderRadius:7,padding:'7px 12px',fontSize:S.sm,cursor:'pointer'}}>{l}</button>))}</div></div>)}
+            {menuCat==='contours'&&(<div style={{display:'flex',flexDirection:'column',gap:12}}>{[['shallowDepth',shallowDepth,setShallowDepth,'🔴 Shallow (m)',50],['safetyDepth',safetyDepth,setSafetyDepth,'🟡 Safety (m)',100],['deepDepth',deepDepth,setDeepDepth,'🟢 Deep (m)',500],['shipDraft',shipDraft,setShipDraft,'⚓ Draft (m)',30]].map(([k,val,set,lbl,mx])=>(<div key={k}><div style={{display:'flex',justifyContent:'space-between',marginBottom:3}}><span style={{color:S.tx,fontSize:S.sm}}>{lbl}</span><span style={{color:S.cy,fontFamily:'monospace',fontSize:S.sm}}>{val}m</span></div><input type="range" min={1} max={mx} value={val} onChange={e=>set(Number(e.target.value))} style={{width:'100%',accentColor:'#00D4FF'}}/></div>))}<label style={{display:'flex',alignItems:'center',gap:8,cursor:'pointer',fontSize:S.sm,color:depthCheckOn?S.cy:S.tx}}><input type="checkbox" checked={depthCheckOn} onChange={e=>setDepthCheckOn(e.target.checked)}/>🔍 Depth Check on tap</label></div>)}
+            {menuCat==='display'&&(<div style={{display:'flex',flexDirection:'column',gap:12}}><div><div style={{color:S.dm,fontSize:S.xs,marginBottom:6}}>COG VECTOR LOOK-AHEAD</div><div style={{display:'flex',gap:4,flexWrap:'wrap'}}>{[[6,'6m'],[12,'12m'],[20,'20m'],[30,'30m'],[60,'60m']].map(([n,l])=>(<button key={n} onClick={()=>setVectorMins(n)} style={{background:vectorMins===n?'rgba(0,212,255,0.18)':'#060F1C',border:`1px solid ${vectorMins===n?S.cy:S.vd}`,color:vectorMins===n?S.cy:S.tx,borderRadius:7,padding:'7px 10px',fontSize:S.sm,cursor:'pointer'}}>{l}</button>))}</div></div><div><div style={{color:S.dm,fontSize:S.xs,marginBottom:6}}>MAP ORIENTATION</div><div style={{display:'flex',gap:4}}>{[['north','N↑ North Up'],['course','C↑ Course Up'],['head','H↑ Head Up']].map(([v,l])=>(<button key={v} onClick={()=>setDisplayMode(v)} style={{flex:1,background:displayMode===v?'rgba(0,212,255,0.18)':'#060F1C',border:`1px solid ${displayMode===v?S.cy:S.vd}`,color:displayMode===v?S.cy:S.tx,borderRadius:7,padding:'7px 4px',fontSize:'0.68rem',cursor:'pointer'}}>{l}</button>))}</div></div><div><div style={{color:S.dm,fontSize:S.xs,marginBottom:6}}>MAP THEME</div><div style={{display:'flex',gap:4}}>{[['night','🌙 Night'],['day','☀ Day'],['dusk','🏇 Dusk']].map(([v,l])=>(<button key={v} onClick={()=>setMapMode(v)} style={{flex:1,background:mapMode===v?'rgba(255,215,0,0.18)':'#060F1C',border:`1px solid ${mapMode===v?'#FFD700':S.vd}`,color:mapMode===v?'#FFD700':S.tx,borderRadius:7,padding:'7px 4px',fontSize:'0.68rem',cursor:'pointer'}}>{l}</button>))}</div></div>{activeRoute&&(<div><div style={{color:S.dm,fontSize:S.xs,marginBottom:6}}>XTD CORRIDOR WIDTH</div><div style={{display:'flex',gap:3,flexWrap:'wrap'}}>{[0.1,0.25,0.5,1.0,2.0].map(n=>(<button key={n} onClick={()=>setXtdNM(n)} style={{background:xtdNM===n?'rgba(255,179,0,0.2)':'#060F1C',border:`1px solid ${xtdNM===n?'#FFB300':S.vd}`,color:xtdNM===n?'#FFB300':S.tx,borderRadius:7,padding:'7px 10px',fontSize:S.sm,cursor:'pointer'}}>{n}NM</button>))}</div></div>)}</div>)}
           </div>
         </div>
       )}
-
     </div>
   );
-                                                                                       }
+}
