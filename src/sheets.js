@@ -173,36 +173,22 @@ export const fetchRouteSheet = () => {
   return Promise.any(ROUTE_TABS.map(tab => _fetchTab(ROUTE_SHEET_ID, tab))).catch(() => []);
 };
 
-// ─── parseDMS ── NEW helper: converts DMS string to decimal degrees ─────────
-// Added to fix: parseFloat() was dropping minutes + seconds from DMS values
-// like "42°32'60.0N", returning only the degree integer (e.g. 42).
-// Handles both with and without the " seconds symbol (CSV unescaping strips it).
-// Falls back to parseFloat() so existing decimal-format rows still work.
+// ─── parseDMS ─────────────────────────────────────────────────────────────
 const parseDMS = (str) => {
   if (!str) return NaN;
-  // Strip any stray quote characters left by CSV unescaping, then trim
   const s = str.replace(/"/g, '').trim();
-  // Match: degrees ° minutes ' seconds (optional ") direction [NSEW]
-  // e.g. "42°32'60.0N" or "42°32'60.0"N" or "1°18'30"E"
   const m = s.match(/^(\d+)[°\s]+(\d+)['\s]+(\d+(?:\.\d+)?)\s*["']?\s*([NSEWnsew])/);
   if (m) {
     const decimal = parseFloat(m[1]) + parseFloat(m[2]) / 60 + parseFloat(m[3]) / 3600;
     return /[SWsw]/.test(m[4]) ? -decimal : decimal;
   }
-  // Fallback: value is already in decimal degrees format
   return parseFloat(s);
 };
 
-// ─── fetchPortsFromSheet ── CHANGED: paginated fetch, all other code identical
-// Root cause: GViz endpoint silently truncates large sheets at ~3700 rows per
-// single request — so 27,000 port rows were cut to 3699 every time.
-// Fix: loop with GViz limit/offset (3000 rows per page) until no pages remain.
-// Function name unchanged · return shape unchanged · nothing else in file touched.
+// ─── fetchPortsFromSheet ───────────────────────────────────────────────────
 export const fetchPortsFromSheet = async () => {
-  const PAGE_SIZE = 3000; // safely below the ~3700 GViz per-request hard limit
+  const PAGE_SIZE = 3000;
 
-  // CSV line parser — identical logic to the original, extracted so it can be
-  // reused across every page without duplicating code inside the loop
   const parseLine = (line) => {
     const vals = []; let cur = ''; let inQ = false;
     for (const ch of line) {
@@ -221,9 +207,6 @@ export const fetchPortsFromSheet = async () => {
 
   try {
     while (true) {
-      // Request PAGE_SIZE + 1 because GViz counts the header row inside the limit.
-      // i.e. limit 3000 = 1 header + 2999 data rows → loop stops too early.
-      //      limit 3001 = 1 header + 3000 data rows → correct full page.
       const tq  = encodeURIComponent(`select * limit ${PAGE_SIZE + 1} offset ${offset}`);
       const url = `https://docs.google.com/spreadsheets/d/${PORTS_SHEET_ID}/gviz/tq?tqx=out:csv&sheet=PORTDATA&tq=${tq}`;
       const r   = await fetch(url);
@@ -231,9 +214,8 @@ export const fetchPortsFromSheet = async () => {
 
       const csv   = await r.text();
       const lines = csv.trim().split('\n');
-      if (lines.length < 2) break; // header only or empty = no more data
+      if (lines.length < 2) break;
 
-      // Detect column positions once from the first page's header row
       if (!headersFound) {
         const headers = lines[0].split(',').map(h => h.replace(/"/g, '').trim().toLowerCase());
         colC   = headers.indexOf('port name') >= 0 ? headers.indexOf('port name') :
@@ -244,19 +226,14 @@ export const fetchPortsFromSheet = async () => {
         headersFound = true;
       }
 
-      // GViz always puts the header in line 0 of every page — skip it
       const dataLineCount = lines.length - 1;
       for (let i = 1; i < lines.length; i++) {
         const vals        = parseLine(lines[i]);
         const countryCode = (vals[0] || '').replace(/"/g, '').trim();
         const locode      = (vals[1] || '').replace(/"/g, '').trim();
         const portName    = (vals[colC] || '').replace(/"/g, '').trim();
-
-        // ── CHANGED: was parseFloat() — now parseDMS() so DMS strings like
-        //    "42°32'60.0N" are fully converted instead of truncated to degrees only.
         const lat = colLat >= 0 ? parseDMS(vals[colLat] || '') : NaN;
         const lon = colLon >= 0 ? parseDMS(vals[colLon] || '') : NaN;
-
         if (!portName || !locode) continue;
         const fullLocode  = locode.length <= 3 ? (countryCode + locode) : locode;
         allRows.push({
@@ -270,16 +247,12 @@ export const fetchPortsFromSheet = async () => {
         });
       }
 
-      // If this page returned fewer rows than requested, it was the last page
       if (dataLineCount < PAGE_SIZE) break;
       offset += PAGE_SIZE;
     }
-
     return allRows;
-
   } catch (e) {
     console.warn('Port sheet fetch failed:', e.message);
-    // Return whatever rows were collected before the error instead of []
     return allRows.length > 0 ? allRows : [];
   }
 };
@@ -290,17 +263,26 @@ export const SOFTWARE_SHEET_ID = '1ckCXVUzubcHlCy76JZgAImGDQTRNBUEwn2uX1C237rw';
 
 const IDB_LIBRARY = 'mnav_library';
 
-// ─── fetchLibrarySheet — network first, IDB cache as fallback ──────────────
+// ─── fetchLibrarySheet ────────────────────────────────────────────────────
+// FIX: library rows now read mimeType from sheet (was hardcoded as '' before).
+// Both sheets are fetched in parallel; result is merged, IDB-cached as fallback.
 export const fetchLibrarySheet = async () => {
+
   const normalise = (lib, sw) => {
+    // ── Library sheet rows (LIBRARY_SHEET_ID / Sheet1) ──────────────────
+    // AppScript columns: category | title | url | downloadUrl | fileId | mimeType | updatedAt
     const libNorm = lib.map(r => ({
       category:    (r.category    || '').trim(),
       title:       (r.title       || '').trim(),
       url:         (r.url         || '').trim(),
       downloadUrl: (r.downloadUrl || '').trim(),
       fileId:      (r.fileId      || '').trim(),
-      mimeType:    '',
+      // ← FIXED: was hardcoded '' — now reads from sheet so PDF/Office/image
+      //   detection works for all library folders, not just Software sheet
+      mimeType:    (r.mimeType    || '').trim(),
     }));
+
+    // ── Software sheet rows (SOFTWARE_SHEET_ID / Sheet1) ────────────────
     const swNorm = sw.map(r => ({
       category:    (r.category    || 'SAILORS USEFUL SOFTWARE').trim(),
       title:       (r.title       || '').trim(),
@@ -309,10 +291,11 @@ export const fetchLibrarySheet = async () => {
       fileId:      (r.fileId      || '').trim(),
       mimeType:    (r.mimeType    || '').trim(),
     }));
+
     return [...libNorm, ...swNorm].filter(r => r.title && r.category);
   };
 
-  // 1. Try network first
+  // 1. Try network — both sheets in parallel
   try {
     const [libRes, swRes] = await Promise.allSettled([
       fetchSheetCSV(LIBRARY_SHEET_ID,  'Sheet1'),
@@ -320,16 +303,22 @@ export const fetchLibrarySheet = async () => {
     ]);
     const lib    = libRes.status === 'fulfilled' ? libRes.value : [];
     const sw     = swRes.status  === 'fulfilled' ? swRes.value  : [];
+
+    // Warn in dev console if either sheet returned nothing
+    if (lib.length === 0) console.warn('fetchLibrarySheet: LIBRARY sheet returned 0 rows — check Sheet1 tab name and sharing');
+    if (sw.length  === 0) console.warn('fetchLibrarySheet: SOFTWARE sheet returned 0 rows');
+
     const merged = normalise(lib, sw);
     if (merged.length > 0) {
       try { await idbSet(IDB_LIBRARY, merged); } catch {}
     }
     return merged;
+
   } catch (networkErr) {
     console.warn('fetchLibrarySheet network failed, trying IDB cache:', networkErr.message);
   }
 
-  // 2. Network failed — try IDB cache as fallback
+  // 2. Network failed — IDB cache fallback
   try {
     const cached = await idbGet(IDB_LIBRARY);
     if (cached && Array.isArray(cached) && cached.length > 0) return cached;
