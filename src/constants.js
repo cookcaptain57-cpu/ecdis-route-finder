@@ -79,10 +79,6 @@ export let PORTS_DB = [
 export const ECA_ZONES = [
 
   // ── North Sea ECA ──────────────────────────────────────────────────────────
-  // MARPOL Annex VI Reg.14.3.1 text definition:
-  // "North Sea southwards of 62°N and eastwards of 4°W; the Skagerrak,
-  //  southern limit east of the Skaw at 57°44.8'N; and the English Channel
-  //  and its approaches eastwards of 5°W and northwards of 48°30'N"
   {
     name: "North Sea ECA",
     shortDesc: "SOx 0.1% — North Sea, Skagerrak & English Channel",
@@ -90,25 +86,16 @@ export const ECA_ZONES = [
     fuelLimit: "0.10% S",
     authority: "IMO / Paris MOU",
     coords: [
-      // English Channel south boundary 48°30'N, west at 5°W
       [48.5,-5.0],[48.5,2.5],
-      // Join North Sea at 51°N/2°E, west boundary steps to 4°W
       [51.0,2.5],[51.0,-4.0],
-      // North Sea north boundary 62°N, east to Norwegian coast ~12°E
       [62.0,-4.0],[62.0,12.0],
-      // Skagerrak east boundary south to Skaw latitude 57°44.8'N
       [57.747,12.0],[57.747,8.5],
-      // Skaw (Skagen) at 57°44.8'N, 10.6°E — south boundary of Skagerrak
       [54.75,8.5],
-      // Back along North Sea southern edge to English Channel
       [51.0,2.5],[48.5,2.5],[48.5,-5.0]
     ]
   },
 
   // ── Baltic Sea ECA ─────────────────────────────────────────────────────────
-  // MARPOL Annex VI Reg.14.3.1 text definition:
-  // "Baltic Sea proper with Gulf of Bothnia, Gulf of Finland and the entrance
-  //  to the Baltic Sea bounded by the parallel of the Skaw at 57°44.8'N"
   {
     name: "Baltic Sea ECA",
     shortDesc: "SOx 0.1% — Baltic Sea, Gulf of Bothnia & Gulf of Finland",
@@ -116,29 +103,19 @@ export const ECA_ZONES = [
     fuelLimit: "0.10% S",
     authority: "IMO / HELCOM",
     coords: [
-      // Entry from Skagerrak at the Skaw 57°44.8'N
       [57.747,8.5],[57.747,12.0],
-      // Danish straits and Kattegat
       [56.5,12.5],[55.5,12.5],[55.0,9.5],[54.5,9.0],[54.0,10.0],
-      // Bornholm, SE Baltic
       [54.0,14.0],[54.5,18.0],[55.0,20.0],
-      // Kaliningrad, Lithuania, Latvia coasts
       [55.5,21.5],[56.5,21.0],[57.0,21.5],
-      // Gulf of Riga entrance
       [57.5,21.0],[58.5,22.0],
-      // Estonia, Gulf of Finland
       [59.5,22.5],[60.0,25.0],[60.0,28.5],[60.5,28.5],
-      // Gulf of Bothnia north — Finland/Sweden
       [65.0,28.5],[66.0,25.0],[66.0,22.5],[65.5,22.0],[65.0,22.0],
       [65.5,20.0],[66.0,20.0],[65.0,14.0],
-      // West Swedish coast back to Skagerrak
       [62.0,10.0],[58.5,9.0],[57.747,8.5]
     ]
   },
 
   // ── North American ECA — Sub-area 1: Pacific Coast ─────────────────────────
-  // SOURCE: MEPC.1/Circ.723 Annex 2 §1 — all 47 official outer boundary points
-  // + simplified US/Canada Pacific coastline to close polygon
   {
     name: "North American ECA — Pacific Coast",
     shortDesc: "SOx 0.1% within 200NM of US & Canada Pacific coasts",
@@ -146,7 +123,6 @@ export const ECA_ZONES = [
     fuelLimit: "0.10% S",
     authority: "US EPA / Transport Canada",
     coords: [
-      // ── Official 47-point outer boundary (MEPC.1/Circ.723 Annex 2 §1) ──
       [32.536111,-117.103056],[32.534444,-117.124722],[32.5275,-117.238889],
       [32.553611,-117.263889],[32.5725,-117.366944],[32.589722,-117.464722],
       [32.627222,-117.826111],[31.133056,-118.605833],[30.556944,-121.791389],
@@ -163,7 +139,6 @@ export const ECA_ZONES = [
       [53.6775,-138.814722],[54.229167,-139.543889],[54.656944,-139.938611],
       [55.338333,-140.929167],[56.12,-141.605],[56.475556,-142.288611],
       [56.621944,-142.815833],[58.851111,-153.250833],
-      // ── Coastal closing line (simplified US/Canada Pacific coast) ──
       [59.8,-150.0],[61.0,-147.0],[60.0,-142.0],[59.5,-136.5],
       [57.0,-135.5],[55.3,-132.0],[54.0,-130.5],[50.0,-127.5],
       [48.5,-124.73],[47.5,-124.6],[46.25,-124.07],[43.0,-124.57],
@@ -172,8 +147,6 @@ export const ECA_ZONES = [
   },
 
   // ── North American ECA — Sub-area 2: Atlantic & Gulf Coast ─────────────────
-  // SOURCE: MEPC.1/Circ.723 Annex 2 §2 — all 206 official outer boundary points
-  // + simplified US/Canada Atlantic & Gulf coastline to close polygon
   {
     name: "North American ECA — Atlantic & Gulf Coast",
     shortDesc: "SOx 0.1% within 200NM of US, Canada & France (SPM) Atlantic & Gulf coasts",
@@ -181,7 +154,6 @@ export const ECA_ZONES = [
     fuelLimit: "0.10% S",
     authority: "US EPA / Transport Canada",
     coords: [
-      // ── Official 206-point outer boundary (MEPC.1/Circ.723 Annex 2 §2) ──
       [60.0,-64.16],[60.0,-56.716667],[58.900278,-55.634722],
       [57.847778,-55.063056],[57.586944,-54.016389],[57.238889,-53.132778],
       [56.8025,-52.391389],[56.303611,-51.828333],[54.389167,-50.295556],
@@ -251,7 +223,6 @@ export const ECA_ZONES = [
       [26.008889,-95.6575],[26.009167,-96.808333],[25.975556,-96.924444],
       [25.970833,-96.978056],[25.966111,-97.031667],[25.961389,-97.085556],
       [25.956667,-97.139167],[25.956667,-97.146389],
-      // ── Coastal closing line (simplified US/Canada/Gulf coast) ──
       [26.5,-97.0],[28.0,-96.5],[29.0,-94.75],[29.75,-93.75],
       [29.2,-89.25],[30.0,-88.8],[30.0,-85.5],[25.75,-80.0],
       [32.0,-80.75],[33.85,-78.55],[35.25,-75.5],[37.0,-76.0],
@@ -262,8 +233,6 @@ export const ECA_ZONES = [
   },
 
   // ── North American ECA — Sub-area 3: Hawaiian Islands ──────────────────────
-  // SOURCE: MEPC.1/Circ.723 Annex 2 §3 — 42 official outer boundary points
-  // covers Hawai'i, Maui, O'ahu, Moloka'i, Ni'ihau, Kaua'i, Lāna'i, Kaho'olawe
   {
     name: "North American ECA — Hawaiian Islands",
     shortDesc: "SOx 0.1% within 200NM of the 8 main Hawaiian Islands",
@@ -271,7 +240,6 @@ export const ECA_ZONES = [
     fuelLimit: "0.10% S",
     authority: "US EPA",
     coords: [
-      // ── Official 42-point outer boundary (MEPC.1/Circ.723 Annex 2 §3) ──
       [22.548333,-153.009167],[23.101389,-153.476667],[23.536389,-154.036667],
       [23.863056,-154.613333],[24.363611,-155.853611],[24.696389,-156.4575],
       [24.959167,-157.371389],[25.228056,-157.903611],[25.425278,-158.51],
@@ -286,21 +254,17 @@ export const ECA_ZONES = [
       [15.729444,-154.776944],[15.925556,-154.218056],[16.774167,-152.819722],
       [17.561667,-152.008889],[18.504444,-151.506667],[19.046389,-151.371389],
       [19.579444,-151.329722],[20.128333,-151.382778],[20.645278,-151.526667],
-      // ── 3 interpolated closing points back to pt1 ──
       [21.133,-151.783],[21.633,-152.133],[22.167,-152.55]
     ]
   },
 
   // ── US Caribbean Sea ECA ───────────────────────────────────────────────────
-  // SOURCE: MEPC.202(62) / MEPC.1/Circ.755 — Puerto Rico & US Virgin Islands
-  // Effective: 1 January 2014 (SOx/PM), 1 January 2016 (NOx Tier III)
   {
     name: "US Caribbean Sea ECA",
     shortDesc: "SOx 0.1% — Puerto Rico & US Virgin Islands waters",
     regulation: "MARPOL Annex VI Reg.14 — MEPC.202(62) — effective Jan 2014",
     fuelLimit: "0.10% S",
     authority: "US EPA",
-    // Per MEPC.1/Circ.755 Annex 2 — Caribbean ECA boundary
     coords: [
       [19.75,-68.0],[19.75,-64.0],[18.5,-62.5],[17.25,-62.5],
       [14.5,-64.0],[14.5,-67.5],[16.0,-68.5],[18.0,-70.0],[19.75,-68.0]
@@ -308,12 +272,6 @@ export const ECA_ZONES = [
   },
 
   // ── Mediterranean Sea ECA ──────────────────────────────────────────────────
-  // SOURCE: MEPC.361(79) — adopted 16 December 2022
-  // Effective: 1 May 2025 (SOx 0.10% S compliance)
-  // Western limit: Gibraltar line Cape Trafalgar (36°11'N,6°02'W) →
-  //                Cape Spartel (35°48'N,5°55'W)
-  // Eastern limit: Çanakkale Strait (Dardanelles)
-  // Northern/Southern limits: European & North African coastlines
   {
     name: "Mediterranean Sea ECA",
     shortDesc: "SOx 0.1% — entire Mediterranean Sea — effective 1 May 2025",
@@ -321,30 +279,19 @@ export const ECA_ZONES = [
     fuelLimit: "0.10% S",
     authority: "IMO — MEPC 76/79 Resolution",
     coords: [
-      // Western gate: Cape Trafalgar → Cape Spartel (Gibraltar line)
       [36.183,-6.033],[35.8,-5.917],
-      // North African coast east (simplified): Morocco → Algeria → Tunisia → Libya → Egypt
       [35.5,-3.0],[36.0,1.0],[37.0,5.0],[37.3,9.5],
       [33.0,11.0],[32.0,12.0],[31.0,16.0],[31.0,22.0],
       [31.0,25.0],[31.0,29.0],
-      // Suez Canal north entrance
       [31.29,32.27],[31.29,32.47],[31.14,32.47],[31.14,32.27],
-      // Sinai, Israel, Lebanon coast northward
       [31.0,34.5],[33.0,35.0],[35.5,35.9],[36.2,36.0],
-      // Turkish coast west — Iskenderun, Mersin, Antalya, Bodrum
       [36.8,36.2],[37.0,35.5],[36.5,34.0],[36.5,30.0],
-      // Çanakkale (Dardanelles) entrance — ECA eastern limit
       [40.02,26.2],[40.05,26.18],
-      // Greek coast south — Aegean islands, Crete
       [40.0,23.0],[41.0,20.0],[40.5,18.0],
-      // Albania, Montenegro, Croatia coast
       [39.0,20.0],[42.0,19.0],[45.5,13.5],
-      // Northern Adriatic — Italy, Slovenia
       [45.8,13.0],[44.5,12.5],[44.0,12.0],
-      // Italian west coast, French Riviera, Spanish Mediterranean coast
       [43.5,8.0],[43.3,5.0],[43.0,3.5],
       [41.3,2.0],[39.0,0.5],[37.5,-0.5],
-      // Back to Gibraltar western gate
       [36.0,-5.0],[35.8,-5.917],[36.183,-6.033]
     ]
   },
@@ -449,8 +396,6 @@ export const SECA_ZONES = [
 
 // ─────────────────────────────────────────────────────────────────────────────
 // MARPOL SPECIAL AREAS — Annex I / II / V discharge restrictions
-// SOURCE: MARPOL consolidated text official IMO publication
-// Mediterranean western limit corrected to Gibraltar line (not 30°N)
 // ─────────────────────────────────────────────────────────────────────────────
 export const MARPOL_ZONES = [
   {
@@ -458,8 +403,6 @@ export const MARPOL_ZONES = [
     shortDesc: "No oil discharge / no garbage — MARPOL Annex I & V",
     regulation: "MARPOL Annex I Reg.38 / Annex V Reg.7",
     annex: "I, V",
-    // Western limit: Gibraltar line (Cape Trafalgar 36°11'N,6°02'W →
-    //                Cape Spartel 35°48'N,5°55'W)
     coords: [
       [36.183,-6.033],[35.8,-5.917],[35.5,-3.0],[36.0,1.0],[37.0,5.0],
       [37.3,9.5],[33.0,11.0],[32.0,12.0],[31.0,16.0],[31.0,22.0],
@@ -492,7 +435,6 @@ export const MARPOL_ZONES = [
     shortDesc: "No oil discharge — MARPOL Annex I",
     regulation: "MARPOL Annex I Reg.38",
     annex: "I",
-    // Bounded by Bosphorus/Turkish Straits in west, Georgian/Russian coast east
     coords: [
       [41.0,28.0],[41.0,29.0],[41.5,30.0],[42.0,31.0],[42.5,31.5],
       [43.5,32.5],[44.5,33.5],[45.5,34.0],[46.0,35.0],[46.5,36.0],
@@ -507,7 +449,6 @@ export const MARPOL_ZONES = [
     shortDesc: "No oil / no garbage discharge — MARPOL Annex I & V",
     regulation: "MARPOL Annex I Reg.38 / Annex V Reg.7",
     annex: "I, V",
-    // Bounded: Suez Canal south entrance to Bab el-Mandeb strait
     coords: [
       [29.917,32.567],[29.917,32.35],[28.5,33.0],[27.0,34.0],
       [25.0,36.0],[22.0,37.5],[20.0,38.5],[18.0,40.5],
@@ -521,7 +462,6 @@ export const MARPOL_ZONES = [
     shortDesc: "No oil / no garbage discharge — Persian Gulf",
     regulation: "MARPOL Annex I Reg.38 / Annex V Reg.7",
     annex: "I, V",
-    // Bounded by Strait of Hormuz (24°N,56°E) to Shatt al-Arab (29.87°N,48.5°E)
     coords: [
       [24.5,56.5],[24.0,57.0],[24.0,58.5],[26.5,57.5],
       [27.33,56.38],[27.5,56.0],[28.0,55.0],[28.5,53.5],
@@ -595,12 +535,7 @@ export const LAYOVER_ZONES = [
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
-// PSSA — Particularly Sensitive Sea Areas (official IMO-designated only)
-// REMOVED: Medes Islands (NOT an IMO PSSA — Spanish marine reserve only)
-// REMOVED: Patagonian Sea (NOT an officially IMO-designated PSSA)
-// ADDED:   Western European Waters PSSA (MEPC.121(52), 2004)
-// ADDED:   Strait of Bonifacio PSSA (MEPC.211(63), 2011)
-// UPDATED: Great Barrier Reef — extended to include SW Coral Sea (2015)
+// PSSA — Particularly Sensitive Sea Areas
 // ─────────────────────────────────────────────────────────────────────────────
 export const PSSA_ZONES = [
   {
@@ -633,7 +568,6 @@ export const PSSA_ZONES = [
     measures: "No discharge, enhanced reporting, place of refuge procedures",
     designatedYear: 2004,
     authority: "IMO — MEPC.121(52)",
-    // Covers approaches to Western Europe west of 5°W, south of 60°N, north of 36°N
     coords: [
       [60.0,-5.0],[60.0,-18.0],[36.0,-18.0],[36.0,-5.917],
       [35.8,-5.917],[36.183,-6.033],[36.5,-5.5],[37.0,-7.5],
@@ -739,8 +673,6 @@ export const PSSA_ZONES = [
 
 // ─────────────────────────────────────────────────────────────────────────────
 // NOX TIER III ZONES — MARPOL Annex VI Reg.13
-// Vessels keel-laid on or after 1 Jan 2016 must comply with Tier III NOx limits
-// Mediterranean & Black Sea: effective 1 May 2025 — MEPC.361(79)
 // ─────────────────────────────────────────────────────────────────────────────
 export const NOX_ZONES = [
   {
@@ -779,7 +711,6 @@ export const NOX_ZONES = [
     noxLimit: "Tier III (3.4 g/kWh @ 130rpm)",
     applicability: "Vessels keel-laid on or after 01 Jan 2016",
     authority: "US EPA / Transport Canada",
-    // Key outer-boundary points (simplified from full 253-point polygon)
     coords: [
       [32.536,-117.103],[30.557,-121.791],[35.244,-125.723],
       [40.313,-128.763],[44.412,-128.690],[48.542,-132.683],
@@ -1206,3 +1137,47 @@ export function normalizePortRow(row) {
   const keywords = [name, city, country, code].filter(Boolean).join(' ').toLowerCase();
   return { id: code, name, city, country, lat, lon, keywords };
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DEPTH SOURCES — ENC / bathymetry layer options for NavModePage ENC panel
+// ids must match the depthSources.has(id) checks in the tile swap effect
+// ─────────────────────────────────────────────────────────────────────────────
+export const DEPTH_SOURCES = [
+  { id:'usa',       emoji:'🇺🇸', label:'USA NOAA ENC',     desc:'NOAA ENC + Esri Ocean Base — US waters' },
+  { id:'europe',    emoji:'🇪🇺', label:'EMODnet Europe',    desc:'EMODnet bathymetry WMS — European waters' },
+  { id:'global',    emoji:'🌍',  label:'GEBCO Global',      desc:'GEBCO 2023 global bathymetry WMS' },
+  { id:'soundings', emoji:'📡',  label:'ESRI Soundings',    desc:'Esri Ocean Reference tile layer with depth labels' },
+  { id:'nz',        emoji:'🇳🇿', label:'LINZ New Zealand',  desc:'LINZ hydrographic WMS — NZ waters' },
+  { id:'norway',    emoji:'🇳🇴', label:'Norway Depth',      desc:'Kartverket dybdedata WMS — Norwegian waters' },
+  { id:'australia', emoji:'🇦🇺', label:'Australia GA',      desc:'Geoscience Australia bathymetry WMS' },
+  { id:'canada',    emoji:'🇨🇦', label:'Canada CHS',        desc:'CHS NONNA-100 WMS — Canadian waters' },
+  { id:'finland',   emoji:'🇫🇮', label:'Finland Traficom',  desc:'Traficom syvyyskayra WMS — Finnish waters' },
+  { id:'germany',   emoji:'🇩🇪', label:'Germany BSH',       desc:'BSH depth contours WMS — German waters' },
+  { id:'ireland',   emoji:'🇮🇪', label:'Ireland INFOMAR',   desc:'INFOMAR bathymetry WMS — Irish waters' },
+  { id:'osm_depth', emoji:'🌊',  label:'OpenSeaMap Depth',  desc:'OpenSeaMap crowdsourced depth soundings tiles' },
+  { id:'china',     emoji:'🇨🇳', label:'China ENC',         desc:'China S-57 ENC GeoJSON overlay (custom URL)' },
+];
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AIS SOURCES — local WebSocket host lists for SafePilot and Bridge modes
+// AIS_SOURCES.safepilot.hosts — SafePilot P3 default WebSocket ports
+// AIS_SOURCES.bridge.hosts   — Local bridge / NMEA aggregator ports
+// The 'internet' and 'off' modes are handled inline in NavModePage.jsx
+// User can override the bridge host via the localAisHost input in the AIS panel
+// ─────────────────────────────────────────────────────────────────────────────
+export const AIS_SOURCES = {
+  safepilot: {
+    hosts: [
+      'ws://localhost:4001',
+      'ws://192.168.1.100:4001',
+      'ws://10.0.0.1:4001',
+    ],
+  },
+  bridge: {
+    hosts: [
+      'ws://localhost:4002',
+      'ws://192.168.1.100:4002',
+      'ws://10.0.0.1:4002',
+    ],
+  },
+};
