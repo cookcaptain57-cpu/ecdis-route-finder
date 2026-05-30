@@ -745,7 +745,6 @@ export default function App() {
                 padding:'5px 9px', cursor:'pointer', fontSize:'1rem', color:'var(--text2)' }}>
               {theme==='dark' ? '☀️' : '🌙'}
             </button>
-            </button>
             <button className="burger" onClick={() => setMenuOpen(o => !o)}><span /><span /><span /></button>
           </div>
         </nav>
