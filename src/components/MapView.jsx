@@ -1,7 +1,11 @@
 /* eslint-disable */
 // src/components/MapView.jsx
 import { useEffect, useRef, useState } from "react";
-import { ECA_ZONES, SECA_ZONES, MARPOL_ZONES, PIRACY_ZONES, LAYOVER_ZONES } from "../constants";
+import {
+  ECA_ZONES, SECA_ZONES, MARPOL_ZONES, PIRACY_ZONES, LAYOVER_ZONES,
+  PSSA_ZONES, NOX_ZONES, LOAD_LINE_ZONES, MARITIME_RESTRICTIONS,
+  CHINA_MSC_NO_G, EEZ_ZONES,
+} from "../constants";
 import { recalcWaypoints } from "../utils";
 
 function greatCircle(lat1, lon1, lat2, lon2, n) {
@@ -18,6 +22,26 @@ function greatCircle(lat1, lon1, lat2, lon2, n) {
     pts.push([Math.atan2(z,Math.sqrt(x*x+y*y))/DEG, Math.atan2(y,x)/DEG]);
   }
   return pts;
+}
+
+// ── IDL Normalization ─────────────────────────────────────────────────────────
+// Fixes the "double earth" bug where a route crossing the International Date Line
+// renders split across two copies of the world map.
+// e.g. WP at lon=-178 followed by WP at lon=+179:
+//   diff = 179 - (-178) = 357 > 180 → lon -= 360 → lon = -181
+//   This keeps the polyline on ONE earth copy, rendering correctly.
+// Applied to BOTH auto waypoints AND manual waypoints.
+function normalizeWaypointLons(waypoints) {
+  if (!waypoints || waypoints.length === 0) return waypoints;
+  const out = [{ ...waypoints[0] }];
+  for (let i = 1; i < waypoints.length; i++) {
+    let lon = waypoints[i].lon;
+    const prevLon = out[i - 1].lon;
+    while (lon - prevLon >  180) lon -= 360;
+    while (lon - prevLon < -180) lon += 360;
+    out.push({ ...waypoints[i], lon });
+  }
+  return out;
 }
 
 function MapView({
@@ -88,7 +112,8 @@ function MapView({
     mapRef.current = L.map(containerRef.current, {
       center: [15, 70], zoom: 3, preferCanvas: true, zoomControl: true,
       tap: true, tapTolerance: 15,
-      worldCopyJump: true, // FIX: prevents double-earth rendering on trans-pacific routes
+      // NOTE: worldCopyJump removed — it conflicts with our manual lon normalization.
+      // normalizeWaypointLons() handles the IDL rendering correctly without it.
     });
     layersRef.current.baseTile = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
       { attribution: '© OpenStreetMap © CARTO', subdomains:'abcd', maxZoom:19 }).addTo(mapRef.current);
@@ -134,7 +159,7 @@ function MapView({
     };
   }, []);
 
-  // ── Auto-route waypoints + leg labels ─────────────────────────────────────
+  // ── Auto-route waypoints + leg labels ──────────────────────────────────────
   useEffect(() => {
     if (!ready || !window.L) return;
     const L = window.L, map = mapRef.current, lrs = layersRef.current;
@@ -144,15 +169,8 @@ function MapView({
     lrs.legLabels.forEach(l => l.remove()); lrs.legLabels = [];
     if (waypoints.length === 0) return;
 
-    // FIX: Normalize longitudes to prevent antimeridian double-earth bug
-    // Ensures trans-pacific routes (e.g. Ecuador → China) render on one earth copy
-    const norm = [waypoints[0]];
-for (let i = 1; i < waypoints.length; i++) {
-  let lon = waypoints[i].lon;
-  while (lon - norm[i-1].lon >  180) lon -= 360;
-  while (lon - norm[i-1].lon < -180) lon += 360;
-  norm.push({ ...waypoints[i], lon });
-}
+    // Apply IDL normalization — fixes double-earth rendering on trans-pacific routes
+    const norm = normalizeWaypointLons(waypoints);
 
     const latlngs = norm.map(w => [w.lat, w.lon]);
     lrs.route = L.polyline(latlngs, { color:'#00B4D8', weight:2.5, opacity:0.9, dashArray:'8 4', noClip:true }).addTo(map);
@@ -198,29 +216,103 @@ for (let i = 1; i < waypoints.length; i++) {
     animPtsRef.current=pts; animIdxRef.current=0;
   }, [waypoints, ready]);
 
+  // ── Zone overlays ──────────────────────────────────────────────────────────
   useEffect(() => {
     if (!ready || !window.L) return;
     const L=window.L, map=mapRef.current, lrs=layersRef.current;
-    Object.values(lrs.zones).forEach(l=>l.remove()); lrs.zones={};
-    const cfg={
-      eca:    {zones:ECA_ZONES,    color:'#FF6B35',label:'ECA Area'   },
-      seca:   {zones:SECA_ZONES,   color:'#FFB347',label:'SECA Area'  },
-      marpol: {zones:MARPOL_ZONES, color:'#9B59B6',label:'MARPOL Area'},
-      piracy: {zones:PIRACY_ZONES, color:'#E74C3C',label:'Piracy Area'},
-      layover:{zones:LAYOVER_ZONES,color:'#3498DB',label:'Anchorage'  },
+    Object.values(lrs.zones).forEach(l => l.remove()); lrs.zones = {};
+
+    // ── Helper: build a rich popup for each zone type ──────────────────────
+    const buildPopup = (z, typeLabel, color) => {
+      const restriction = z.type ? `<div style="margin:3px 0;padding:2px 6px;background:rgba(255,0,0,0.15);border-radius:4px;font-size:10px;color:${color};font-weight:700;">${z.type.replace(/_/g,' ')}</div>` : '';
+      const severity    = z.severity ? `<div style="font-size:10px;color:${z.severity==='critical'?'#FF2020':z.severity==='high'?'#FF6600':'#FFB300'};margin-bottom:3px;">⚠ ${z.severity.toUpperCase()} RISK</div>` : '';
+      const regulation  = z.regulation  ? `<div style="font-size:10px;color:#aaa;margin-top:2px;">📋 ${z.regulation}</div>` : '';
+      const fuelLimit   = z.fuelLimit    ? `<div style="font-size:10px;color:#FFD700;margin-top:2px;">⛽ Fuel: ${z.fuelLimit}</div>` : '';
+      const noxLimit    = z.noxLimit     ? `<div style="font-size:10px;color:#FFD700;margin-top:2px;">💨 NOx: ${z.noxLimit}</div>` : '';
+      const authority   = z.authority    ? `<div style="font-size:10px;color:#aaa;margin-top:2px;">🏛 ${z.authority}</div>` : '';
+      const annex       = z.annex        ? `<div style="font-size:10px;color:#aaa;margin-top:2px;">📑 MARPOL Annex: ${z.annex}</div>` : '';
+      const measures    = z.measures     ? `<div style="font-size:10px;color:#aaa;margin-top:2px;">🔒 ${z.measures}</div>` : '';
+      const seasons     = z.seasons      ? `<div style="font-size:10px;color:#aaa;margin-top:2px;">📅 ${z.seasons}</div>` : '';
+      const details     = z.details      ? `<div style="font-size:10px;color:#ccc;margin-top:4px;line-height:1.4;border-top:1px solid rgba(255,255,255,0.1);padding-top:4px;">${z.details}</div>` : '';
+      return `
+        <div style="font-size:12px;min-width:200px;max-width:260px;line-height:1.6;font-family:sans-serif;">
+          <b style="color:${color};font-size:13px;">${z.name}</b>
+          <div style="font-size:10px;color:#bbb;margin-bottom:4px;">${typeLabel}</div>
+          ${restriction}${severity}
+          <div style="font-size:11px;color:#ddd;margin:3px 0;">${z.shortDesc||''}</div>
+          ${regulation}${fuelLimit}${noxLimit}${annex}${authority}${measures}${seasons}${details}
+        </div>`;
     };
-    Object.entries(cfg).forEach(([k,c]) => {
+
+    // ── Zone render config ─────────────────────────────────────────────────
+    // Each entry: key matches overlays prop key, zones array, color, label, fillOpacity, weight
+    const cfg = [
+      // ── Original zones ───────────────────────────────────────────────────
+      { k:'eca',          zones:ECA_ZONES,              color:'#FF6B35', label:'ECA — Emission Control Area',         fill:0.18, w:1.5 },
+      { k:'seca',         zones:SECA_ZONES,             color:'#FFB347', label:'SECA — Sulphur ECA',                  fill:0.18, w:1.5 },
+      { k:'marpol',       zones:MARPOL_ZONES,           color:'#9B59B6', label:'MARPOL Special Area',                 fill:0.15, w:1.5 },
+      { k:'piracy',       zones:PIRACY_ZONES,           color:'#E74C3C', label:'Piracy High Risk Area',               fill:0.20, w:2.0 },
+      { k:'layover',      zones:LAYOVER_ZONES,          color:'#3498DB', label:'Anchorage Zone',                      fill:0.20, w:1.5 },
+      // ── New zones ────────────────────────────────────────────────────────
+      { k:'pssa',         zones:PSSA_ZONES,             color:'#00C896', label:'PSSA — Particularly Sensitive Sea Area', fill:0.14, w:1.8 },
+      { k:'nox',          zones:NOX_ZONES,              color:'#F39C12', label:'NOx Tier III ECA',                    fill:0.14, w:1.5 },
+      { k:'loadline',     zones:LOAD_LINE_ZONES,        color:'#1ABC9C', label:'Load Line Zone (ICLL)',               fill:0.10, w:1.5 },
+      { k:'restrictions', zones:MARITIME_RESTRICTIONS,  color:'#FF2020', label:'Maritime Restriction / War Risk',     fill:0.22, w:2.0, useZoneColor:true },
+      { k:'msc_nog',      zones:CHINA_MSC_NO_G,         color:'#FF00FF', label:'MSC No-G Area (China)',               fill:0.25, w:2.0 },
+      { k:'eez',          zones:EEZ_ZONES,              color:'#5DADE2', label:'Exclusive Economic Zone (EEZ)',        fill:0.08, w:1.2, dashed:true },
+    ];
+
+    cfg.forEach(({ k, zones, color, label, fill, w, useZoneColor, dashed }) => {
       if (!overlays?.[k]) return;
-      const lg=L.layerGroup();
-      c.zones.forEach(z => {
-        L.polygon(z.coords.map(p=>Array.isArray(p)?p:[p[0],p[1]]),
-          {color:c.color,fillColor:c.color,fillOpacity:0.18,weight:1.5,opacity:0.8})
-          .bindPopup(`<b>${z.name}</b><br/>${c.label}`).addTo(lg);
+      const lg = L.layerGroup();
+      zones.forEach(z => {
+        const zColor = useZoneColor && z.color ? z.color : color;
+        const coords = z.coords.map(p => Array.isArray(p) ? p : [p[0], p[1]]);
+        const poly = L.polygon(coords, {
+          color: zColor,
+          fillColor: zColor,
+          fillOpacity: fill,
+          weight: w,
+          opacity: 0.85,
+          dashArray: dashed ? '8 5' : null,
+        });
+        poly.bindPopup(buildPopup(z, label, zColor), { maxWidth: 280 });
+
+        // Zone name label in center of polygon
+        try {
+          const bounds  = L.polygon(coords).getBounds();
+          const center  = bounds.getCenter();
+          const nameIcon = L.divIcon({
+            html: `<div style="
+              background:rgba(0,0,0,0.72);
+              color:${zColor};
+              border:1px solid ${zColor}55;
+              border-radius:4px;
+              padding:2px 5px;
+              font-size:9px;
+              font-weight:700;
+              white-space:nowrap;
+              font-family:monospace;
+              pointer-events:none;
+              max-width:140px;
+              overflow:hidden;
+              text-overflow:ellipsis;
+            ">${z.name}</div>`,
+            className: '',
+            iconSize: [0, 0],
+            iconAnchor: [0, 0],
+          });
+          L.marker([center.lat, center.lng], { icon: nameIcon, interactive: false, zIndexOffset: -100 }).addTo(lg);
+        } catch {}
+
+        poly.addTo(lg);
       });
-      lg.addTo(map); lrs.zones[k]=lg;
+      lg.addTo(map);
+      lrs.zones[k] = lg;
     });
   }, [overlays, ready]);
 
+  // ── Animation ──────────────────────────────────────────────────────────────
   useEffect(() => {
     if (!ready || !window.L) return;
     if (animRef.current) { clearInterval(animRef.current); animRef.current=null; }
@@ -239,6 +331,7 @@ for (let i = 1; i < waypoints.length; i++) {
     return ()=>{ if (animRef.current) clearInterval(animRef.current); };
   }, [playing, speed, ready]);
 
+  // ── Depth-click ────────────────────────────────────────────────────────────
   useEffect(() => {
     if (!ready||!window.L||!mapRef.current) return;
     const map=mapRef.current, L=window.L;
@@ -262,7 +355,7 @@ for (let i = 1; i < waypoints.length; i++) {
     return () => map.off('click', handleDepthClick);
   }, [overlays?.depthClick, ready]);
 
-  // ── Route-check highlight overlay ────────────────────────────────────────
+  // ── Route-check highlight overlay ──────────────────────────────────────────
   useEffect(() => {
     if (!ready||!window.L) return;
     const L=window.L, map=mapRef.current, lrs=layersRef.current;
@@ -285,7 +378,7 @@ for (let i = 1; i < waypoints.length; i++) {
     lg.addTo(map); lrs.checkLayer=lg;
   }, [checkHighlights, ready]);
 
-  // ── Manual route — green dashed line + interactive markers ───────────────
+  // ── Manual route — IDL fix applied here too ────────────────────────────────
   useEffect(() => {
     if (!ready||!window.L) return;
     const L=window.L, map=mapRef.current, lrs=layersRef.current;
@@ -293,10 +386,15 @@ for (let i = 1; i < waypoints.length; i++) {
     lrs.manualMarkers.forEach(m=>m.remove()); lrs.manualMarkers=[];
     if (!manualWaypoints||manualWaypoints.length===0) return;
 
-    lrs.manualRoute=L.polyline(manualWaypoints.map(w=>[w.lat,w.lon]),
+    // Apply IDL normalization to manual waypoints too
+    const normManual = normalizeWaypointLons(manualWaypoints);
+
+    lrs.manualRoute=L.polyline(normManual.map(w=>[w.lat,w.lon]),
       {color:'#00C896',weight:2.5,opacity:0.9,dashArray:'6 3'}).addTo(map);
 
+    // Render markers using original manualWaypoints indices (state), normalized coords for display
     manualWaypoints.forEach((wp, i) => {
+      const normWp = normManual[i];
       const isFirst=i===0, isLast=i===manualWaypoints.length-1;
       const color=isFirst?'#00C896':isLast?'#FF4757':'#FFD700';
       const sz=(isFirst||isLast)?14:9;
@@ -304,7 +402,7 @@ for (let i = 1; i < waypoints.length; i++) {
         html:`<div style="background:${color};border:2px solid #fff;border-radius:50%;width:${sz}px;height:${sz}px;cursor:pointer;box-shadow:0 0 5px rgba(0,0,0,0.6);"></div>`,
         className:'', iconSize:[sz,sz], iconAnchor:[sz/2,sz/2],
       });
-      const m=L.marker([wp.lat,wp.lon], {icon, draggable:true, zIndexOffset:50});
+      const m=L.marker([normWp.lat,normWp.lon], {icon, draggable:true, zIndexOffset:50});
 
       const popupEl=document.createElement('div');
       popupEl.style.cssText='font-size:12px;min-width:170px;';
@@ -340,13 +438,15 @@ for (let i = 1; i < waypoints.length; i++) {
 
       m.on('dragend', e => {
         const {lat,lng}=e.target.getLatLng();
+        // Store original lon in state (not normalized), recalc handles it
         setManualWaypointsRef.current?.(wps=>recalcWaypoints(wps.map((w,j)=>j===i?{...w,lat,lon:lng}:w)));
       });
 
       m.addTo(map); lrs.manualMarkers.push(m);
 
       if (i>0) {
-        const prev=manualWaypoints[i-1], midLat=(prev.lat+wp.lat)/2, midLon=(prev.lon+wp.lon)/2;
+        const prev=normManual[i-1];
+        const midLat=(prev.lat+normWp.lat)/2, midLon=(prev.lon+normWp.lon)/2;
         const lbl=L.marker([midLat,midLon], {
           icon:L.divIcon({
             html:`<div style="transform:translate(-50%,-50%);background:rgba(0,0,0,0.82);border:1px solid rgba(0,200,150,0.5);border-radius:4px;padding:2px 7px;white-space:nowrap;pointer-events:none;"><span style="font-family:Orbitron,monospace;font-size:9.5px;color:#00C896;">&#9658; ${(wp.bearing||0).toFixed(0)}&deg;</span><span style="font-family:monospace;font-size:9.5px;color:#FFD700;margin-left:5px;">${(wp.distance||0).toFixed(1)}NM</span></div>`,
@@ -359,9 +459,20 @@ for (let i = 1; i < waypoints.length; i++) {
     });
   }, [manualWaypoints, ready]);
 
-  const activeOverlays=Object.entries(overlays||{}).filter(([,v])=>v);
-  const legendColors={eca:'#FF6B35',seca:'#FFB347',marpol:'#9B59B6',piracy:'#E74C3C',layover:'#3498DB',gebco:'#00B4D8',depthClick:'#00C896'};
-  const legendNames ={eca:'ECA',seca:'SECA',marpol:'MARPOL',piracy:'Piracy',layover:'Anchorage',gebco:'Ocean Depth',depthClick:'Depth Click'};
+  // ── Legend ─────────────────────────────────────────────────────────────────
+  const activeOverlays = Object.entries(overlays||{}).filter(([,v])=>v);
+  const legendColors = {
+    eca:'#FF6B35', seca:'#FFB347', marpol:'#9B59B6', piracy:'#E74C3C',
+    layover:'#3498DB', gebco:'#00B4D8', depthClick:'#00C896',
+    pssa:'#00C896', nox:'#F39C12', loadline:'#1ABC9C',
+    restrictions:'#FF2020', msc_nog:'#FF00FF', eez:'#5DADE2',
+  };
+  const legendNames = {
+    eca:'ECA', seca:'SECA', marpol:'MARPOL', piracy:'Piracy',
+    layover:'Anchorage', gebco:'Ocean Depth', depthClick:'Depth Click',
+    pssa:'PSSA', nox:'NOx Tier III', loadline:'Load Line',
+    restrictions:'Restrictions', msc_nog:'MSC No-G', eez:'EEZ',
+  };
 
   return (
     <div className="planner-map">
