@@ -1,8 +1,5 @@
 /* eslint-disable */
 // src/Pages/RoutePlannerPage.jsx
-// NavisphereX Marine — Final Route Planner
-// Fixes: API routing, TSS lane display, port approach clutter, safety report UI
-
 import { useState, useEffect, useRef, useMemo } from "react";
 import { buildAutoRoute, buildAutoRouteCoords, buildProRoute, checkCanalPassage } from "../routing";
 import {
@@ -11,14 +8,16 @@ import {
   pointInPolygon, exportGPX, exportNMEAWPL, exportFurunoCSV, exportJRCCSV,
   exportTransasXML, exportKML,
 } from "../utils";
-import { ECA_ZONES, SECA_ZONES, MARPOL_ZONES, PIRACY_ZONES, LAYOVER_ZONES } from "../constants";
+import {
+  ECA_ZONES, SECA_ZONES, MARPOL_ZONES, PIRACY_ZONES, LAYOVER_ZONES,
+  PSSA_ZONES, NOX_ZONES, LOAD_LINE_ZONES, MARITIME_RESTRICTIONS,
+  CHINA_MSC_NO_G, EEZ_ZONES,
+} from "../constants";
 import MapView from "../components/MapView";
 import ETACalculator from "../components/ETACalculator";
 
-// ── Render API URL ─────────────────────────────────────────────────────────────
 const RENDER_API = 'https://navispherexrouter.onrender.com';
 
-// ── Land detection (tile-based) ───────────────────────────────────────────────
 const checkPointOnLand = (lat, lon) => new Promise(resolve => {
   const zoom=11,n=1<<zoom;
   const tx=Math.floor((lon+180)/360*n);
@@ -40,7 +39,6 @@ const checkPointOnLand = (lat, lon) => new Promise(resolve => {
   setTimeout(()=>resolve(null),5000);
 });
 
-// ── Overpass multi-endpoint fetch ─────────────────────────────────────────────
 async function fetchOverpass(query){
   const eps=['https://overpass-api.de/api/interpreter','https://overpass.karte.io/api/interpreter','https://z.overpass-api.de/api/interpreter','https://overpass.openstreetmap.ru/api/interpreter'];
   for(const ep of eps){
@@ -52,6 +50,24 @@ async function fetchOverpass(query){
   }
   return null;
 }
+
+// ── Regulatory zone overlay config ────────────────────────────────────────────
+// Each entry drives both the toggle buttons AND the MapView overlays prop
+const REG_ZONE_CFG = [
+  { k:'eca',          label:'ECA',          color:'#FF6B35', desc:'Emission Control Areas — SOx limits' },
+  { k:'seca',         label:'SECA',         color:'#FFB347', desc:'Sulphur ECA — 0.10% S fuel required' },
+  { k:'marpol',       label:'MARPOL',       color:'#9B59B6', desc:'MARPOL Special Areas — discharge rules' },
+  { k:'pssa',         label:'PSSA',         color:'#00C896', desc:'Particularly Sensitive Sea Areas' },
+  { k:'nox',          label:'NOx Tier III', color:'#F39C12', desc:'NOx Tier III Engine Control Areas' },
+  { k:'loadline',     label:'Load Line',    color:'#1ABC9C', desc:'ICLL 1966 Load Line Zones' },
+  { k:'restrictions', label:'Restrictions', color:'#FF2020', desc:'War Risk / Sanctions / Conflict Zones' },
+  { k:'msc_nog',      label:'MSC No-G',     color:'#FF00FF', desc:'MSC Prohibited Areas — China' },
+  { k:'eez',          label:'EEZ',          color:'#5DADE2', desc:'Exclusive Economic Zones (200NM)' },
+  { k:'piracy',       label:'Piracy HRA',   color:'#E74C3C', desc:'Piracy High Risk Areas — BMP5' },
+  { k:'layover',      label:'Anchorage',    color:'#3498DB', desc:'Anchorage / Layover Areas' },
+  { k:'gebco',        label:'Ocean Depth',  color:'#00B4D8', desc:'GEBCO Bathymetry + NOAA ENC' },
+  { k:'depthClick',   label:'Depth Click',  color:'#00C896', desc:'Click map to query water depth' },
+];
 
 function RoutePlannerPage({ notify, sheetRoutes=[], portsDb=[] }){
   const portsList=portsDb;
@@ -68,8 +84,17 @@ function RoutePlannerPage({ notify, sheetRoutes=[], portsDb=[] }){
   const[playing,        setPlaying]        =useState(false);
   const[speed,          setSpeed]          =useState(5);
   const[clickAdd,       setClickAdd]       =useState(false);
-  const[overlays,       setOverlays]       =useState({eca:false,seca:false,marpol:false,piracy:false,layover:false,gebco:false,depthClick:false});
   const[mapMode,        setMapMode]        =useState('day');
+
+  // ── NEW: single overlays state — drives both old + new zone keys ───────────
+  const[overlays, setOverlays]=useState({
+    // original keys kept for MapView compatibility
+    eca:false, seca:false, marpol:false, piracy:false, layover:false,
+    gebco:false, depthClick:false,
+    // new zone keys
+    pssa:false, nox:false, loadline:false,
+    restrictions:false, msc_nog:false, eez:false,
+  });
 
   // ── ECDIS-first state ──────────────────────────────────────────────────────
   const[portF,          setPortF]          =useState(null);
@@ -136,7 +161,7 @@ function RoutePlannerPage({ notify, sheetRoutes=[], portsDb=[] }){
         const g=k=>localStorage.getItem(k);
         if(g('mnp_mapMode'))  setMapMode(g('mnp_mapMode'));
         if(g('mnp_panel'))    setPanel(g('mnp_panel'));
-        if(g('mnp_overlays'))try{setOverlays(JSON.parse(g('mnp_overlays')));}catch{}
+        if(g('mnp_overlays'))try{setOverlays(prev=>({...prev,...JSON.parse(g('mnp_overlays'))}));}catch{}
         if(g('mnp_fromPort')) setFromPort(g('mnp_fromPort'));
         if(g('mnp_toPort'))   setToPort(g('mnp_toPort'));
         if(g('mnp_vDraft'))   setVDraft(+g('mnp_vDraft'));
@@ -221,7 +246,7 @@ function RoutePlannerPage({ notify, sheetRoutes=[], portsDb=[] }){
     notify(`Arrival set: ${name}`,'success');
   };
 
-  // ── Search ────────────────────────────────────────────────────────────────
+  // ── Search ─────────────────────────────────────────────────────────────────
   const handleSearch=()=>{
     const f=portF?.id==='CUSTOM_DEP'?portF:portsList.find(p=>p.name?.toLowerCase()===fromPort.toLowerCase()||p.id?.toLowerCase()===fromPort.toLowerCase());
     const t=portT?.id==='CUSTOM_ARR'?portT:portsList.find(p=>p.name?.toLowerCase()===toPort.toLowerCase()||p.id?.toLowerCase()===toPort.toLowerCase());
@@ -254,14 +279,12 @@ function RoutePlannerPage({ notify, sheetRoutes=[], portsDb=[] }){
     }else{notify('No file in ECDIS record — generating auto route','success');handleGenerateAutoRoute();}
   };
 
-  // ── MAIN: Generate auto route via Render API ───────────────────────────────
+  // ── Generate auto route ────────────────────────────────────────────────────
   const handleGenerateAutoRoute=async()=>{
     const f=portF,t=portT;
     if(!f||!t)return;
     setIsGenerating(true);setSearchMode('generating');
     setRouteMeta(null);setApiSafetyReport(null);setApiRouteInfo(null);
-
-    // Try Render API first
     try{
       const url=`${RENDER_API}/route?fromLon=${f.lon}&fromLat=${f.lat}&toLon=${t.lon}&toLat=${t.lat}&draft=${vDraft}&safety=2&beam=${vBeam}&loa=${vLoa}`;
       const res=await fetch(url,{signal:AbortSignal.timeout(35000)});
@@ -293,7 +316,6 @@ function RoutePlannerPage({ notify, sheetRoutes=[], portsDb=[] }){
       }
     }catch(e){console.warn('[NavisphereX] Render API failed, falling back:',e);}
 
-    // Fallback
     const vesselParams={draft:vDraft,beam:vBeam,loa:vLoa,airDraft:vAirDraft,vesselType:vType};
     const result=await buildProRoute(f,t,vesselParams);
     if(result.error||!result.waypoints||result.waypoints.length<2){
@@ -352,15 +374,47 @@ function RoutePlannerPage({ notify, sheetRoutes=[], portsDb=[] }){
     downloadFile(cfg.fn(),`${safe}${cfg.ext}`,cfg.mime);
   };
 
-  // ── Local route check ──────────────────────────────────────────────────────
+  // ── Route check — updated to include new zones ─────────────────────────────
   const runRouteCheck=async(wps,setRes,setChecking)=>{
     if(wps.length<2){notify('Add at least 2 waypoints','error');return;}
     setChecking(true);setRes([]);
     const results=[];
     for(let i=1;i<wps.length;i++){if((wps[i].distance||0)<0.1)results.push({segIdx:i,type:'duplicate',severity:'error',message:`WP${i} & WP${i+1}: too close (< 0.1 NM)`});}
     for(let i=2;i<wps.length;i++){let diff=Math.abs((wps[i].bearing||0)-(wps[i-1].bearing||0));if(diff>180)diff=360-diff;if(diff>140)results.push({segIdx:i,type:'sharpTurn',severity:'warning',message:`WP${i+1}: ${diff.toFixed(0)}° course change — impractical`});}
-    const allZones=[...PIRACY_ZONES.map(z=>({...z,ztype:'piracy',label:'Piracy Risk Area (HRA)',sev:'error'})),...ECA_ZONES.map(z=>({...z,ztype:'eca',label:'ECA Zone',sev:'warning'})),...SECA_ZONES.map(z=>({...z,ztype:'seca',label:'SECA Zone',sev:'warning'})),...MARPOL_ZONES.map(z=>({...z,ztype:'marpol',label:'MARPOL Special Area',sev:'warning'})),...LAYOVER_ZONES.map(z=>({...z,ztype:'layover',label:'Anchorage Zone',sev:'warning'}))];
-    wps.forEach((wp,i)=>{const seen=new Set();allZones.forEach(zone=>{if(!zone.coords)return;const coords=zone.coords.map(p=>Array.isArray(p)?p:[p[0],p[1]]);const key=`${zone.ztype}:${zone.name}:${i}`;if(!seen.has(key)&&pointInPolygon(wp.lat,wp.lon,coords)){seen.add(key);results.push({segIdx:i,type:zone.ztype,severity:zone.sev,message:`WP${i+1} inside ${zone.label}: ${zone.name}`});}});});
+
+    // ── All zone types checked against waypoints ───────────────────────────
+    const allZones=[
+      ...PIRACY_ZONES.map(z=>({...z,ztype:'piracy',label:'Piracy Risk Area (HRA)',sev:'error'})),
+      ...MARITIME_RESTRICTIONS.map(z=>({...z,ztype:'restriction',label:`Maritime Restriction (${z.type||'RESTRICTED'})`,sev:z.severity==='critical'?'error':'warning'})),
+      ...ECA_ZONES.map(z=>({...z,ztype:'eca',label:'ECA Zone — check fuel compliance',sev:'warning'})),
+      ...SECA_ZONES.map(z=>({...z,ztype:'seca',label:'SECA Zone — 0.10% S fuel required',sev:'warning'})),
+      ...MARPOL_ZONES.map(z=>({...z,ztype:'marpol',label:'MARPOL Special Area — discharge rules apply',sev:'warning'})),
+      ...PSSA_ZONES.map(z=>({...z,ztype:'pssa',label:'PSSA — special precautions required',sev:'warning'})),
+      ...NOX_ZONES.map(z=>({...z,ztype:'nox',label:'NOx Tier III ECA — engine compliance required',sev:'warning'})),
+      ...LOAD_LINE_ZONES.map(z=>({...z,ztype:'loadline',label:'Load Line Zone — verify freeboard',sev:'warning'})),
+      ...CHINA_MSC_NO_G.map(z=>({...z,ztype:'msc_nog',label:'MSC No-G Area — MSC vessels prohibited',sev:'error'})),
+      ...EEZ_ZONES.map(z=>({...z,ztype:'eez',label:'EEZ — fishing/resource rules apply',sev:'warning'})),
+      ...LAYOVER_ZONES.map(z=>({...z,ztype:'layover',label:'Anchorage Zone',sev:'warning'})),
+    ];
+
+    wps.forEach((wp,i)=>{
+      const seen=new Set();
+      allZones.forEach(zone=>{
+        if(!zone.coords)return;
+        const coords=zone.coords.map(p=>Array.isArray(p)?p:[p[0],p[1]]);
+        const key=`${zone.ztype}:${zone.name}:${i}`;
+        if(!seen.has(key)&&pointInPolygon(wp.lat,wp.lon,coords)){
+          seen.add(key);
+          results.push({
+            segIdx:i,
+            type:zone.ztype,
+            severity:zone.sev,
+            message:`WP${i+1} inside ${zone.label}: ${zone.name}${zone.shortDesc?' — '+zone.shortDesc:''}`,
+          });
+        }
+      });
+    });
+
     const midpoints=wps.slice(1).map((wp,idx)=>({lat:(wps[idx].lat+wp.lat)/2,lon:(wps[idx].lon+wp.lon)/2,segIdx:idx+1}));
     let tileWorked=false;
     try{
@@ -425,134 +479,6 @@ function RoutePlannerPage({ notify, sheetRoutes=[], portsDb=[] }){
     setIsApiChecking(false);
   };
 
-  // ── Overlay config ─────────────────────────────────────────────────────────
-  const ovCfg=[
-    {k:'eca',label:'ECA',color:'#FF6B35',desc:'Emission Control Area'},
-    {k:'seca',label:'SECA',color:'#FFB347',desc:'Sulphur ECA'},
-    {k:'marpol',label:'MARPOL',color:'#9B59B6',desc:'MARPOL Special Area'},
-    {k:'piracy',label:'Piracy',color:'#E74C3C',desc:'Piracy HRA'},
-    {k:'layover',label:'Anchorage',color:'#3498DB',desc:'Anchorage'},
-    {k:'gebco',label:'GEBCO',color:'#00B4D8',desc:'GEBCO Bathymetry'},
-    {k:'depthClick',label:'Depth Click',color:'#00C896',desc:'Depth on click'},
-  ];
-
-  // ── Render: local check results ────────────────────────────────────────────
-  const renderCheckResults=res=>(
-    <div>
-      {res.filter(r=>r.type!=='ok').map((r,i)=>(
-        <div key={i} style={{padding:'6px 8px',marginBottom:4,borderRadius:6,fontSize:'0.7rem',lineHeight:1.4,background:r.severity==='error'?'rgba(231,76,60,0.14)':r.severity==='warning'?'rgba(255,179,71,0.13)':'rgba(0,180,216,0.09)',border:`1px solid ${r.severity==='error'?'rgba(231,76,60,0.4)':r.severity==='warning'?'rgba(255,179,71,0.4)':'rgba(0,180,216,0.3)'}`,color:r.severity==='error'?'#ff8080':r.severity==='warning'?'#FFB347':'var(--text2)'}}>
-          {r.severity==='error'?'🚫':r.severity==='warning'?'⚠️':'ℹ️'} {r.message}
-        </div>
-      ))}
-      {res.some(r=>r.type==='ok')&&<div style={{padding:'6px 8px',borderRadius:6,background:'rgba(0,200,150,0.14)',border:'1px solid rgba(0,200,150,0.4)',fontSize:'0.7rem',color:'#00C896'}}>✅ All checks passed!</div>}
-    </div>
-  );
-
-  // ── Render: API route info (TSS + port approach shown after generation) ────
-  const renderApiRouteInfo=info=>{
-    if(!info)return null;
-    return(
-      <div style={{marginTop:6,marginBottom:4}}>
-        {info.tssZones?.length>0&&(
-          <div style={{padding:'5px 8px',borderRadius:6,marginBottom:4,fontSize:'0.68rem',background:'rgba(0,180,216,0.12)',border:'1px solid rgba(0,180,216,0.35)',color:'var(--cyan)'}}>
-            🚢 TSS lanes followed: {info.tssZones.map(z=>z.replace(/_/g,' ')).join(', ')}
-          </div>
-        )}
-        {(info.portApproach?.origin||info.portApproach?.destination)&&(
-          <div style={{padding:'5px 8px',borderRadius:6,marginBottom:4,fontSize:'0.68rem',background:'rgba(255,179,71,0.12)',border:'1px solid rgba(255,179,71,0.35)',color:'#FFB347'}}>
-            ⚓ Port approach: {[info.portApproach.origin,info.portApproach.destination].filter(Boolean).map(p=>p.replace(/_/g,' ')).join(' → ')}
-          </div>
-        )}
-        {info.landCrossing&&(
-          <div style={{padding:'5px 8px',borderRadius:6,marginBottom:4,fontSize:'0.68rem',background:'rgba(231,76,60,0.14)',border:'1px solid rgba(231,76,60,0.4)',color:'#ff8080'}}>
-            🚨 Land crossing detected — route may need manual adjustment
-          </div>
-        )}
-        {info.warnings?.map((w,i)=>(
-          <div key={i} style={{padding:'5px 8px',borderRadius:6,marginBottom:3,fontSize:'0.67rem',background:'rgba(231,76,60,0.10)',border:'1px solid rgba(231,76,60,0.3)',color:'#ff8080'}}>⚠️ {w}</div>
-        ))}
-      </div>
-    );
-  };
-
-  // ── Render: Full API safety report ────────────────────────────────────────
-  const renderApiSafetyReport=report=>{
-    if(!report)return null;
-    const{overall_safe,warnings=[],route_stats,land_check,tss_check,port_check,depth_check,danger_check}=report;
-    const sec={marginBottom:5,borderRadius:7,overflow:'hidden',border:'1px solid rgba(255,255,255,0.07)'};
-    const hdr=(ok,color)=>({padding:'5px 9px',fontSize:'0.67rem',fontWeight:700,display:'flex',justifyContent:'space-between',alignItems:'center',background:color||(ok?'rgba(0,200,150,0.18)':'rgba(231,76,60,0.22)'),color:ok?'#00C896':'#ff8080'});
-    const row={padding:'4px 9px',fontSize:'0.66rem',lineHeight:1.45,background:'rgba(0,0,0,0.22)',borderTop:'1px solid rgba(255,255,255,0.05)',color:'var(--text2)'};
-    const wrow={...row,color:'#ff8080'};
-    return(
-      <div style={{marginTop:8}}>
-        {/* Overall */}
-        <div style={{padding:'8px 10px',borderRadius:8,marginBottom:8,background:overall_safe?'rgba(0,200,150,0.14)':'rgba(231,76,60,0.16)',border:`1px solid ${overall_safe?'rgba(0,200,150,0.45)':'rgba(231,76,60,0.45)'}`,display:'flex',alignItems:'center',gap:8}}>
-          <span style={{fontSize:'1rem'}}>{overall_safe?'✅':'🚨'}</span>
-          <div style={{flex:1}}>
-            <div style={{fontSize:'0.72rem',fontWeight:700,color:overall_safe?'#00C896':'#ff8080'}}>{overall_safe?'Route is SAFE':'Safety Issues Found'}</div>
-            {warnings.length>0&&<div style={{fontSize:'0.63rem',color:'var(--text2)',marginTop:1}}>{warnings.length} warning(s) — see below</div>}
-          </div>
-          {route_stats&&<div style={{textAlign:'right'}}><div style={{fontSize:'0.7rem',fontFamily:'Orbitron,monospace',color:'var(--gold)'}}>{route_stats.total_nm} NM</div><div style={{fontSize:'0.6rem',color:'var(--text2)'}}>{route_stats.waypoint_count} WPs</div></div>}
-        </div>
-        {/* ETA */}
-        {route_stats?.eta&&(
-          <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:4,marginBottom:8}}>
-            {[['10kn',route_stats.eta['10kn']],['12kn',route_stats.eta['12kn']],['15kn',route_stats.eta['15kn']],['18kn',route_stats.eta['18kn']]].map(([spd,hrs])=>(
-              <div key={spd} style={{background:'var(--bg2)',borderRadius:6,padding:'4px 5px',textAlign:'center'}}>
-                <div style={{fontSize:'0.57rem',color:'var(--text2)'}}>@{spd}</div>
-                <div style={{fontSize:'0.7rem',color:'var(--gold)',fontFamily:'Orbitron,monospace'}}>{hrs}h</div>
-              </div>
-            ))}
-          </div>
-        )}
-        {/* Land */}
-        <div style={sec}>
-          <div style={hdr(land_check?.safe)}>
-            <span>{land_check?.safe?'✅':'🚨'} Land Crossing</span>
-            <span style={{fontWeight:400,fontSize:'0.63rem'}}>{land_check?.safe?'Clear':`${land_check?.problem_segments?.length||0} segment(s)`}</span>
-          </div>
-          {!land_check?.safe&&land_check?.problem_segments?.map((sg,i)=><div key={i} style={wrow}>🚨 Seg {sg.segment_index+1}: ({sg.from?.lat?.toFixed(2)},{sg.from?.lon?.toFixed(2)}) → ({sg.to?.lat?.toFixed(2)},{sg.to?.lon?.toFixed(2)})</div>)}
-          {land_check?.safe&&<div style={row}>✅ No land crossings detected</div>}
-        </div>
-        {/* TSS */}
-        <div style={sec}>
-          <div style={{...hdr(true),background:'rgba(0,180,216,0.18)',color:'var(--cyan)'}}>
-            <span>🚢 TSS Zones</span>
-            <span style={{fontWeight:400,fontSize:'0.63rem'}}>{tss_check?.zones_crossed||0} crossed</span>
-          </div>
-          {tss_check?.issues?.length>0
-            ?tss_check.issues.map((issue,i)=><div key={i} style={row}>🚢 <b style={{color:'var(--cyan)'}}>{issue.tss?.replace(/_/g,' ').toUpperCase()}</b> — use <b style={{color:'#FFB347'}}>{issue.correct_lane}</b> lane</div>)
-            :<div style={row}>✅ No TSS zones crossed</div>}
-        </div>
-        {/* Port approach */}
-        <div style={sec}>
-          <div style={{...hdr(true),background:'rgba(255,179,71,0.16)',color:'#FFB347'}}><span>⚓ Port Approach</span></div>
-          {port_check?.origin_port&&<div style={row}>🛳 Departure: <b style={{color:'#FFB347'}}>{port_check.origin_port.replace(/_/g,' ')}</b></div>}
-          {port_check?.destination_port&&<div style={row}>🏁 Arrival: <b style={{color:'#FFB347'}}>{port_check.destination_port.replace(/_/g,' ')}</b></div>}
-          {!port_check?.origin_port&&!port_check?.destination_port&&<div style={row}>ℹ️ No port approach match in database</div>}
-        </div>
-        {/* Depth */}
-        <div style={sec}>
-          <div style={hdr(depth_check?.safe)}>
-            <span>{depth_check?.safe?'✅':'⚠️'} Water Depth</span>
-            <span style={{fontWeight:400,fontSize:'0.63rem'}}>{depth_check?.min_depth_m!=null?`Min ${depth_check.min_depth_m}m / Need ${depth_check.required_depth}m`:'—'}</span>
-          </div>
-          {depth_check?.shallow_points?.map((sp,i)=><div key={i} style={wrow}>⚠️ Shallow {sp.depth}m at ({sp.lat?.toFixed(3)},{sp.lon?.toFixed(3)}) — need {sp.required}m</div>)}
-          {depth_check?.safe&&<div style={row}>✅ Depth OK — {depth_check.points_checked} points checked</div>}
-        </div>
-        {/* Dangers */}
-        <div style={sec}>
-          <div style={hdr(danger_check?.safe)}>
-            <span>{danger_check?.safe?'✅':'🪨'} Danger Marks</span>
-            <span style={{fontWeight:400,fontSize:'0.63rem'}}>{danger_check?.total_in_area||0} in area</span>
-          </div>
-          {danger_check?.dangers_near_route?.map((d,i)=><div key={i} style={wrow}>🪨 {d.type?.toUpperCase()} {d.name?`"${d.name}"`:''} — {d.nearest_route_nm} NM from route</div>)}
-          {danger_check?.safe&&<div style={row}>✅ No danger marks near route</div>}
-        </div>
-      </div>
-    );
-  };
-
   const inp={width:'100%',padding:'6px 8px',background:'var(--bg2)',border:'1px solid var(--border)',color:'var(--text)',borderRadius:7,fontSize:'0.78rem'};
 
   const manualCoordSection=(label,showState,setShow,latVal,setLat,lonVal,setLon,nameVal,setName,applyFn,isSet)=>(
@@ -576,8 +502,93 @@ function RoutePlannerPage({ notify, sheetRoutes=[], portsDb=[] }){
     </div>
   );
 
+  // ── Render: local check results ────────────────────────────────────────────
+  const renderCheckResults=res=>(
+    <div>
+      {res.filter(r=>r.type!=='ok').map((r,i)=>(
+        <div key={i} style={{padding:'6px 8px',marginBottom:4,borderRadius:6,fontSize:'0.7rem',lineHeight:1.4,background:r.severity==='error'?'rgba(231,76,60,0.14)':r.severity==='warning'?'rgba(255,179,71,0.13)':'rgba(0,180,216,0.09)',border:`1px solid ${r.severity==='error'?'rgba(231,76,60,0.4)':r.severity==='warning'?'rgba(255,179,71,0.4)':'rgba(0,180,216,0.3)'}`,color:r.severity==='error'?'#ff8080':r.severity==='warning'?'#FFB347':'var(--text2)'}}>
+          {r.severity==='error'?'🚫':r.severity==='warning'?'⚠️':'ℹ️'} {r.message}
+        </div>
+      ))}
+      {res.some(r=>r.type==='ok')&&<div style={{padding:'6px 8px',borderRadius:6,background:'rgba(0,200,150,0.14)',border:'1px solid rgba(0,200,150,0.4)',fontSize:'0.7rem',color:'#00C896'}}>✅ All checks passed!</div>}
+    </div>
+  );
+
+  // ── Render: API route info ─────────────────────────────────────────────────
+  const renderApiRouteInfo=info=>{
+    if(!info)return null;
+    return(
+      <div style={{marginTop:6,marginBottom:4}}>
+        {info.tssZones?.length>0&&(<div style={{padding:'5px 8px',borderRadius:6,marginBottom:4,fontSize:'0.68rem',background:'rgba(0,180,216,0.12)',border:'1px solid rgba(0,180,216,0.35)',color:'var(--cyan)'}}>🚢 TSS lanes followed: {info.tssZones.map(z=>z.replace(/_/g,' ')).join(', ')}</div>)}
+        {(info.portApproach?.origin||info.portApproach?.destination)&&(<div style={{padding:'5px 8px',borderRadius:6,marginBottom:4,fontSize:'0.68rem',background:'rgba(255,179,71,0.12)',border:'1px solid rgba(255,179,71,0.35)',color:'#FFB347'}}>⚓ Port approach: {[info.portApproach.origin,info.portApproach.destination].filter(Boolean).map(p=>p.replace(/_/g,' ')).join(' → ')}</div>)}
+        {info.landCrossing&&(<div style={{padding:'5px 8px',borderRadius:6,marginBottom:4,fontSize:'0.68rem',background:'rgba(231,76,60,0.14)',border:'1px solid rgba(231,76,60,0.4)',color:'#ff8080'}}>🚨 Land crossing detected — route may need manual adjustment</div>)}
+        {info.warnings?.map((w,i)=>(<div key={i} style={{padding:'5px 8px',borderRadius:6,marginBottom:3,fontSize:'0.67rem',background:'rgba(231,76,60,0.10)',border:'1px solid rgba(231,76,60,0.3)',color:'#ff8080'}}>⚠️ {w}</div>))}
+      </div>
+    );
+  };
+
+  // ── Render: Full API safety report ────────────────────────────────────────
+  const renderApiSafetyReport=report=>{
+    if(!report)return null;
+    const{overall_safe,warnings=[],route_stats,land_check,tss_check,port_check,depth_check,danger_check}=report;
+    const sec={marginBottom:5,borderRadius:7,overflow:'hidden',border:'1px solid rgba(255,255,255,0.07)'};
+    const hdr=(ok,color)=>({padding:'5px 9px',fontSize:'0.67rem',fontWeight:700,display:'flex',justifyContent:'space-between',alignItems:'center',background:color||(ok?'rgba(0,200,150,0.18)':'rgba(231,76,60,0.22)'),color:ok?'#00C896':'#ff8080'});
+    const row={padding:'4px 9px',fontSize:'0.66rem',lineHeight:1.45,background:'rgba(0,0,0,0.22)',borderTop:'1px solid rgba(255,255,255,0.05)',color:'var(--text2)'};
+    const wrow={...row,color:'#ff8080'};
+    return(
+      <div style={{marginTop:8}}>
+        <div style={{padding:'8px 10px',borderRadius:8,marginBottom:8,background:overall_safe?'rgba(0,200,150,0.14)':'rgba(231,76,60,0.16)',border:`1px solid ${overall_safe?'rgba(0,200,150,0.45)':'rgba(231,76,60,0.45)'}`,display:'flex',alignItems:'center',gap:8}}>
+          <span style={{fontSize:'1rem'}}>{overall_safe?'✅':'🚨'}</span>
+          <div style={{flex:1}}>
+            <div style={{fontSize:'0.72rem',fontWeight:700,color:overall_safe?'#00C896':'#ff8080'}}>{overall_safe?'Route is SAFE':'Safety Issues Found'}</div>
+            {warnings.length>0&&<div style={{fontSize:'0.63rem',color:'var(--text2)',marginTop:1}}>{warnings.length} warning(s) — see below</div>}
+          </div>
+          {route_stats&&<div style={{textAlign:'right'}}><div style={{fontSize:'0.7rem',fontFamily:'Orbitron,monospace',color:'var(--gold)'}}>{route_stats.total_nm} NM</div><div style={{fontSize:'0.6rem',color:'var(--text2)'}}>{route_stats.waypoint_count} WPs</div></div>}
+        </div>
+        {route_stats?.eta&&(<div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:4,marginBottom:8}}>{[['10kn',route_stats.eta['10kn']],['12kn',route_stats.eta['12kn']],['15kn',route_stats.eta['15kn']],['18kn',route_stats.eta['18kn']]].map(([spd,hrs])=>(<div key={spd} style={{background:'var(--bg2)',borderRadius:6,padding:'4px 5px',textAlign:'center'}}><div style={{fontSize:'0.57rem',color:'var(--text2)'}}>@{spd}</div><div style={{fontSize:'0.7rem',color:'var(--gold)',fontFamily:'Orbitron,monospace'}}>{hrs}h</div></div>))}</div>)}
+        <div style={sec}><div style={hdr(land_check?.safe)}><span>{land_check?.safe?'✅':'🚨'} Land Crossing</span><span style={{fontWeight:400,fontSize:'0.63rem'}}>{land_check?.safe?'Clear':`${land_check?.problem_segments?.length||0} segment(s)`}</span></div>{!land_check?.safe&&land_check?.problem_segments?.map((sg,i)=><div key={i} style={wrow}>🚨 Seg {sg.segment_index+1}</div>)}{land_check?.safe&&<div style={row}>✅ No land crossings detected</div>}</div>
+        <div style={sec}><div style={{...hdr(true),background:'rgba(0,180,216,0.18)',color:'var(--cyan)'}}><span>🚢 TSS Zones</span><span style={{fontWeight:400,fontSize:'0.63rem'}}>{tss_check?.zones_crossed||0} crossed</span></div>{tss_check?.issues?.length>0?tss_check.issues.map((issue,i)=><div key={i} style={row}>🚢 <b style={{color:'var(--cyan)'}}>{issue.tss?.replace(/_/g,' ').toUpperCase()}</b> — use <b style={{color:'#FFB347'}}>{issue.correct_lane}</b> lane</div>):<div style={row}>✅ No TSS zones crossed</div>}</div>
+        <div style={sec}><div style={{...hdr(true),background:'rgba(255,179,71,0.16)',color:'#FFB347'}}><span>⚓ Port Approach</span></div>{port_check?.origin_port&&<div style={row}>🛳 Departure: <b style={{color:'#FFB347'}}>{port_check.origin_port.replace(/_/g,' ')}</b></div>}{port_check?.destination_port&&<div style={row}>🏁 Arrival: <b style={{color:'#FFB347'}}>{port_check.destination_port.replace(/_/g,' ')}</b></div>}{!port_check?.origin_port&&!port_check?.destination_port&&<div style={row}>ℹ️ No port approach match</div>}</div>
+        <div style={sec}><div style={hdr(depth_check?.safe)}><span>{depth_check?.safe?'✅':'⚠️'} Water Depth</span><span style={{fontWeight:400,fontSize:'0.63rem'}}>{depth_check?.min_depth_m!=null?`Min ${depth_check.min_depth_m}m / Need ${depth_check.required_depth}m`:'—'}</span></div>{depth_check?.shallow_points?.map((sp,i)=><div key={i} style={wrow}>⚠️ Shallow {sp.depth}m at ({sp.lat?.toFixed(3)},{sp.lon?.toFixed(3)})</div>)}{depth_check?.safe&&<div style={row}>✅ Depth OK — {depth_check.points_checked} points checked</div>}</div>
+        <div style={sec}><div style={hdr(danger_check?.safe)}><span>{danger_check?.safe?'✅':'🪨'} Danger Marks</span><span style={{fontWeight:400,fontSize:'0.63rem'}}>{danger_check?.total_in_area||0} in area</span></div>{danger_check?.dangers_near_route?.map((d,i)=><div key={i} style={wrow}>🪨 {d.type?.toUpperCase()} {d.name?`"${d.name}"`:''} — {d.nearest_route_nm} NM</div>)}{danger_check?.safe&&<div style={row}>✅ No danger marks near route</div>}</div>
+      </div>
+    );
+  };
+
+  // ── Regulatory zones overlay panel (replaces old overlay section) ──────────
+  const renderRegZones=()=>(
+    <div className="p-section">
+      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:6}}>
+        <span className="p-label" style={{marginBottom:0}}>🌐 Regulatory Zones</span>
+        {Object.values(overlays).some(Boolean)&&(
+          <button onClick={()=>setOverlays(o=>Object.fromEntries(Object.keys(o).map(k=>[k,false])))}
+            style={{fontSize:'0.62rem',color:'var(--red)',background:'none',border:'1px solid rgba(231,76,60,0.4)',borderRadius:4,padding:'2px 7px',cursor:'pointer'}}>
+            ⭕ All Off
+          </button>
+        )}
+      </div>
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:4}}>
+        {REG_ZONE_CFG.map(z=>{
+          const on=!!overlays[z.k];
+          return(
+            <button key={z.k} onClick={()=>toggleOverlay(z.k)} title={z.desc}
+              style={{display:'flex',alignItems:'center',gap:5,padding:'5px 7px',borderRadius:6,fontSize:'0.67rem',cursor:'pointer',border:`1px solid ${on?z.color:'var(--border)'}`,background:on?`${z.color}18`:'var(--bg2)',color:on?z.color:'var(--text2)',textAlign:'left',transition:'all 0.15s'}}>
+              <div style={{width:8,height:8,borderRadius:2,background:z.color,flexShrink:0,opacity:on?1:0.35}}/>
+              <span style={{fontWeight:on?700:400,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{z.label}</span>
+              {on&&<span style={{marginLeft:'auto',fontSize:'0.6rem'}}>✓</span>}
+            </button>
+          );
+        })}
+      </div>
+      <div style={{fontSize:'0.62rem',color:'var(--text3)',marginTop:5,padding:'4px 0',borderTop:'1px solid var(--border)',lineHeight:1.5}}>
+        Tap zone on map for regulation details
+      </div>
+    </div>
+  );
+
   return(
     <div style={{display:'flex',flexDirection:'column',flex:1,minHeight:0}}>
+      {/* TOP BAR */}
       <div style={{display:'flex',alignItems:'center',gap:8,padding:'0.7rem 1rem',background:'var(--card)',borderBottom:'1px solid var(--border)',flexWrap:'wrap'}}>
         <input className="fi" style={{flex:1,minWidth:150,padding:'7px 12px',fontSize:'0.82rem'}} placeholder="Route Name…" value={routeName} onChange={e=>setRouteName(e.target.value)}/>
         {totalNM>0&&<span style={{fontFamily:'Orbitron,monospace',fontSize:'0.78rem',color:'var(--cyan)',whiteSpace:'nowrap'}}>📏 {totalNM.toFixed(1)} NM</span>}
@@ -592,12 +603,13 @@ function RoutePlannerPage({ notify, sheetRoutes=[], portsDb=[] }){
 
       <div className="planner-layout">
         <div className="planner-sidebar">
+          {/* TABS */}
           <div className="p-tabs">
             {[['auto','🗺 Auto'],['manual','✏️ Manual'],['load','📂 Load RTZ'],['eta','⏱ ETA'],['wpts','📋 WPTs']].map(([k,l])=>(<button key={k} className={`p-tab ${panel===k?'active':''}`} onClick={()=>setPanel(k)}>{l}</button>))}
           </div>
           <div className="p-panel" style={{overflowY:'auto'}}>
 
-            {/* AUTO PANEL */}
+            {/* ── AUTO PANEL ── */}
             {panel==='auto'&&(<>
               <div className="p-section">
                 <span className="p-label">🛳 Departure Port</span>
@@ -640,9 +652,8 @@ function RoutePlannerPage({ notify, sheetRoutes=[], portsDb=[] }){
                   {dbSuggestions.map((r,i)=>{
                     const allVals=Object.entries(r).filter(([k,v])=>v&&typeof v==='string'&&v.trim().length>2);
                     const nameCols=allVals.filter(([k])=>/(name|route|file|rtz|title)/i.test(k));
-                    const portCols=allVals.filter(([k])=>/(port|from|to|dep|arr|desc)/i.test(k));
                     const name=r.fileName||r['File Name']||r['Route Name']||nameCols[0]?.[1]||allVals[0]?.[1]||`Route ${i+1}`;
-                    const port=r.portName||r['Port Name']||r['From']||portCols[0]?.[1]||'';
+                    const port=r.portName||r['Port Name']||r['From']||'';
                     const hasUrl=!!(r.fileUrl||r['File URL']||r['Drive Link']||Object.values(r).find(v=>typeof v==='string'&&v.includes('drive.google')));
                     return(<div key={i} style={{display:'flex',alignItems:'center',gap:8,padding:'8px 10px',borderRadius:8,background:'rgba(0,0,0,0.2)',marginBottom:5,cursor:'pointer',border:'1px solid rgba(255,255,255,0.06)'}} onClick={()=>useDbRoute(r)}><span style={{fontSize:'1.1rem'}}>{hasUrl?'📥':'📋'}</span><div style={{flex:1,minWidth:0}}><div style={{fontSize:'0.8rem',fontWeight:600,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{name}</div>{port&&<div style={{fontSize:'0.68rem',color:'var(--cyan)',marginTop:1}}>📍 {port}</div>}</div><button style={{background:'var(--cyan)',color:'#000',border:'none',borderRadius:6,padding:'4px 10px',fontSize:'0.68rem',fontWeight:700,cursor:'pointer'}}>USE</button></div>);
                   })}
@@ -674,7 +685,7 @@ function RoutePlannerPage({ notify, sheetRoutes=[], portsDb=[] }){
                 </div>
                 <div className="p-section">
                   <span className="p-label">🔍 Route Safety Check</span>
-                  <div style={{fontSize:'0.68rem',color:'var(--text2)',marginBottom:6}}>Land (map tiles), rocks/wrecks (OpenSeaMap), piracy/ECA/SECA, TSS, turns.</div>
+                  <div style={{fontSize:'0.68rem',color:'var(--text2)',marginBottom:6}}>Land, rocks/wrecks, piracy, ECA/SECA, PSSA, restrictions, NOx, load line zones.</div>
                   <button className="btn btn-secondary" style={{width:'100%',justifyContent:'center',marginBottom:6}} disabled={waypoints.length<2||isCheckingAuto} onClick={performAutoRouteCheck}>{isCheckingAuto?'⏳ Checking…':'🔍 Run Local Check'}</button>
                   <button style={{width:'100%',display:'flex',justifyContent:'center',alignItems:'center',gap:6,padding:'8px',marginBottom:8,borderRadius:8,cursor:waypoints.length<2||isApiChecking?'not-allowed':'pointer',fontSize:'0.72rem',fontWeight:600,background:'rgba(0,180,216,0.18)',border:'1px solid rgba(0,180,216,0.5)',color:'var(--cyan)',opacity:waypoints.length<2||isApiChecking?0.5:1}} disabled={waypoints.length<2||isApiChecking} onClick={performApiSafetyCheck}>
                     {isApiChecking?<>⏳ Running API Safety Check…</>:'🛡 Run Full API Safety Check'}
@@ -684,17 +695,15 @@ function RoutePlannerPage({ notify, sheetRoutes=[], portsDb=[] }){
                 </div>
               </>)}
 
-              <div className="p-section">
-                <span className="p-label">🗺 Maritime Zone Overlays</span>
-                <div className="overlay-grid">{ovCfg.map(ov=>(<button key={ov.k} className={`ov-btn ${overlays[ov.k]?'active':''}`} style={{color:overlays[ov.k]?ov.color:'var(--text2)',borderColor:overlays[ov.k]?ov.color:'var(--border)'}} onClick={()=>toggleOverlay(ov.k)} title={ov.desc}>{overlays[ov.k]?'✓ ':''}{ov.label}</button>))}</div>
-              </div>
+              {/* NEW: Regulatory Zones replaces old overlay buttons */}
+              {renderRegZones()}
             </>)}
 
-            {/* MANUAL PANEL */}
+            {/* ── MANUAL PANEL ── */}
             {panel==='manual'&&(<>
               <div className="p-section">
                 <span className="p-label">✏️ Manual Route Builder</span>
-                <div style={{fontSize:'0.72rem',color:'var(--cyan)',marginBottom:'0.5rem',padding:'6px 8px',background:'rgba(0,180,216,0.08)',borderRadius:6,border:'1px solid rgba(0,180,216,0.2)'}}>👆 Tap the map to place waypoints. Tap a marker to edit name or remove. Drag to reposition.</div>
+                <div style={{fontSize:'0.72rem',color:'var(--cyan)',marginBottom:'0.5rem',padding:'6px 8px',background:'rgba(0,180,216,0.08)',borderRadius:6,border:'1px solid rgba(0,180,216,0.2)'}}>👆 Tap the map to place waypoints.</div>
                 <input className="fi" placeholder="Route name…" value={manualRouteName} onChange={e=>setManualRouteName(e.target.value)} style={{marginBottom:6}}/>
                 <div style={{display:'flex',gap:6,alignItems:'center'}}>
                   <button className="btn btn-danger" style={{flex:1,justifyContent:'center',padding:'6px 8px'}} disabled={manualWps.length===0} onClick={clearManual}>🗑 Clear All</button>
@@ -703,14 +712,17 @@ function RoutePlannerPage({ notify, sheetRoutes=[], portsDb=[] }){
               </div>
               {manualWps.length===0&&<div className="empty" style={{marginTop:8}}><div className="empty-icon">👆</div><div className="empty-t">Tap the map to start</div><div className="empty-d">Course and distance appear on each leg automatically.</div></div>}
               {manualWps.length>0&&(<div className="p-section"><span className="p-label">📋 Waypoints</span><div style={{overflowX:'auto'}}><table className="wp-table"><thead><tr><th>#</th><th>Name</th><th>Lat</th><th>Lon</th><th>Crs°</th><th>NM</th><th>Del</th></tr></thead><tbody>{manualWps.map((wp,i)=>(<tr key={i}><td style={{color:'var(--cyan)',fontFamily:'Orbitron,monospace',fontSize:'0.7rem'}}>{String(i+1).padStart(2,'0')}</td><td><input style={{background:'transparent',border:'1px solid var(--border)',color:'var(--text)',padding:'2px 4px',fontSize:'0.67rem',width:62,borderRadius:4}} value={wp.name||''} placeholder={`WP${i+1}`} onChange={e=>{const u=[...manualWps];u[i]={...u[i],name:e.target.value};setManualWps(u);}}/></td><td style={{fontSize:'0.67rem'}}>{wp.lat.toFixed(4)}</td><td style={{fontSize:'0.67rem'}}>{wp.lon.toFixed(4)}</td><td style={{fontSize:'0.67rem'}}>{i>0?(wp.bearing||0).toFixed(0):'—'}</td><td style={{fontSize:'0.67rem'}}>{i>0?(wp.distance||0).toFixed(1):'0'}</td><td><button onClick={()=>setManualWps(wps=>recalcWaypoints(wps.filter((_,j)=>j!==i)))} style={{background:'none',border:'none',color:'var(--red)',cursor:'pointer',fontSize:'0.85rem'}}>✕</button></td></tr>))}</tbody></table><div style={{marginTop:8,padding:'7px',background:'var(--bg2)',borderRadius:8,textAlign:'center',fontFamily:'Orbitron,monospace',fontSize:'0.74rem',color:'var(--gold)'}}>Total: {totalManualNM.toFixed(1)} NM</div></div></div>)}
-              <div className="p-section"><span className="p-label">🔍 Route Safety Check</span><div style={{fontSize:'0.68rem',color:'var(--text2)',marginBottom:6}}>Land, rocks/wrecks, piracy/ECA/SECA, TSS, turns.</div><button className="btn btn-secondary" style={{width:'100%',justifyContent:'center',marginBottom:8}} disabled={manualWps.length<2||isChecking} onClick={performRouteCheck}>{isChecking?'⏳ Checking…':'🔍 Run Route Check'}</button>{checkResults.length>0&&renderCheckResults(checkResults)}</div>
+              <div className="p-section"><span className="p-label">🔍 Route Safety Check</span><button className="btn btn-secondary" style={{width:'100%',justifyContent:'center',marginBottom:8}} disabled={manualWps.length<2||isChecking} onClick={performRouteCheck}>{isChecking?'⏳ Checking…':'🔍 Run Route Check'}</button>{checkResults.length>0&&renderCheckResults(checkResults)}</div>
               <div className="p-section"><span className="p-label">💾 Save &amp; Export</span><button className="btn btn-green" style={{width:'100%',justifyContent:'center',marginBottom:8}} disabled={manualWps.length<2} onClick={saveManualRoute}>💾 Save to Route Library</button><select value={exportFormat} onChange={e=>setExportFormat(e.target.value)} style={{width:'100%',padding:'7px 10px',borderRadius:8,background:'var(--bg2)',border:'1px solid var(--border)',color:'var(--text)',fontSize:'0.74rem',marginBottom:6}}><option value="rtz">RTZ — CIRM Standard (.rtz)</option><option value="gpx">GPX — GPS Exchange (.gpx)</option><option value="csv">CSV — Generic (.csv)</option><option value="nmea">NMEA 0183 WPL (.txt)</option><option value="furuno">Furuno ECDIS (.csv)</option><option value="jrc">JRC ECDIS (.csv)</option><option value="transas">Transas / TECDIS (.xml)</option><option value="kml">Google Earth KML (.kml)</option></select><button className="btn btn-gold" style={{width:'100%',justifyContent:'center'}} disabled={manualWps.length<2} onClick={exportManualRoute}>⬇ Export Route</button></div>
               <div className="p-section"><span className="p-label">📚 Route Library ({savedRoutes.length})</span>{savedRoutes.length===0?<div style={{fontSize:'0.72rem',color:'var(--text2)',textAlign:'center',padding:'1rem 0'}}>No saved routes yet</div>:savedRoutes.map(r=>(<div key={r.id} style={{display:'flex',alignItems:'center',gap:6,padding:'8px 10px',borderRadius:8,background:'var(--bg2)',marginBottom:6,border:'1px solid var(--border)'}}><div style={{flex:1,minWidth:0}}><div style={{fontSize:'0.78rem',fontWeight:600,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{r.name}</div><div style={{fontSize:'0.64rem',color:'var(--text2)',marginTop:1}}>{r.waypoints.length} WPs · {(r.totalNM||0).toFixed(1)} NM · {new Date(r.savedAt).toLocaleDateString()}</div></div><button style={{background:'var(--cyan)',color:'#000',border:'none',borderRadius:5,padding:'3px 8px',fontSize:'0.65rem',fontWeight:700,cursor:'pointer'}} onClick={()=>{setManualWps(r.waypoints);setManualRouteName(r.name);notify(`Loaded "${r.name}"`,'success');}}>LOAD</button><button style={{background:'rgba(231,76,60,0.8)',color:'#fff',border:'none',borderRadius:5,padding:'3px 8px',fontSize:'0.65rem',fontWeight:700,cursor:'pointer'}} onClick={()=>deleteSavedRoute(r.id)}>DEL</button></div>))}</div>
-              <div className="p-section"><span className="p-label">🗺 Zone Overlays</span><div className="overlay-grid">{ovCfg.map(ov=>(<button key={ov.k} className={`ov-btn ${overlays[ov.k]?'active':''}`} style={{color:overlays[ov.k]?ov.color:'var(--text2)',borderColor:overlays[ov.k]?ov.color:'var(--border)'}} onClick={()=>toggleOverlay(ov.k)} title={ov.desc}>{overlays[ov.k]?'✓ ':''}{ov.label}</button>))}</div></div>
+              {renderRegZones()}
             </>)}
 
-            {/* LOAD RTZ PANEL */}
-            {panel==='load'&&(<><div className="p-section"><span className="p-label">📂 Load RTZ File from your ECDIS</span><div style={{border:'2px dashed var(--border2)',borderRadius:10,padding:'1.5rem',textAlign:'center',background:'var(--bg2)',marginBottom:'0.8rem'}}><div style={{fontSize:'2rem',marginBottom:6}}>📂</div><div style={{fontWeight:600,fontSize:'0.84rem',marginBottom:3}}>Select RTZ File</div><div style={{fontSize:'0.72rem',color:'var(--text2)'}}>Accepts .rtz and .rtzp files</div><input type="file" accept=".rtz,.rtzp" onChange={handleRTZLoad} style={{display:'block',marginTop:10,width:'100%',fontSize:'0.75rem'}}/></div>{waypoints.length>0&&<div className="ok-box" style={{textAlign:'center',fontSize:'0.78rem'}}>✅ {waypoints.length} waypoints loaded</div>}</div><div className="p-section"><span className="p-label">🗺 Zone Overlays</span><div className="overlay-grid">{ovCfg.map(ov=>(<button key={ov.k} className={`ov-btn ${overlays[ov.k]?'active':''}`} style={{color:overlays[ov.k]?ov.color:'var(--text2)',borderColor:overlays[ov.k]?ov.color:'var(--border)'}} onClick={()=>toggleOverlay(ov.k)}>{overlays[ov.k]?'✓ ':''}{ov.label}</button>))}</div></div></>)}
+            {/* ── LOAD RTZ PANEL ── */}
+            {panel==='load'&&(<>
+              <div className="p-section"><span className="p-label">📂 Load RTZ File from your ECDIS</span><div style={{border:'2px dashed var(--border2)',borderRadius:10,padding:'1.5rem',textAlign:'center',background:'var(--bg2)',marginBottom:'0.8rem'}}><div style={{fontSize:'2rem',marginBottom:6}}>📂</div><div style={{fontWeight:600,fontSize:'0.84rem',marginBottom:3}}>Select RTZ File</div><div style={{fontSize:'0.72rem',color:'var(--text2)'}}>Accepts .rtz and .rtzp files</div><input type="file" accept=".rtz,.rtzp" onChange={handleRTZLoad} style={{display:'block',marginTop:10,width:'100%',fontSize:'0.75rem'}}/></div>{waypoints.length>0&&<div className="ok-box" style={{textAlign:'center',fontSize:'0.78rem'}}>✅ {waypoints.length} waypoints loaded</div>}</div>
+              {renderRegZones()}
+            </>)}
 
             {panel==='eta'&&<ETACalculator totalNM={totalNM}/>}
 
