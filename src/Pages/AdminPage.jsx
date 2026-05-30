@@ -40,6 +40,10 @@ function AdminPage({
   const [noticeForm,  setNoticeForm]  = useState({ title:'', portName:'', type:'info', description:'', expiryDate:'' });
   const [showNoticeForm, setShowNoticeForm] = useState(false);
 
+  // Push notifications to all users
+  const [notifForm, setNotifForm] = useState({ title:'', message:'', type:'info' });
+  const [sentNotifs, setSentNotifs] = useState([]);
+
   // Live sheet preview
   const [liveRoutes,        setLiveRoutes]        = useState([]);
   const [liveCharts,        setLiveCharts]        = useState([]);
@@ -114,9 +118,34 @@ function AdminPage({
   };
 
   useEffect(() => { const u = onAuthStateChanged(auth, u => setUser(u)); return () => u(); }, []);
-  useEffect(() => { if (user && section === 'users')   loadUsers();   }, [user, section]);
-  useEffect(() => { if (user && section === 'settings') loadLimits();  }, [user, section]);
-  useEffect(() => { if (user && section === 'notices') loadNotices(); }, [user, section]);
+  useEffect(() => { if (user && section === 'users')         loadUsers();      }, [user, section]);
+  useEffect(() => { if (user && section === 'settings')      loadLimits();     }, [user, section]);
+  useEffect(() => { if (user && section === 'notices')       loadNotices();    }, [user, section]);
+  useEffect(() => { if (user && section === 'notifications') loadSentNotifs(); }, [user, section]);
+
+  const loadSentNotifs = async () => {
+    try {
+      const snap = await getDocs(collection(db, 'notifications'));
+      setSentNotifs(snap.docs.map(d => ({ id: d.id, ...d.data() }))
+        .sort((a,b) => (b.createdAt?.seconds||0) - (a.createdAt?.seconds||0)));
+    } catch {}
+  };
+
+  const sendNotification = async () => {
+    if (!notifForm.title) { notify('Enter notification title', 'error'); return; }
+    try {
+      await addDoc(collection(db, 'notifications'), { ...notifForm, createdAt: serverTimestamp(), sentBy: 'admin' });
+      notify('✅ Notification sent to all users', 'success');
+      setNotifForm({ title:'', message:'', type:'info' });
+      loadSentNotifs();
+    } catch (e) { notify('Failed: ' + e.message, 'error'); }
+  };
+
+  const deleteNotification = async (id) => {
+    if (!window.confirm('Delete this notification?')) return;
+    try { await deleteDoc(doc(db, 'notifications', id)); loadSentNotifs(); notify('Deleted', 'success'); }
+    catch { notify('Delete failed', 'error'); }
+  };
 
   const loadNotices = async () => {
     try {
@@ -300,6 +329,7 @@ function AdminPage({
     { k: 'sheet-routes', i: '🔄', l: 'Sync Routes' },
     { k: 'sheet-charts', i: '🔄', l: 'Sync Charts' },
     { k: 'port-search',  i: '⚓', l: 'Sync Ports' },
+    { k: 'notifications',i: '🔔', l: 'Send Notification' },
     { k: 'notices',      i: '📢', l: 'Port Notices' },
     { k: 'settings',     i: '⚙️', l: 'Settings' },
     { k: 'users',        i: '👥', l: 'User Database' },
@@ -544,6 +574,62 @@ function AdminPage({
                   </div>
                 </>
               )}
+            </>
+          )}
+
+          {/* ─── SEND NOTIFICATION ─────────────────────────────────────── */}
+          {section === 'notifications' && (
+            <>
+              <div className="a-hdr"><div className="a-title">🔔 Send Notification</div></div>
+              <div className="info-box" style={{ marginBottom:'1rem', fontSize:'0.74rem' }}>
+                📢 Notifications appear in the 🔔 bell icon for all logged-in users. Unread count shown on bell.
+              </div>
+              <div style={{ background:'var(--card)', border:'1px solid rgba(0,180,216,0.3)', borderRadius:12, padding:'1.2rem', marginBottom:'1rem' }}>
+                <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
+                  <div className="ff" style={{ gridColumn:'1/-1', margin:0 }}>
+                    <label className="fl">Notification Title *</label>
+                    <input className="fi" placeholder="e.g. 🚢 New routes added for Mumbai port"
+                      value={notifForm.title} onChange={e=>setNotifForm(n=>({...n,title:e.target.value}))} />
+                  </div>
+                  <div className="ff" style={{ margin:0 }}>
+                    <label className="fl">Type</label>
+                    <select className="fi" value={notifForm.type} onChange={e=>setNotifForm(n=>({...n,type:e.target.value}))}>
+                      <option value="info">ℹ️ Info</option>
+                      <option value="warning">⚠️ Warning</option>
+                      <option value="alert">🚨 Alert</option>
+                    </select>
+                  </div>
+                  <div className="ff" style={{ gridColumn:'1/-1', margin:0 }}>
+                    <label className="fl">Message (optional)</label>
+                    <textarea className="fi" rows={2} style={{ resize:'vertical' }}
+                      placeholder="Additional details…"
+                      value={notifForm.message} onChange={e=>setNotifForm(n=>({...n,message:e.target.value}))} />
+                  </div>
+                </div>
+                <button className="btn btn-primary" style={{ marginTop:10 }} onClick={sendNotification}>
+                  🔔 Send to All Users
+                </button>
+              </div>
+              {/* Sent notifications history */}
+              <div style={{ fontFamily:'Orbitron,monospace', fontSize:'0.72rem', color:'var(--text3)', marginBottom:'0.8rem' }}>SENT NOTIFICATIONS</div>
+              {sentNotifs.length === 0
+                ? <div className="empty"><div className="empty-icon">🔔</div><div className="empty-t">No Notifications Sent Yet</div></div>
+                : <div style={{ display:'grid', gap:'0.6rem' }}>
+                  {sentNotifs.map(n => (
+                    <div key={n.id} style={{ background:'var(--card)', border:'1px solid var(--border)', borderRadius:10, padding:'0.9rem', display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:8 }}>
+                      <div>
+                        <div style={{ fontWeight:700, fontSize:'0.82rem', color:'var(--cyan)' }}>{n.title}</div>
+                        {n.message && <div style={{ fontSize:'0.72rem', color:'var(--text2)', marginTop:3 }}>{n.message}</div>}
+                        <div style={{ fontSize:'0.62rem', color:'var(--text3)', marginTop:4 }}>
+                          {n.createdAt?.toDate?.()?.toLocaleString() || ''}
+                        </div>
+                      </div>
+                      <button className="btn btn-danger" style={{ padding:'3px 8px', fontSize:'0.68rem', flexShrink:0 }}
+                        onClick={() => deleteNotification(n.id)}>🗑</button>
+                    </div>
+                  ))}
+                </div>
+              }
             </>
           )}
 
