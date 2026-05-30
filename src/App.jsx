@@ -31,6 +31,7 @@ import AccountPage             from "./Pages/AccountPage";
 import VoyageCalculatorPage    from "./Pages/VoyageCalculatorPage";
 import CertificateTrackerPage  from "./Pages/CertificateTrackerPage";
 import NoticesPage             from "./Pages/NoticesPage";
+import SeaTimeCalculatorPage   from "./Pages/SeaTimeCalculatorPage";
 
 const S = `
   @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700;900&family=Exo+2:wght@300;400;500;600&display=swap');
@@ -189,9 +190,28 @@ const S = `
     --gold:   #b07000;
     --red:    #cc2233;
   }
-  [data-theme="light"] .nav-bar { background: rgba(240,245,250,0.97); border-color: rgba(0,0,0,0.1); }
+  [data-theme="light"] .nav-bar {
+    background: rgba(240,245,250,0.97);
+    border-color: rgba(0,0,0,0.12);
+  }
+  /* Fix burger/menu button visibility in light mode */
+  [data-theme="light"] .burger span {
+    background: #0a1628 !important;
+  }
+  [data-theme="light"] .nav-logo,
+  [data-theme="light"] .ntab,
+  [data-theme="light"] .uc {
+    color: #0a1628 !important;
+  }
+  [data-theme="light"] .nav-tab {
+    color: #3a4a6a;
+  }
+  [data-theme="light"] .nav-tab.active {
+    color: #0070cc;
+  }
   [data-theme="light"] .file-card { background: #ffffff; }
   [data-theme="light"] .auth-card { background: #ffffff; }
+  [data-theme="light"] .footer    { background: #e4ecf4; }
   .empty{text-align:center;padding:3rem 1rem;color:var(--text3);}
   .empty-icon{font-size:2.8rem;margin-bottom:1rem;}
   .empty-t{font-family:'Orbitron',monospace;font-size:0.82rem;margin-bottom:6px;color:var(--text2);}
@@ -277,7 +297,18 @@ export default function App() {
   // Online/offline detection
   const [isOnline,       setIsOnline]             = useState(navigator.onLine);
   // Dark / Light theme
-  const [theme,          setTheme]                = useState(() => localStorage.getItem('nav_theme') || 'dark'); // null | {type,name,rank}
+  const [theme,          setTheme]                = useState(() => localStorage.getItem('nav_theme') || 'dark');
+
+  // Back navigation — track previous tab
+  const [prevTab,        setPrevTab]              = useState(null);
+
+  // Notification panel
+  const [showNotifPanel, setShowNotifPanel]       = useState(false);
+  const [notifications,  setNotifications]        = useState([]);
+  const [readNotifIds,   setReadNotifIds]         = useState(() => {
+    try { return new Set(JSON.parse(localStorage.getItem('notif_read') || '[]')); }
+    catch { return new Set(); }
+  });
 
   // Per-sync progress for admin panel progress bars (0-100)
   const [routesSyncProgress, setRoutesSyncProgress] = useState(0);
@@ -557,7 +588,8 @@ export default function App() {
 
   const toggleTheme = () => setTheme(t => t === 'dark' ? 'light' : 'dark');
 
-  useEffect(() => {                          // ← ADD THIS LINE
+  // Animate auth loading progress bar
+  useEffect(() => {
     if (authChecked) { setAuthProgress(100); return; }
     let p = 0;
     const t = setInterval(() => {
@@ -567,7 +599,25 @@ export default function App() {
     }, 120);
     return () => clearInterval(t);
   }, [authChecked]);
-  
+
+  // Load notifications from Firestore when user is authenticated
+  useEffect(() => {
+    if (!user) return;
+    import('firebase/firestore').then(({ collection, getDocs, query, orderBy }) => {
+      getDocs(query(collection(db, 'notifications'), orderBy('createdAt', 'desc')))
+        .then(snap => setNotifications(snap.docs.map(d => ({ id: d.id, ...d.data() }))))
+        .catch(() => {});
+    });
+  }, [user?.uid]);
+
+  const unreadCount = notifications.filter(n => !readNotifIds.has(n.id)).length;
+
+  const markAllRead = () => {
+    const allIds = new Set(notifications.map(n => n.id));
+    setReadNotifIds(allIds);
+    localStorage.setItem('notif_read', JSON.stringify([...allIds]));
+  };
+
   const TABS = [
     { k: 'home',    i: '🏠', l: 'Dashboard' },
     { k: 'routes',  i: '🛤', l: 'Routes' },
@@ -578,6 +628,7 @@ export default function App() {
     { k: 'vessel',  i: '🚢', l: 'Vessel Search' },
     { k: 'voyage',  i: '🧮', l: 'Voyage Calculator' },
     { k: 'certs',   i: '📜', l: 'Certificates' },
+    { k: 'seatime', i: '⏱', l: 'Sea Time' },
     { k: 'notices', i: '📢', l: 'Port Notices' },
     { k: 'library', i: '📖', l: 'Maritime Library' },
     ...(user ? [{ k: 'account', i: '👤', l: 'My Account' }] : []),
@@ -591,6 +642,7 @@ export default function App() {
       setTab('login'); setMenuOpen(false);
       sessionStorage.setItem('intendedTab', k); return;
     }
+    setPrevTab(tab);  // ← track previous tab for back button
     setTab(k); setMenuOpen(false);
     // Show nav disclaimer banner on FIRST visit to navigation tabs per session
     const navTabs = ['routes', 'planner', 'navmode'];
@@ -671,11 +723,28 @@ export default function App() {
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <div className="sd" />
+            {/* Notification bell */}
+            {user && (
+              <button onClick={() => { setShowNotifPanel(p => !p); markAllRead(); }}
+                style={{ position:'relative', background:'rgba(255,255,255,0.06)', border:'1px solid var(--border)',
+                  borderRadius:8, padding:'5px 9px', cursor:'pointer', fontSize:'1.1rem', color:'var(--text2)' }}>
+                🔔
+                {unreadCount > 0 && (
+                  <span style={{ position:'absolute', top:-4, right:-4, background:'#ff4757',
+                    color:'white', borderRadius:'50%', width:16, height:16, fontSize:'0.55rem',
+                    fontWeight:900, display:'flex', alignItems:'center', justifyContent:'center',
+                    fontFamily:'Orbitron,monospace', border:'1px solid var(--bg)' }}>
+                    {unreadCount > 9 ? '9+' : unreadCount}
+                  </span>
+                )}
+              </button>
+            )}
             {/* Dark / Light mode toggle */}
             <button onClick={toggleTheme} title={theme==='dark'?'Light Mode':'Dark Mode'}
               style={{ background:'rgba(255,255,255,0.06)', border:'1px solid var(--border)', borderRadius:8,
                 padding:'5px 9px', cursor:'pointer', fontSize:'1rem', color:'var(--text2)' }}>
               {theme==='dark' ? '☀️' : '🌙'}
+            </button>
             </button>
             <button className="burger" onClick={() => setMenuOpen(o => !o)}><span /><span /><span /></button>
           </div>
@@ -750,6 +819,57 @@ export default function App() {
               </div>
             </div>
           )}
+          {/* ── Back button — shown on all tabs except home ── */}
+          {tab !== 'home' && prevTab && (
+            <div style={{ padding:'8px 16px 0', flexShrink:0 }}>
+              <button className="btn btn-secondary"
+                style={{ padding:'5px 12px', fontSize:'0.72rem', display:'flex', alignItems:'center', gap:6 }}
+                onClick={() => switchTab(prevTab)}>
+                ← Back
+              </button>
+            </div>
+          )}
+
+          {/* ── Notification slide-in panel ── */}
+          {showNotifPanel && (
+            <div style={{ position:'fixed', top:60, right:0, width:320, maxWidth:'95vw',
+              height:'calc(100vh - 60px)', background:'var(--card)',
+              border:'1px solid var(--border)', borderLeft:'1px solid var(--border)',
+              zIndex:9990, display:'flex', flexDirection:'column',
+              boxShadow:'-8px 0 32px rgba(0,0,0,0.4)', overflowY:'auto' }}>
+              <div style={{ padding:'1rem', borderBottom:'1px solid var(--border)',
+                display:'flex', justifyContent:'space-between', alignItems:'center', flexShrink:0 }}>
+                <div style={{ fontFamily:'Orbitron,monospace', fontSize:'0.8rem', fontWeight:700 }}>
+                  🔔 Notifications
+                </div>
+                <button onClick={() => setShowNotifPanel(false)}
+                  style={{ background:'none', border:'none', color:'var(--text3)', cursor:'pointer', fontSize:'1.2rem' }}>✕</button>
+              </div>
+              {notifications.length === 0
+                ? <div style={{ padding:'2rem', textAlign:'center', color:'var(--text3)', fontSize:'0.78rem' }}>
+                    <div style={{ fontSize:'2rem', marginBottom:8 }}>🔔</div>
+                    No notifications yet
+                  </div>
+                : notifications.map(n => {
+                  const isRead = readNotifIds.has(n.id);
+                  const typeColor = n.type==='warning'?'#ff6b35':n.type==='alert'?'#ff4757':'var(--cyan)';
+                  return (
+                    <div key={n.id} style={{ padding:'12px 16px', borderBottom:'1px solid var(--border)',
+                      background: isRead?'transparent':'rgba(0,180,216,0.05)' }}>
+                      {!isRead && <div style={{ width:6, height:6, borderRadius:'50%', background:'var(--cyan)',
+                        float:'right', marginTop:4 }} />}
+                      <div style={{ fontWeight:700, fontSize:'0.82rem', color:typeColor, marginBottom:4 }}>{n.title}</div>
+                      {n.message && <div style={{ fontSize:'0.74rem', color:'var(--text2)', lineHeight:1.5 }}>{n.message}</div>}
+                      <div style={{ fontSize:'0.62rem', color:'var(--text3)', marginTop:4 }}>
+                        {n.createdAt?.toDate?.()?.toLocaleString() || ''}
+                      </div>
+                    </div>
+                  );
+                })
+              }
+            </div>
+          )}
+
           {tab === 'home'    && <HomePage routes={routes} charts={charts} onSearch={handleSearch} setTab={switchTab} user={user} portsDb={portsDb} userProfile={userProfile} />}
           {tab === 'routes'  && <RoutesPage searchQuery={searchQ} notify={notify} user={user} setTab={switchTab} sheetRoutes={sheetRoutes} sheetLoading={routesLoading} />}
           {tab === 'charts'  && <ChartsPage notify={notify} user={user} setTab={switchTab} isAdmin={isAdmin} sheetCharts={sheetCharts} sheetLoading={chartsLoading} />}
@@ -758,6 +878,7 @@ export default function App() {
           {tab === 'vessel'  && <VesselSearchPage />}
           {tab === 'voyage'  && <VoyageCalculatorPage portsDb={portsDb} />}
           {tab === 'certs'   && <CertificateTrackerPage user={user} notify={notify} />}
+          {tab === 'seatime' && <SeaTimeCalculatorPage  user={user} notify={notify} />}
           {tab === 'notices' && <NoticesPage notify={notify} />}
           {tab === 'account' && user && <AccountPage user={user} userProfile={userProfile} setUserProfile={setUserProfile} notify={notify} setTab={switchTab} />}
           {tab === 'library' && <MaritimeLibraryPage setTab={switchTab} />}
