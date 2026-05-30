@@ -28,13 +28,17 @@ function HomePage({ routes, charts, onSearch, setTab, user, portsDb = [], userPr
   const doSearch = (val) => { const v = val || q; if (v.trim()) { onSearch(v); setShowSugg(false); } };
 
   const FEATURE_CARDS = [
-    { icon: '🗺', title: 'ROUTES', desc: 'Browse, search & download routes in multiple formats.', tab: 'routes', color: 'var(--cyan)' },
-    { icon: '📊', title: 'ECDIS CHARTS', desc: 'Access charts, formats & user charts.', tab: 'charts', color: 'var(--gold)' },
-    { icon: '✏️', title: 'ROUTE PLANNER', desc: 'Plan optimised routes with advanced tools.', tab: 'planner', color: 'var(--green)' },
-    { icon: '🧭', title: 'NAV MODE', desc: 'Navigate with precision using smart nav mode.', tab: 'navmode', color: '#A78BFA', badge: 'NEW' },
-    { icon: '⚓', title: 'PORTS DATABASE', desc: 'Explore global ports with details & coordinates.', tab: 'ports', color: 'var(--cyan)' },
-    { icon: '🚢', title: 'VESSEL SEARCH', desc: 'Search vessels by IMO, MMSI or flag state.', tab: 'vessel', color: 'var(--gold)', badge: 'NEW' },
-    { icon: '📚', title: 'MARITIME LIBRARY', desc: 'SOLAS, MARPOL, IMO, STCW & more books.', tab: 'library', color: 'var(--gold)' },
+    { icon: '🗺',  title: 'ROUTES',           desc: 'Browse, search & download routes in multiple formats.',    tab: 'routes',  color: 'var(--cyan)' },
+    { icon: '📊',  title: 'ECDIS CHARTS',     desc: 'Access charts, formats & user charts.',                    tab: 'charts',  color: 'var(--gold)' },
+    { icon: '✏️',  title: 'ROUTE PLANNER',    desc: 'Plan optimised routes with advanced tools.',               tab: 'planner', color: 'var(--green)' },
+    { icon: '🧭',  title: 'NAV MODE',         desc: 'Navigate with precision using smart nav mode.',            tab: 'navmode', color: '#A78BFA', badge: 'NEW' },
+    { icon: '⚓',  title: 'PORTS DATABASE',   desc: 'Explore global ports with details & coordinates.',         tab: 'ports',   color: 'var(--cyan)' },
+    { icon: '🚢',  title: 'VESSEL SEARCH',    desc: 'Search vessels by IMO, MMSI or flag state.',              tab: 'vessel',  color: 'var(--gold)', badge: 'NEW' },
+    { icon: '🧮',  title: 'VOYAGE CALC',      desc: 'Calculate distance, duration and fuel for any voyage.',   tab: 'voyage',  color: 'var(--green)' },
+    { icon: '📜',  title: 'CERTIFICATES',     desc: 'Track STCW certificate expiry dates and renewals.',       tab: 'certs',   color: '#A78BFA' },
+    { icon: '⏱',  title: 'SEA TIME',         desc: 'Log and calculate sea service time across all ships.',    tab: 'seatime', color: 'var(--cyan)' },
+    { icon: '📢',  title: 'PORT NOTICES',     desc: 'Port closures, restrictions and navigational warnings.',  tab: 'notices', color: 'var(--gold)' },
+    { icon: '📚',  title: 'MARITIME LIBRARY', desc: 'SOLAS, MARPOL, IMO, STCW & more books.',                 tab: 'library', color: 'var(--gold)' },
   ];
 
   const QUICK_ACTIONS = [
