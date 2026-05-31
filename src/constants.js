@@ -1168,16 +1168,16 @@ export const DEPTH_SOURCES = [
 export const AIS_SOURCES = {
   safepilot: {
     hosts: [
-      'ws://localhost:4001',
-      'ws://192.168.1.100:4001',
-      'ws://10.0.0.1:4001',
+      'wss://localhost:4001',
+      'wss://192.168.1.100:4001',
+      'wss://10.0.0.1:4001',
     ],
   },
   bridge: {
     hosts: [
-      'ws://localhost:4002',
-      'ws://192.168.1.100:4002',
-      'ws://10.0.0.1:4002',
+      'wss://localhost:4002',
+      'wss://192.168.1.100:4002',
+      'wss://10.0.0.1:4002',
     ],
   },
 };
