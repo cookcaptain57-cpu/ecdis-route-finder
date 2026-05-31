@@ -2,6 +2,7 @@
 // src/pages/CertificateTrackerPage.jsx
 import { useState, useEffect } from "react";
 import { db } from "../firebase";
+import { doc, getDoc, setDoc } from "firebase/firestore";
 const connectDrive = async () => {
   setConnectingDrive(true);
   try {
