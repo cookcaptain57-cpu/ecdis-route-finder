@@ -32,6 +32,8 @@ import VoyageCalculatorPage    from "./Pages/VoyageCalculatorPage";
 import CertificateTrackerPage  from "./Pages/CertificateTrackerPage";
 import NoticesPage             from "./Pages/NoticesPage";
 import SeaTimeCalculatorPage   from "./Pages/SeaTimeCalculatorPage";
+// ── ADDITION 1: CompassErrorPage import ──────────────────────────────────────
+import CompassErrorPage        from "./Pages/CompassErrorPage";
 
 const S = `
   @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700;900&family=Exo+2:wght@300;400;500;600&display=swap');
@@ -278,31 +280,18 @@ export default function App() {
   const [charts, setCharts]               = useState([]);
   const [sheetRoutes, setSheetRoutes]     = useState([]);
   const [sheetCharts, setSheetCharts]     = useState([]);
-  // ← CHANGED: start empty — never show 41 hardcoded ports as initial state
   const [portsDb, setPortsDb]             = useState([]);
 
-  // Sync banner: null | 'syncing' | 'done'
-  // Shows a non-blocking status bar while data loads from Firebase/Sheets
   const [syncBanner, setSyncBanner]             = useState(null);
-  // Prevents double-retry after auth is confirmed
   const hasRetriedRef                           = { current: false };
 
-  // Disclaimer: modal on first app open, small banner on first nav-tab visit per session
   const [showDisclaimer, setShowDisclaimer]     = useState(false);
   const [navDiscBanner,  setNavDiscBanner]       = useState(false);
-  // Welcome popup — typewriter message shown on login / signup
   const [welcomePopup,   setWelcomePopup]        = useState(null);
-  // Auth loading progress bar (0-100) shown on the welcome splash screen
   const [authProgress,   setAuthProgress]        = useState(0);
-  // Online/offline detection
   const [isOnline,       setIsOnline]             = useState(navigator.onLine);
-  // Dark / Light theme
   const [theme,          setTheme]                = useState(() => localStorage.getItem('nav_theme') || 'dark');
-
-  // Back navigation — track previous tab
   const [prevTab,        setPrevTab]              = useState(null);
-
-  // Notification panel
   const [showNotifPanel, setShowNotifPanel]       = useState(false);
   const [notifications,  setNotifications]        = useState([]);
   const [readNotifIds,   setReadNotifIds]         = useState(() => {
@@ -310,12 +299,10 @@ export default function App() {
     catch { return new Set(); }
   });
 
-  // Per-sync progress for admin panel progress bars (0-100)
   const [routesSyncProgress, setRoutesSyncProgress] = useState(0);
   const [chartsSyncProgress, setChartsSyncProgress] = useState(0);
   const [portsSyncProgress,  setPortsSyncProgress]  = useState(0);
 
-  // ✅ SEPARATE loading states — each sync button has its OWN spinner
   const [routesLoading, setRoutesLoading] = useState(false);
   const [chartsLoading, setChartsLoading] = useState(false);
   const [portsLoading, setPortsLoading]   = useState(false);
@@ -325,62 +312,37 @@ export default function App() {
   const isAdmin = user?.email === ADMIN_EMAIL;
   const notify  = (msg, type = 'success') => setNotif({ msg, type, key: Date.now() });
 
-  // ← CHANGED: two fixes in applyPortData
-  // Fix 1 — data from Firebase/IDB/fetchPortsFromSheet is already normalised
-  //   (has id, name, lat, lon directly). Running normalizePortRow on it calls
-  //   String(null) → "null" → parseFloat("null") → NaN → port filtered out.
-  //   Detect pre-normalised data and skip the normalizePortRow step entirely.
-  // Fix 2 — old filter `p.lat && p.lon` drops valid ports at lat=0 / lon=0
-  //   and also drops ports with null coords from PortSearch unnecessarily.
-  //   Route planner already handles missing coords gracefully (no waypoint placed).
   const applyPortData = (d3) => {
     if (!Array.isArray(d3) || d3.length === 0) return;
-
     let normalized;
     const isPreNormalized = d3[0] && typeof d3[0].id === 'string' && typeof d3[0].name === 'string';
     if (isPreNormalized) {
-      // Data from fetchPortsFromSheet / Firebase — already has id, name, lat, lon
       normalized = d3.filter(p => p && p.name && p.id);
     } else {
-      // Raw Google Sheet row data — run through normalizePortRow
       normalized = d3.map(normalizePortRow).filter(Boolean);
     }
-
     const seen = new Set();
     const deduped = [];
     normalized.forEach(p => {
       const key = `${p.name?.toLowerCase()}-${p.country?.toLowerCase()}`;
-      // Keep ports without coordinates too (port search still works; route planner
-      // filters its own list when coordinates are needed for waypoint placement)
       if (!seen.has(key)) { seen.add(key); deduped.push(p); }
     });
-
     const seedMap = new Map();
     deduped.forEach(p => seedMap.set(p.id, p));
     setPortsDb([...seedMap.values()]);
   };
 
-  // ─── Load app data ────────────────────────────────────────────────────────
-  // Called on mount AND again after auth is confirmed (fixes race condition where
-  // Firestore rules block unauthenticated reads on first attempt).
-  // Never touches routesLoading/chartsLoading/portsLoading — those are manual sync only.
   const loadAppData = async () => {
     try {
-      // Step 1: IDB-first — instant, works offline, no network call
       const [idbPortsEarly, idbRoutesEarly, idbChartsEarly] = await Promise.all([
         idbGet('ports_d'), idbGet('routes_d'), idbGet('charts_d'),
       ]);
       if (Array.isArray(idbRoutesEarly) && idbRoutesEarly.length > 0) setSheetRoutes(idbRoutesEarly);
       if (Array.isArray(idbChartsEarly) && idbChartsEarly.length > 0) setSheetCharts(idbChartsEarly);
       if (Array.isArray(idbPortsEarly)  && idbPortsEarly.length  > 0) applyPortData(idbPortsEarly);
-
-      // Show sync banner only if cache was empty (user needs to wait for network)
       const allCached = idbRoutesEarly?.length > 0 && idbChartsEarly?.length > 0 && idbPortsEarly?.length > 0;
       if (!allCached) setSyncBanner('syncing');
-
-      // Step 2: Check Firestore for data / newer version
       const meta = await getFirestoreMeta();
-
       if (meta) {
         const [cachedRv, cachedCv, cachedPv] = await Promise.all([
           idbGet('routes_v'), idbGet('charts_v'), idbGet('ports_v'),
@@ -424,22 +386,18 @@ export default function App() {
           })(),
         ]);
       } else {
-        // Step 3: No Firestore meta — fallback to Google Sheets directly
         const [d1, d2, d3] = await Promise.all([fetchRouteSheet(), fetchChartSheet(), fetchPortsFromSheet()]);
         if (Array.isArray(d1) && d1.length > 0) setSheetRoutes(d1);
         if (Array.isArray(d2) && d2.length > 0) setSheetCharts(d2);
         applyPortData(d3);
       }
     } catch (e) { console.warn('loadAppData error:', e); }
-
-    // Dismiss banner: if was showing 'syncing' → flip to 'done' for 4s then hide
     setSyncBanner(prev => {
       if (prev === 'syncing') { setTimeout(() => setSyncBanner(null), 4000); return 'done'; }
       return null;
     });
   };
 
-  // ─── Admin: Sync Routes ONLY ──────────────────────────────────────────────
   const refreshRoutes = async () => {
     setRoutesLoading(true); setRoutesSyncProgress(5);
     notify('📡 Fetching routes from Sheet…', 'info');
@@ -464,7 +422,6 @@ export default function App() {
     setTimeout(() => setRoutesSyncProgress(0), 3000);
   };
 
-  // ─── Admin: Sync Charts ONLY ──────────────────────────────────────────────
   const refreshCharts = async () => {
     setChartsLoading(true); setChartsSyncProgress(5);
     notify('📡 Fetching charts from Sheet…', 'info');
@@ -489,13 +446,11 @@ export default function App() {
     setTimeout(() => setChartsSyncProgress(0), 3000);
   };
 
-  // ─── Admin: Sync Ports ONLY ───────────────────────────────────────────────
   const refreshPorts = async () => {
     setPortsLoading(true); setPortsSyncProgress(2);
     notify('📡 Fetching ports from Sheet…', 'info');
     try {
       const ESTIMATED_TOTAL = 27000;
-      // Pass onProgress callback — fetchPortsFromSheet calls it after each page
       const d = await fetchPortsFromSheet((fetched) => {
         const pct = Math.min(65, Math.round((fetched / ESTIMATED_TOTAL) * 65));
         setPortsSyncProgress(pct);
@@ -518,13 +473,8 @@ export default function App() {
     setTimeout(() => setPortsSyncProgress(0), 3000);
   };
 
-  // Run on mount — gets IDB cache instantly, then tries Firebase
   useEffect(() => { loadAppData(); }, []);
 
-  // ─── Retry after auth confirmed ───────────────────────────────────────────
-  // Fixes: Firestore rules require login → first loadAppData (before auth) fails
-  // silently → user logs in → data still empty. Re-run loadAppData once auth
-  // is confirmed so Firebase now has credentials and can serve the data.
   useEffect(() => {
     if (!authChecked) return;
     if (sheetRoutes.length === 0 || portsDb.length === 0) {
@@ -532,9 +482,6 @@ export default function App() {
     }
   }, [authChecked]);
 
-  // ─── Auto-redirect after login ────────────────────────────────────────────
-  // Fixes: user logs in but stays on login page — now auto-goes to dashboard
-  // (or the page they originally tried to visit before being redirected to login)
   useEffect(() => {
     if (user && tab === 'login') {
       const intended = sessionStorage.getItem('intendedTab');
@@ -543,7 +490,6 @@ export default function App() {
     }
   }, [user]);
 
-  // ─── Auth listener ────────────────────────────────────────────────────────
   useEffect(() => {
     setPersistence(auth, browserLocalPersistence).catch(() => {});
     const unsub = onAuthStateChanged(auth, async u => {
@@ -566,12 +512,10 @@ export default function App() {
     return () => unsub();
   }, []);
 
-  // Show disclaimer modal once per session on app open
   useEffect(() => {
     if (!sessionStorage.getItem('disclaimer_ok')) setShowDisclaimer(true);
   }, []);
 
-  // Online / offline detection
   useEffect(() => {
     const goOnline  = () => setIsOnline(true);
     const goOffline = () => setIsOnline(false);
@@ -580,7 +524,6 @@ export default function App() {
     return () => { window.removeEventListener('online', goOnline); window.removeEventListener('offline', goOffline); };
   }, []);
 
-  // Apply theme class + save to localStorage
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
     localStorage.setItem('nav_theme', theme);
@@ -588,7 +531,6 @@ export default function App() {
 
   const toggleTheme = () => setTheme(t => t === 'dark' ? 'light' : 'dark');
 
-  // Animate auth loading progress bar
   useEffect(() => {
     if (authChecked) { setAuthProgress(100); return; }
     let p = 0;
@@ -600,7 +542,6 @@ export default function App() {
     return () => clearInterval(t);
   }, [authChecked]);
 
-  // Load notifications from Firestore when user is authenticated
   useEffect(() => {
     if (!user) return;
     import('firebase/firestore').then(({ collection, getDocs, query, orderBy }) => {
@@ -630,6 +571,8 @@ export default function App() {
     { k: 'certs',   i: '📜', l: 'Certificates' },
     { k: 'seatime', i: '⏱', l: 'Sea Time' },
     { k: 'notices', i: '📢', l: 'Port Notices' },
+    // ── ADDITION 2: Compass Error tab entry ──────────────────────────────────
+    { k: 'compass', i: '🧭', l: 'Compass Error' },
     { k: 'library', i: '📖', l: 'Maritime Library' },
     ...(user ? [{ k: 'account', i: '👤', l: 'My Account' }] : []),
     ...(isAdmin ? [{ k: 'admin', i: '🛡', l: 'Admin' }] : []),
@@ -638,13 +581,13 @@ export default function App() {
   const handleSearch = (q) => { setSearchQ(q); setTab('routes'); setMenuOpen(false); };
 
   const switchTab = k => {
-    if (!user && k !== 'home' && k !== 'login') {
+    // ── ADDITION 3: 'compass' is a public tool — no login required ───────────
+    if (!user && k !== 'home' && k !== 'login' && k !== 'compass') {
       setTab('login'); setMenuOpen(false);
       sessionStorage.setItem('intendedTab', k); return;
     }
-    setPrevTab(tab);  // ← track previous tab for back button
+    setPrevTab(tab);
     setTab(k); setMenuOpen(false);
-    // Show nav disclaimer banner on FIRST visit to navigation tabs per session
     const navTabs = ['routes', 'planner', 'navmode'];
     if (navTabs.includes(k) && !sessionStorage.getItem(`navdisc_${k}`)) {
       sessionStorage.setItem(`navdisc_${k}`, '1');
@@ -659,7 +602,6 @@ export default function App() {
     <>
       <style>{S}</style>
 
-      {/* ── Offline banner ── */}
       {!isOnline && (
         <div style={{ position:'fixed', bottom:72, left:'50%', transform:'translateX(-50%)', zIndex:9994,
           background:'rgba(4,12,26,0.97)', border:'1px solid rgba(240,165,0,0.4)', borderRadius:12,
@@ -673,7 +615,6 @@ export default function App() {
         </div>
       )}
 
-      {/* ── Welcome splash screen — shown while Firebase checks auth ── */}
       {!authChecked && (
         <div style={{ position: 'fixed', inset: 0, background: 'var(--bg)', zIndex: 99999,
           display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -686,7 +627,6 @@ export default function App() {
             🙏 Welcome to NavisphereX Marine Systems
           </div>
           <div style={{ fontSize: '0.72rem', color: 'var(--text3)' }}>Please wait while the app is loading…</div>
-          {/* Progress bar */}
           <div style={{ width: 220, height: 4, background: 'rgba(255,255,255,0.08)', borderRadius: 4, overflow: 'hidden', marginTop: 6 }}>
             <div style={{ height: '100%', borderRadius: 4, transition: 'width 0.35s ease',
               background: 'linear-gradient(90deg,var(--cyan),var(--blue))',
@@ -723,7 +663,6 @@ export default function App() {
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <div className="sd" />
-            {/* Notification bell */}
             {user && (
               <button onClick={() => { setShowNotifPanel(p => !p); markAllRead(); }}
                 style={{ position:'relative', background:'rgba(255,255,255,0.06)', border:'1px solid var(--border)',
@@ -739,7 +678,6 @@ export default function App() {
                 )}
               </button>
             )}
-            {/* Dark / Light mode toggle */}
             <button onClick={toggleTheme} title={theme==='dark'?'Light Mode':'Dark Mode'}
               style={{ background:'rgba(255,255,255,0.06)', border:'1px solid var(--border)', borderRadius:8,
                 padding:'5px 9px', cursor:'pointer', fontSize:'1rem', color:'var(--text2)' }}>
@@ -783,7 +721,6 @@ export default function App() {
 
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, overflow: isPlannerFull ? 'hidden' : 'auto' }}>
 
-          {/* ── Top progress bar — thin line at top when loading from network ── */}
           {syncBanner && (
             <div style={{ position: 'fixed', top: 60, left: 0, right: 0, height: 3, zIndex: 200, overflow: 'hidden' }}>
               {syncBanner === 'syncing'
@@ -793,7 +730,6 @@ export default function App() {
             </div>
           )}
 
-          {/* ── Floating popup notification — non-blocking, appears only on network load ── */}
           {syncBanner === 'syncing' && (
             <div style={{ position: 'fixed', bottom: 72, left: '50%', transform: 'translateX(-50%)', zIndex: 9996,
               background: 'rgba(4,12,26,0.97)', border: '1px solid rgba(0,180,216,0.45)', borderRadius: 14,
@@ -818,7 +754,7 @@ export default function App() {
               </div>
             </div>
           )}
-          {/* ── Back button — shown on all tabs except home ── */}
+
           {tab !== 'home' && prevTab && (
             <div style={{ padding:'8px 16px 0', flexShrink:0 }}>
               <button className="btn btn-secondary"
@@ -829,7 +765,6 @@ export default function App() {
             </div>
           )}
 
-          {/* ── Notification slide-in panel ── */}
           {showNotifPanel && (
             <div style={{ position:'fixed', top:60, right:0, width:320, maxWidth:'95vw',
               height:'calc(100vh - 60px)', background:'var(--card)',
@@ -882,10 +817,11 @@ export default function App() {
           {tab === 'account' && user && <AccountPage user={user} userProfile={userProfile} setUserProfile={setUserProfile} notify={notify} setTab={switchTab} />}
           {tab === 'library' && <MaritimeLibraryPage setTab={switchTab} />}
           {tab === 'navmode' && <NavModePage notify={notify} sheetRoutes={[...routes, ...sheetRoutes]} portsDb={portsDb} setTab={switchTab} />}
+          {/* ── ADDITION 4: Compass Error page render ─────────────────────── */}
+          {tab === 'compass' && <CompassErrorPage />}
           {tab === 'login'   && <LoginPage notify={notify} onLogin={(u, redirectTo, isNew, userName, userRank) => {
             setUser(u);
             setTab(redirectTo || 'home');
-            // Show welcome popup once per session
             if (!sessionStorage.getItem('welcome_shown')) {
               sessionStorage.setItem('welcome_shown', '1');
               setWelcomePopup({ type: isNew ? 'new' : 'returning', name: userName, rank: userRank });
@@ -912,7 +848,7 @@ export default function App() {
             : <div className="section"><div className="empty"><div className="empty-icon">🔒</div><div className="empty-t">Admin Access Only</div></div></div>
           )}
 
-          {authChecked && !user && tab !== 'home' && tab !== 'login' && (
+          {authChecked && !user && tab !== 'home' && tab !== 'login' && tab !== 'compass' && (
             <div style={{ display: 'flex', flex: 1, alignItems: 'center', justifyContent: 'center', padding: '2rem' }}>
               <div style={{ maxWidth: 380, width: '100%', background: 'var(--card)', border: '1px solid var(--border2)', borderRadius: 16, padding: '2rem', textAlign: 'center' }}>
                 <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>🔐</div>
@@ -930,7 +866,6 @@ export default function App() {
         {tab !== 'planner' && <Footer />}
         {notif && <Notif key={notif.key} msg={notif.msg} type={notif.type} onClose={() => setNotif(null)} />}
 
-        {/* ── Welcome popup — typewriter message on login / signup ── */}
         {welcomePopup && (
           <WelcomePopup
             type={welcomePopup.type}
@@ -940,7 +875,6 @@ export default function App() {
           />
         )}
 
-        {/* ── Disclaimer modal — once per session on app open ── */}
         {showDisclaimer && (
           <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1.5rem' }}>
             <div style={{ background: 'var(--card)', border: '2px solid rgba(240,165,0,0.4)', borderRadius: 18, padding: '2rem', maxWidth: 400, width: '100%', boxShadow: '0 20px 60px rgba(0,0,0,0.7)', textAlign: 'center' }}>
@@ -959,7 +893,6 @@ export default function App() {
           </div>
         )}
 
-        {/* ── Nav disclaimer banner — first visit to Routes / Planner / NavMode ── */}
         {navDiscBanner && (
           <div style={{ position: 'fixed', bottom: 72, left: '50%', transform: 'translateX(-50%)', zIndex: 9995, background: 'rgba(4,12,26,0.97)', border: '1px solid rgba(240,165,0,0.4)', borderRadius: 12, padding: '10px 16px', display: 'flex', alignItems: 'center', gap: 10, boxShadow: '0 6px 24px rgba(0,0,0,0.5)', backdropFilter: 'blur(20px)', maxWidth: '92vw', minWidth: 260 }}>
             <span style={{ fontSize: '1.1rem', flexShrink: 0 }}>⚠️</span>
