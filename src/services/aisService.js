@@ -12,7 +12,7 @@
 
 // ── WS hosts to try in order ──────────────────────────────────────────────
 const WS_HOSTS = [
-  'ws://localhost:4002',
+  'wss://localhost:4002',
 ];
 
 // ── Stale target timeout: remove targets not updated in 10 minutes ─────────
