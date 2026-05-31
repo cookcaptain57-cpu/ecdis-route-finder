@@ -111,7 +111,7 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
   const [fullScreen,setFullScreen]=useState(false);
   const [localAisStatus,setLocalAisStatus]=useState('off');
   const [localAisCount,setLocalAisCount]=useState(0);
-  const [localAisHost,setLocalAisHost]=useState(()=>ls('nav_localAisHost')||'ws://localhost:4002');
+  const [localAisHost,setLocalAisHost]=useState(()=>ls('nav_localAisHost')||'wss://localhost:4002');
   const [localAisAlert,setLocalAisAlert]=useState(null);
 
   // ─── HELPERS ────────────────────────────────────────────────────────────
