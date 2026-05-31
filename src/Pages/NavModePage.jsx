@@ -111,8 +111,9 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
   const [fullScreen,setFullScreen]=useState(false);
   const [localAisStatus,setLocalAisStatus]=useState('off');
   const [localAisCount,setLocalAisCount]=useState(0);
-  const [localAisHost,setLocalAisHost]=useState(()=>ls('nav_localAisHost')||'wss://localhost:4002');
+  const [localAisHost,setLocalAisHost]=useState(()=>ls('nav_localAisHost')||'ws://localhost:4002');
   const [localAisAlert,setLocalAisAlert]=useState(null);
+  const [zoneOverlays,setZoneOverlays]=useState(()=>{try{return JSON.parse(localStorage.getItem('nav_zoneOverlays')||'{}');}catch{return{};}});
 
   // ─── HELPERS ────────────────────────────────────────────────────────────
   const safeInvalidate=useCallback(()=>{
@@ -168,6 +169,14 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
         pane:'indonesiaPane',
         style:ft=>{
           const t=ft.properties?.type||ft.properties?.featureType||'';
+          // Filter out bad long-range lines (edge chain artifacts > ~1.5 degrees span)
+          const g=ft.geometry;
+          if(g&&g.type==='LineString'&&g.coordinates?.length>=2){
+            const lons=g.coordinates.map(c=>c[0]),lats=g.coordinates.map(c=>c[1]);
+            const dLon=Math.max(...lons)-Math.min(...lons);
+            const dLat=Math.max(...lats)-Math.min(...lats);
+            if(dLon>3||dLat>3) return{opacity:0,weight:0,color:'transparent'};
+          }
           if(t==='coastline')     return{color:'#000000',weight:2,opacity:0.9};
           if(t==='depth_contour') return{color:'#0050AA',weight:1,opacity:0.7,dashArray:'4 3'};
           if(t==='depth_area')    return{color:'#0050AA',weight:0.5,opacity:0.3,fillColor:'#AADDFF',fillOpacity:0.15};
@@ -342,7 +351,7 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
       try{L.tileLayer.wms('https://wms.geonorge.no/skwms1/wms.dybdedata2',{layers:'dybdedata2',format:'image/png',transparent:true,version:'1.3.0',opacity:0.65,zIndex:7,attribution:'© Kartverket'}).addTo(m);}catch(e){console.warn('[Kartverket]',e);}
     }
     if(ds.has('australia')){
-      try{L.tileLayer.wms('https://marine.ga.gov.au/geoserver/marine/wms',{layers:'marine:bathymetry',format:'image/png',transparent:true,version:'1.3.0',opacity:0.6,zIndex:7,attribution:'© Geoscience Australia'}).addTo(m);}catch(e){console.warn('[GA]',e);}
+      try{L.tileLayer.wms('http://marine.ga.gov.au/geoserver/marine/wms',{layers:'marine:bathymetry',format:'image/png',transparent:true,version:'1.3.0',opacity:0.6,zIndex:7,attribution:'© Geoscience Australia'}).addTo(m);}catch(e){console.warn('[GA]',e);}
     }
     if(ds.has('canada')){
       try{L.tileLayer.wms('https://nonna-geoserver.data.chs-shc.ca/geoserver/wms',{layers:'nonna:NONNA_100',format:'image/png',transparent:true,version:'1.3.0',opacity:0.65,zIndex:7,attribution:'© CHS/NRCan'}).addTo(m);}catch(e){console.warn('[CHS]',e);}
@@ -400,6 +409,7 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
   useEffect(()=>{localStorage.setItem('nav_localAisHost',localAisHost);},[localAisHost]);
   useEffect(()=>{if(activeRoute) localStorage.setItem('nav_activeRoute',JSON.stringify(activeRoute));else localStorage.removeItem('nav_activeRoute');},[activeRoute]);
   useEffect(()=>{localStorage.setItem('nav_chartOverlays',JSON.stringify(chartOverlays));},[chartOverlays]);
+  useEffect(()=>{localStorage.setItem('nav_zoneOverlays',JSON.stringify(zoneOverlays));},[zoneOverlays]);
 
   // Route render
   useEffect(()=>{
@@ -496,6 +506,52 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
     else{const r=setInterval(()=>{if(window.L){clearInterval(r);load();}},50);setTimeout(()=>clearInterval(r),5000);}
     return()=>{invalidateTimers.current.forEach(clearTimeout);if(leafRef.current){leafRef.current.remove();leafRef.current=null;}};
   },[]);
+
+  // ── Zone overlay toggle ──────────────────────────────────────────────────
+  const toggleZoneOverlay=k=>setZoneOverlays(o=>({...o,[k]:!o[k]}));
+
+  // ── Zone overlay render on map ────────────────────────────────────────────
+  useEffect(()=>{
+    if(!mapReady||!leafRef.current||!window.L) return;
+    const L=window.L,m=leafRef.current,lrs=layersRef.current;
+    Object.values(lrs.zones||{}).forEach(lg=>{try{m.removeLayer(lg);}catch{}});
+    lrs.zones={};
+    const zoneData={
+      eca:         {zones:ECA_ZONES,          color:'#FF6B35',fill:0.12},
+      seca:        {zones:SECA_ZONES,         color:'#FFB347',fill:0.12},
+      marpol:      {zones:MARPOL_ZONES,       color:'#9B59B6',fill:0.12},
+      pssa:        {zones:PSSA_ZONES,         color:'#00C896',fill:0.12},
+      nox:         {zones:NOX_ZONES,          color:'#F39C12',fill:0.12},
+      loadline:    {zones:LOAD_LINE_ZONES,    color:'#1ABC9C',fill:0.10},
+      restrictions:{zones:MARITIME_RESTRICTIONS,color:'#FF2020',fill:0.18,useZoneColor:true},
+      msc_nog:     {zones:CHINA_MSC_NO_G,     color:'#FF00FF',fill:0.22},
+      eez:         {zones:EEZ_ZONES,          color:'#5DADE2',fill:0.06,dashed:true},
+      piracy:      {zones:[
+        {name:'Indian Ocean HRA',    coords:[[0,40],[0,78],[25,78],[25,40]],   shortDesc:'IMB High Risk Area'},
+        {name:'Gulf of Guinea',      coords:[[-5,0],[5,0],[5,10],[-5,10]],     shortDesc:'Piracy HRA'},
+        {name:'Malacca Strait',      coords:[[1,98],[6,98],[6,106],[1,106]],   shortDesc:'Piracy risk area'},
+        {name:'Somali Coast',        coords:[[-2,40],[12,40],[12,55],[-2,55]], shortDesc:'Piracy HRA'},
+      ],color:'#E74C3C',fill:0.16},
+    };
+    if(!m.getPane('zonePane')){const zp=m.createPane('zonePane');zp.style.zIndex='420';}
+    Object.entries(zoneData).forEach(([k,cfg])=>{
+      if(!zoneOverlays[k]) return;
+      const lg=L.layerGroup();
+      (cfg.zones||[]).forEach(z=>{
+        const zColor=(cfg.useZoneColor&&z.color)?z.color:cfg.color;
+        const coords=(z.coords||[]).map(p=>Array.isArray(p)?p:[p[0],p[1]]);
+        if(coords.length<3) return;
+        const popup=`<div style="font-size:12px;min-width:160px"><b style="color:${zColor}">${z.name||k}</b><br/><small>${z.shortDesc||''}</small>${z.regulation?`<br/><small>📋 ${z.regulation}</small>`:''}</div>`;
+        L.polygon(coords,{color:zColor,fillColor:zColor,fillOpacity:cfg.fill,weight:cfg.useZoneColor?2:1.5,opacity:0.85,dashArray:cfg.dashed?'8 5':null,pane:'zonePane'}).bindPopup(popup,{maxWidth:260}).addTo(lg);
+        try{
+          const center=L.polygon(coords).getBounds().getCenter();
+          L.marker([center.lat,center.lng],{icon:L.divIcon({html:`<div style="background:rgba(0,0,0,0.75);color:${zColor};border:1px solid ${zColor}55;border-radius:3px;padding:2px 5px;font-size:9px;font-weight:700;white-space:nowrap;font-family:monospace;pointer-events:none;">${z.name||k}</div>`,className:'',iconSize:[0,0],iconAnchor:[0,0]}),interactive:false,pane:'zonePane'}).addTo(lg);
+        }catch{}
+      });
+      lg.addTo(m);
+      lrs.zones[k]=lg;
+    });
+  },[zoneOverlays,mapReady]);
 
   // Derived
   const filteredSaved=savedRoutes.filter(r=>!savedSearch.trim()||(r.name||'').toLowerCase().includes(savedSearch.toLowerCase())).slice(0,100);
