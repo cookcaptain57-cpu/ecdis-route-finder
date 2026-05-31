@@ -109,6 +109,7 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
   const [offTrackAlarm,setOffTrackAlarm]=useState(false);
   const [shallowAlarm,setShallowAlarm]=useState(false);
   const [fullScreen,setFullScreen]=useState(false);
+  const [mapZoom,setMapZoom]=useState(4);
   const [localAisStatus,setLocalAisStatus]=useState('off');
   const [localAisCount,setLocalAisCount]=useState(0);
   const [localAisHost,setLocalAisHost]=useState(()=>ls('nav_localAisHost')||'ws://localhost:4002');
@@ -165,28 +166,17 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
       const geojson=await res.json();
       const L=window.L,m=leafRef.current;
       if(!m.getPane('indonesiaPane')){const cp=m.createPane('indonesiaPane');cp.style.zIndex='445';cp.style.pointerEvents='none';}
-      const layer=L.geoJSON(geojson,{
+      // Filter to only depth features for performance
+      const depthOnly={...geojson,features:(geojson.features||[]).filter(f=>['depth_area','depth_contour','sounding'].includes(f.properties?.type||f.properties?.featureType||''))};
+      const layer=L.geoJSON(depthOnly,{
         pane:'indonesiaPane',
         style:ft=>{
           const t=ft.properties?.type||ft.properties?.featureType||'';
-          // Filter out bad long-range lines (edge chain artifacts > ~1.5 degrees span)
-          const g=ft.geometry;
-          if(g&&g.type==='LineString'&&g.coordinates?.length>=2){
-            const lons=g.coordinates.map(c=>c[0]),lats=g.coordinates.map(c=>c[1]);
-            const dLon=Math.max(...lons)-Math.min(...lons);
-            const dLat=Math.max(...lats)-Math.min(...lats);
-            if(dLon>3||dLat>3) return{opacity:0,weight:0,color:'transparent'};
-          }
-          if(t==='coastline')     return{color:'#000000',weight:2,opacity:0.9};
-          if(t==='depth_contour') return{color:'#0050AA',weight:1,opacity:0.7,dashArray:'4 3'};
-          if(t==='depth_area')    return{color:'#0050AA',weight:0.5,opacity:0.3,fillColor:'#AADDFF',fillOpacity:0.15};
-          if(t==='land')          return{color:'#888800',weight:1,fillColor:'#FFFFCC',fillOpacity:0.5};
-          if(t==='nav_line')      return{color:'#CC00CC',weight:1.5,dashArray:'8 4'};
-          if(t==='traffic_sep')   return{color:'#CC00CC',weight:1,opacity:0.6,fillColor:'#CC00CC',fillOpacity:0.05};
-          if(t==='restricted')    return{color:'#FF0000',weight:2};
-          if(t==='hazard')        return{color:'#FF4500',weight:1.5};
-          if(t==='anchorage')     return{color:'#0080FF',weight:1,dashArray:'6 4',fillColor:'#0080FF',fillOpacity:0.06};
-          return{color:'#0050AA',weight:1,opacity:0.5};
+          // Only show depth areas (shadow) and depth contours - hide everything else
+          if(t==='depth_area')    return{color:'#0050AA',weight:0,fillColor:'#AADDFF',fillOpacity:0.18};
+          if(t==='depth_contour') return{color:'#0050AA',weight:0.8,opacity:0.6,dashArray:'3 3'};
+          // Hide ALL other feature types - no lines, no land, no traffic
+          return{opacity:0,weight:0,color:'transparent',fillOpacity:0};
         },
         pointToLayer:(ft,ll)=>{
           const p=ft.properties;
@@ -348,10 +338,10 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
       try{L.tileLayer.wms('https://data.linz.govt.nz/services;key=insert-linz-key/wms',{layers:'layer-50448',format:'image/png',transparent:true,version:'1.1.1',opacity:0.7,zIndex:7,attribution:'© LINZ'}).addTo(m);}catch(e){console.warn('[LINZ]',e);}
     }
     if(ds.has('norway')){
-      try{L.tileLayer.wms('https://wms.geonorge.no/skwms1/wms.dybdedata2',{layers:'dybdedata2',format:'image/png',transparent:true,version:'1.3.0',opacity:0.65,zIndex:7,attribution:'© Kartverket'}).addTo(m);}catch(e){console.warn('[Kartverket]',e);}
+      try{L.tileLayer.wms('https://wms.geonorge.no/skwms1/wms.dybdedata2',{layers:'dybdedata2,dybdedata2_25m',format:'image/png',transparent:true,version:'1.3.0',opacity:0.65,zIndex:7,attribution:'© Kartverket'}).addTo(m);}catch(e){console.warn('[Kartverket]',e);}
     }
     if(ds.has('australia')){
-      try{L.tileLayer.wms('http://marine.ga.gov.au/geoserver/marine/wms',{layers:'marine:bathymetry',format:'image/png',transparent:true,version:'1.3.0',opacity:0.6,zIndex:7,attribution:'© Geoscience Australia'}).addTo(m);}catch(e){console.warn('[GA]',e);}
+      try{L.tileLayer.wms('https://www.ga.gov.au/geoserver/marine/wms',{layers:'marine:bathymetry',format:'image/png',transparent:true,version:'1.3.0',opacity:0.6,zIndex:7,attribution:'© Geoscience Australia'}).addTo(m);}catch(e){console.warn('[GA]',e);}
     }
     if(ds.has('canada')){
       try{L.tileLayer.wms('https://nonna-geoserver.data.chs-shc.ca/geoserver/wms',{layers:'nonna:NONNA_100',format:'image/png',transparent:true,version:'1.3.0',opacity:0.65,zIndex:7,attribution:'© CHS/NRCan'}).addTo(m);}catch(e){console.warn('[CHS]',e);}
@@ -360,7 +350,7 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
       try{L.tileLayer.wms('https://julkinen.traficom.fi/inspirepalvelu/avoin/wms',{layers:'syvyyskayra',format:'image/png',transparent:true,version:'1.3.0',opacity:0.7,zIndex:7,attribution:'© Traficom'}).addTo(m);}catch(e){console.warn('[Traficom]',e);}
     }
     if(ds.has('germany')){
-      try{L.tileLayer.wms('https://gdi.bsh.de/mapservice_gs/NAUTHIS/ows',{layers:'Tiefenlinien',format:'image/png',transparent:true,version:'1.3.0',opacity:0.65,zIndex:7,attribution:'© BSH'}).addTo(m);}catch(e){console.warn('[BSH]',e);}
+      try{L.tileLayer.wms('https://gdi.bsh.de/mapservice_gs/NAUTHIS/ows',{layers:'Tiefenlinien,Tiefenzonen',format:'image/png',transparent:true,version:'1.3.0',opacity:0.65,zIndex:7,attribution:'© BSH'}).addTo(m);}catch(e){console.warn('[BSH]',e);}
     }
     if(ds.has('ireland')){
       try{L.tileLayer.wms('https://atlas.marine.ie/arcgis/services/Bathymetry/MapServer/WMSServer',{layers:'0',format:'image/png',transparent:true,version:'1.3.0',opacity:0.6,zIndex:7,attribution:'© INFOMAR'}).addTo(m);}catch(e){console.warn('[INFOMAR]',e);}
@@ -491,6 +481,8 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
       const L=window.L,opts={center:[20,70],zoom:4,worldCopyJump:true};
       if(typeof L.Map.prototype.setBearing==='function'){try{opts.rotate=true;opts.rotateControl=false;}catch{}}
       leafRef.current=L.map(mapRef.current,opts);
+      L.control.scale({position:'bottomleft',imperial:true,metric:true,maxWidth:120}).addTo(leafRef.current);
+      leafRef.current.on('zoomend',()=>setMapZoom(leafRef.current.getZoom()));
       baseTileRef.current=L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{subdomains:'abcd',attribution:'© CARTO'}).addTo(leafRef.current);
       seamarkRef.current=L.tileLayer('https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png',{opacity:0.55,maxZoom:18,attribution:'© OpenSeaMap'}).addTo(leafRef.current);
       leafRef.current.on('click',e=>{
@@ -627,8 +619,32 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
       {/* MAP */}
       <div ref={mapRef} style={{flex:1,minHeight:0}}/>
 
+      {/* Zoom level badge */}
+      <div style={{position:'absolute',bottom:36,left:8,zIndex:500,pointerEvents:'none'}}>
+        <div style={{background:'rgba(4,12,26,0.85)',border:'1px solid rgba(0,212,255,0.25)',borderRadius:4,padding:'2px 7px',color:'#00D4FF',fontFamily:'monospace',fontSize:'0.6rem',fontWeight:700}}>Z{mapZoom}</div>
+      </div>
+
+      {/* Fullscreen SOG/COG/ROT overlay */}
+      {fullScreen&&livePos&&(
+        <div style={{position:'absolute',top:56,left:'50%',transform:'translateX(-50%)',zIndex:601,display:'flex',alignItems:'center',gap:14,background:'rgba(2,8,16,0.88)',border:'1px solid rgba(0,212,255,0.35)',borderRadius:14,padding:'8px 18px',backdropFilter:'blur(12px)',pointerEvents:'none'}}>
+          <div style={{textAlign:'center'}}><div style={{color:'#5A7A90',fontSize:'0.58rem',letterSpacing:1}}>SOG</div><div style={{color:'#00FF88',fontFamily:'monospace',fontSize:'1.7rem',fontWeight:900,lineHeight:1}}>{livePos.sog.toFixed(1)}</div><div style={{color:'#5A7A90',fontSize:'0.52rem'}}>knots</div></div>
+          <div style={{width:1,height:50,background:'rgba(0,212,255,0.2)'}}/>
+          <div style={{textAlign:'center'}}><div style={{color:'#5A7A90',fontSize:'0.58rem',letterSpacing:1}}>COG</div><div style={{color:'#00D4FF',fontFamily:'monospace',fontSize:'1.7rem',fontWeight:900,lineHeight:1}}>{livePos.cog.toFixed(0)}°</div><div style={{color:'#5A7A90',fontSize:'0.52rem'}}>true</div></div>
+          <div style={{width:1,height:50,background:'rgba(0,212,255,0.2)'}}/>
+          <div style={{textAlign:'center'}}>
+            <div style={{color:'#5A7A90',fontSize:'0.58rem',letterSpacing:1,marginBottom:2}}>ROT</div>
+            <svg width="58" height="30" viewBox="0 0 58 30" style={{display:'block',margin:'0 auto'}}>
+              <path d="M 5,29 A 24,24 0 0,1 29,5" stroke="#FF2020" strokeWidth="4" fill="none" strokeLinecap="round" opacity="0.4"/>
+              <path d="M 29,5 A 24,24 0 0,1 53,29" stroke="#00FF88" strokeWidth="4" fill="none" strokeLinecap="round" opacity="0.4"/>
+              {(()=>{const rot=Math.max(-30,Math.min(30,rotValue||0));const ang=(rot/30)*80;const rad=(ang-90)*Math.PI/180;const x=29+23*Math.cos(rad);const y=29+23*Math.sin(rad);const col=rot<-2?'#FF2020':rot>2?'#00FF88':'#FFD700';return(<><line x1="29" y1="29" x2={x.toFixed(1)} y2={y.toFixed(1)} stroke={col} strokeWidth="2.5" strokeLinecap="round"/><circle cx="29" cy="29" r="3" fill="#00D4FF"/></>);})()}
+            </svg>
+            <div style={{color:Math.abs(rotValue||0)>10?'#FF2020':Math.abs(rotValue||0)>3?'#FFD700':'#00FF88',fontFamily:'monospace',fontSize:'0.68rem',fontWeight:700}}>{(rotValue||0)>0?'⇒':'⇐'} {Math.abs(rotValue||0).toFixed(1)}°/m</div>
+          </div>
+        </div>
+      )}
+
       {/* HUD */}
-      <div style={{position:'absolute',left:hudPos.x,top:hudPos.y,zIndex:600,background:S.bg,border:`1px solid ${gpsOn?S.bd:'rgba(42,64,85,0.4)'}`,borderRadius:10,minWidth:182,touchAction:'none',boxShadow:'0 4px 20px rgba(0,0,0,0.5)'}} onTouchStart={onTS} onTouchMove={onTM} onTouchEnd={onTE}>
+      <div style={{position:'absolute',left:hudPos.x,top:hudPos.y,zIndex:600,background:S.bg,border:`1px solid ${gpsOn?S.bd:'rgba(42,64,85,0.4)'}`,borderRadius:10,minWidth:182,touchAction:'none',boxShadow:'0 4px 20px rgba(0,0,0,0.5)'}} onTouchStart={onTS} onTouchMove={onTM} onTouchEnd={onTE} onMouseDown={e=>{if(e.button!==0)return;hudDragRef.current={dx:e.clientX-hudPos.x,dy:e.clientY-hudPos.y};const mm=ev=>{if(!hudDragRef.current)return;setHudPos({x:Math.max(0,Math.min(window.innerWidth-185,ev.clientX-hudDragRef.current.dx)),y:Math.max(50,Math.min(window.innerHeight-200,ev.clientY-hudDragRef.current.dy))});};const mu=()=>{hudDragRef.current=null;window.removeEventListener('mousemove',mm);window.removeEventListener('mouseup',mu);};window.addEventListener('mousemove',mm);window.addEventListener('mouseup',mu);}}>
         <div style={{display:'flex',alignItems:'center',padding:'6px 10px',gap:5,cursor:'grab',borderBottom:'1px solid rgba(0,212,255,0.12)'}}>
           <span style={{color:S.dm,fontSize:'0.7rem',flex:1}}>⠸ {shipProfile?.name||'SHIP DATA'}</span>
           <button onClick={()=>setTogCollapsed(v=>!v)} style={{background:'transparent',border:`1px solid ${S.vd}`,color:S.dm,borderRadius:4,padding:'1px 5px',fontSize:'0.62rem',cursor:'pointer'}}>{togCollapsed?'▼':'▲'} CTRL</button>
@@ -765,7 +781,7 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
             <div style={{color:S.dm,fontSize:'0.54rem',borderTop:'1px solid rgba(0,212,255,0.08)',paddingTop:4}}>Chart color: <span style={{color:colors.chart||'#FF2020'}}>■</span> — change in 🎨 Settings → Colors</div>
           </div>)}
 
-          {activePanel==='enc'&&(<div style={{display:'flex',flexDirection:'column',gap:5}}>
+          {activePanel==='enc'&&(<div style={{display:'flex',flexDirection:'column',gap:5,maxHeight:'65vh',overflowY:'auto',overflowX:'hidden',paddingRight:2}}>
             <div style={{color:S.dm,fontSize:S.lb,letterSpacing:0.5,marginBottom:2}}>ENC DEPTH LAYERS</div>
             <div style={{display:'flex',flexDirection:'column',gap:2}}>
               {DEPTH_SOURCES.map(d=>{const on=depthSources.has(d.id);return(<button key={d.id} onClick={()=>toggleDepth(d.id)} title={d.desc} style={{display:'flex',alignItems:'center',gap:5,background:on?'rgba(0,212,255,0.15)':'transparent',border:`1px solid ${on?S.cy:S.vd}`,color:on?S.cy:S.dm,borderRadius:5,padding:'4px 7px',fontSize:'0.65rem',cursor:'pointer',textAlign:'left',width:'100%'}}>
@@ -862,6 +878,7 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
         </div>
       )}
 
+      
       {/* SETTINGS */}
       {showMenu&&(<div style={{position:'absolute',inset:0,zIndex:800,background:'rgba(0,0,0,0.6)'}} onClick={()=>setShowMenu(false)}>
         <div style={{position:'absolute',bottom:0,left:0,right:0,background:'#030A15',borderTop:`1px solid ${S.bd}`,borderRadius:'14px 14px 0 0',padding:'14px 16px',maxHeight:'78vh',overflowY:'auto'}} onClick={e=>e.stopPropagation()}>
@@ -921,4 +938,4 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
 
     </div>
   );
-}
+      }
