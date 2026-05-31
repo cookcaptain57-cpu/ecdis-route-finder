@@ -11,7 +11,14 @@
     <meta name="description" content="ECDIS Route Finder - Maritime Navigation System for professional navigators and ship officers" />
     <title>ECDIS Route Finder</title>
     <style>
-      body { margin: 0; background: #040C1A; }
+  body { margin: 0; background: #040C1A; }
+  
+  /* Add padding for Android status bar when in WebView app */
+  @media all {
+    :root {
+      --status-bar-height: env(safe-area-inset-top, 0px);
+    }
+  }
     </style>
   </head>
   <body>
