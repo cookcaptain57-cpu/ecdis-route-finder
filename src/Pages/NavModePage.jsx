@@ -92,6 +92,7 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
   const [savedCharts,setSavedCharts]=useState(()=>{try{return JSON.parse(ls('nav_savedCharts')||'[]');}catch{return[];}});
   const [chartSearch,setChartSearch]=useState(''), [chartDbSearch,setChartDbSearch]=useState('');
   const [savedSearch,setSavedSearch]=useState(''), [dbSearch,setDbSearch]=useState('');
+  const [dbRouteSearch,setDbRouteSearch]=useState(''), [dbChartSearch,setDbChartSearch]=useState('');
   const [chartOverlays,setChartOverlays]=useState(()=>{try{return JSON.parse(ls('nav_chartOverlays')||'[]');}catch{return[];}});
   const [showMenu,setShowMenu]=useState(false), [menuCat,setMenuCat]=useState('colors');
   const [aisRange,setAisRange]=useState(()=>Number(ls('nav_aisRange')||0));
