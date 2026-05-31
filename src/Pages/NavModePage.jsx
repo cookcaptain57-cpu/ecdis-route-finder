@@ -2,33 +2,33 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import ETACalculator from "../components/ETACalculator";
 import aisService from "../services/aisService";
+import {
+  PSSA_ZONES, NOX_ZONES, LOAD_LINE_ZONES,
+  MARITIME_RESTRICTIONS, CHINA_MSC_NO_G, EEZ_ZONES,
+  ECA_ZONES, SECA_ZONES, MARPOL_ZONES,
+  DEPTH_SOURCES, AIS_SOURCES,
+} from "../constants";
 
 const VESSEL_API_KEY = '7da0c40c639a5f2a7532e75d9cdad6156b65f61932d778c1ce8580f9786e4506';
 const AISSTREAM_KEY  = 'e66d76190c2bf6c206264e3cb894308b853d73df';
 const DEFAULT_COLORS = { route:'#E74C3C', vector:'#00D4FF', ship:'#00D4FF', track:'#00FF88', xtd:'#FFB300', chart:'#FF2020' };
-const INDONESIA_ENC_URL = 'https://raw.githubusercontent.com/cookcaptain57-cpu/ecdis-route-finder/main/public/china%20enc%20EA200004.geojson';
+const INDONESIA_ENC_URL = 'https://raw.githubusercontent.com/cookcaptain57-cpu/ecdis-route-finder/main/public/EA200004_Indonesia_ENC.geojson';
 
-const AIS_SOURCES = {
-  safepilot:{ label:'SafePilot P3', color:'#00FF88', hosts:['ws://192.168.1.1:4002','ws://10.0.0.1:4002','ws://10.0.1.1:4002','ws://192.168.1.1:4001'] },
-  bridge:   { label:'Local Bridge',  color:'#00D4FF', hosts:['ws://localhost:4002','ws://127.0.0.1:4002'] },
-  internet: { label:'Internet AIS',  color:'#FFD700', hosts:[] },
-  off:      { label:'Off',           color:'#4A6080', hosts:[] },
-};
+// AIS_SOURCES imported from constants
 
-const DEPTH_SOURCES = [
-  { id:'usa',        label:'USA',        emoji:'🇺🇸', desc:'NOAA ENC — S-57 chart detail' },
-  { id:'europe',     label:'Europe',     emoji:'🇪🇺', desc:'EMODnet — high-res coastal' },
-  { id:'global',     label:'Global',     emoji:'🌍', desc:'GEBCO — worldwide coverage' },
-  { id:'soundings',  label:'Soundings',  emoji:'📊', desc:'ESRI depth numbers (zoom 9+)' },
-  { id:'osm_depth',  label:'OSM Depths', emoji:'🌊', desc:'OpenSeaMap — crowdsourced shallow depths' },
-  { id:'nz',         label:'NZ',         emoji:'🇳🇿', desc:'LINZ — New Zealand hydrographic (API key required)' },
-  { id:'norway',     label:'Norway',     emoji:'🇳🇴', desc:'Kartverket — Norwegian coastal contours' },
-  { id:'australia',  label:'Australia',  emoji:'🇦🇺', desc:'Geoscience Australia bathymetry' },
-  { id:'canada',     label:'Canada',     emoji:'🇨🇦', desc:'CHS NONNA — Canadian hydrographic' },
-  { id:'finland',    label:'Finland',    emoji:'🇫🇮', desc:'Traficom — Finnish hydrographic (CC BY 4.4)' },
-  { id:'germany',    label:'Germany',    emoji:'🇩🇪', desc:'BSH — North Sea & Baltic depth contours' },
-  { id:'ireland',    label:'Ireland',    emoji:'🇮🇪', desc:'INFOMAR — Irish seabed mapping' },
-  { id:'indonesia',  label:'Indonesia',  emoji:'🇮🇩', desc:'Indonesia ENC — Sumatra/Java/Kalimantan (EA200004)' },
+// DEPTH_SOURCES imported from constants
+
+const ZONE_OVERLAY_CFG = [
+  { k:'eca',          label:'ECA',          color:'#FF6B35', desc:'Emission Control Areas (SOx)' },
+  { k:'seca',         label:'SECA',         color:'#FFB347', desc:'Sulphur ECA 0.1%' },
+  { k:'marpol',       label:'MARPOL',       color:'#9B59B6', desc:'MARPOL Special Areas' },
+  { k:'pssa',         label:'PSSA',         color:'#00C896', desc:'Particularly Sensitive Sea Areas' },
+  { k:'nox',          label:'NOx',          color:'#F39C12', desc:'NOx Tier III Control Areas' },
+  { k:'loadline',     label:'Load Line',    color:'#1ABC9C', desc:'ICLL Load Line Zones' },
+  { k:'restrictions', label:'Restrictions', color:'#FF2020', desc:'War Risk / Sanctions Zones' },
+  { k:'msc_nog',      label:'MSC No-G',     color:'#FF00FF', desc:'MSC Prohibited Areas' },
+  { k:'eez',          label:'EEZ',          color:'#5DADE2', desc:'Exclusive Economic Zones' },
+  { k:'piracy',       label:'Piracy HRA',   color:'#E74C3C', desc:'Piracy High Risk Areas' },
 ];
 
 const toDMS = (d, isLat) => {
@@ -167,10 +167,16 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
         pane:'indonesiaPane',
         style:ft=>{
           const t=ft.properties?.type||ft.properties?.featureType||'';
-          if(t==='coastline') return{color:'#FFD700',weight:1.5,opacity:0.75};
-          if(t==='depth_contour'||t==='line') return{color:'#00BFFF',weight:1,opacity:0.55,dashArray:'4 3'};
-          if(t==='depth_area'||t==='area') return{color:'#0080FF',weight:1,opacity:0.35,fillColor:'#004080',fillOpacity:0.1};
-          return{color:'#00BFFF',weight:1,opacity:0.5};
+          if(t==='coastline')     return{color:'#000000',weight:2,opacity:0.9};
+          if(t==='depth_contour') return{color:'#0050AA',weight:1,opacity:0.7,dashArray:'4 3'};
+          if(t==='depth_area')    return{color:'#0050AA',weight:0.5,opacity:0.3,fillColor:'#AADDFF',fillOpacity:0.15};
+          if(t==='land')          return{color:'#888800',weight:1,fillColor:'#FFFFCC',fillOpacity:0.5};
+          if(t==='nav_line')      return{color:'#CC00CC',weight:1.5,dashArray:'8 4'};
+          if(t==='traffic_sep')   return{color:'#CC00CC',weight:1,opacity:0.6,fillColor:'#CC00CC',fillOpacity:0.05};
+          if(t==='restricted')    return{color:'#FF0000',weight:2};
+          if(t==='hazard')        return{color:'#FF4500',weight:1.5};
+          if(t==='anchorage')     return{color:'#0080FF',weight:1,dashArray:'6 4',fillColor:'#0080FF',fillOpacity:0.06};
+          return{color:'#0050AA',weight:1,opacity:0.5};
         },
         pointToLayer:(ft,ll)=>{
           const p=ft.properties;
@@ -352,7 +358,7 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
     if(ds.has('osm_depth')){
       try{L.tileLayer('https://tiles.openseamap.org/depth/{z}/{x}/{y}.png',{maxZoom:18,opacity:0.8,zIndex:8,attribution:'© OpenSeaMap'}).addTo(m);}catch(e){console.warn('[OSM depth]',e);}
     }
-    if(ds.has('indonesia')){ loadIndonesiaEnc(); } else { removeIndonesiaEnc(); }
+    if(ds.has('china')||ds.has('indonesia')){ loadIndonesiaEnc(); } else { removeIndonesiaEnc(); }
     seamarkRef.current=L.tileLayer('https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png',{opacity:hasAny?0.9:0.55,maxZoom:18,zIndex:10,attribution:'© OpenSeaMap'}).addTo(m);
   },[depthSources,mapMode,mapReady]);
 
