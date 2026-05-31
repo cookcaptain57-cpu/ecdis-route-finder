@@ -2,9 +2,46 @@
 // src/pages/CertificateTrackerPage.jsx
 import { useState, useEffect } from "react";
 import { db } from "../firebase";
-import { auth } from "../firebase";
-import { doc, getDoc, setDoc } from "firebase/firestore";
-import { GoogleAuthProvider, signInWithPopup } from "firebase/auth";
+const connectDrive = async () => {
+  setConnectingDrive(true);
+  try {
+    // Load Google Identity Services script dynamically if not loaded
+    await new Promise((resolve, reject) => {
+      if (window.google?.accounts?.oauth2) { resolve(); return; }
+      const script = document.createElement('script');
+      script.src = 'https://accounts.google.com/gsi/client';
+      script.onload = resolve;
+      script.onerror = () => reject(new Error('Failed to load Google sign-in'));
+      document.head.appendChild(script);
+    });
+
+    // Request Drive access token directly via Google OAuth
+    const token = await new Promise((resolve, reject) => {
+      const client = window.google.accounts.oauth2.initTokenClient({
+        // Your NavisphereX Web Client ID from Google Cloud Console
+        client_id: '636056685819-b0mv1o4ftbdfirtan4svpoaa83ns49c6.apps.googleusercontent.com',
+        scope: DRIVE_SCOPE,
+        hint: user?.email || '',
+        callback: (response) => {
+          if (response.error) reject(new Error(response.error_description || response.error));
+          else resolve(response.access_token);
+        },
+      });
+      client.requestAccessToken({ prompt: '' }); // '' = only prompt if needed
+    });
+
+    sessionStorage.setItem('nsx_drive_token',  token);
+    sessionStorage.setItem('nsx_drive_expiry', String(Date.now() + 3300000));
+    setDriveToken(token);
+    setDriveConnected(true);
+    notify('✅ Google Drive connected', 'success');
+  } catch(e) {
+    if (!e.message?.includes('popup_closed')) {
+      notify('Drive connection failed: ' + e.message, 'error');
+    }
+  }
+  setConnectingDrive(false);
+};
 
 const CERT_TEMPLATES = [
   { name:'Certificate of Competency (CoC)',     validity:5,  category:'Competency' },
