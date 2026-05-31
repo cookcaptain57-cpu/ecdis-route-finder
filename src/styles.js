@@ -72,10 +72,11 @@ export const S = `
     backdrop-filter:blur(20px);
     border-bottom:1px solid var(--border);
     padding:0 1.2rem;
+    padding-top:env(safe-area-inset-top, 0px);
     display:flex;
     align-items:center;
     justify-content:space-between;
-    height:60px;
+    height:calc(60px + env(safe-area-inset-top, 0px));
     box-shadow:0 4px 30px rgba(0,0,0,0.5);
   }
 
@@ -197,9 +198,7 @@ export const S = `
     backdrop-filter:blur(12px);
   }
 
-  /* ─── FOOTER — unified, same on all screen sizes ────────
-     position:relative + overflow:hidden keep waves inside.
-  ───────────────────────────────────────────────────────── */
+  /* ─── FOOTER ───────────────────────── */
   .footer{
     position:relative;
     overflow:hidden;
@@ -241,7 +240,6 @@ export const S = `
     color:var(--cyan);
   }
 
-  /* copyright line — small & muted */
   .footer-copy{
     font-size:0.62rem;
     font-weight:300;
@@ -249,7 +247,6 @@ export const S = `
     letter-spacing:0.03em;
   }
 
-  /* ── Disclaimer — exact same size/weight/color as copyright ── */
   .footer-disclaimer{
     position:relative;
     z-index:10;
@@ -263,7 +260,6 @@ export const S = `
     border-top:1px solid rgba(26,58,92,0.3);
   }
 
-  /* ── Kept for backward compat (used elsewhere in app) ── */
   .footer-status{
     display:flex;
     align-items:center;
@@ -301,15 +297,7 @@ export const S = `
 
   .leaflet-popup-tip{background:#0B1D35;}
 
-  /* ════════════════════════════════════════════════════════
-     ─── INSTAGRAM BUTTON + ANIMATED WAVES (NEW) ────────────
-     ════════════════════════════════════════════════════════ */
-
-  /* ── Instagram button ───────────────────────────────────
-     !important on color + text-decoration overrides the
-     browser default  a { color:blue; text-decoration:underline }
-     that was winning before.
-  ─────────────────────────────────────────────────────── */
+  /* ─── INSTAGRAM BUTTON ───────────────────────── */
   .dock-ig-btn{
     display:flex !important;
     align-items:center !important;
@@ -328,7 +316,6 @@ export const S = `
     color:var(--text) !important;
   }
 
-  /* Gradient rounded square — vivid Instagram brand colours */
   .ig-icon-wrap{
     width:34px;
     height:34px;
@@ -362,7 +349,7 @@ export const S = `
       0 6px 24px rgba(193,53,132,0.75);
   }
 
-  /* ─── ANIMATED WAVES (inside .footer) ──────────────────── */
+  /* ─── ANIMATED WAVES ───────────────────────── */
   .wave{
     position:absolute;
     bottom:-24px;
