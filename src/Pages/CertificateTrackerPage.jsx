@@ -1,34 +1,30 @@
 /* eslint-disable */
 // src/pages/CertificateTrackerPage.jsx
-import { useState, useEffect } from "react";
-import { db } from "../firebase";
-import { doc, getDoc, setDoc } from "firebase/firestore";
 const connectDrive = async () => {
   setConnectingDrive(true);
   try {
-    // Load Google Identity Services script dynamically if not loaded
+    // Load Google Identity Services if not already loaded
     await new Promise((resolve, reject) => {
       if (window.google?.accounts?.oauth2) { resolve(); return; }
-      const script = document.createElement('script');
-      script.src = 'https://accounts.google.com/gsi/client';
-      script.onload = resolve;
-      script.onerror = () => reject(new Error('Failed to load Google sign-in'));
+      const script    = document.createElement('script');
+      script.src      = 'https://accounts.google.com/gsi/client';
+      script.onload   = resolve;
+      script.onerror  = () => reject(new Error('Failed to load Google client'));
       document.head.appendChild(script);
     });
 
-    // Request Drive access token directly via Google OAuth
+    // Get Drive access token directly from Google (no Firebase involved)
     const token = await new Promise((resolve, reject) => {
       const client = window.google.accounts.oauth2.initTokenClient({
-        // Your NavisphereX Web Client ID from Google Cloud Console
         client_id: '636056685819-b0mv1o4ftbdfirtan4svpoaa83ns49c6.apps.googleusercontent.com',
-        scope: DRIVE_SCOPE,
-        hint: user?.email || '',
-        callback: (response) => {
+        scope:     DRIVE_SCOPE,
+        hint:      user?.email || '',
+        callback:  (response) => {
           if (response.error) reject(new Error(response.error_description || response.error));
           else resolve(response.access_token);
         },
       });
-      client.requestAccessToken({ prompt: '' }); // '' = only prompt if needed
+      client.requestAccessToken({ prompt: '' });
     });
 
     sessionStorage.setItem('nsx_drive_token',  token);
