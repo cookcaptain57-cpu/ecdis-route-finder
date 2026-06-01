@@ -581,8 +581,8 @@ export default function App() {
   const handleSearch = (q) => { setSearchQ(q); setTab('routes'); setMenuOpen(false); };
 
   const switchTab = k => {
-    // ── ADDITION 3: 'compass' is a public tool — no login required ───────────
-    if (!user && k !== 'home' && k !== 'login' && k !== 'compass') {
+    // compass requires login — same as all other tools
+    if (!user && k !== 'home' && k !== 'login') {
       setTab('login'); setMenuOpen(false);
       sessionStorage.setItem('intendedTab', k); return;
     }
@@ -848,7 +848,7 @@ export default function App() {
             : <div className="section"><div className="empty"><div className="empty-icon">🔒</div><div className="empty-t">Admin Access Only</div></div></div>
           )}
 
-          {authChecked && !user && tab !== 'home' && tab !== 'login' && tab !== 'compass' && (
+          {authChecked && !user && tab !== 'home' && tab !== 'login' && (
             <div style={{ display: 'flex', flex: 1, alignItems: 'center', justifyContent: 'center', padding: '2rem' }}>
               <div style={{ maxWidth: 380, width: '100%', background: 'var(--card)', border: '1px solid var(--border2)', borderRadius: 16, padding: '2rem', textAlign: 'center' }}>
                 <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>🔐</div>
