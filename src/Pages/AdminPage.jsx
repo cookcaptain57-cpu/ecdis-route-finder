@@ -230,6 +230,15 @@ function AdminPage({
     } catch { notify('Failed to unblock user', 'error'); }
   };
 
+  // ← ADDED: Change user tier Free ↔ Paid directly from admin panel
+  const changeUserTier = async (u, newTier) => {
+    try {
+      await setDoc(doc(db, 'users', u.id), { tier: newTier, updatedAt: serverTimestamp() }, { merge: true });
+      setUsers(us => us.map(x => x.id === u.id ? { ...x, tier: newTier } : x));
+      notify(`✅ ${u.name || u.email} → ${newTier === 'paid' ? '⭐ Paid' : '🆓 Free'}`, 'success');
+    } catch { notify('Failed to change tier', 'error'); }
+  };
+
   if (!user) return (
     <div className="auth-wrap">
       <div className="auth-card">
@@ -785,11 +794,20 @@ function AdminPage({
                       </td>
                       <td>
                         <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                          {/* Tier toggle */}
+                          <button
+                            style={{ background: u.tier==='paid'?'rgba(0,180,216,0.12)':'rgba(240,165,0,0.12)',
+                              color: u.tier==='paid'?'var(--cyan)':'var(--gold)',
+                              border: `1px solid ${u.tier==='paid'?'rgba(0,180,216,0.3)':'rgba(240,165,0,0.3)'}`,
+                              borderRadius:5, padding:'3px 8px', fontSize:'0.62rem', fontWeight:700, cursor:'pointer' }}
+                            onClick={() => changeUserTier(u, u.tier==='paid'?'free':'paid')}>
+                            {u.tier==='paid' ? '🔽 Set Free' : '⭐ Set Paid'}
+                          </button>
                           {u.blocked
-                            ? <button style={{ background: 'rgba(0,200,100,0.15)', color: 'var(--green)', border: '1px solid rgba(0,200,100,0.3)', borderRadius: 5, padding: '3px 8px', fontSize: '0.62rem', fontWeight: 700, cursor: 'pointer' }} onClick={() => unblockUser(u)}>✅ Unblock</button>
-                            : <button style={{ background: 'rgba(255,60,60,0.12)', color: '#ff6b6b', border: '1px solid rgba(255,60,60,0.3)', borderRadius: 5, padding: '3px 8px', fontSize: '0.62rem', fontWeight: 700, cursor: 'pointer' }} onClick={() => { if (window.confirm(`Block ${u.name || u.email}?`)) blockUser(u); }}>⛔ Block</button>
+                            ? <button style={{ background:'rgba(0,200,100,0.15)', color:'var(--green)', border:'1px solid rgba(0,200,100,0.3)', borderRadius:5, padding:'3px 8px', fontSize:'0.62rem', fontWeight:700, cursor:'pointer' }} onClick={() => unblockUser(u)}>✅ Unblock</button>
+                            : <button style={{ background:'rgba(255,60,60,0.12)', color:'#ff6b6b', border:'1px solid rgba(255,60,60,0.3)', borderRadius:5, padding:'3px 8px', fontSize:'0.62rem', fontWeight:700, cursor:'pointer' }} onClick={() => { if (window.confirm(`Block ${u.name || u.email}?`)) blockUser(u); }}>⛔ Block</button>
                           }
-                          <button style={{ background: 'rgba(0,180,216,0.1)', color: 'var(--cyan)', border: '1px solid rgba(0,180,216,0.25)', borderRadius: 5, padding: '3px 8px', fontSize: '0.62rem', fontWeight: 700, cursor: 'pointer' }}
+                          <button style={{ background:'rgba(0,180,216,0.1)', color:'var(--cyan)', border:'1px solid rgba(0,180,216,0.25)', borderRadius:5, padding:'3px 8px', fontSize:'0.62rem', fontWeight:700, cursor:'pointer' }}
                             onClick={() => { if (window.confirm(`Send password reset to ${u.email}?`)) sendResetToUser(u.email); }}>🔑 Reset</button>
                         </div>
                       </td>
