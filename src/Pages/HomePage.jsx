@@ -1,198 +1,410 @@
 /* eslint-disable */
 // src/pages/HomePage.jsx
-// ← CHANGED: removed PORTS_DB import — no longer used as fallback
 import { useState, useEffect, useRef } from "react";
-import { ECDIS_BRANDS } from "../constants";
+import { db } from "../firebase";
+import { collection, getDocs, query, orderBy, limit, getDoc, doc } from "firebase/firestore";
+import { idbGet } from "../sheets";
 
-function HomePage({ routes, charts, onSearch, setTab, user, portsDb = [], userProfile = null }) {
-  const [q, setQ] = useState('');
-  const [sugg, setSugg] = useState([]);
-  const [showSugg, setShowSugg] = useState(false);
+// Maritime tips of the day
+const MARITIME_TIPS = [
+  "⚓ Always maintain a safe speed to allow adequate time to take avoiding action in restricted visibility.",
+  "🧭 Check gyro compass error against solar azimuth or stellar observation at least once per watch.",
+  "📻 Monitor VHF Channel 16 at all times when underway for distress, urgency and safety calls.",
+  "🌊 A vessel not under command should show two all-round red lights in a vertical line.",
+  "⛽ Bunker tanks should be fully checked before departure — fuel contamination causes most engine failures.",
+  "🗺 Always update charts to the latest Notice to Mariners before departure.",
+  "🌪 In the Northern Hemisphere, tropical cyclones rotate counter-clockwise. The dangerous semicircle is on the right of the storm's path.",
+  "🔦 Test navigation lights before every departure — carry spare bulbs on all ocean voyages.",
+  "📋 STCW rest hours minimum: 10 hours rest in any 24-hour period, 77 hours in any 7-day period.",
+  "⚠️ Rule 5 of COLREGS requires a proper look-out at all times by sight, hearing and all available means.",
+  "🌡 MARPOL Annex VI limits sulphur content in fuel to 0.5% globally and 0.1% in ECAs.",
+  "🛢 Oil record book must be maintained for all machinery space operations on ships ≥400 GT.",
+  "📡 AIS Class A transponders must be maintained operational at all times when underway.",
+  "⚓ The anchoring depth should not exceed 82 metres — beyond this, anchor chain control becomes difficult.",
+  "🧯 Fire drills must be conducted at least once a month under SOLAS Chapter III Reg 19.",
+  "🌊 Load line regulations — a ship must never be loaded beyond its assigned load line marks.",
+  "📦 Dangerous goods must be declared, properly labelled and stowed as per IMDG Code requirements.",
+  "🔐 ISM Code requires every ship to have a Safety Management System and a Designated Person Ashore (DPA).",
+  "🌐 GMDSS — all SOLAS ships must maintain a continuous radio watch on appropriate distress frequencies.",
+  "🚢 Under MARPOL Annex I, no ship may discharge oily mixture unless oil content is less than 15 ppm.",
+];
+
+// WMO weather codes to icons and descriptions
+const weatherIcon = (code) => {
+  if (code === 0) return { icon:'☀️', desc:'Clear sky' };
+  if (code <= 3)  return { icon:'🌤️', desc:'Partly cloudy' };
+  if (code <= 48) return { icon:'🌫️', desc:'Foggy' };
+  if (code <= 55) return { icon:'🌦️', desc:'Drizzle' };
+  if (code <= 65) return { icon:'🌧️', desc:'Rain' };
+  if (code <= 77) return { icon:'❄️', desc:'Snow' };
+  if (code <= 82) return { icon:'🌦️', desc:'Rain showers' };
+  if (code <= 95) return { icon:'⛈️', desc:'Thunderstorm' };
+  return { icon:'🌩️', desc:'Heavy storm' };
+};
+
+const calcDays = (signOn, signOff) => {
+  if (!signOn) return 0;
+  const from = new Date(signOn);
+  const to   = signOff ? new Date(signOff) : new Date();
+  return Math.max(0, Math.floor((to - from) / 86400000));
+};
+const formatDuration = (d) => {
+  const y = Math.floor(d/365), m = Math.floor((d%365)/30), r = d%30;
+  return [y>0?`${y}y`:'', m>0?`${m}m`:'', `${r}d`].filter(Boolean).join(' ');
+};
+
+export default function HomePage({ routes, charts, onSearch, setTab, user, portsDb = [], userProfile = null }) {
+  const [q,           setQ]           = useState('');
+  const [qResults,    setQResults]    = useState([]);
+  const [searching,   setSearching]   = useState(false);
+  const [tipIndex,    setTipIndex]    = useState(() => Math.floor(Math.random() * MARITIME_TIPS.length));
+  const [portNotice,  setPortNotice]  = useState(null);
+  const [weather,     setWeather]     = useState(null);
+  const [weatherPort, setWeatherPort] = useState('');
+  const [weatherQ,    setWeatherQ]    = useState('');
+  const [weatherSugg, setWeatherSugg] = useState([]);
+  const [isOffline,   setIsOffline]   = useState(false);
+  const [seaTimeDays, setSeaTimeDays] = useState(null);
+  const [expiringCerts, setExpiringCerts] = useState([]);
+  const [sheetRoutes,   setSheetRoutes]   = useState([]);
+  const [sheetCharts,   setSheetCharts]   = useState([]);
   const wRef = useRef();
 
+  // Check if data is cached (offline capable)
   useEffect(() => {
-    const h = e => { if (!wRef.current?.contains(e.target)) setShowSugg(false); };
-    document.addEventListener('mousedown', h); return () => document.removeEventListener('mousedown', h);
+    idbGet('routes_d').then(d => setIsOffline(Array.isArray(d) && d.length > 0)).catch(()=>{});
+    idbGet('routes_d').then(d => setSheetRoutes(Array.isArray(d) ? d : [])).catch(()=>{});
+    idbGet('charts_d').then(d => setSheetCharts(Array.isArray(d) ? d : [])).catch(()=>{});
   }, []);
 
+  // Rotate tip daily
   useEffect(() => {
-    if (!q.trim()) { setSugg([]); return; }
-    const ql = q.toLowerCase();
-    const hits = new Set();
-    [...routes, ...charts].forEach(f => [f.fileName, f.portName, f.keywords, f.brand].filter(Boolean).forEach(s => { if (s.toLowerCase().includes(ql)) hits.add(s); }));
-    // ← CHANGED: always use portsDb directly — no fallback to hardcoded 41 ports
-    portsDb.forEach(p => { if (p.name?.toLowerCase().includes(ql)) hits.add(p.name); });
-    setSugg([...hits].slice(0, 7));
-  }, [q, routes, charts, portsDb]);
+    const dayIndex = Math.floor(Date.now() / 86400000) % MARITIME_TIPS.length;
+    setTipIndex(dayIndex);
+  }, []);
 
-  const doSearch = (val) => { const v = val || q; if (v.trim()) { onSearch(v); setShowSugg(false); } };
+  // Load port notice and user data on mount
+  useEffect(() => {
+    loadPortNotice();
+    if (user) { loadSeaTime(); loadCerts(); }
+  }, [user?.uid]);
+
+  const loadPortNotice = async () => {
+    try {
+      const snap = await getDocs(query(collection(db, 'notices'), orderBy('createdAt','desc'), limit(1)));
+      if (!snap.empty) {
+        const n = { id:snap.docs[0].id, ...snap.docs[0].data() };
+        const isActive = !n.expiryDate || new Date(n.expiryDate) >= new Date();
+        if (isActive) setPortNotice(n);
+      }
+    } catch {}
+  };
+
+  const loadSeaTime = async () => {
+    try {
+      const snap = await getDoc(doc(db, 'seatime', user.uid));
+      if (snap.exists()) {
+        const total = (snap.data().entries||[]).reduce((s,e) => s + calcDays(e.signOn,e.signOff), 0);
+        setSeaTimeDays(total);
+      }
+    } catch {}
+  };
+
+  const loadCerts = async () => {
+    try {
+      const snap = await getDoc(doc(db, 'certificates', user.uid));
+      if (snap.exists()) {
+        const list = snap.data().list || [];
+        const expiring = list.filter(c => {
+          if (!c.expiryDate) return false;
+          const d = Math.floor((new Date(c.expiryDate)-new Date())/86400000);
+          return d >= 0 && d <= 90;
+        });
+        setExpiringCerts(expiring);
+      }
+    } catch {}
+  };
+
+  // Weather fetch using OpenMeteo (free, no API key)
+  const fetchWeather = async (port) => {
+    if (!port?.lat || !port?.lon) return;
+    try {
+      const url = `https://api.open-meteo.com/v1/forecast?latitude=${port.lat}&longitude=${port.lon}&current=temperature_2m,wind_speed_10m,weather_code&wind_speed_unit=kn&timezone=auto`;
+      const res  = await fetch(url);
+      const data = await res.json();
+      const c    = data.current;
+      setWeather({ temp:Math.round(c.temperature_2m), wind:Math.round(c.wind_speed_10m), code:c.weather_code, port:port.name });
+      setWeatherPort(port.name);
+    } catch { setWeather(null); }
+  };
+
+  // Weather port autocomplete
+  useEffect(() => {
+    if (!weatherQ || weatherQ.length < 2) { setWeatherSugg([]); return; }
+    const ql = weatherQ.toLowerCase();
+    setWeatherSugg(portsDb.filter(p => p.lat && p.lon && (p.name||'').toLowerCase().includes(ql)).slice(0,6));
+  }, [weatherQ, portsDb]);
+
+  // Global search across routes + charts + ports
+  const doSearch = (sq) => {
+    const s = (sq!==undefined ? sq : q).trim();
+    if (!s || s.length < 2) { setQResults([]); return; }
+    setSearching(true);
+    const ql = s.toLowerCase();
+    const rr = sheetRoutes.filter(r=>Object.values(r).join(' ').toLowerCase().includes(ql)).slice(0,5).map(r=>({ type:'route', label:r['File Name']||r.fileName||'Route', sub:r['Port Name']||r.portName||'' }));
+    const cr = sheetCharts.filter(c=>Object.values(c).join(' ').toLowerCase().includes(ql)).slice(0,5).map(c=>({ type:'chart', label:c['File Name']||c.fileName||'Chart', sub:c['Port Name']||c.portName||'' }));
+    const pr = portsDb.filter(p=>(p.name||'').toLowerCase().includes(ql)).slice(0,5).map(p=>({ type:'port',  label:p.name, sub:p.country||'' }));
+    setQResults([...rr,...cr,...pr]);
+    setSearching(false);
+  };
+
+  const selectResult = (r) => {
+    if (r.type==='route' || r.type==='chart') { onSearch(r.label); }
+    else { setTab('ports'); }
+    setQ(''); setQResults([]);
+  };
 
   const FEATURE_CARDS = [
-    { icon: '🗺',  title: 'ROUTES',           desc: 'Browse, search & download routes in multiple formats.',    tab: 'routes',  color: 'var(--cyan)' },
-    { icon: '📊',  title: 'ECDIS CHARTS',     desc: 'Access charts, formats & user charts.',                    tab: 'charts',  color: 'var(--gold)' },
-    { icon: '✏️',  title: 'ROUTE PLANNER',    desc: 'Plan optimised routes with advanced tools.',               tab: 'planner', color: 'var(--green)' },
-    { icon: '🧭',  title: 'NAV MODE',         desc: 'Navigate with precision using smart nav mode.',            tab: 'navmode', color: '#A78BFA', badge: 'NEW' },
-    { icon: '⚓',  title: 'PORTS DATABASE',   desc: 'Explore global ports with details & coordinates.',         tab: 'ports',   color: 'var(--cyan)' },
-    { icon: '🚢',  title: 'VESSEL SEARCH',    desc: 'Search vessels by IMO, MMSI or flag state.',              tab: 'vessel',  color: 'var(--gold)', badge: 'NEW' },
-    { icon: '🧮',  title: 'VOYAGE CALC',      desc: 'Calculate distance, duration and fuel for any voyage.',   tab: 'voyage',  color: 'var(--green)' },
-    { icon: '📜',  title: 'CERTIFICATES',     desc: 'Track STCW certificate expiry dates and renewals.',       tab: 'certs',   color: '#A78BFA' },
-    { icon: '⏱',  title: 'SEA TIME',         desc: 'Log and calculate sea service time across all ships.',    tab: 'seatime', color: 'var(--cyan)' },
-    { icon: '📢',  title: 'PORT NOTICES',     desc: 'Port closures, restrictions and navigational warnings.',  tab: 'notices', color: 'var(--gold)' },
-    { icon: '📚',  title: 'MARITIME LIBRARY', desc: 'SOLAS, MARPOL, IMO, STCW & more books.',                 tab: 'library', color: 'var(--gold)' },
+    { icon:'🗺',  title:'ROUTES',          desc:'Browse, search & download 23,000+ RTZ routes.',   tab:'routes',  color:'var(--cyan)' },
+    { icon:'📊',  title:'ECDIS CHARTS',    desc:'Access charts for all major ECDIS brands.',        tab:'charts',  color:'var(--gold)' },
+    { icon:'✏️',  title:'ROUTE PLANNER',   desc:'Plan optimised routes with advanced tools.',       tab:'planner', color:'var(--green)' },
+    { icon:'🧭',  title:'NAV MODE',        desc:'Navigate with precision.',                         tab:'navmode', color:'#A78BFA', badge:'NEW' },
+    { icon:'⚓',  title:'PORTS DATABASE',  desc:'27,000+ global ports with coordinates.',           tab:'ports',   color:'var(--cyan)' },
+    { icon:'🚢',  title:'VESSEL SEARCH',   desc:'Search by IMO, MMSI or flag state.',               tab:'vessel',  color:'var(--gold)', badge:'NEW' },
+    { icon:'🧮',  title:'VOYAGE CALC',     desc:'Calculate distance, duration and fuel.',           tab:'voyage',  color:'var(--green)' },
+    { icon:'📜',  title:'CERTIFICATES',    desc:'Track STCW certificate expiry dates.',             tab:'certs',   color:'#A78BFA' },
+    { icon:'⏱',  title:'SEA TIME',        desc:'Log sea service time across all ships.',           tab:'seatime', color:'var(--cyan)' },
+    { icon:'📢',  title:'PORT NOTICES',    desc:'Closures, restrictions and navigational warnings.',tab:'notices', color:'var(--gold)' },
+    { icon:'📚',  title:'LIBRARY',         desc:'SOLAS, MARPOL, IMO, STCW & more.',                tab:'library', color:'var(--gold)' },
   ];
 
-  const QUICK_ACTIONS = [
-    { icon: '👤', title: 'My Account', desc: 'Profile & saved items', tab: 'account', color: 'var(--cyan)' },
-    { icon: '⬇️', title: 'Download Latest', desc: 'Get latest updates', tab: 'routes', color: 'var(--green)' },
-    { icon: '📊', title: 'New Charts', desc: 'Explore new charts', tab: 'charts', color: 'var(--gold)' },
-    { icon: '🚢', title: 'Vessel Search', desc: 'Search by IMO / MMSI', tab: 'vessel', color: '#A78BFA' },
-  ];
-
-  const KNOWLEDGE = [
-    { title: 'SOLAS', desc: 'Safety of Life at Sea', icon: '🛡', color: 'var(--cyan)' },
-    { title: 'MARPOL', desc: 'Pollution Prevention Regulations', icon: '🌊', color: 'var(--green)' },
-    { title: 'STCW', desc: 'Standards of Training & Certification', icon: '⚓', color: 'var(--gold)' },
-    { title: 'IMO CIRCULARS', desc: 'Latest IMO Circulars', icon: '🏛', color: 'var(--purple)' },
-    { title: 'ECDIS MANUALS', desc: 'User Manuals & Guides', icon: '📡', color: 'var(--cyan)' },
-  ];
-
-  // ← CHANGED: always use portsDb directly — no fallback to hardcoded 41 ports
-  const db = portsDb;
+  const wc = weather ? weatherIcon(weather.code) : null;
 
   return (
-    <div style={{ flex: 1 }}>
-      <div style={{ background: 'linear-gradient(135deg,#040C1A 0%,#071428 40%,#0B1D35 100%)', borderBottom: '1px solid var(--border)', padding: '2rem 1.4rem 1.6rem', position: 'relative', overflow: 'hidden' }}>
-        <div style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: '45%', background: 'linear-gradient(to left,rgba(0,180,216,0.04),transparent)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '6rem', opacity: 0.08, userSelect: 'none', pointerEvents: 'none' }}>🚢</div>
-        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '0.6rem' }}>
-          <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.72rem', color: 'var(--green)' }}>
-            <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--green)', boxShadow: '0 0 8px var(--green)', animation: 'pulse 2s infinite', display: 'inline-block' }} />Live Data
+    <div style={{ padding:'1.2rem', maxWidth:1100, margin:'0 auto', width:'100%' }}>
+
+      {/* ── Port Notice Banner ── */}
+      {portNotice && (
+        <div style={{ background:'rgba(255,107,53,0.08)', border:'1px solid rgba(255,107,53,0.3)', borderRadius:10,
+          padding:'10px 14px', marginBottom:'1rem', display:'flex', alignItems:'center', gap:10, flexWrap:'wrap', cursor:'pointer' }}
+          onClick={() => setTab('notices')}>
+          <span>⚠️</span>
+          <span style={{ fontSize:'0.7rem', color:'var(--text2)', fontWeight:500 }}>
+            <strong style={{ color:'#ff6b35' }}>Port Notice:</strong> {portNotice.title}
+            {portNotice.portName && ` — ${portNotice.portName}`}
           </span>
+          <span style={{ marginLeft:'auto', fontSize:'0.68rem', color:'#ff6b35' }}>View all →</span>
         </div>
-        <div style={{ marginBottom: '0.4rem' }}>
-          <h1 style={{ fontFamily: 'Orbitron,monospace', fontSize: 'clamp(1.4rem,5vw,2.4rem)', fontWeight: 900, lineHeight: 1.1, letterSpacing: '0.04em', marginBottom: '0.3rem' }}>
-            NAVISPHERE<span style={{ color: 'var(--cyan)' }}>X</span> MARINE
-          </h1>
-          <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', fontSize: '0.68rem', color: 'var(--text3)', letterSpacing: '0.12em', textTransform: 'uppercase', marginBottom: '0.8rem' }}>
-            {['Smart Navigation', 'Routes', 'Charts', 'Ports', 'Maritime Library'].map((t, i) => (
-              <span key={i} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>{i > 0 && <span style={{ color: 'var(--border2)' }}>•</span>}{t}</span>
-            ))}
-          </div>
-          <p style={{ color: 'var(--text2)', fontSize: '0.86rem', maxWidth: 420, lineHeight: 1.6, marginBottom: '1.4rem' }}>
-            Your all-in-one maritime platform for planning, navigation and knowledge.
-            {user && (
-              <span style={{ color: 'var(--cyan)' }}>
-                {' '}Welcome, {userProfile?.rank ? `${userProfile.rank} ` : ''}{userProfile?.name || user.email.split('@')[0]}!
-              </span>
-            )}
-          </p>
+      )}
+
+      {/* ── Welcome + search ── */}
+      <div style={{ marginBottom:'1.4rem' }}>
+        <div style={{ marginBottom:'0.6rem' }}>
+          <span style={{ fontFamily:'Orbitron,monospace', fontSize:'0.72rem', color:'var(--text3)', letterSpacing:'0.12em' }}>
+            NAVISPHERE<span style={{ color:'var(--cyan)' }}>X</span> MARINE
+          </span>
+          {user && (
+            <span style={{ color:'var(--cyan)' }}>
+              {' '}— Welcome{userProfile?.name ? `, ${userProfile?.rank?userProfile.rank+' ':''}${userProfile.name.split(' ')[0]}` : ' back'}!
+            </span>
+          )}
         </div>
-        <div style={{ display: 'flex', gap: '0.8rem', flexWrap: 'wrap', marginBottom: '1.4rem' }}>
-          <button onClick={() => setShowSugg(true)} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 20px', background: 'var(--card)', border: '1px solid var(--border2)', borderRadius: 12, color: 'var(--text)', fontFamily: 'Exo 2,sans-serif', fontSize: '0.84rem', cursor: 'pointer', fontWeight: 600 }}>
-            <span style={{ fontSize: '1.1rem' }}>🔍</span>
-            <div style={{ textAlign: 'left' }}><div style={{ fontSize: '0.82rem', fontWeight: 700 }}>Search Routes / Ports</div><div style={{ fontSize: '0.66rem', color: 'var(--text3)' }}>Search anything...</div></div>
-            <span style={{ color: 'var(--cyan)', marginLeft: 'auto' }}>→</span>
-          </button>
-          <button onClick={() => setTab('planner')} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 20px', background: 'linear-gradient(135deg,rgba(0,180,216,0.15),rgba(21,101,192,0.2))', border: '1px solid rgba(0,180,216,0.35)', borderRadius: 12, color: 'var(--cyan)', fontFamily: 'Exo 2,sans-serif', fontSize: '0.84rem', cursor: 'pointer', fontWeight: 600 }}>
-            <span style={{ fontSize: '1.1rem' }}>🧭</span>
-            <div style={{ textAlign: 'left' }}><div style={{ fontSize: '0.82rem', fontWeight: 700 }}>Open Route Planner</div><div style={{ fontSize: '0.66rem', color: 'rgba(0,180,216,0.7)' }}>Plan your voyage</div></div>
-            <span style={{ marginLeft: 'auto' }}>→</span>
-          </button>
-        </div>
-        <div ref={wRef} style={{ position: 'relative', maxWidth: 600 }}>
+
+        {/* Quick unified search */}
+        <div ref={wRef} style={{ position:'relative' }}>
           <div className="siw">
             <span className="si-ic">🔍</span>
-            <input className="si" style={{ paddingLeft: 42 }}
-              placeholder="Search port, route or file name… e.g. Mumbai, MUM, Singapore"
-              value={q} onChange={e => { setQ(e.target.value); setShowSugg(true); }}
-              onFocus={() => setShowSugg(true)}
-              onKeyDown={e => e.key === 'Enter' && doSearch()} />
-            <button onClick={() => doSearch()} style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', padding: '6px 14px', background: 'linear-gradient(135deg,var(--cyan),var(--blue))', border: 'none', borderRadius: 7, color: 'white', fontWeight: 700, fontSize: '0.72rem', cursor: 'pointer' }}>Search</button>
+            <input className="si" style={{ paddingLeft:42, fontSize:'0.9rem' }}
+              placeholder="Search routes, charts, ports… type anything"
+              value={q}
+              onChange={e => { setQ(e.target.value); doSearch(e.target.value); }}
+              onKeyDown={e => e.key==='Enter' && onSearch(q)} />
+            {q && (
+              <button onClick={() => { setQ(''); setQResults([]); }}
+                style={{ position:'absolute', right:10, top:'50%', transform:'translateY(-50%)', background:'none', border:'none', color:'var(--text3)', cursor:'pointer', fontSize:'1.1rem' }}>✕</button>
+            )}
           </div>
-          {showSugg && sugg.length > 0 && (
-            <div className="ac">
-              {sugg.map((s, i) => <div key={i} className="ac-item" onClick={() => { setQ(s); doSearch(s); }}><span>🔎</span><span>{s}</span></div>)}
+          {/* Search results dropdown */}
+          {qResults.length > 0 && (
+            <div style={{ position:'absolute', top:'calc(100% + 6px)', left:0, right:0, zIndex:300,
+              background:'var(--card)', border:'1px solid var(--border)', borderRadius:12,
+              boxShadow:'0 12px 40px rgba(0,0,0,0.5)', overflow:'hidden' }}>
+              {['route','chart','port'].map(type => {
+                const items = qResults.filter(r=>r.type===type);
+                if (!items.length) return null;
+                const colors = { route:'var(--cyan)', chart:'var(--gold)', port:'var(--green)' };
+                const labels = { route:'Routes', chart:'Charts', port:'Ports' };
+                return (
+                  <div key={type}>
+                    <div style={{ padding:'6px 14px', fontSize:'0.6rem', color:'var(--text3)', textTransform:'uppercase', letterSpacing:'0.1em', borderBottom:'1px solid var(--border)', background:'rgba(255,255,255,0.02)' }}>
+                      {labels[type]}
+                    </div>
+                    {items.map((r,i) => (
+                      <div key={i} onMouseDown={() => selectResult(r)}
+                        style={{ padding:'9px 14px', cursor:'pointer', display:'flex', alignItems:'center', gap:10, borderBottom:'1px solid rgba(255,255,255,0.03)' }}
+                        onMouseEnter={e=>e.currentTarget.style.background='rgba(0,180,216,0.07)'}
+                        onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
+                        <span style={{ width:8, height:8, borderRadius:'50%', background:colors[type], flexShrink:0 }} />
+                        <div>
+                          <div style={{ fontSize:'0.82rem', color:'var(--text)' }}>{r.label}</div>
+                          {r.sub && <div style={{ fontSize:'0.68rem', color:'var(--text3)' }}>{r.sub}</div>}
+                        </div>
+                        <span style={{ marginLeft:'auto', fontSize:'0.62rem', color:colors[type] }}>{labels[type].slice(0,-1)}</span>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
       </div>
 
-      <div style={{ padding: '1.4rem', maxWidth: 1100, margin: '0 auto', width: '100%' }}>
-        {/* ← CHANGED: removed stats grid (RTZ Routes, Chart Files, ECDIS Brands, World Ports) */}
-
-        <div style={{ marginBottom: '1.8rem' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: '1rem' }}>
-            <div style={{ width: 4, height: 18, background: 'var(--cyan)', borderRadius: 2 }} />
-            <span style={{ fontFamily: 'Orbitron,monospace', fontSize: '0.82rem', fontWeight: 700 }}>Explore NavisphereX Marine</span>
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(180px,1fr))', gap: '0.8rem' }}>
-            {FEATURE_CARDS.map((c, i) => (
-              <div key={i} onClick={() => setTab(c.tab)}
-                style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 14, padding: '1.2rem', cursor: 'pointer', transition: 'all 0.22s', position: 'relative' }}
-                onMouseEnter={e => { e.currentTarget.style.borderColor = c.color; e.currentTarget.style.transform = 'translateY(-3px)'; }}
-                onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.transform = 'translateY(0)'; }}>
-                {c.badge && <span style={{ position: 'absolute', top: 10, right: 10, background: c.color, color: '#000', padding: '1px 6px', borderRadius: 4, fontSize: '0.55rem', fontWeight: 800 }}>{c.badge}</span>}
-                <div style={{ fontSize: '2rem', marginBottom: '0.7rem' }}>{c.icon}</div>
-                <div style={{ fontFamily: 'Orbitron,monospace', fontSize: '0.68rem', fontWeight: 700, color: c.color, marginBottom: '0.4rem' }}>{c.title}</div>
-                <div style={{ fontSize: '0.72rem', color: 'var(--text2)', lineHeight: 1.5, marginBottom: '0.8rem' }}>{c.desc}</div>
-                <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                  <span style={{ width: 28, height: 28, borderRadius: '50%', border: `1px solid ${c.color}55`, display: 'flex', alignItems: 'center', justifyContent: 'center', color: c.color, fontSize: '0.8rem' }}>→</span>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div onClick={() => setTab(user ? 'home' : 'login')} style={{ background: 'linear-gradient(135deg,rgba(11,29,53,1),rgba(15,36,68,0.8))', border: '1px solid var(--border)', borderRadius: 14, padding: '1.2rem 1.4rem', cursor: 'pointer', marginBottom: '1.6rem', display: 'flex', alignItems: 'center', gap: 14, transition: 'all 0.2s' }}
-          onMouseEnter={e => e.currentTarget.style.borderColor = 'var(--cyan)'}
-          onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--border)'}>
-          <div style={{ width: 48, height: 48, borderRadius: '50%', background: 'rgba(0,180,216,0.1)', border: '1px solid rgba(0,180,216,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.4rem', flexShrink: 0 }}>{user ? '👥' : '🔐'}</div>
-          <div style={{ flex: 1 }}>
-            <div style={{ fontFamily: 'Orbitron,monospace', fontSize: '0.78rem', fontWeight: 700, marginBottom: 2 }}>MY ACCOUNT</div>
-            <div style={{ fontSize: '0.74rem', color: 'var(--text2)' }}>{user ? `Logged in as ${user.email}` : 'Login, save routes, manage your data.'}</div>
-          </div>
-          <span style={{ color: 'var(--cyan)', fontSize: '1.1rem' }}>→</span>
-        </div>
-
-        <div style={{ marginBottom: '1.8rem' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: '1rem' }}>
-            <div style={{ width: 4, height: 18, background: 'var(--gold)', borderRadius: 2 }} />
-            <span style={{ fontFamily: 'Orbitron,monospace', fontSize: '0.82rem', fontWeight: 700 }}>Quick Actions</span>
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(140px,1fr))', gap: '0.7rem' }}>
-            {QUICK_ACTIONS.map((a, i) => (
-              <div key={i} onClick={() => setTab(a.tab)} style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: '1rem', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10, transition: 'all 0.2s' }}
-                onMouseEnter={e => { e.currentTarget.style.borderColor = a.color; e.currentTarget.style.background = 'rgba(255,255,255,0.03)'; }}
-                onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.background = 'var(--card)'; }}>
-                <div style={{ width: 38, height: 38, borderRadius: 10, background: 'rgba(0,0,0,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.2rem', flexShrink: 0 }}>{a.icon}</div>
-                <div><div style={{ fontSize: '0.76rem', fontWeight: 700 }}>{a.title}</div><div style={{ fontSize: '0.65rem', color: 'var(--text3)' }}>{a.desc}</div></div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div style={{ marginBottom: '1rem' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <div style={{ width: 4, height: 18, background: 'var(--purple)', borderRadius: 2 }} />
-              <span style={{ fontFamily: 'Orbitron,monospace', fontSize: '0.82rem', fontWeight: 700 }}>Maritime Knowledge Hub</span>
+      {/* ── Personal widgets row (logged-in users) ── */}
+      {user && (
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(160px,1fr))', gap:10, marginBottom:'1.4rem' }}>
+          {seaTimeDays !== null && (
+            <div onClick={() => setTab('seatime')} style={{ background:'var(--card)', border:'1px solid rgba(0,180,216,0.25)', borderRadius:12, padding:'0.9rem', cursor:'pointer', transition:'all 0.2s' }}
+              onMouseEnter={e=>e.currentTarget.style.borderColor='rgba(0,180,216,0.5)'}
+              onMouseLeave={e=>e.currentTarget.style.borderColor='rgba(0,180,216,0.25)'}>
+              <div style={{ fontSize:'1.3rem', marginBottom:3 }}>⏱</div>
+              <div style={{ fontFamily:'Orbitron,monospace', fontSize:'0.9rem', fontWeight:700, color:'var(--cyan)' }}>{formatDuration(seaTimeDays)}</div>
+              <div style={{ fontSize:'0.62rem', color:'var(--text3)', textTransform:'uppercase', letterSpacing:'0.06em' }}>Sea Time</div>
             </div>
-            <span style={{ fontSize: '0.74rem', color: 'var(--cyan)', cursor: 'pointer' }} onClick={() => setTab('library')}>View all →</span>
+          )}
+          {expiringCerts.length > 0 && (
+            <div onClick={() => setTab('certs')} style={{ background:'rgba(255,71,87,0.06)', border:'1px solid rgba(255,71,87,0.3)', borderRadius:12, padding:'0.9rem', cursor:'pointer' }}>
+              <div style={{ fontSize:'1.3rem', marginBottom:3 }}>📜</div>
+              <div style={{ fontFamily:'Orbitron,monospace', fontSize:'0.9rem', fontWeight:700, color:'#ff4757' }}>{expiringCerts.length}</div>
+              <div style={{ fontSize:'0.62rem', color:'#ff4757', textTransform:'uppercase', letterSpacing:'0.06em' }}>Certs Expiring</div>
+            </div>
+          )}
+          {isOffline && (
+            <div style={{ background:'rgba(0,200,100,0.06)', border:'1px solid rgba(0,200,100,0.25)', borderRadius:12, padding:'0.9rem' }}>
+              <div style={{ fontSize:'1.3rem', marginBottom:3 }}>✅</div>
+              <div style={{ fontFamily:'Orbitron,monospace', fontSize:'0.72rem', fontWeight:700, color:'var(--green)' }}>Available</div>
+              <div style={{ fontSize:'0.62rem', color:'var(--green)', textTransform:'uppercase', letterSpacing:'0.06em' }}>Offline</div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Feature cards grid ── */}
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(200px,1fr))', gap:'0.8rem', marginBottom:'1.4rem' }}>
+        {FEATURE_CARDS.map((f,i) => (
+          <div key={i} onClick={() => setTab(f.tab)}
+            style={{ background:'var(--card)', border:'1px solid var(--border)', borderRadius:13,
+              padding:'1.1rem', cursor:'pointer', transition:'all 0.25s', position:'relative', overflow:'hidden' }}
+            onMouseEnter={e=>{e.currentTarget.style.borderColor=f.color+'66';e.currentTarget.style.transform='translateY(-2px)';e.currentTarget.style.boxShadow='0 8px 28px rgba(0,0,0,0.4)';}}
+            onMouseLeave={e=>{e.currentTarget.style.borderColor='var(--border)';e.currentTarget.style.transform='translateY(0)';e.currentTarget.style.boxShadow='none';}}>
+            {f.badge && (
+              <span style={{ position:'absolute', top:8, right:8, padding:'2px 6px', borderRadius:6, fontSize:'0.55rem',
+                fontWeight:700, background:f.badge==='NEW'?'rgba(0,200,100,0.15)':'rgba(240,165,0,0.15)',
+                color:f.badge==='NEW'?'var(--green)':'var(--gold)',
+                border:`1px solid ${f.badge==='NEW'?'rgba(0,200,100,0.3)':'rgba(240,165,0,0.3)'}` }}>{f.badge}</span>
+            )}
+            <div style={{ fontSize:'1.8rem', marginBottom:'0.5rem' }}>{f.icon}</div>
+            <div style={{ fontFamily:'Orbitron,monospace', fontSize:'0.66rem', fontWeight:700, color:f.color, marginBottom:4, letterSpacing:'0.06em' }}>{f.title}</div>
+            <div style={{ fontSize:'0.72rem', color:'var(--text2)', lineHeight:1.5 }}>{f.desc}</div>
+            <div style={{ marginTop:8, fontSize:'0.68rem', color:f.color }}>Explore →</div>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(140px,1fr))', gap: '0.7rem' }}>
-            {KNOWLEDGE.map((k, i) => (
-              <div key={i} onClick={() => setTab('library')} style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: '1rem', cursor: 'pointer', textAlign: 'center', transition: 'all 0.2s' }}
-                onMouseEnter={e => { e.currentTarget.style.borderColor = k.color; e.currentTarget.style.transform = 'translateY(-2px)'; }}
-                onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.transform = 'translateY(0)'; }}>
-                <div style={{ fontSize: '1.6rem', marginBottom: 8 }}>{k.icon}</div>
-                <div style={{ fontFamily: 'Orbitron,monospace', fontSize: '0.62rem', fontWeight: 700, color: k.color, marginBottom: 4 }}>{k.title}</div>
-                <div style={{ fontSize: '0.66rem', color: 'var(--text2)', lineHeight: 1.4 }}>{k.desc}</div>
+        ))}
+      </div>
+
+      {/* ── Bottom widgets row ── */}
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(280px,1fr))', gap:'1rem', marginBottom:'1.4rem' }}>
+
+        {/* Tip of the Day */}
+        <div style={{ background:'var(--card)', border:'1px solid var(--border)', borderRadius:14, padding:'1.1rem' }}>
+          <div style={{ fontFamily:'Orbitron,monospace', fontSize:'0.68rem', color:'var(--gold)', marginBottom:'0.6rem', letterSpacing:'0.08em' }}>💡 TIP OF THE DAY</div>
+          <div style={{ fontSize:'0.8rem', color:'var(--text2)', lineHeight:1.7 }}>{MARITIME_TIPS[tipIndex]}</div>
+          <button className="btn btn-secondary" style={{ marginTop:'0.8rem', padding:'4px 10px', fontSize:'0.66rem' }}
+            onClick={() => setTipIndex(i => (i+1) % MARITIME_TIPS.length)}>Next tip →</button>
+        </div>
+
+        {/* Weather Widget */}
+        <div style={{ background:'var(--card)', border:'1px solid var(--border)', borderRadius:14, padding:'1.1rem' }}>
+          <div style={{ fontFamily:'Orbitron,monospace', fontSize:'0.68rem', color:'var(--cyan)', marginBottom:'0.6rem', letterSpacing:'0.08em' }}>🌊 PORT WEATHER</div>
+          <div style={{ position:'relative', marginBottom:'0.8rem' }}>
+            <div className="siw">
+              <span className="si-ic" style={{ fontSize:'0.9rem' }}>⚓</span>
+              <input className="si" style={{ paddingLeft:36, fontSize:'0.8rem', padding:'8px 8px 8px 34px' }}
+                placeholder="Search port…" value={weatherQ}
+                onChange={e => setWeatherQ(e.target.value)} />
+            </div>
+            {weatherSugg.length > 0 && (
+              <div style={{ position:'absolute', top:'calc(100% + 4px)', left:0, right:0, zIndex:200,
+                background:'var(--card)', border:'1px solid var(--border)', borderRadius:8,
+                boxShadow:'0 8px 24px rgba(0,0,0,0.5)', overflow:'hidden', maxHeight:160, overflowY:'auto' }}>
+                {weatherSugg.map((p,i) => (
+                  <div key={i} onMouseDown={() => { fetchWeather(p); setWeatherQ(''); setWeatherSugg([]); }}
+                    style={{ padding:'8px 12px', cursor:'pointer', fontSize:'0.78rem', borderBottom:'1px solid rgba(255,255,255,0.04)' }}
+                    onMouseEnter={e=>e.currentTarget.style.background='rgba(0,180,216,0.08)'}
+                    onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
+                    {p.name} <span style={{ color:'var(--text3)', fontSize:'0.68rem' }}>{p.country}</span>
+                  </div>
+                ))}
               </div>
+            )}
+          </div>
+          {weather ? (
+            <div style={{ display:'flex', alignItems:'center', gap:14 }}>
+              <div style={{ fontSize:'2.5rem' }}>{wc?.icon}</div>
+              <div>
+                <div style={{ fontFamily:'Orbitron,monospace', fontSize:'1.1rem', fontWeight:700, color:'var(--cyan)' }}>{weather.temp}°C</div>
+                <div style={{ fontSize:'0.72rem', color:'var(--text2)' }}>💨 {weather.wind} knots · {wc?.desc}</div>
+                <div style={{ fontSize:'0.68rem', color:'var(--text3)', marginTop:2 }}>⚓ {weather.port}</div>
+              </div>
+            </div>
+          ) : (
+            <div style={{ fontSize:'0.74rem', color:'var(--text3)', textAlign:'center', padding:'0.5rem 0' }}>
+              Search a port above to see current weather conditions
+            </div>
+          )}
+        </div>
+
+        {/* Quick Actions */}
+        <div style={{ background:'var(--card)', border:'1px solid var(--border)', borderRadius:14, padding:'1.1rem' }}>
+          <div style={{ fontFamily:'Orbitron,monospace', fontSize:'0.68rem', color:'var(--text2)', marginBottom:'0.6rem', letterSpacing:'0.08em' }}>⚡ QUICK ACTIONS</div>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:6 }}>
+            {[
+              { icon:'👤', label:'My Account',    tab:'account',  color:'var(--cyan)' },
+              { icon:'⬇️', label:'Download',      tab:'routes',   color:'var(--green)' },
+              { icon:'📊', label:'New Charts',    tab:'charts',   color:'var(--gold)' },
+              { icon:'🚢', label:'Vessel Search', tab:'vessel',   color:'#A78BFA' },
+              { icon:'🧮', label:'Voyage Calc',   tab:'voyage',   color:'var(--green)' },
+              { icon:'📢', label:'Notices',       tab:'notices',  color:'#ff6b35' },
+            ].map((a,i) => (
+              <button key={i} onClick={() => setTab(a.tab)}
+                style={{ padding:'8px', borderRadius:8, border:`1px solid ${a.color}33`, background:`${a.color}0a`,
+                  cursor:'pointer', display:'flex', alignItems:'center', gap:6, transition:'all 0.2s', fontFamily:'Exo 2,sans-serif', fontSize:'0.72rem', color:a.color }}
+                onMouseEnter={e=>e.currentTarget.style.background=`${a.color}18`}
+                onMouseLeave={e=>e.currentTarget.style.background=`${a.color}0a`}>
+                <span>{a.icon}</span> {a.label}
+              </button>
             ))}
           </div>
         </div>
       </div>
+
+      {/* ── Maritime Library quick links ── */}
+      <div style={{ background:'var(--card)', border:'1px solid var(--border)', borderRadius:14, padding:'1rem', marginBottom:'1rem', cursor:'pointer' }}
+        onClick={() => setTab('library')}>
+        <div style={{ fontFamily:'Orbitron,monospace', fontSize:'0.68rem', color:'var(--gold)', marginBottom:'0.6rem' }}>📚 MARITIME LIBRARY</div>
+        <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
+          {['SOLAS','MARPOL','STCW','ISM Code','COLREGS','IMDG','MLC','UNCLOS'].map(b => (
+            <span key={b} style={{ padding:'3px 9px', borderRadius:6, background:'rgba(240,165,0,0.08)', border:'1px solid rgba(240,165,0,0.2)', fontSize:'0.68rem', color:'var(--gold)' }}>{b}</span>
+          ))}
+          <span style={{ fontSize:'0.72rem', color:'var(--text3)', alignSelf:'center' }}>→ View all</span>
+        </div>
+      </div>
+
+      {/* Offline indicator */}
+      {isOffline && (
+        <div style={{ fontSize:'0.66rem', color:'var(--green)', textAlign:'center', opacity:0.7 }}>
+          ✅ App data available offline — cached locally
+        </div>
+      )}
     </div>
   );
 }
-
-export default HomePage;
