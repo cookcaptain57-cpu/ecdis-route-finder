@@ -11,9 +11,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 // ── WS hosts to try in order ──────────────────────────────────────────────
-const WS_HOSTS = [
-  'ws://localhost:4002',
-];
+const WS_HOSTS = ['ws://localhost:4002'];
 
 // ── Stale target timeout: remove targets not updated in 10 minutes ─────────
 const STALE_MS = 10 * 60 * 1000;
@@ -196,6 +194,22 @@ const parseHDT = (s) => {
   if (p.length < 2) return null;
   const hdg = parseFloat(p[1]);
   return isNaN(hdg) ? null : hdg;
+  const parseGPGGA = (s) => {
+  const p = s.split(',');
+  if (p.length < 7 || p[6] === '0') return null;
+  const rawLat = parseFloat(p[2]);
+  const rawLon = parseFloat(p[4]);
+  if (isNaN(rawLat) || isNaN(rawLon)) return null;
+  const lat = Math.floor(rawLat/100) + (rawLat%100)/60;
+  const lon = Math.floor(rawLon/100) + (rawLon%100)/60;
+  return { lat: p[3]==='S'?-lat:lat, lon: p[5]==='W'?-lon:lon };
+};
+
+const parseVTG = (s) => {
+  const p = s.split(',');
+  const cog = parseFloat(p[1]);
+  const sog = parseFloat(p[5]);
+  return (!isNaN(cog)&&!isNaN(sog)) ? {cog,sog} : null;
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -327,6 +341,15 @@ class AISService {
       const hdg = parseHDT(line);
       if (hdg !== null) { this.ownShip = { ...(this.ownShip||{}), hdg }; this._emit('ownPos', this.ownShip); }
       return;
+      if(line.startsWith('$GPGGA')||line.startsWith('$GNGGA')){
+  const pos=parseGPGGA(line);
+  if(pos){this.ownShip={...(this.ownShip||{}),...pos};this._emit('ownPos',this.ownShip);}
+  return;
+}
+if(line.startsWith('$GNVTG')||line.startsWith('$GPVTG')){
+  const vtg=parseVTG(line);
+  if(vtg){this.ownShip={...(this.ownShip||{}),...vtg};this._emit('ownPos',this.ownShip);}
+  return;
     }
   }
 
