@@ -11,7 +11,9 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 // ── WS hosts to try in order ──────────────────────────────────────────────
-const WS_HOSTS = ['ws://localhost:4002'];
+const WS_HOSTS = [
+  'ws://localhost:4002',
+];
 
 // ── Stale target timeout: remove targets not updated in 10 minutes ─────────
 const STALE_MS = 10 * 60 * 1000;
@@ -19,10 +21,10 @@ const STALE_MS = 10 * 60 * 1000;
 // ── COLREG classification ──────────────────────────────────────────────────
 const COLREG = (ownCog, relBrg) => {
   const rel = ((relBrg - ownCog + 360) % 360);
-  if (rel > 345 || rel < 15)      return 'HEAD-ON';
+  if (rel > 345 || rel < 15)        return 'HEAD-ON';
   if (rel >= 112.5 && rel <= 247.5) return 'OVERTAKING';
-  if (rel > 15 && rel < 112.5)    return 'CROSSING-STBD';
-  if (rel > 247.5 && rel < 345)   return 'CROSSING-PORT';
+  if (rel > 15 && rel < 112.5)      return 'CROSSING-STBD';
+  if (rel > 247.5 && rel < 345)     return 'CROSSING-PORT';
   return 'SAFE';
 };
 
@@ -61,10 +63,10 @@ const bearingTo = (lat1, lon1, lat2, lon2) => {
 
 // ── NMEA checksum validation ───────────────────────────────────────────────
 const validChecksum = (s) => {
-  const st = s.indexOf('!') !== -1 ? s.indexOf('!') : s.indexOf('$');
+  const st  = s.indexOf('!') !== -1 ? s.indexOf('!') : s.indexOf('$');
   const end = s.lastIndexOf('*');
   if (st < 0 || end < 0 || end < st) return true; // no checksum — accept
-  const body = s.slice(st + 1, end);
+  const body  = s.slice(st + 1, end);
   const given = parseInt(s.slice(end + 1, end + 3), 16);
   const calc  = body.split('').reduce((x, c) => x ^ c.charCodeAt(0), 0);
   return calc === given;
@@ -83,8 +85,8 @@ const payloadToBits = (payload, fill = 0) => {
   return bits;
 };
 
-const b = (bits, s, l) => { let v = 0; for (let i = 0; i < l; i++) v = (v << 1) | (bits[s + i] || 0); return v >>> 0; };
-const bs = (bits, s, l) => { const v = b(bits, s, l); return (v & (1 << (l - 1))) ? v - (1 << l) : v; };
+const b   = (bits, s, l) => { let v = 0; for (let i = 0; i < l; i++) v = (v << 1) | (bits[s + i] || 0); return v >>> 0; };
+const bs  = (bits, s, l) => { const v = b(bits, s, l); return (v & (1 << (l - 1))) ? v - (1 << l) : v; };
 const str6 = (bits, s, l) => {
   let out = '';
   for (let i = 0; i < l; i += 6) {
@@ -194,22 +196,26 @@ const parseHDT = (s) => {
   if (p.length < 2) return null;
   const hdg = parseFloat(p[1]);
   return isNaN(hdg) ? null : hdg;
-  const parseGPGGA = (s) => {
+};
+
+// ── $GPGGA / $GNGGA parser → own ship position from GPS fix ───────────────
+const parseGPGGA = (s) => {
   const p = s.split(',');
   if (p.length < 7 || p[6] === '0') return null;
   const rawLat = parseFloat(p[2]);
   const rawLon = parseFloat(p[4]);
   if (isNaN(rawLat) || isNaN(rawLon)) return null;
-  const lat = Math.floor(rawLat/100) + (rawLat%100)/60;
-  const lon = Math.floor(rawLon/100) + (rawLon%100)/60;
-  return { lat: p[3]==='S'?-lat:lat, lon: p[5]==='W'?-lon:lon };
+  const lat = Math.floor(rawLat / 100) + (rawLat % 100) / 60;
+  const lon = Math.floor(rawLon / 100) + (rawLon % 100) / 60;
+  return { lat: p[3] === 'S' ? -lat : lat, lon: p[5] === 'W' ? -lon : lon };
 };
 
+// ── $GPVTG / $GNVTG parser → COG and SOG ─────────────────────────────────
 const parseVTG = (s) => {
   const p = s.split(',');
   const cog = parseFloat(p[1]);
   const sog = parseFloat(p[5]);
-  return (!isNaN(cog)&&!isNaN(sog)) ? {cog,sog} : null;
+  return (!isNaN(cog) && !isNaN(sog)) ? { cog, sog } : null;
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -217,20 +223,20 @@ const parseVTG = (s) => {
 // ─────────────────────────────────────────────────────────────────────────────
 class AISService {
   constructor() {
-    this.ws              = null;
-    this.targets         = new Map();   // mmsi → target
-    this.multiPart       = new Map();   // seqKey → parts[]
-    this.callbacks       = { update: [], status: [], alert: [], ownPos: [] };
-    this.reconnectTimer  = null;
-    this.staleTimer      = null;
-    this.hostIdx         = 0;
-    this.retryDelay      = 2000;
-    this.maxRetryDelay   = 30000;
-    this._status         = 'disconnected';
-    this.ownShip         = null;        // set from $GPRMC or external
-    this.customHosts     = [];
-    this._active         = false;
-    this._lineBuffer     = '';
+    this.ws             = null;
+    this.targets        = new Map();   // mmsi → target
+    this.multiPart      = new Map();   // seqKey → parts[]
+    this.callbacks      = { update: [], status: [], alert: [], ownPos: [] };
+    this.reconnectTimer = null;
+    this.staleTimer     = null;
+    this.hostIdx        = 0;
+    this.retryDelay     = 2000;
+    this.maxRetryDelay  = 30000;
+    this._status        = 'disconnected';
+    this.ownShip        = null;        // set from $GPRMC or external
+    this.customHosts    = [];
+    this._active        = false;
+    this._lineBuffer    = '';
   }
 
   // ── Public API ──────────────────────────────────────────────────────────
@@ -276,7 +282,7 @@ class AISService {
     if (!this._active) return;
     const hosts = this._allHosts();
     const url   = hosts[this.hostIdx % hosts.length];
-    this._setStatus(`connecting:${url}`);
+    this._setStatus(`connecting:${url}`); // ← fix: was missing backticks
 
     try {
       const ws = new WebSocket(url);
@@ -330,7 +336,7 @@ class AISService {
     }
 
     // Own GPS position from multiplexer
-    if (line.startsWith('$GPRMC') || line.startsWith('$GNRMC') || line.startsWith('$GPRMC')) {
+    if (line.startsWith('$GPRMC') || line.startsWith('$GNRMC')) {
       const pos = parseGPRMC(line);
       if (pos) { this.ownShip = { ...this.ownShip, ...pos }; this._emit('ownPos', this.ownShip); }
       return;
@@ -339,22 +345,27 @@ class AISService {
     // True heading
     if (line.startsWith('$HEHDT') || line.startsWith('$GPHDT') || line.startsWith('$INHDT')) {
       const hdg = parseHDT(line);
-      if (hdg !== null) { this.ownShip = { ...(this.ownShip||{}), hdg }; this._emit('ownPos', this.ownShip); }
+      if (hdg !== null) { this.ownShip = { ...(this.ownShip || {}), hdg }; this._emit('ownPos', this.ownShip); }
       return;
-      if(line.startsWith('$GPGGA')||line.startsWith('$GNGGA')){
-  const pos=parseGPGGA(line);
-  if(pos){this.ownShip={...(this.ownShip||{}),...pos};this._emit('ownPos',this.ownShip);}
-  return;
-}
-if(line.startsWith('$GNVTG')||line.startsWith('$GPVTG')){
-  const vtg=parseVTG(line);
-  if(vtg){this.ownShip={...(this.ownShip||{}),...vtg};this._emit('ownPos',this.ownShip);}
-  return;
+    }
+
+    // GPS fix position (Change 2)
+    if (line.startsWith('$GPGGA') || line.startsWith('$GNGGA')) {
+      const pos = parseGPGGA(line);
+      if (pos) { this.ownShip = { ...(this.ownShip || {}), ...pos }; this._emit('ownPos', this.ownShip); }
+      return;
+    }
+
+    // COG + SOG from VTG (Change 2)
+    if (line.startsWith('$GNVTG') || line.startsWith('$GPVTG')) {
+      const vtg = parseVTG(line);
+      if (vtg) { this.ownShip = { ...(this.ownShip || {}), ...vtg }; this._emit('ownPos', this.ownShip); }
+      return;
     }
   }
 
   _handleVDM(sentence) {
-    const parts = sentence.split(',');
+    const parts   = sentence.split(',');
     if (parts.length < 7) return;
     const total   = parseInt(parts[1]) || 1;
     const partNum = parseInt(parts[2]) || 1;
@@ -388,7 +399,7 @@ if(line.startsWith('$GNVTG')||line.startsWith('$GPVTG')){
 
   _decodeAndMerge(payload, fill) {
     try {
-      const bits = payloadToBits(payload, fill);
+      const bits    = payloadToBits(payload, fill);
       const decoded = decodeAIS(bits);
       if (!decoded || !decoded.mmsi) return;
       this._mergeTarget(decoded);
@@ -420,13 +431,13 @@ if(line.startsWith('$GNVTG')||line.startsWith('$GPVTG')){
     // Compute CPA/TCPA if own ship is known and target has position
     if (this.ownShip?.lat && updated.lat) {
       const { cpa, tcpa } = calcCPATCPA(this.ownShip, updated);
-      const brg = bearingTo(this.ownShip.lat, this.ownShip.lon, updated.lat, updated.lon);
+      const brg    = bearingTo(this.ownShip.lat, this.ownShip.lon, updated.lat, updated.lon);
       const colreg = COLREG(this.ownShip.cog || 0, brg);
       updated.cpa   = cpa;
       updated.tcpa  = tcpa;
       updated.brg   = parseFloat(brg.toFixed(1));
       updated.colreg = colreg;
-      updated.range = parseFloat(
+      updated.range  = parseFloat(
         Math.sqrt(
           Math.pow((updated.lon - this.ownShip.lon) * Math.cos(this.ownShip.lat * Math.PI / 180) * 60, 2) +
           Math.pow((updated.lat - this.ownShip.lat) * 60, 2)
