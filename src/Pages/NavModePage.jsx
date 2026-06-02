@@ -109,6 +109,10 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
   const [offTrackAlarm,setOffTrackAlarm]=useState(false);
   const [shallowAlarm,setShallowAlarm]=useState(false);
   const [fullScreen,setFullScreen]=useState(false);
+  const [mapZoom,setMapZoom]=useState(4);
+  const [cogPanelPos,setCogPanelPos]=useState(()=>{try{return JSON.parse(localStorage.getItem('nav_cogPanelPos')||'null')||{x:null,y:8};}catch{return{x:null,y:8};}});
+  const [cogPanelVisible,setCogPanelVisible]=useState(()=>localStorage.getItem('nav_cogPanel')!=='false');
+  const cogDragRef=useRef(null);
   const [localAisStatus,setLocalAisStatus]=useState('off');
   const [localAisCount,setLocalAisCount]=useState(0);
   const [localAisHost,setLocalAisHost]=useState(()=>ls('nav_localAisHost')||'ws://localhost:4002');
@@ -165,28 +169,17 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
       const geojson=await res.json();
       const L=window.L,m=leafRef.current;
       if(!m.getPane('indonesiaPane')){const cp=m.createPane('indonesiaPane');cp.style.zIndex='445';cp.style.pointerEvents='none';}
-      const layer=L.geoJSON(geojson,{
+      // Filter to only depth features for performance
+      const depthOnly={...geojson,features:(geojson.features||[]).filter(f=>['depth_area','depth_contour','sounding'].includes(f.properties?.type||f.properties?.featureType||''))};
+      const layer=L.geoJSON(depthOnly,{
         pane:'indonesiaPane',
         style:ft=>{
           const t=ft.properties?.type||ft.properties?.featureType||'';
-          // Filter out bad long-range lines (edge chain artifacts > ~1.5 degrees span)
-          const g=ft.geometry;
-          if(g&&g.type==='LineString'&&g.coordinates?.length>=2){
-            const lons=g.coordinates.map(c=>c[0]),lats=g.coordinates.map(c=>c[1]);
-            const dLon=Math.max(...lons)-Math.min(...lons);
-            const dLat=Math.max(...lats)-Math.min(...lats);
-            if(dLon>3||dLat>3) return{opacity:0,weight:0,color:'transparent'};
-          }
-          if(t==='coastline')     return{color:'#000000',weight:2,opacity:0.9};
-          if(t==='depth_contour') return{color:'#0050AA',weight:1,opacity:0.7,dashArray:'4 3'};
-          if(t==='depth_area')    return{color:'#0050AA',weight:0.5,opacity:0.3,fillColor:'#AADDFF',fillOpacity:0.15};
-          if(t==='land')          return{color:'#888800',weight:1,fillColor:'#FFFFCC',fillOpacity:0.5};
-          if(t==='nav_line')      return{color:'#CC00CC',weight:1.5,dashArray:'8 4'};
-          if(t==='traffic_sep')   return{color:'#CC00CC',weight:1,opacity:0.6,fillColor:'#CC00CC',fillOpacity:0.05};
-          if(t==='restricted')    return{color:'#FF0000',weight:2};
-          if(t==='hazard')        return{color:'#FF4500',weight:1.5};
-          if(t==='anchorage')     return{color:'#0080FF',weight:1,dashArray:'6 4',fillColor:'#0080FF',fillOpacity:0.06};
-          return{color:'#0050AA',weight:1,opacity:0.5};
+          // Only show depth areas (shadow) and depth contours - hide everything else
+          if(t==='depth_area')    return{color:'#0050AA',weight:0,fillColor:'#AADDFF',fillOpacity:0.18};
+          if(t==='depth_contour') return{color:'#0050AA',weight:0.8,opacity:0.6,dashArray:'3 3'};
+          // Hide ALL other feature types - no lines, no land, no traffic
+          return{opacity:0,weight:0,color:'transparent',fillOpacity:0};
         },
         pointToLayer:(ft,ll)=>{
           const p=ft.properties;
@@ -238,7 +231,7 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
           try{const r=await fetch(url,{headers:{'Authorization':VESSEL_API_KEY,'x-api-key':VESSEL_API_KEY}});if(!r.ok) continue;const data=await r.json();const v=data?.vessels||data?.data||data?.results||(Array.isArray(data)?data:[]);if(Array.isArray(v)&&v.length>0){setAisStatus('connected');const t={};v.forEach(x=>{const m=x.mmsi||x.MMSI;const la=parseFloat(x.lat||x.latitude||0),ln=parseFloat(x.lon||x.lng||x.longitude||0);if(m&&la&&ln) t[m]={mmsi:m,lat:la,lon:ln,cog:parseFloat(x.cog||0),sog:parseFloat(x.sog||x.speed||0),name:(x.name||x.shipName||'').trim(),ts:Date.now()};});setAisTargets(t);return;}}catch{}}
         setAisStatus('connecting');
         if(aisWsRef.current?.readyState===WebSocket.OPEN) return;
-        const ws=new WebSocket("ws://stream.aisstream.io/v0/stream");
+        const ws=new WebSocket("wss://stream.aisstream.io/v0/stream");
         aisWsRef.current=ws;
         ws.onopen=()=>{setAisStatus('connected');ws.send(JSON.stringify({APIKey:AISSTREAM_KEY,BoundingBoxes:[[[-90,-180],[90,180]]],FilterMessageTypes:["PositionReport"]}));};
         ws.onmessage=msg=>{try{const d=JSON.parse(msg.data);const p=d?.Message?.PositionReport,m=d?.MetaData;if(!p||!m||p.Latitude===0) return;setAisTargets(prev=>({...prev,[m.MMSI]:{mmsi:m.MMSI,name:(m.ShipName||'').trim(),lat:p.Latitude,lon:p.Longitude,cog:p.CourseOverGround||0,sog:p.SpeedOverGround||0,ts:Date.now()}}));}catch{}};
@@ -273,7 +266,8 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
         const sog=(pos.coords.speed||0)*1.94384,cog=pos.coords.heading||0,acc=pos.coords.accuracy||0;
         const now2=Date.now(),dt=lastHdgTimeRef.current?((now2-lastHdgTimeRef.current)/60000):0;
         const dHdg=lastHdgRef.current!==null?((cog-lastHdgRef.current+540)%360-180):0;
-        const rot=dt>0?parseFloat((dHdg/dt).toFixed(1)):0;
+        // Only calculate ROT when actually moving (>0.5kn), else noise from GPS
+        const rot=(dt>0&&sog>0.5)?Math.max(-720,Math.min(720,parseFloat((dHdg/dt).toFixed(1)))):0;
         lastHdgRef.current=cog;lastHdgTimeRef.current=now2;
         setRotValue(rot);
         const fix={lat:la,lon:ln,sog,cog,heading:cog,acc,rot};
@@ -348,10 +342,10 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
       try{L.tileLayer.wms('https://data.linz.govt.nz/services;key=insert-linz-key/wms',{layers:'layer-50448',format:'image/png',transparent:true,version:'1.1.1',opacity:0.7,zIndex:7,attribution:'© LINZ'}).addTo(m);}catch(e){console.warn('[LINZ]',e);}
     }
     if(ds.has('norway')){
-      try{L.tileLayer.wms('https://wms.geonorge.no/skwms1/wms.dybdedata2',{layers:'dybdedata2',format:'image/png',transparent:true,version:'1.3.0',opacity:0.65,zIndex:7,attribution:'© Kartverket'}).addTo(m);}catch(e){console.warn('[Kartverket]',e);}
+      try{L.tileLayer.wms('https://wms.geonorge.no/skwms1/wms.dybdedata2',{layers:'dybdedata2,dybdedata2_25m',format:'image/png',transparent:true,version:'1.3.0',opacity:0.65,zIndex:7,attribution:'© Kartverket'}).addTo(m);}catch(e){console.warn('[Kartverket]',e);}
     }
     if(ds.has('australia')){
-      try{L.tileLayer.wms('http://marine.ga.gov.au/geoserver/marine/wms',{layers:'marine:bathymetry',format:'image/png',transparent:true,version:'1.3.0',opacity:0.6,zIndex:7,attribution:'© Geoscience Australia'}).addTo(m);}catch(e){console.warn('[GA]',e);}
+      try{L.tileLayer.wms('https://www.ga.gov.au/geoserver/marine/wms',{layers:'marine:bathymetry',format:'image/png',transparent:true,version:'1.3.0',opacity:0.6,zIndex:7,attribution:'© Geoscience Australia'}).addTo(m);}catch(e){console.warn('[GA]',e);}
     }
     if(ds.has('canada')){
       try{L.tileLayer.wms('https://nonna-geoserver.data.chs-shc.ca/geoserver/wms',{layers:'nonna:NONNA_100',format:'image/png',transparent:true,version:'1.3.0',opacity:0.65,zIndex:7,attribution:'© CHS/NRCan'}).addTo(m);}catch(e){console.warn('[CHS]',e);}
@@ -360,7 +354,7 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
       try{L.tileLayer.wms('https://julkinen.traficom.fi/inspirepalvelu/avoin/wms',{layers:'syvyyskayra',format:'image/png',transparent:true,version:'1.3.0',opacity:0.7,zIndex:7,attribution:'© Traficom'}).addTo(m);}catch(e){console.warn('[Traficom]',e);}
     }
     if(ds.has('germany')){
-      try{L.tileLayer.wms('https://gdi.bsh.de/mapservice_gs/NAUTHIS/ows',{layers:'Tiefenlinien',format:'image/png',transparent:true,version:'1.3.0',opacity:0.65,zIndex:7,attribution:'© BSH'}).addTo(m);}catch(e){console.warn('[BSH]',e);}
+      try{L.tileLayer.wms('https://gdi.bsh.de/mapservice_gs/NAUTHIS/ows',{layers:'Tiefenlinien,Tiefenzonen',format:'image/png',transparent:true,version:'1.3.0',opacity:0.65,zIndex:7,attribution:'© BSH'}).addTo(m);}catch(e){console.warn('[BSH]',e);}
     }
     if(ds.has('ireland')){
       try{L.tileLayer.wms('https://atlas.marine.ie/arcgis/services/Bathymetry/MapServer/WMSServer',{layers:'0',format:'image/png',transparent:true,version:'1.3.0',opacity:0.6,zIndex:7,attribution:'© INFOMAR'}).addTo(m);}catch(e){console.warn('[INFOMAR]',e);}
@@ -410,6 +404,8 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
   useEffect(()=>{if(activeRoute) localStorage.setItem('nav_activeRoute',JSON.stringify(activeRoute));else localStorage.removeItem('nav_activeRoute');},[activeRoute]);
   useEffect(()=>{localStorage.setItem('nav_chartOverlays',JSON.stringify(chartOverlays));},[chartOverlays]);
   useEffect(()=>{localStorage.setItem('nav_zoneOverlays',JSON.stringify(zoneOverlays));},[zoneOverlays]);
+  useEffect(()=>{localStorage.setItem('nav_cogPanelPos',JSON.stringify(cogPanelPos));},[cogPanelPos]);
+  useEffect(()=>{localStorage.setItem('nav_cogPanel',cogPanelVisible);},[cogPanelVisible]);
 
   // Route render
   useEffect(()=>{
@@ -491,6 +487,8 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
       const L=window.L,opts={center:[20,70],zoom:4,worldCopyJump:true};
       if(typeof L.Map.prototype.setBearing==='function'){try{opts.rotate=true;opts.rotateControl=false;}catch{}}
       leafRef.current=L.map(mapRef.current,opts);
+      L.control.scale({position:'bottomleft',imperial:true,metric:true,maxWidth:120}).addTo(leafRef.current);
+      leafRef.current.on('zoomend',()=>setMapZoom(leafRef.current.getZoom()));
       baseTileRef.current=L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{subdomains:'abcd',attribution:'© CARTO'}).addTo(leafRef.current);
       seamarkRef.current=L.tileLayer('https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png',{opacity:0.55,maxZoom:18,attribution:'© OpenSeaMap'}).addTo(leafRef.current);
       leafRef.current.on('click',e=>{
@@ -553,6 +551,116 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
     });
   },[zoneOverlays,mapReady]);
 
+
+  // ── ANCHOR WATCH effect ──────────────────────────────────────────────────
+  useEffect(()=>{
+    if(!anchorWatchOn||!anchorPos||!livePos) return;
+    const dist=distNM(livePos.lat,livePos.lon,anchorPos.lat,anchorPos.lon);
+    if(dist>anchorRadius){
+      const now=Date.now();
+      if(now-anchorAlarmCooldownRef.current>20000){
+        anchorAlarmCooldownRef.current=now;
+        setAnchorAlarm(true);
+        notify(`⚓ ANCHOR DRAGGING — ${dist.toFixed(2)}NM from drop point!`,'error');
+        setTimeout(()=>setAnchorAlarm(false),10000);
+      }
+    } else { setAnchorAlarm(false); }
+  },[livePos,anchorPos,anchorRadius,anchorWatchOn]);
+
+  // ── Draw/remove anchor circle on map ─────────────────────────────────────
+  useEffect(()=>{
+    if(!mapReady||!leafRef.current||!window.L) return;
+    const L=window.L,m=leafRef.current;
+    if(anchorCircleRef.current){try{m.removeLayer(anchorCircleRef.current);}catch{}anchorCircleRef.current=null;}
+    if(anchorWatchOn&&anchorPos){
+      const radiusM=anchorRadius*1852;
+      anchorCircleRef.current=L.circle([anchorPos.lat,anchorPos.lon],{
+        radius:radiusM,color:anchorAlarm?'#FF2020':'#FFD700',
+        fillColor:anchorAlarm?'#FF2020':'#FFD700',fillOpacity:0.08,
+        weight:2,dashArray:'6 4',
+      }).bindPopup(`<b>⚓ Anchor Drop</b><br/>Radius: ${anchorRadius}NM<br/>${anchorAlarm?'<b style="color:#FF2020">⚠ DRAGGING!</b>':'Holding'}`).addTo(m);
+    }
+  },[anchorWatchOn,anchorPos,anchorRadius,anchorAlarm,mapReady]);
+
+  // ── SPEED ALARM ───────────────────────────────────────────────────────────
+  useEffect(()=>{
+    if(!livePos||speedAlarmKn<=0) return;
+    if(livePos.sog>speedAlarmKn){
+      if(!speedAlarmTriggered){
+        setSpeedAlarmTriggered(true);
+        notify(`⚠ SPEED LIMIT — ${livePos.sog.toFixed(1)}kn exceeds ${speedAlarmKn}kn limit`,'error');
+      }
+    } else { setSpeedAlarmTriggered(false); }
+  },[livePos,speedAlarmKn]);
+
+  // ── WP ARRIVAL ALERT + AUTO-ADVANCE ──────────────────────────────────────
+  useEffect(()=>{
+    if(!livePos||!activeRoute?.waypoints?.length) return;
+    const wps=activeRoute.waypoints;
+    const ti=Math.min(Math.max(selectedWpIdx,0),wps.length-1);
+    const dist=distNM(livePos.lat,livePos.lon,wps[ti].lat,wps[ti].lon);
+    if(dist<wpArrivalNM){
+      const now=Date.now();
+      if(now-wpAlarmCooldownRef.current>15000){
+        wpAlarmCooldownRef.current=now;
+        const wpName=wps[ti].name||`WP${String(ti+1).padStart(2,'0')}`;
+        notify(`📍 Arriving at ${wpName} — ${dist.toFixed(2)}NM`,'error');
+        // Auto-advance to next waypoint
+        if(ti<wps.length-1) setSelectedWpIdx(ti+1);
+        else notify('🏁 Final waypoint reached!','error');
+      }
+    }
+  },[livePos,activeRoute,selectedWpIdx,wpArrivalNM]);
+
+  // ── WEATHER fetch ─────────────────────────────────────────────────────────
+  const fetchWeather=async(lat,lon)=>{
+    if(weatherLoading) return;
+    setWeatherLoading(true);
+    try{
+      // OpenWeatherMap free API — 1000 calls/day
+      const key='dc9f59e2df05e49c03bc4aaacbb6d27a'; // free demo key — replace with your own
+      const res=await fetch(`https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&units=metric&appid=${key}`);
+      if(res.ok){
+        const d=await res.json();
+        setWeatherData({
+          temp:d.main?.temp,
+          desc:d.weather?.[0]?.description||'',
+          windSpd:((d.wind?.speed||0)*1.94384).toFixed(1), // m/s -> knots
+          windDir:d.wind?.deg||0,
+          humidity:d.main?.humidity,
+          pressure:d.main?.pressure,
+          visibility:(d.visibility||0)/1000,
+          icon:d.weather?.[0]?.icon,
+          city:d.name||'',
+        });
+        setShowWeather(true);
+      } else { notify('Weather: no data for this location','error'); }
+    }catch(e){notify('Weather fetch failed','error');}
+    setWeatherLoading(false);
+  };
+
+  // ── PORT QUICK SEARCH ─────────────────────────────────────────────────────
+  useEffect(()=>{
+    if(!portSearch.trim()||portSearch.length<2){setPortSearchResults([]);return;}
+    const q=portSearch.toLowerCase();
+    const results=(portsDb||[]).filter(p=>(p.name||'').toLowerCase().includes(q)||(p.country||'').toLowerCase().includes(q)).slice(0,8);
+    setPortSearchResults(results);
+  },[portSearch,portsDb]);
+
+  // ── TRACK EXPORT as GPX ───────────────────────────────────────────────────
+  const exportTrack=()=>{
+    const pts=pastTrackRef.current;
+    if(!pts||pts.length<2){notify('No track to export','error');return;}
+    const wpts=pts.map(p=>`    <trkpt lat="${p.lat.toFixed(6)}" lon="${p.lon.toFixed(6)}"><time>${new Date(p.t).toISOString()}</time></trkpt>`).join('\n');
+    const gpx=`<?xml version="1.0"?>\n<gpx version="1.1" creator="NavisphereX">\n  <trk><name>NavisphereX Track ${new Date().toISOString().slice(0,10)}</name>\n  <trkseg>\n${wpts}\n  </trkseg></trk>\n</gpx>`;
+    const blob=new Blob([gpx],{type:'application/gpx+xml'});
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(blob);
+    a.download=`track_${new Date().toISOString().slice(0,10)}.gpx`;
+    a.click();URL.revokeObjectURL(a.href);
+    notify('✓ Track exported as GPX','error');
+  };
+
   // Derived
   const filteredSaved=savedRoutes.filter(r=>!savedSearch.trim()||(r.name||'').toLowerCase().includes(savedSearch.toLowerCase())).slice(0,100);
   const filteredDbRoutes=(sheetRoutes||[]).filter(r=>{if(!dbRouteSearch.trim()) return true;const k=dbRouteSearch.toLowerCase();const h=[r.name,r.Name,r['Route Name'],r.from,r.to,r.origin,r.destination].filter(Boolean).join(' ').toLowerCase();return h.includes(k);}).slice(0,60);
@@ -613,13 +721,16 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
 
   // ─── UI ─────────────────────────────────────────────────────────────────
   return(
-    <div style={{flex:1,display:'flex',flexDirection:'column',background:'#040C1A',position:'relative',overflow:'hidden',minHeight:0,...(fullScreen?{position:'fixed',inset:0,zIndex:9999,minHeight:'100vh'}:{})}}>
+    <div style={{flex:1,display:'flex',flexDirection:'column',background:'#040C1A',position:'relative',overflow:'hidden',minHeight:0,...(fullScreen?{position:'fixed',inset:0,zIndex:9999,minHeight:'100vh'}:{}),...(nightVision?{filter:'sepia(1) saturate(3) hue-rotate(300deg) brightness(0.7)'}:{})}}>
 
       {/* HEADER */}
       <div style={{height:48,display:'flex',alignItems:'center',padding:'0 10px',background:'#020810',borderBottom:`1px solid ${S.bd}`,flexShrink:0,gap:5}}>
         <span style={{color:S.cy,fontWeight:700,fontSize:'0.82rem',letterSpacing:1,flex:1}}>⚓ NAV MODE</span>
         <div style={{display:'flex',gap:2}}>{[['north','N↑'],['course','C↑'],['head','H↑']].map(([v,l])=>(<button key={v} onClick={()=>setDisplayMode(v)} style={{background:displayMode===v?'rgba(0,212,255,0.2)':'transparent',border:`1px solid ${displayMode===v?S.cy:S.vd}`,color:displayMode===v?S.cy:S.dm,borderRadius:5,padding:'3px 7px',fontSize:'0.65rem',cursor:'pointer'}}>{l}</button>))}</div>
         <div style={{display:'flex',gap:2}}>{[['night','🌙'],['day','☀'],['dusk','🏇']].map(([v,l])=>(<button key={v} onClick={()=>setMapMode(v)} style={{background:mapMode===v?'rgba(255,215,0,0.18)':'transparent',border:`1px solid ${mapMode===v?S.gd:S.vd}`,color:mapMode===v?S.gd:S.dm,borderRadius:5,padding:'3px 6px',fontSize:'0.72rem',cursor:'pointer'}}>{l}</button>))}</div>
+        <button onClick={()=>setShowPortSearch(v=>!v)} style={{background:showPortSearch?'rgba(0,212,255,0.2)':'transparent',border:`1px solid ${showPortSearch?S.cy:S.vd}`,color:showPortSearch?S.cy:S.dm,borderRadius:5,padding:'3px 7px',fontSize:'0.8rem',cursor:'pointer'}} title="Port Search">🔍</button>
+        <button onClick={()=>setNightVision(v=>!v)} style={{background:nightVision?'rgba(255,0,0,0.2)':'transparent',border:`1px solid ${nightVision?'#FF2020':S.vd}`,color:nightVision?'#FF2020':S.dm,borderRadius:5,padding:'3px 7px',fontSize:'0.8rem',cursor:'pointer'}} title="Night Vision">🔴</button>
+        <button onClick={()=>setCogPanelVisible(v=>!v) style={{background:cogPanelVisible&&livePos?'rgba(0,212,255,0.15)':'transparent',border:`1px solid ${cogPanelVisible&&livePos?S.cy:S.vd}`,color:cogPanelVisible&&livePos?S.cy:S.dm,borderRadius:5,padding:'3px 7px',fontSize:'0.75rem',cursor:'pointer'}} title="Toggle SOG/COG panel">⊕</button>
         <button onClick={()=>setFullScreen(v=>!v)} style={{background:fullScreen?'rgba(0,255,136,0.15)':'transparent',border:`1px solid ${fullScreen?S.gn:S.vd}`,color:fullScreen?S.gn:S.dm,borderRadius:5,padding:'3px 7px',fontSize:'0.9rem',cursor:'pointer'}} title={fullScreen?'Exit Fullscreen':'Fullscreen'}>{fullScreen?'⛶':'⛶'}</button>
         <button onClick={()=>setShowMenu(v=>!v)} style={{background:showMenu?'rgba(0,212,255,0.2)':'transparent',border:`1px solid ${showMenu?S.cy:S.vd}`,color:showMenu?S.cy:S.dm,borderRadius:5,padding:'3px 9px',fontSize:'1rem',cursor:'pointer'}}>☰</button>
       </div>
@@ -627,8 +738,107 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
       {/* MAP */}
       <div ref={mapRef} style={{flex:1,minHeight:0}}/>
 
+      {/* Weather info card */}
+      {showWeather&&weatherData&&(
+        <div style={{position:'absolute',bottom:80,right:8,zIndex:500,background:'rgba(2,8,16,0.92)',border:`1px solid ${S.bd}`,borderRadius:10,padding:'8px 12px',minWidth:140,backdropFilter:'blur(10px)'}}>
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:4}}>
+            <div style={{color:S.cy,fontSize:'0.72rem',fontWeight:700}}>🌤 {weatherData.city}</div>
+            <button onClick={()=>setShowWeather(false)} style={{background:'none',border:'none',color:S.dm,cursor:'pointer',fontSize:'0.7rem'}}>✕</button>
+          </div>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'3px 8px'}}>
+            {[['🌡','Temp',`${weatherData.temp?.toFixed(1)}°C`],
+              ['💨','Wind',`${weatherData.windSpd}kn`],
+              ['🧭','Dir',`${weatherData.windDir}°`],
+              ['👁','Vis',`${weatherData.visibility?.toFixed(1)}km`],
+              ['💧','Hum',`${weatherData.humidity}%`],
+              ['📊','Pres',`${weatherData.pressure}hPa`],
+            ].map(([ic,lb,val])=>(
+              <div key={lb}><span style={{color:S.dm,fontSize:'0.55rem'}}>{ic} {lb}</span><div style={{color:S.tx,fontSize:'0.68rem',fontFamily:'monospace',fontWeight:600}}>{val}</div></div>
+            ))}
+          </div>
+          <div style={{color:S.dm,fontSize:'0.58rem',marginTop:4,textTransform:'capitalize'}}>{weatherData.desc}</div>
+        </div>
+      )}
+
+      {/* Zoom level badge */}
+      <div style={{position:'absolute',bottom:36,left:8,zIndex:500,pointerEvents:'none'}}>
+        <div style={{background:'rgba(4,12,26,0.85)',border:'1px solid rgba(0,212,255,0.25)',borderRadius:4,padding:'2px 7px',color:'#00D4FF',fontFamily:'monospace',fontSize:'0.6rem',fontWeight:700}}>Z{mapZoom}</div>
+      </div>
+
+      {/* Port Quick Search overlay */}
+      {showPortSearch&&(
+        <div style={{position:'absolute',top:56,left:'50%',transform:'translateX(-50%)',zIndex:700,background:'rgba(2,8,16,0.97)',border:`1px solid ${S.bd}`,borderRadius:12,padding:'10px 12px',width:260,backdropFilter:'blur(16px)',boxShadow:'0 8px 32px rgba(0,0,0,0.6)'}}>
+          <div style={{display:'flex',gap:6,marginBottom:6}}>
+            <input autoFocus value={portSearch} onChange={e=>setPortSearch(e.target.value)} placeholder="Search port..." style={{flex:1,background:'#060F1C',color:S.cy,border:`1px solid ${S.vd}`,borderRadius:6,padding:'6px 9px',fontSize:'0.78rem',outline:'none'}}/>
+            <button onClick={()=>{setShowPortSearch(false);setPortSearch('');setPortSearchResults([]);}} style={{background:'transparent',border:`1px solid ${S.vd}`,color:S.dm,borderRadius:6,padding:'4px 8px',cursor:'pointer'}}>✕</button>
+          </div>
+          {portSearchResults.map((p,i)=>{
+            const dist=livePos?distNM(livePos.lat,livePos.lon,p.lat,p.lon):null;
+            const bearing=livePos&&p.lat?brg(livePos.lat,livePos.lon,p.lat,p.lon):null;
+            return(<div key={i} onClick={()=>{if(leafRef.current&&p.lat&&p.lon){leafRef.current.setView([p.lat,p.lon],10);}setShowPortSearch(false);setPortSearch('');}} style={{padding:'7px 8px',cursor:'pointer',borderRadius:6,marginBottom:3,background:'rgba(0,212,255,0.05)',border:`1px solid ${S.vd}`}}>
+              <div style={{color:S.cy,fontSize:'0.78rem',fontWeight:600}}>⚓ {p.name}</div>
+              <div style={{color:S.dm,fontSize:'0.62rem'}}>{p.country}</div>
+              {dist&&<div style={{color:S.gd,fontSize:'0.62rem',fontFamily:'monospace'}}>{dist.toFixed(1)}NM · {bearing?.toFixed(0)}°T</div>}
+            </div>);
+          })}
+          {portSearchResults.length===0&&portSearch.length>=2&&<div style={{color:S.vd,fontSize:'0.7rem',textAlign:'center',padding:'8px 0'}}>No ports found</div>}
+        </div>
+      )}
+
+      {/* SOG/COG/ROT draggable panel - always visible when GPS on */}
+      {cogPanelVisible&&livePos&&(
+        <div
+          style={{position:'absolute',left:cogPanelPos.x!==null?cogPanelPos.x:'50%',top:cogPanelPos.y,transform:cogPanelPos.x===null?'translateX(-50%)':'none',zIndex:601,touchAction:'none',cursor:'grab'}}
+          onTouchStart={e=>{const t=e.touches[0];cogDragRef.current={dx:t.clientX-(cogPanelPos.x||window.innerWidth/2-120),dy:t.clientY-cogPanelPos.y};}}
+          onTouchMove={e=>{if(!cogDragRef.current)return;e.stopPropagation();const t=e.touches[0];setCogPanelPos({x:Math.max(0,Math.min(window.innerWidth-260,t.clientX-cogDragRef.current.dx)),y:Math.max(50,Math.min(window.innerHeight-120,t.clientY-cogDragRef.current.dy))});}}
+          onTouchEnd={()=>{cogDragRef.current=null;}}
+          onMouseDown={e=>{if(e.button!==0)return;const startX=cogPanelPos.x!==null?cogPanelPos.x:e.currentTarget.getBoundingClientRect().left;const startY=cogPanelPos.y;const ox=e.clientX-startX,oy=e.clientY-startY;const mm=ev=>{setCogPanelPos({x:Math.max(0,Math.min(window.innerWidth-260,ev.clientX-ox)),y:Math.max(50,Math.min(window.innerHeight-120,ev.clientY-oy))});};const mu=()=>{window.removeEventListener('mousemove',mm);window.removeEventListener('mouseup',mu);};window.addEventListener('mousemove',mm);window.addEventListener('mouseup',mu);}}
+        >
+          <div style={{display:'flex',alignItems:'center',gap:12,background:'rgba(2,8,16,0.92)',border:'1px solid rgba(0,212,255,0.4)',borderRadius:14,padding:'8px 16px',backdropFilter:'blur(14px)',boxShadow:'0 4px 20px rgba(0,0,0,0.5)'}}>
+            {/* Close button */}
+            <button onClick={()=>setCogPanelVisible(false)} style={{position:'absolute',top:3,right:5,background:'none',border:'none',color:'#5A7A90',fontSize:'0.65rem',cursor:'pointer',lineHeight:1}}>✕</button>
+            {/* SOG */}
+            <div style={{textAlign:'center',minWidth:52}}>
+              <div style={{color:'#5A7A90',fontSize:'0.55rem',letterSpacing:1,textTransform:'uppercase'}}>SOG</div>
+              <div style={{color:'#00FF88',fontFamily:'monospace',fontSize:'1.6rem',fontWeight:900,lineHeight:1.1}}>{livePos.sog.toFixed(1)}</div>
+              <div style={{color:'#5A7A90',fontSize:'0.5rem'}}>knots</div>
+            </div>
+            <div style={{width:1,height:46,background:'rgba(0,212,255,0.2)',flexShrink:0}}/>
+            {/* COG */}
+            <div style={{textAlign:'center',minWidth:52}}>
+              <div style={{color:'#5A7A90',fontSize:'0.55rem',letterSpacing:1,textTransform:'uppercase'}}>COG</div>
+              <div style={{color:'#00D4FF',fontFamily:'monospace',fontSize:'1.6rem',fontWeight:900,lineHeight:1.1}}>{livePos.cog.toFixed(0)}°</div>
+              <div style={{color:'#5A7A90',fontSize:'0.5rem'}}>true</div>
+            </div>
+            <div style={{width:1,height:46,background:'rgba(0,212,255,0.2)',flexShrink:0}}/>
+            {/* ROT analog gauge */}
+            <div style={{textAlign:'center',minWidth:64}}>
+              <div style={{color:'#5A7A90',fontSize:'0.55rem',letterSpacing:1,textTransform:'uppercase',marginBottom:2}}>ROT</div>
+              <svg width="60" height="32" viewBox="0 0 60 32" style={{display:'block',margin:'0 auto'}}>
+                <path d="M 6,31 A 25,25 0 0,1 30,6" stroke="#FF2020" strokeWidth="5" fill="none" strokeLinecap="round" opacity="0.35"/>
+                <path d="M 30,6 A 25,25 0 0,1 54,31" stroke="#00FF88" strokeWidth="5" fill="none" strokeLinecap="round" opacity="0.35"/>
+                <text x="4" y="30" fill="#FF2020" fontSize="8" fontFamily="monospace" opacity="0.7">P</text>
+                <text x="50" y="30" fill="#00FF88" fontSize="8" fontFamily="monospace" opacity="0.7">S</text>
+                {(()=>{
+                  const rot=Math.max(-30,Math.min(30,rotValue||0));
+                  const ang=(rot/30)*82;
+                  const rad=(ang-90)*Math.PI/180;
+                  const x=30+23*Math.cos(rad);
+                  const y=31+23*Math.sin(rad);
+                  const col=rot<-2?'#FF2020':rot>2?'#00FF88':'#FFD700';
+                  return(<><line x1="30" y1="31" x2={x.toFixed(1)} y2={y.toFixed(1)} stroke={col} strokeWidth="3" strokeLinecap="round"/><circle cx="30" cy="31" r="3.5" fill="#00D4FF"/></>);
+                })()}
+              </svg>
+              <div style={{color:Math.abs(rotValue||0)>10?'#FF2020':Math.abs(rotValue||0)>3?'#FFD700':'#00FF88',fontFamily:'monospace',fontSize:'0.65rem',fontWeight:700,marginTop:1}}>
+                {(rotValue||0)>0.5?'⇒':(rotValue||0)<-0.5?'⇐':'·'} {Math.abs(rotValue||0).toFixed(1)}°/m
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* HUD */}
-      <div style={{position:'absolute',left:hudPos.x,top:hudPos.y,zIndex:600,background:S.bg,border:`1px solid ${gpsOn?S.bd:'rgba(42,64,85,0.4)'}`,borderRadius:10,minWidth:182,touchAction:'none',boxShadow:'0 4px 20px rgba(0,0,0,0.5)'}} onTouchStart={onTS} onTouchMove={onTM} onTouchEnd={onTE}>
+      <div style={{position:'absolute',left:hudPos.x,top:hudPos.y,zIndex:600,background:S.bg,border:`1px solid ${gpsOn?S.bd:'rgba(42,64,85,0.4)'}`,borderRadius:10,minWidth:182,touchAction:'none',boxShadow:'0 4px 20px rgba(0,0,0,0.5)'}} onTouchStart={onTS} onTouchMove={onTM} onTouchEnd={onTE} onMouseDown={e=>{if(e.button!==0)return;hudDragRef.current={dx:e.clientX-hudPos.x,dy:e.clientY-hudPos.y};const mm=ev=>{if(!hudDragRef.current)return;setHudPos({x:Math.max(0,Math.min(window.innerWidth-185,ev.clientX-hudDragRef.current.dx)),y:Math.max(50,Math.min(window.innerHeight-200,ev.clientY-hudDragRef.current.dy))});};const mu=()=>{hudDragRef.current=null;window.removeEventListener('mousemove',mm);window.removeEventListener('mouseup',mu);};window.addEventListener('mousemove',mm);window.addEventListener('mouseup',mu);}}>
         <div style={{display:'flex',alignItems:'center',padding:'6px 10px',gap:5,cursor:'grab',borderBottom:'1px solid rgba(0,212,255,0.12)'}}>
           <span style={{color:S.dm,fontSize:'0.7rem',flex:1}}>⠸ {shipProfile?.name||'SHIP DATA'}</span>
           <button onClick={()=>setTogCollapsed(v=>!v)} style={{background:'transparent',border:`1px solid ${S.vd}`,color:S.dm,borderRadius:4,padding:'1px 5px',fontSize:'0.62rem',cursor:'pointer'}}>{togCollapsed?'▼':'▲'} CTRL</button>
@@ -682,11 +892,13 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
       {panelCollapsed?(
         <button onClick={()=>setPanelCollapsed(false)} style={{position:'absolute',top:'50%',right:0,transform:'translateY(-50%)',background:'rgba(4,12,26,0.95)',border:`1px solid ${S.bd}`,color:S.cy,borderRadius:'8px 0 0 8px',padding:'12px 6px',fontSize:'0.7rem',cursor:'pointer',zIndex:500,writingMode:'vertical-rl'}}>◀ PANEL</button>
       ):(
-        <div style={{position:'absolute',top:56,right:8,background:S.bg,border:`1px solid ${S.bd}`,borderRadius:10,padding:'8px 10px',zIndex:500,width:172,backdropFilter:'blur(10px)',maxHeight:'82vh',overflowY:'auto',boxShadow:'0 4px 20px rgba(0,0,0,0.5)'}}>
+        <div style={{position:'absolute',top:56,right:8,background:S.bg,border:`1px solid ${S.bd}`,borderRadius:10,padding:'8px 10px',zIndex:500,width:172,backdropFilter:'blur(10px)',maxHeight:'82vh',display:'flex',flexDirection:'column',boxShadow:'0 4px 20px rgba(0,0,0,0.5)'}}>
           <div style={{display:'flex',alignItems:'center',marginBottom:8,gap:4,flexWrap:'wrap'}}>
-            {[['route','ROUTE'],['rb','R/B'],['charts','CHARTS'],['enc','ENC'],['zones','🌐'],['ais_src','📡'],['eta','ETA'],['db','🗄']].map(([p,l])=>(<button key={p} onClick={()=>setActivePanel(p)} style={{flex:1,minWidth:42,background:activePanel===p?'rgba(0,212,255,0.18)':'transparent',border:`1px solid ${activePanel===p?S.cy:S.vd}`,color:activePanel===p?S.cy:S.dm,borderRadius:5,padding:'3px 2px',fontSize:'0.58rem',cursor:'pointer'}}>{l}</button>))}
+            {[['route','ROUTE'],['rb','R/B'],['charts','CHARTS'],['enc','ENC'],['zones','🌐'],['ais_src','📡'],['eta','ETA'],['db','🗄'],['anchor','⚓'],['wx','🌤'],['tools','🔧']].map(([p,l])=>(<button key={p} onClick={()=>setActivePanel(p)} style={{flex:1,minWidth:42,background:activePanel===p?'rgba(0,212,255,0.18)':'transparent',border:`1px solid ${activePanel===p?S.cy:S.vd}`,color:activePanel===p?S.cy:S.dm,borderRadius:5,padding:'3px 2px',fontSize:'0.58rem',cursor:'pointer'}}>{l}</button>))}
             <button onClick={()=>setPanelCollapsed(true)} style={{background:'transparent',border:`1px solid ${S.vd}`,color:S.dm,borderRadius:5,padding:'3px 5px',fontSize:'0.65rem',cursor:'pointer'}}>▶</button>
           </div>
+          {/* Scrollable content area */}
+          <div style={{overflowY:'auto',overflowX:'hidden',flex:1,paddingRight:1}}>
 
           {activePanel==='route'&&(
             <div style={{display:'flex',flexDirection:'column',gap:6}}>
@@ -916,6 +1128,107 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
             </div>)}
           </div>)}
 
+
+          {activePanel==='anchor'&&(<div style={{display:'flex',flexDirection:'column',gap:8}}>
+            <div style={{color:S.dm,fontSize:S.lb,letterSpacing:0.5}}>⚓ ANCHOR WATCH</div>
+            {!anchorWatchOn
+              ?<div style={{display:'flex',flexDirection:'column',gap:6}}>
+                <div style={{color:S.dm,fontSize:S.xs}}>Alarm radius</div>
+                <div style={{display:'flex',gap:3,flexWrap:'wrap'}}>{[0.1,0.2,0.3,0.5,1.0].map(r=>(<button key={r} onClick={()=>setAnchorRadius(r)} style={{background:anchorRadius===r?'rgba(255,215,0,0.2)':'transparent',border:`1px solid ${anchorRadius===r?S.gd:S.vd}`,color:anchorRadius===r?S.gd:S.dm,borderRadius:5,padding:'3px 6px',fontSize:S.xs,cursor:'pointer'}}>{r}NM</button>))}</div>
+                <button onClick={()=>{if(!livePos){notify('Enable GPS first','error');return;}setAnchorPos({lat:livePos.lat,lon:livePos.lon});setAnchorWatchOn(true);notify('⚓ Anchor watch started','error');}} style={{background:'rgba(255,215,0,0.15)',border:'1px solid #FFD700',color:S.gd,borderRadius:7,padding:'9px',fontSize:S.sm,cursor:'pointer',fontWeight:700}}>⚓ Drop Anchor Here</button>
+              </div>
+              :<div style={{display:'flex',flexDirection:'column',gap:6}}>
+                <div style={{background:anchorAlarm?'rgba(255,32,32,0.2)':'rgba(0,255,136,0.1)',border:`1px solid ${anchorAlarm?S.rd:S.gn}`,borderRadius:7,padding:'8px',textAlign:'center'}}>
+                  <div style={{color:anchorAlarm?S.rd:S.gn,fontWeight:700,fontSize:S.sm}}>{anchorAlarm?'⚠ DRAGGING!':'✓ Holding'}</div>
+                  {livePos&&anchorPos&&<div style={{color:S.dm,fontSize:S.xs}}>{distNM(livePos.lat,livePos.lon,anchorPos.lat,anchorPos.lon).toFixed(3)}NM from drop</div>}
+                </div>
+                <div style={{color:S.dm,fontSize:S.xs}}>Drop: {anchorPos?`${anchorPos.lat.toFixed(4)}°N`:'-'}</div>
+                <div style={{color:S.dm,fontSize:S.xs}}>Radius: {anchorRadius}NM</div>
+                <button onClick={()=>{setAnchorWatchOn(false);setAnchorPos(null);setAnchorAlarm(false);}} style={{background:'transparent',border:`1px solid ${S.rd}`,color:S.rd,borderRadius:6,padding:'7px',fontSize:S.xs,cursor:'pointer'}}>⛔ Stop Watch</button>
+              </div>}
+            <div style={{borderTop:'1px solid rgba(0,212,255,0.1)',paddingTop:6}}>
+              <div style={{color:S.dm,fontSize:S.xs,marginBottom:3}}>⚡ SPEED ALARM</div>
+              <div style={{display:'flex',gap:3,flexWrap:'wrap'}}>{[[0,'Off'],[5,'5kn'],[8,'8kn'],[10,'10kn'],[12,'12kn'],[15,'15kn']].map(([v,l])=>(<button key={v} onClick={()=>{setSpeedAlarmKn(v);setSpeedAlarmTriggered(false);}} style={{background:speedAlarmKn===v?'rgba(255,107,53,0.2)':'transparent',border:`1px solid ${speedAlarmKn===v?'#FF6B35':S.vd}`,color:speedAlarmKn===v?'#FF6B35':S.dm,borderRadius:5,padding:'3px 5px',fontSize:S.xs,cursor:'pointer'}}>{l}</button>))}</div>
+              {speedAlarmTriggered&&<div style={{color:S.rd,fontSize:S.xs,fontWeight:700,marginTop:3}}>⚠ SPEED EXCEEDED</div>}
+            </div>
+            <div style={{borderTop:'1px solid rgba(0,212,255,0.1)',paddingTop:6}}>
+              <div style={{color:S.dm,fontSize:S.xs,marginBottom:3}}>📍 WP ARRIVAL ALERT</div>
+              <div style={{display:'flex',gap:3,flexWrap:'wrap'}}>{[[0.1,'0.1'],[0.2,'0.2'],[0.3,'0.3'],[0.5,'0.5'],[1.0,'1.0']].map(([v,l])=>(<button key={v} onClick={()=>setWpArrivalNM(v)} style={{background:wpArrivalNM===v?'rgba(0,200,150,0.2)':'transparent',border:`1px solid ${wpArrivalNM===v?S.gn:S.vd}`,color:wpArrivalNM===v?S.gn:S.dm,borderRadius:5,padding:'3px 5px',fontSize:S.xs,cursor:'pointer'}}>{l}NM</button>))}</div>
+            </div>
+          </div>)}
+
+          {/* ── WEATHER panel ── */}
+          {activePanel==='wx'&&(<div style={{display:'flex',flexDirection:'column',gap:7}}>
+            <div style={{color:S.dm,fontSize:S.lb,letterSpacing:0.5}}>🌤 WEATHER</div>
+            <button onClick={()=>{const pos=livePos||{lat:1.29,lon:103.85};fetchWeather(pos.lat,pos.lon);}} disabled={weatherLoading} style={{background:'rgba(0,212,255,0.1)',border:`1px solid ${S.cy}`,color:S.cy,borderRadius:7,padding:'8px',fontSize:S.xs,cursor:'pointer',fontWeight:600}}>
+              {weatherLoading?'⏳ Loading…':'🌐 Get Weather Here'}
+            </button>
+            {!livePos&&<div style={{color:S.dm,fontSize:'0.6rem'}}>Enable GPS for current position, or shows default location</div>}
+            {weatherData&&showWeather&&(
+              <div style={{background:'rgba(0,0,0,0.3)',borderRadius:7,padding:'8px',border:`1px solid ${S.vd}`}}>
+                <div style={{color:S.cy,fontSize:S.xs,fontWeight:700,marginBottom:5}}>📍 {weatherData.city}</div>
+                <div style={{color:S.dm,fontSize:'0.58rem',textTransform:'capitalize',marginBottom:5}}>{weatherData.desc}</div>
+                {[['🌡 Temp',`${weatherData.temp?.toFixed(1)}°C`],['💨 Wind',`${weatherData.windSpd}kn / ${weatherData.windDir}°`],['👁 Visibility',`${weatherData.visibility?.toFixed(1)}km`],['💧 Humidity',`${weatherData.humidity}%`],['📊 Pressure',`${weatherData.pressure}hPa`]].map(([k,v])=>(
+                  <div key={k} style={{display:'flex',justifyContent:'space-between',padding:'2px 0',borderBottom:'1px solid rgba(255,255,255,0.04)'}}>
+                    <span style={{color:S.dm,fontSize:'0.62rem'}}>{k}</span>
+                    <span style={{color:S.tx,fontSize:'0.65rem',fontFamily:'monospace',fontWeight:600}}>{v}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div style={{color:S.vd,fontSize:'0.55rem',lineHeight:1.5}}>Powered by OpenWeatherMap free API. Replace key in code for production use.</div>
+          </div>)}
+
+          {/* ── TOOLS panel ── */}
+          {activePanel==='tools'&&(<div style={{display:'flex',flexDirection:'column',gap:7}}>
+            <div style={{color:S.dm,fontSize:S.lb,letterSpacing:0.5}}>🔧 TOOLS</div>
+            {/* Track Export */}
+            <div style={{borderBottom:'1px solid rgba(0,212,255,0.1)',paddingBottom:7}}>
+              <div style={{color:S.dm,fontSize:S.xs,marginBottom:4}}>📤 TRACK EXPORT</div>
+              <button onClick={exportTrack} style={{width:'100%',background:'rgba(0,200,150,0.1)',border:`1px solid ${S.gn}`,color:S.gn,borderRadius:7,padding:'8px',fontSize:S.xs,cursor:'pointer',fontWeight:600}}>⬇ Export GPX File</button>
+              <div style={{color:S.vd,fontSize:'0.55rem',marginTop:3}}>Exports your past track as GPX</div>
+            </div>
+            {/* AIS Target List */}
+            <div style={{borderBottom:'1px solid rgba(0,212,255,0.1)',paddingBottom:7}}>
+              <div style={{color:S.dm,fontSize:S.xs,marginBottom:4}}>📡 AIS TARGETS ({Object.keys(aisTargets).length})</div>
+              <div style={{maxHeight:120,overflowY:'auto',display:'flex',flexDirection:'column',gap:2}}>
+                {Object.values(aisTargets).sort((a,b)=>{
+                  if(!livePos) return 0;
+                  return distNM(livePos.lat,livePos.lon,a.lat,a.lon)-distNM(livePos.lat,livePos.lon,b.lat,b.lon);
+                }).slice(0,20).map((v,i)=>{
+                  const dist=livePos?distNM(livePos.lat,livePos.lon,v.lat,v.lon):null;
+                  const bg=dist&&dist<1?'rgba(255,32,32,0.15)':dist&&dist<3?'rgba(255,150,0,0.1)':'transparent';
+                  return(<div key={v.mmsi} style={{background:bg,border:`1px solid ${S.vd}`,borderRadius:5,padding:'4px 6px',cursor:'pointer'}} onClick={()=>{if(leafRef.current) leafRef.current.setView([v.lat,v.lon],12);}}>
+                    <div style={{color:S.cy,fontSize:'0.65rem',fontWeight:700,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{v.name||`MMSI ${v.mmsi}`}</div>
+                    <div style={{color:S.dm,fontSize:'0.58rem',fontFamily:'monospace'}}>{dist?dist.toFixed(1)+'NM · ':''}{v.sog?.toFixed(1)}kn {v.cog?.toFixed(0)}°</div>
+                  </div>);
+                })}
+                {Object.keys(aisTargets).length===0&&<div style={{color:S.vd,fontSize:S.xs,fontStyle:'italic'}}>No AIS targets</div>}
+              </div>
+            </div>
+            {/* WP Notes */}
+            {activeRoute?.waypoints?.length>0&&(
+              <div style={{borderBottom:'1px solid rgba(0,212,255,0.1)',paddingBottom:7}}>
+                <div style={{color:S.dm,fontSize:S.xs,marginBottom:4}}>📝 WAYPOINT NOTES</div>
+                <select value={editingWpNote??0} onChange={e=>setEditingWpNote(Number(e.target.value))} style={{width:'100%',background:'#060F1C',color:S.cy,border:`1px solid ${S.vd}`,borderRadius:5,padding:'4px',fontSize:S.xs,marginBottom:4}}>
+                  {activeRoute.waypoints.map((wp,i)=><option key={i} value={i}>WP{String(i+1).padStart(2,'0')} {wp.name||''}</option>)}
+                </select>
+                <textarea value={wpNotes[editingWpNote??0]||''} onChange={e=>setWpNotes(prev=>({...prev,[editingWpNote??0]:e.target.value}))} placeholder="Add note for this waypoint..." rows={3} style={{width:'100%',boxSizing:'border-box',background:'#060F1C',color:S.tx,border:`1px solid ${S.vd}`,borderRadius:5,padding:'5px 7px',fontSize:S.xs,outline:'none',resize:'none',lineHeight:1.5}}/>
+              </div>
+            )}
+            {/* Night Vision */}
+            <button onClick={()=>setNightVision(v=>!v)} style={{background:nightVision?'rgba(255,0,0,0.15)':'transparent',border:`1px solid ${nightVision?'#FF2020':S.vd}`,color:nightVision?'#FF2020':S.dm,borderRadius:7,padding:'8px',fontSize:S.xs,cursor:'pointer',fontWeight:700}}>
+              🔴 Night Vision: {nightVision?'ON':'OFF'}
+            </button>
+            {/* True vs Relative bearing toggle placeholder */}
+            <div style={{color:S.vd,fontSize:'0.58rem',borderTop:'1px solid rgba(0,212,255,0.08)',paddingTop:6,lineHeight:1.5}}>
+              💡 Tap any AIS vessel on map to see CPA/TCPA popup.<br/>
+              💡 Use R/B panel + tap map for range & bearing.<br/>
+              💡 Route total distance shown in ETA panel.
+            </div>
+          </div>)}
+
+          </div>{/* end scrollable content */}
         </div>
       </div>)}
 
