@@ -1129,7 +1129,7 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
           </div>)}
 
 
-          {activePanel==='anchor'&&(<div style={{display:'flex',flexDirection:'column',gap:8}}>
+          {menuCat==='anchor'&&(<div style={{display:'flex',flexDirection:'column',gap:8}}>
             <div style={{color:S.dm,fontSize:S.lb,letterSpacing:0.5}}>⚓ ANCHOR WATCH</div>
             {!anchorWatchOn
               ?<div style={{display:'flex',flexDirection:'column',gap:6}}>
@@ -1158,7 +1158,7 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
           </div>)}
 
           {/* ── WEATHER panel ── */}
-          {activePanel==='wx'&&(<div style={{display:'flex',flexDirection:'column',gap:7}}>
+          {menucat==='wx'&&(<div style={{display:'flex',flexDirection:'column',gap:7}}>
             <div style={{color:S.dm,fontSize:S.lb,letterSpacing:0.5}}>🌤 WEATHER</div>
             <button onClick={()=>{const pos=livePos||{lat:1.29,lon:103.85};fetchWeather(pos.lat,pos.lon);}} disabled={weatherLoading} style={{background:'rgba(0,212,255,0.1)',border:`1px solid ${S.cy}`,color:S.cy,borderRadius:7,padding:'8px',fontSize:S.xs,cursor:'pointer',fontWeight:600}}>
               {weatherLoading?'⏳ Loading…':'🌐 Get Weather Here'}
@@ -1180,7 +1180,7 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
           </div>)}
 
           {/* ── TOOLS panel ── */}
-          {activePanel==='tools'&&(<div style={{display:'flex',flexDirection:'column',gap:7}}>
+          {menucat==='tools'&&(<div style={{display:'flex',flexDirection:'column',gap:7}}>
             <div style={{color:S.dm,fontSize:S.lb,letterSpacing:0.5}}>🔧 TOOLS</div>
             {/* Track Export */}
             <div style={{borderBottom:'1px solid rgba(0,212,255,0.1)',paddingBottom:7}}>
