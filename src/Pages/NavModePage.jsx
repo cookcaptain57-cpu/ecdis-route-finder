@@ -887,7 +887,6 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
           ):(gpsOn?<div style={{color:S.dm,fontSize:S.sm,fontStyle:'italic'}}>Acquiring GPS…</div>:<div style={{color:S.vd,fontSize:S.xs}}>Enable GPS to track vessel</div>)}
         </div>
       </div>
-
       {/* SIDE PANEL */}
       {panelCollapsed?(
         <button onClick={()=>setPanelCollapsed(false)} style={{position:'absolute',top:'50%',right:0,transform:'translateY(-50%)',background:'rgba(4,12,26,0.95)',border:`1px solid ${S.bd}`,color:S.cy,borderRadius:'8px 0 0 8px',padding:'12px 6px',fontSize:'0.7rem',cursor:'pointer',zIndex:500,writingMode:'vertical-rl'}}>◀ PANEL</button>
@@ -941,7 +940,7 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
           {activePanel==='rb'&&(<div style={{display:'flex',flexDirection:'column',gap:7}}>
             <label style={{display:'flex',alignItems:'center',gap:7,cursor:'pointer',fontSize:S.sm,color:S.tx}}><input type="checkbox" checked={rbMode} onChange={e=>{const on=e.target.checked;rbModeRef.current=on;setRbMode(on);if(!on){rbTargetRef.current=null;setRbResult(null);if(leafRef.current){if(layersRef.current.rbLine) leafRef.current.removeLayer(layersRef.current.rbLine);if(layersRef.current.rbMarker) leafRef.current.removeLayer(layersRef.current.rbMarker);layersRef.current.rbLine=null;layersRef.current.rbMarker=null;}}}}/>📐 Range & Bearing</label>
             <div style={{color:rbMode?S.gd:S.dm,fontSize:S.xs}}>{rbMode?'⭡ Tap map — live updates':'Enable then tap map'}</div>
-            {rbResult&&(<div sItyle={{background:'#020810',borderRadius:7,padding:'8px 10px',border:'1px solid rgba(255,215,0,0.3)'}}>
+            {rbResult&&(<div style={{background:'#020810',borderRadius:7,padding:'8px 10px',border:'1px solid rgba(255,215,0,0.3)'}}>
               <div style={{display:'flex',justifyContent:'space-between',marginBottom:4}}>{[['RANGE',rbResult.rangeNM+' NM'],['BRG',rbResult.bearing+'°T']].map(([k,v])=>(<div key={k}><div style={{color:S.dm,fontSize:S.lb}}>{k}</div><div style={{color:S.gd,fontFamily:'monospace',fontSize:'0.9rem',fontWeight:700}}>{v}</div></div>))}</div>
               {livePos?.sog>0.2&&(<div style={{borderTop:'1px solid rgba(255,215,0,0.2)',paddingTop:4,marginBottom:4}}><div style={{color:S.dm,fontSize:S.lb}}>TTG @ {livePos.sog.toFixed(1)}kn</div><div style={{color:S.gn,fontFamily:'monospace',fontSize:'0.82rem',fontWeight:700}}>{(()=>{const h=parseFloat(rbResult.rangeNM)/livePos.sog,hr=Math.floor(h),mn=Math.round((h-hr)*60);return hr>0?`${hr}h ${mn}m`:`${mn} min`;})()}</div></div>)}
               <div style={{color:S.dm,fontSize:S.xs}}>{toDMS(parseFloat(rbResult.lat),true)}<br/>{toDMS(parseFloat(rbResult.lon),false)}</div>
@@ -1068,7 +1067,10 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
                     <button onClick={()=>delSavedChart(c.name)} style={{background:'transparent',border:'1px solid rgba(255,71,87,0.35)',color:S.rd,borderRadius:4,padding:'3px 6px',fontSize:'0.65rem',cursor:'pointer'}}>✕</button>
                   </div>
                 ))}
-</div>)}
+              </div>
+            </div>
+          </div>)}
+          {/* FIX 1: db panel now properly closed above with 3 matching </div> tags */}
 
           {activePanel==='anchor'&&(<div style={{display:'flex',flexDirection:'column',gap:8}}>
             <div style={{color:S.dm,fontSize:S.lb,letterSpacing:0.5}}>⚓ ANCHOR WATCH</div>
@@ -1151,7 +1153,7 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
           </div>)}
 
           </div>{/* end scrollable content */}
-    
+        </div>
       )}
 
       {/* SETTINGS */}
@@ -1178,6 +1180,7 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
           </div>)}
 
           {menuCat==='track'&&(<div style={{display:'flex',flexDirection:'column',gap:10}}><div style={{color:S.dm,fontSize:S.xs}}>PAST TRACK DURATION</div><div style={{display:'flex',gap:5,flexWrap:'wrap'}}>{[[0,'OFF'],[1,'1H'],[2,'2H'],[6,'6H'],[12,'12H'],[24,'24H']].map(([h,l])=>(<button key={h} onClick={()=>setTrackHours(h)} style={{background:trackHours===h?'rgba(0,255,136,0.18)':'#060F1C',border:`1px solid ${trackHours===h?S.gn:S.vd}`,color:trackHours===h?S.gn:S.tx,borderRadius:7,padding:'7px 12px',fontSize:S.sm,cursor:'pointer'}}>{l}</button>))}</div></div>)}
+
           {menuCat==='contours'&&(<div style={{display:'flex',flexDirection:'column',gap:12}}>
             {[['shallowDepth',shallowDepth,setShallowDepth,'🔴 Shallow (m)'],['safetyDepth',safetyDepth,setSafetyDepth,'🟡 Safety (m)'],['deepDepth',deepDepth,setDeepDepth,'🟢 Deep (m)'],['shipDraft',shipDraft,setShipDraft,'⚓ Draft (m)']].map(([k,val,set,lbl])=>(<div key={k}>
               <div style={{display:'flex',justifyContent:'space-between',marginBottom:3}}><span style={{color:S.tx,fontSize:S.sm}}>{lbl}</span><span style={{color:S.cy,fontFamily:'monospace',fontSize:S.sm}}>{val}m</span></div>
@@ -1205,61 +1208,17 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
             {activeRoute&&(<div>
               <div style={{color:S.dm,fontSize:S.xs,marginBottom:6}}>XTD CORRIDOR</div>
               <div style={{display:'flex',gap:3,flexWrap:'wrap'}}>{[0.1,0.25,0.5,1.0,2.0].map(n=>(<button key={n} onClick={()=>setXtdNM(n)} style={{background:xtdNM===n?'rgba(255,179,0,0.2)':'#060F1C',border:`1px solid ${xtdNM===n?'#FFB300':S.vd}`,color:xtdNM===n?'#FFB300':S.tx,borderRadius:7,padding:'7px 10px',fontSize:S.sm,cursor:'pointer'}}>{n}NM</button>))}</div>
-                    </div>
-      </div>
-    </div>)}
-
-        
-            {/* Track Export */}
-            <div style={{borderBottom:'1px solid rgba(0,212,255,0.1)',paddingBottom:7}}>
-              <div style={{color:S.dm,fontSize:S.xs,marginBottom:4}}>📤 TRACK EXPORT</div>
-              <button onClick={exportTrack} style={{width:'100%',background:'rgba(0,200,150,0.1)',border:`1px solid ${S.gn}`,color:S.gn,borderRadius:7,padding:'8px',fontSize:S.xs,cursor:'pointer',fontWeight:600}}>⬇ Export GPX File</button>
-              <div style={{color:S.vd,fontSize:'0.55rem',marginTop:3}}>Exports your past track as GPX</div>
-            </div>
-            {/* AIS Target List */}
-            <div style={{borderBottom:'1px solid rgba(0,212,255,0.1)',paddingBottom:7}}>
-              <div style={{color:S.dm,fontSize:S.xs,marginBottom:4}}>📡 AIS TARGETS ({Object.keys(aisTargets).length})</div>
-              <div style={{maxHeight:120,overflowY:'auto',display:'flex',flexDirection:'column',gap:2}}>
-                {Object.values(aisTargets).sort((a,b)=>{
-                  if(!livePos) return 0;
-                  return distNM(livePos.lat,livePos.lon,a.lat,a.lon)-distNM(livePos.lat,livePos.lon,b.lat,b.lon);
-                }).slice(0,20).map((v,i)=>{
-                  const dist=livePos?distNM(livePos.lat,livePos.lon,v.lat,v.lon):null;
-                  const bg=dist&&dist<1?'rgba(255,32,32,0.15)':dist&&dist<3?'rgba(255,150,0,0.1)':'transparent';
-                  return(<div key={v.mmsi} style={{background:bg,border:`1px solid ${S.vd}`,borderRadius:5,padding:'4px 6px',cursor:'pointer'}} onClick={()=>{if(leafRef.current) leafRef.current.setView([v.lat,v.lon],12);}}>
-                    <div style={{color:S.cy,fontSize:'0.65rem',fontWeight:700,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{v.name||`MMSI ${v.mmsi}`}</div>
-                    <div style={{color:S.dm,fontSize:'0.58rem',fontFamily:'monospace'}}>{dist?dist.toFixed(1)+'NM · ':''}{v.sog?.toFixed(1)}kn {v.cog?.toFixed(0)}°</div>
-                  </div>);
-                })}
-                {Object.keys(aisTargets).length===0&&<div style={{color:S.vd,fontSize:S.xs,fontStyle:'italic'}}>No AIS targets</div>}
-              </div>
-            </div>
-            {/* WP Notes */}
-            {activeRoute?.waypoints?.length>0&&(
-              <div style={{borderBottom:'1px solid rgba(0,212,255,0.1)',paddingBottom:7}}>
-                <div style={{color:S.dm,fontSize:S.xs,marginBottom:4}}>📝 WAYPOINT NOTES</div>
-                <select value={editingWpNote??0} onChange={e=>setEditingWpNote(Number(e.target.value))} style={{width:'100%',background:'#060F1C',color:S.cy,border:`1px solid ${S.vd}`,borderRadius:5,padding:'4px',fontSize:S.xs,marginBottom:4}}>
-                  {activeRoute.waypoints.map((wp,i)=><option key={i} value={i}>WP{String(i+1).padStart(2,'0')} {wp.name||''}</option>)}
-                </select>
-                <textarea value={wpNotes[editingWpNote??0]||''} onChange={e=>setWpNotes(prev=>({...prev,[editingWpNote??0]:e.target.value}))} placeholder="Add note for this waypoint..." rows={3} style={{width:'100%',boxSizing:'border-box',background:'#060F1C',color:S.tx,border:`1px solid ${S.vd}`,borderRadius:5,padding:'5px 7px',fontSize:S.xs,outline:'none',resize:'none',lineHeight:1.5}}/>
-              </div>
-            )}
-            {/* Night Vision */}
-            <button onClick={()=>setNightVision(v=>!v)} style={{background:nightVision?'rgba(255,0,0,0.15)':'transparent',border:`1px solid ${nightVision?'#FF2020':S.vd}`,color:nightVision?'#FF2020':S.dm,borderRadius:7,padding:'8px',fontSize:S.xs,cursor:'pointer',fontWeight:700}}>
-              🔴 Night Vision: {nightVision?'ON':'OFF'}
-            </button>
-            {/* True vs Relative bearing toggle placeholder */}
-            <div style={{color:S.vd,fontSize:'0.58rem',borderTop:'1px solid rgba(0,212,255,0.08)',paddingTop:6,lineHeight:1.5}}>
-              💡 Tap any AIS vessel on map to see CPA/TCPA popup.<br/>
-              💡 Use R/B panel + tap map for range & bearing.<br/>
-              💡 Route total distance shown in ETA panel.
-            </div>
+            </div>)}
           </div>)}
+          {/* FIX 2: display menuCat now properly closed — removed extra </div>, activeRoute && block closes correctly */}
 
-          </div>{/* end scrollable content */}
         </div>
       </div>)}
+      {/* FIX 3: removed entire duplicate tools block (Track Export / AIS Targets / WP Notes / Night Vision)
+          that was floating outside any panel and causing the adjacent JSX elements error */}
 
     </div>
   );
 }
+
+      
