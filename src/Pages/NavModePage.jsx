@@ -941,7 +941,7 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
           {activePanel==='rb'&&(<div style={{display:'flex',flexDirection:'column',gap:7}}>
             <label style={{display:'flex',alignItems:'center',gap:7,cursor:'pointer',fontSize:S.sm,color:S.tx}}><input type="checkbox" checked={rbMode} onChange={e=>{const on=e.target.checked;rbModeRef.current=on;setRbMode(on);if(!on){rbTargetRef.current=null;setRbResult(null);if(leafRef.current){if(layersRef.current.rbLine) leafRef.current.removeLayer(layersRef.current.rbLine);if(layersRef.current.rbMarker) leafRef.current.removeLayer(layersRef.current.rbMarker);layersRef.current.rbLine=null;layersRef.current.rbMarker=null;}}}}/>📐 Range & Bearing</label>
             <div style={{color:rbMode?S.gd:S.dm,fontSize:S.xs}}>{rbMode?'⭡ Tap map — live updates':'Enable then tap map'}</div>
-            {rbResult&&(<div style={{background:'#020810',borderRadius:7,padding:'8px 10px',border:'1px solid rgba(255,215,0,0.3)'}}>
+            {rbResult&&(<div sItyle={{background:'#020810',borderRadius:7,padding:'8px 10px',border:'1px solid rgba(255,215,0,0.3)'}}>
               <div style={{display:'flex',justifyContent:'space-between',marginBottom:4}}>{[['RANGE',rbResult.rangeNM+' NM'],['BRG',rbResult.bearing+'°T']].map(([k,v])=>(<div key={k}><div style={{color:S.dm,fontSize:S.lb}}>{k}</div><div style={{color:S.gd,fontFamily:'monospace',fontSize:'0.9rem',fontWeight:700}}>{v}</div></div>))}</div>
               {livePos?.sog>0.2&&(<div style={{borderTop:'1px solid rgba(255,215,0,0.2)',paddingTop:4,marginBottom:4}}><div style={{color:S.dm,fontSize:S.lb}}>TTG @ {livePos.sog.toFixed(1)}kn</div><div style={{color:S.gn,fontFamily:'monospace',fontSize:'0.82rem',fontWeight:700}}>{(()=>{const h=parseFloat(rbResult.rangeNM)/livePos.sog,hr=Math.floor(h),mn=Math.round((h-hr)*60);return hr>0?`${hr}h ${mn}m`:`${mn} min`;})()}</div></div>)}
               <div style={{color:S.dm,fontSize:S.xs}}>{toDMS(parseFloat(rbResult.lat),true)}<br/>{toDMS(parseFloat(rbResult.lon),false)}</div>
@@ -1068,10 +1068,90 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
                     <button onClick={()=>delSavedChart(c.name)} style={{background:'transparent',border:'1px solid rgba(255,71,87,0.35)',color:S.rd,borderRadius:4,padding:'3px 6px',fontSize:'0.65rem',cursor:'pointer'}}>✕</button>
                   </div>
                 ))}
+</div>)}
+
+          {activePanel==='anchor'&&(<div style={{display:'flex',flexDirection:'column',gap:8}}>
+            <div style={{color:S.dm,fontSize:S.lb,letterSpacing:0.5}}>⚓ ANCHOR WATCH</div>
+            {!anchorWatchOn
+              ?<div style={{display:'flex',flexDirection:'column',gap:6}}>
+                <div style={{color:S.dm,fontSize:S.xs}}>Alarm radius</div>
+                <div style={{display:'flex',gap:3,flexWrap:'wrap'}}>{[0.1,0.2,0.3,0.5,1.0].map(r=>(<button key={r} onClick={()=>setAnchorRadius(r)} style={{background:anchorRadius===r?'rgba(255,215,0,0.2)':'transparent',border:`1px solid ${anchorRadius===r?S.gd:S.vd}`,color:anchorRadius===r?S.gd:S.dm,borderRadius:5,padding:'3px 6px',fontSize:S.xs,cursor:'pointer'}}>{r}NM</button>))}</div>
+                <button onClick={()=>{if(!livePos){notify('Enable GPS first','error');return;}setAnchorPos({lat:livePos.lat,lon:livePos.lon});setAnchorWatchOn(true);notify('⚓ Anchor watch started','error');}} style={{background:'rgba(255,215,0,0.15)',border:'1px solid #FFD700',color:S.gd,borderRadius:7,padding:'9px',fontSize:S.sm,cursor:'pointer',fontWeight:700}}>⚓ Drop Anchor Here</button>
               </div>
+              :<div style={{display:'flex',flexDirection:'column',gap:6}}>
+                <div style={{background:anchorAlarm?'rgba(255,32,32,0.2)':'rgba(0,255,136,0.1)',border:`1px solid ${anchorAlarm?S.rd:S.gn}`,borderRadius:7,padding:'8px',textAlign:'center'}}>
+                  <div style={{color:anchorAlarm?S.rd:S.gn,fontWeight:700,fontSize:S.sm}}>{anchorAlarm?'⚠ DRAGGING!':'✓ Holding'}</div>
+                  {livePos&&anchorPos&&<div style={{color:S.dm,fontSize:S.xs}}>{distNM(livePos.lat,livePos.lon,anchorPos.lat,anchorPos.lon).toFixed(3)}NM from drop</div>}
+                </div>
+                <div style={{color:S.dm,fontSize:S.xs}}>Drop: {anchorPos?`${anchorPos.lat.toFixed(4)}°N`:'-'}</div>
+                <div style={{color:S.dm,fontSize:S.xs}}>Radius: {anchorRadius}NM</div>
+                <button onClick={()=>{setAnchorWatchOn(false);setAnchorPos(null);setAnchorAlarm(false);}} style={{background:'transparent',border:`1px solid ${S.rd}`,color:S.rd,borderRadius:6,padding:'7px',fontSize:S.xs,cursor:'pointer'}}>⛔ Stop Watch</button>
+              </div>}
+            <div style={{borderTop:'1px solid rgba(0,212,255,0.1)',paddingTop:6}}>
+              <div style={{color:S.dm,fontSize:S.xs,marginBottom:3}}>⚡ SPEED ALARM</div>
+              <div style={{display:'flex',gap:3,flexWrap:'wrap'}}>{[[0,'Off'],[5,'5kn'],[8,'8kn'],[10,'10kn'],[12,'12kn'],[15,'15kn']].map(([v,l])=>(<button key={v} onClick={()=>{setSpeedAlarmKn(v);setSpeedAlarmTriggered(false);}} style={{background:speedAlarmKn===v?'rgba(255,107,53,0.2)':'transparent',border:`1px solid ${speedAlarmKn===v?'#FF6B35':S.vd}`,color:speedAlarmKn===v?'#FF6B35':S.dm,borderRadius:5,padding:'3px 5px',fontSize:S.xs,cursor:'pointer'}}>{l}</button>))}</div>
+              {speedAlarmTriggered&&<div style={{color:S.rd,fontSize:S.xs,fontWeight:700,marginTop:3}}>⚠ SPEED EXCEEDED</div>}
+            </div>
+            <div style={{borderTop:'1px solid rgba(0,212,255,0.1)',paddingTop:6}}>
+              <div style={{color:S.dm,fontSize:S.xs,marginBottom:3}}>📍 WP ARRIVAL ALERT</div>
+              <div style={{display:'flex',gap:3,flexWrap:'wrap'}}>{[[0.1,'0.1'],[0.2,'0.2'],[0.3,'0.3'],[0.5,'0.5'],[1.0,'1.0']].map(([v,l])=>(<button key={v} onClick={()=>setWpArrivalNM(v)} style={{background:wpArrivalNM===v?'rgba(0,200,150,0.2)':'transparent',border:`1px solid ${wpArrivalNM===v?S.gn:S.vd}`,color:wpArrivalNM===v?S.gn:S.dm,borderRadius:5,padding:'3px 5px',fontSize:S.xs,cursor:'pointer'}}>{l}NM</button>))}</div>
             </div>
           </div>)}
-        </div>
+
+          {activePanel==='wx'&&(<div style={{display:'flex',flexDirection:'column',gap:7}}>
+            <div style={{color:S.dm,fontSize:S.lb,letterSpacing:0.5}}>🌤 WEATHER</div>
+            <button onClick={()=>{const pos=livePos||{lat:1.29,lon:103.85};fetchWeather(pos.lat,pos.lon);}} disabled={weatherLoading} style={{background:'rgba(0,212,255,0.1)',border:`1px solid ${S.cy}`,color:S.cy,borderRadius:7,padding:'8px',fontSize:S.xs,cursor:'pointer',fontWeight:600}}>
+              {weatherLoading?'⏳ Loading…':'🌐 Get Weather Here'}
+            </button>
+            {!livePos&&<div style={{color:S.dm,fontSize:'0.6rem'}}>Enable GPS for current position, or shows default location</div>}
+            {weatherData&&showWeather&&(
+              <div style={{background:'rgba(0,0,0,0.3)',borderRadius:7,padding:'8px',border:`1px solid ${S.vd}`}}>
+                <div style={{color:S.cy,fontSize:S.xs,fontWeight:700,marginBottom:5}}>📍 {weatherData.city}</div>
+                <div style={{color:S.dm,fontSize:'0.58rem',textTransform:'capitalize',marginBottom:5}}>{weatherData.desc}</div>
+                {[['🌡 Temp',`${weatherData.temp?.toFixed(1)}°C`],['💨 Wind',`${weatherData.windSpd}kn / ${weatherData.windDir}°`],['👁 Visibility',`${weatherData.visibility?.toFixed(1)}km`],['💧 Humidity',`${weatherData.humidity}%`],['📊 Pressure',`${weatherData.pressure}hPa`]].map(([k,v])=>(
+                  <div key={k} style={{display:'flex',justifyContent:'space-between',padding:'2px 0',borderBottom:'1px solid rgba(255,255,255,0.04)'}}>
+                    <span style={{color:S.dm,fontSize:'0.62rem'}}>{k}</span>
+                    <span style={{color:S.tx,fontSize:'0.65rem',fontFamily:'monospace',fontWeight:600}}>{v}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div style={{color:S.vd,fontSize:'0.55rem',lineHeight:1.5}}>Powered by OpenWeatherMap free API. Replace key in code for production use.</div>
+          </div>)}
+
+          {activePanel==='tools'&&(<div style={{display:'flex',flexDirection:'column',gap:7}}>
+            <div style={{color:S.dm,fontSize:S.lb,letterSpacing:0.5}}>🔧 TOOLS</div>
+            <div style={{borderBottom:'1px solid rgba(0,212,255,0.1)',paddingBottom:7}}>
+              <div style={{color:S.dm,fontSize:S.xs,marginBottom:4}}>📤 TRACK EXPORT</div>
+              <button onClick={exportTrack} style={{width:'100%',background:'rgba(0,200,150,0.1)',border:`1px solid ${S.gn}`,color:S.gn,borderRadius:7,padding:'8px',fontSize:S.xs,cursor:'pointer',fontWeight:600}}>⬇ Export GPX File</button>
+              <div style={{color:S.vd,fontSize:'0.55rem',marginTop:3}}>Exports your past track as GPX</div>
+            </div>
+            <div style={{borderBottom:'1px solid rgba(0,212,255,0.1)',paddingBottom:7}}>
+              <div style={{color:S.dm,fontSize:S.xs,marginBottom:4}}>📡 AIS TARGETS ({Object.keys(aisTargets).length})</div>
+              <div style={{maxHeight:120,overflowY:'auto',display:'flex',flexDirection:'column',gap:2}}>
+                {Object.values(aisTargets).sort((a,b)=>{if(!livePos) return 0;return distNM(livePos.lat,livePos.lon,a.lat,a.lon)-distNM(livePos.lat,livePos.lon,b.lat,b.lon);}).slice(0,20).map((v,i)=>{const dist=livePos?distNM(livePos.lat,livePos.lon,v.lat,v.lon):null;const bg=dist&&dist<1?'rgba(255,32,32,0.15)':dist&&dist<3?'rgba(255,150,0,0.1)':'transparent';return(<div key={v.mmsi} style={{background:bg,border:`1px solid ${S.vd}`,borderRadius:5,padding:'4px 6px',cursor:'pointer'}} onClick={()=>{if(leafRef.current) leafRef.current.setView([v.lat,v.lon],12);}}><div style={{color:S.cy,fontSize:'0.65rem',fontWeight:700,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{v.name||`MMSI ${v.mmsi}`}</div><div style={{color:S.dm,fontSize:'0.58rem',fontFamily:'monospace'}}>{dist?dist.toFixed(1)+'NM · ':''}{v.sog?.toFixed(1)}kn {v.cog?.toFixed(0)}°</div></div>);})}
+                {Object.keys(aisTargets).length===0&&<div style={{color:S.vd,fontSize:S.xs,fontStyle:'italic'}}>No AIS targets</div>}
+              </div>
+            </div>
+            {activeRoute?.waypoints?.length>0&&(
+              <div style={{borderBottom:'1px solid rgba(0,212,255,0.1)',paddingBottom:7}}>
+                <div style={{color:S.dm,fontSize:S.xs,marginBottom:4}}>📝 WAYPOINT NOTES</div>
+                <select value={editingWpNote??0} onChange={e=>setEditingWpNote(Number(e.target.value))} style={{width:'100%',background:'#060F1C',color:S.cy,border:`1px solid ${S.vd}`,borderRadius:5,padding:'4px',fontSize:S.xs,marginBottom:4}}>
+                  {activeRoute.waypoints.map((wp,i)=><option key={i} value={i}>WP{String(i+1).padStart(2,'0')} {wp.name||''}</option>)}
+                </select>
+                <textarea value={wpNotes[editingWpNote??0]||''} onChange={e=>setWpNotes(prev=>({...prev,[editingWpNote??0]:e.target.value}))} placeholder="Add note for this waypoint..." rows={3} style={{width:'100%',boxSizing:'border-box',background:'#060F1C',color:S.tx,border:`1px solid ${S.vd}`,borderRadius:5,padding:'5px 7px',fontSize:S.xs,outline:'none',resize:'none',lineHeight:1.5}}/>
+              </div>
+            )}
+            <button onClick={()=>setNightVision(v=>!v)} style={{background:nightVision?'rgba(255,0,0,0.15)':'transparent',border:`1px solid ${nightVision?'#FF2020':S.vd}`,color:nightVision?'#FF2020':S.dm,borderRadius:7,padding:'8px',fontSize:S.xs,cursor:'pointer',fontWeight:700}}>🔴 Night Vision: {nightVision?'ON':'OFF'}</button>
+            <div style={{color:S.vd,fontSize:'0.58rem',borderTop:'1px solid rgba(0,212,255,0.08)',paddingTop:6,lineHeight:1.5}}>
+              💡 Tap any AIS vessel on map to see CPA/TCPA popup.<br/>
+              💡 Use R/B panel + tap map for range & bearing.<br/>
+              💡 Route total distance shown in ETA panel.
+            </div>
+          </div>)}
+
+          </div>{/* end scrollable content */}
+    
       )}
 
       {/* SETTINGS */}
@@ -1125,63 +1205,11 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
             {activeRoute&&(<div>
               <div style={{color:S.dm,fontSize:S.xs,marginBottom:6}}>XTD CORRIDOR</div>
               <div style={{display:'flex',gap:3,flexWrap:'wrap'}}>{[0.1,0.25,0.5,1.0,2.0].map(n=>(<button key={n} onClick={()=>setXtdNM(n)} style={{background:xtdNM===n?'rgba(255,179,0,0.2)':'#060F1C',border:`1px solid ${xtdNM===n?'#FFB300':S.vd}`,color:xtdNM===n?'#FFB300':S.tx,borderRadius:7,padding:'7px 10px',fontSize:S.sm,cursor:'pointer'}}>{n}NM</button>))}</div>
-            </div>)}
-          </div>)}
+                    </div>
+      </div>
+    </div>)}
 
-
-          {menuCat==='anchor'&&(<div style={{display:'flex',flexDirection:'column',gap:8}}>
-            <div style={{color:S.dm,fontSize:S.lb,letterSpacing:0.5}}>⚓ ANCHOR WATCH</div>
-            {!anchorWatchOn
-              ?<div style={{display:'flex',flexDirection:'column',gap:6}}>
-                <div style={{color:S.dm,fontSize:S.xs}}>Alarm radius</div>
-                <div style={{display:'flex',gap:3,flexWrap:'wrap'}}>{[0.1,0.2,0.3,0.5,1.0].map(r=>(<button key={r} onClick={()=>setAnchorRadius(r)} style={{background:anchorRadius===r?'rgba(255,215,0,0.2)':'transparent',border:`1px solid ${anchorRadius===r?S.gd:S.vd}`,color:anchorRadius===r?S.gd:S.dm,borderRadius:5,padding:'3px 6px',fontSize:S.xs,cursor:'pointer'}}>{r}NM</button>))}</div>
-                <button onClick={()=>{if(!livePos){notify('Enable GPS first','error');return;}setAnchorPos({lat:livePos.lat,lon:livePos.lon});setAnchorWatchOn(true);notify('⚓ Anchor watch started','error');}} style={{background:'rgba(255,215,0,0.15)',border:'1px solid #FFD700',color:S.gd,borderRadius:7,padding:'9px',fontSize:S.sm,cursor:'pointer',fontWeight:700}}>⚓ Drop Anchor Here</button>
-              </div>
-              :<div style={{display:'flex',flexDirection:'column',gap:6}}>
-                <div style={{background:anchorAlarm?'rgba(255,32,32,0.2)':'rgba(0,255,136,0.1)',border:`1px solid ${anchorAlarm?S.rd:S.gn}`,borderRadius:7,padding:'8px',textAlign:'center'}}>
-                  <div style={{color:anchorAlarm?S.rd:S.gn,fontWeight:700,fontSize:S.sm}}>{anchorAlarm?'⚠ DRAGGING!':'✓ Holding'}</div>
-                  {livePos&&anchorPos&&<div style={{color:S.dm,fontSize:S.xs}}>{distNM(livePos.lat,livePos.lon,anchorPos.lat,anchorPos.lon).toFixed(3)}NM from drop</div>}
-                </div>
-                <div style={{color:S.dm,fontSize:S.xs}}>Drop: {anchorPos?`${anchorPos.lat.toFixed(4)}°N`:'-'}</div>
-                <div style={{color:S.dm,fontSize:S.xs}}>Radius: {anchorRadius}NM</div>
-                <button onClick={()=>{setAnchorWatchOn(false);setAnchorPos(null);setAnchorAlarm(false);}} style={{background:'transparent',border:`1px solid ${S.rd}`,color:S.rd,borderRadius:6,padding:'7px',fontSize:S.xs,cursor:'pointer'}}>⛔ Stop Watch</button>
-              </div>}
-            <div style={{borderTop:'1px solid rgba(0,212,255,0.1)',paddingTop:6}}>
-              <div style={{color:S.dm,fontSize:S.xs,marginBottom:3}}>⚡ SPEED ALARM</div>
-              <div style={{display:'flex',gap:3,flexWrap:'wrap'}}>{[[0,'Off'],[5,'5kn'],[8,'8kn'],[10,'10kn'],[12,'12kn'],[15,'15kn']].map(([v,l])=>(<button key={v} onClick={()=>{setSpeedAlarmKn(v);setSpeedAlarmTriggered(false);}} style={{background:speedAlarmKn===v?'rgba(255,107,53,0.2)':'transparent',border:`1px solid ${speedAlarmKn===v?'#FF6B35':S.vd}`,color:speedAlarmKn===v?'#FF6B35':S.dm,borderRadius:5,padding:'3px 5px',fontSize:S.xs,cursor:'pointer'}}>{l}</button>))}</div>
-              {speedAlarmTriggered&&<div style={{color:S.rd,fontSize:S.xs,fontWeight:700,marginTop:3}}>⚠ SPEED EXCEEDED</div>}
-            </div>
-            <div style={{borderTop:'1px solid rgba(0,212,255,0.1)',paddingTop:6}}>
-              <div style={{color:S.dm,fontSize:S.xs,marginBottom:3}}>📍 WP ARRIVAL ALERT</div>
-              <div style={{display:'flex',gap:3,flexWrap:'wrap'}}>{[[0.1,'0.1'],[0.2,'0.2'],[0.3,'0.3'],[0.5,'0.5'],[1.0,'1.0']].map(([v,l])=>(<button key={v} onClick={()=>setWpArrivalNM(v)} style={{background:wpArrivalNM===v?'rgba(0,200,150,0.2)':'transparent',border:`1px solid ${wpArrivalNM===v?S.gn:S.vd}`,color:wpArrivalNM===v?S.gn:S.dm,borderRadius:5,padding:'3px 5px',fontSize:S.xs,cursor:'pointer'}}>{l}NM</button>))}</div>
-            </div>
-          </div>)}
-
-          {/* ── WEATHER panel ── */}
-          {menucat==='wx'&&(<div style={{display:'flex',flexDirection:'column',gap:7}}>
-            <div style={{color:S.dm,fontSize:S.lb,letterSpacing:0.5}}>🌤 WEATHER</div>
-            <button onClick={()=>{const pos=livePos||{lat:1.29,lon:103.85};fetchWeather(pos.lat,pos.lon);}} disabled={weatherLoading} style={{background:'rgba(0,212,255,0.1)',border:`1px solid ${S.cy}`,color:S.cy,borderRadius:7,padding:'8px',fontSize:S.xs,cursor:'pointer',fontWeight:600}}>
-              {weatherLoading?'⏳ Loading…':'🌐 Get Weather Here'}
-            </button>
-            {!livePos&&<div style={{color:S.dm,fontSize:'0.6rem'}}>Enable GPS for current position, or shows default location</div>}
-            {weatherData&&showWeather&&(
-              <div style={{background:'rgba(0,0,0,0.3)',borderRadius:7,padding:'8px',border:`1px solid ${S.vd}`}}>
-                <div style={{color:S.cy,fontSize:S.xs,fontWeight:700,marginBottom:5}}>📍 {weatherData.city}</div>
-                <div style={{color:S.dm,fontSize:'0.58rem',textTransform:'capitalize',marginBottom:5}}>{weatherData.desc}</div>
-                {[['🌡 Temp',`${weatherData.temp?.toFixed(1)}°C`],['💨 Wind',`${weatherData.windSpd}kn / ${weatherData.windDir}°`],['👁 Visibility',`${weatherData.visibility?.toFixed(1)}km`],['💧 Humidity',`${weatherData.humidity}%`],['📊 Pressure',`${weatherData.pressure}hPa`]].map(([k,v])=>(
-                  <div key={k} style={{display:'flex',justifyContent:'space-between',padding:'2px 0',borderBottom:'1px solid rgba(255,255,255,0.04)'}}>
-                    <span style={{color:S.dm,fontSize:'0.62rem'}}>{k}</span>
-                    <span style={{color:S.tx,fontSize:'0.65rem',fontFamily:'monospace',fontWeight:600}}>{v}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-            <div style={{color:S.vd,fontSize:'0.55rem',lineHeight:1.5}}>Powered by OpenWeatherMap free API. Replace key in code for production use.</div>
-          </div>)}
-
-          {/* ── TOOLS panel ── */}
-          {menucat==='tools'&&(<div style={{display:'flex',flexDirection:'column',gap:7}}>
-            <div style={{color:S.dm,fontSize:S.lb,letterSpacing:0.5}}>🔧 TOOLS</div>
+        
             {/* Track Export */}
             <div style={{borderBottom:'1px solid rgba(0,212,255,0.1)',paddingBottom:7}}>
               <div style={{color:S.dm,fontSize:S.xs,marginBottom:4}}>📤 TRACK EXPORT</div>
