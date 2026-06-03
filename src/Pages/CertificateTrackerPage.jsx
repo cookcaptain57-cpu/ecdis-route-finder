@@ -24,7 +24,7 @@ function ScannerDiag() {
     setDetail('Key found: ' + key.substring(0, 14) + '…\nLength: ' + key.length + ' chars\nCalling API…');
     try {
       const res  = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${key}`,
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${key}`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -221,7 +221,7 @@ async function extractCertData(file) {
   if (!key) throw new Error('NOT_CONFIGURED');
   const base64 = await fileToBase64(file);
   const mime   = file.type === 'image/jpg' ? 'image/jpeg' : file.type;
-  const url    = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${key}`;
+  const url    = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${key}`;
   const res = await fetch(url, {
     method:'POST', headers:{ 'Content-Type':'application/json' },
     body: JSON.stringify({
