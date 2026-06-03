@@ -281,6 +281,11 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
     return()=>navigator.geolocation.clearWatch(id);
   },[gpsOn]);
 
+
+  const [showAllAisVectors,setShowAllAisVectors]=useState(()=>localStorage.getItem('nav_aisVectors')==='true');
+  const [selectedAisMmsi,setSelectedAisMmsi]=useState(null);
+  useEffect(()=>{localStorage.setItem('nav_aisVectors',showAllAisVectors);},[showAllAisVectors]);
+
   useEffect(()=>{
     if(!leafRef.current||!window.L) return;
     const L=window.L,m=leafRef.current;
@@ -296,12 +301,42 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
       const cl=own&&pos?colreg({lat:own.lat,lon:own.lng,cog:pos.cog},v):'N/A';
       const popup=`<div style="font-size:13px;min-width:180px;line-height:1.7"><b style="color:${col}">${v.name||'AIS Vessel'}</b><br/><small>MMSI: ${v.mmsi}</small><br/>SOG: ${v.sog?.toFixed(1)}kn COG: ${v.cog?.toFixed(0)}°<br/>Range: ${rng2}NM<br/>CPA: ${cp?.cpa?.toFixed(2)||'-'}NM TCPA: ${cp?.tcpa?.toFixed(1)||'-'}h<br/>COLREG: ${cl}${cp?.cpa<1.5?'<br/><b style="color:#FF3030">⚠ COLLISION RISK</b>':''}</div>`;
       seen.add(String(v.mmsi));
-      if(layersRef.current.ais[v.mmsi]){layersRef.current.ais[v.mmsi].setLatLng([v.lat,v.lon]);layersRef.current.ais[v.mmsi].setStyle({color:col,fillColor:col});layersRef.current.ais[v.mmsi].setPopupContent(popup);}
-      else{const mk=L.circleMarker([v.lat,v.lon],{radius:7,color:col,fillColor:col,fillOpacity:0.7,weight:2}).bindPopup(popup).addTo(m);layersRef.current.ais[v.mmsi]=mk;if(cp?.cpa<1.5) notify(`⚠ CPA: MMSI ${v.mmsi} ${cp.cpa.toFixed(1)}NM`,'error');}
+      const aisRot=(v.cog||0);
+      const aisIcon=L.divIcon({html:`<div style="transform:rotate(${aisRot}deg);transform-origin:center;width:16px;height:22px;"><svg width="16" height="22" viewBox="0 0 16 22" fill="none"><polygon points="8,1 15,21 8,16 1,21" fill="${col}" stroke="#fff" stroke-width="1.2"/></svg></div>`,className:'',iconSize:[16,22],iconAnchor:[8,11]});
+      if(layersRef.current.ais[v.mmsi]?.mk){
+        layersRef.current.ais[v.mmsi].mk.setLatLng([v.lat,v.lon]);
+        layersRef.current.ais[v.mmsi].mk.setIcon(aisIcon);
+        layersRef.current.ais[v.mmsi].mk.setPopupContent(popup);
+      } else {
+        const mk=L.marker([v.lat,v.lon],{icon:aisIcon,zIndexOffset:500}).bindPopup(popup).addTo(m);
+        mk.on('click',()=>setSelectedAisMmsi(prev=>prev===String(v.mmsi)?null:String(v.mmsi)));
+        if(!layersRef.current.ais[v.mmsi]) layersRef.current.ais[v.mmsi]={};
+        layersRef.current.ais[v.mmsi].mk=mk;
+        if(cp?.cpa<1.5) notify(`⚠ CPA: MMSI ${v.mmsi} ${cp.cpa.toFixed(1)}NM`,'error');
+      }
+      const showVec=showAllAisVectors||(selectedAisMmsi===String(v.mmsi));
+      if(showVec&&(v.sog||0)>0.1){
+        const r2=Math.PI/180,nm2=(v.sog||0)*(vectorMinsRef.current/60);
+        const vl=v.lat+(nm2/60)*Math.cos((v.cog||0)*r2),vn=v.lon+(nm2/60)*Math.sin((v.cog||0)*r2);
+        if(layersRef.current.ais[v.mmsi]?.vec){
+          layersRef.current.ais[v.mmsi].vec.setLatLngs([[v.lat,v.lon],[vl,vn]]);
+          layersRef.current.ais[v.mmsi].vec.setStyle({color:col});
+        } else {
+          layersRef.current.ais[v.mmsi].vec=L.polyline([[v.lat,v.lon],[vl,vn]],{color:col,weight:1.5,opacity:0.7,dashArray:'4 3'}).addTo(m);
+        }
+      } else if(layersRef.current.ais[v.mmsi]?.vec){
+        try{m.removeLayer(layersRef.current.ais[v.mmsi].vec);}catch{}
+        layersRef.current.ais[v.mmsi].vec=null;
+      }
     });
-    Object.keys(layersRef.current.ais).forEach(mmsi=>{if(!seen.has(mmsi)){try{m.removeLayer(layersRef.current.ais[mmsi]);}catch{}delete layersRef.current.ais[mmsi];}});
-  },[aisTargets,livePos]);
-
+    Object.keys(layersRef.current.ais).forEach(mmsi=>{
+      if(!seen.has(mmsi)){
+        try{m.removeLayer(layersRef.current.ais[mmsi].mk);}catch{}
+        try{if(layersRef.current.ais[mmsi].vec) m.removeLayer(layersRef.current.ais[mmsi].vec);}catch{}
+        delete layersRef.current.ais[mmsi];
+      }
+    });
+  },[aisTargets,livePos,showAllAisVectors,selectedAisMmsi]);
   useEffect(()=>{
     if(!mapReady||!leafRef.current||!window.L) return;
     const L=window.L,m=leafRef.current;
@@ -354,7 +389,7 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
   useEffect(()=>{localStorage.setItem('nav_deepDepth',deepDepth);},[deepDepth]);
   useEffect(()=>{localStorage.setItem('nav_draft',shipDraft);},[shipDraft]);
   useEffect(()=>{localStorage.setItem('nav_xtdNM',xtdNM);},[xtdNM]);
-  useEffect(()=>{if(fullScreen){document.body.style.overflow='hidden';document.body.style.position='fixed';document.body.style.width='100%';}else{document.body.style.overflow='';document.body.style.position='';document.body.style.width='';}return()=>{document.body.style.overflow='';document.body.style.position='';document.body.style.width='';};},[fullScreen]);
+  useEffect(()=>{if(fullScreen){document.documentElement.style.overflow='hidden';}else{document.documentElement.style.overflow='';}return()=>{document.documentElement.style.overflow='';};},[fullScreen]);
   useEffect(()=>{localStorage.setItem('nav_aisSource',aisSource);},[aisSource]);
   useEffect(()=>{localStorage.setItem('nav_shipProfile',JSON.stringify(shipProfile));},[shipProfile]);
   useEffect(()=>{localStorage.setItem('nav_localAisHost',localAisHost);},[localAisHost]);
@@ -369,8 +404,11 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
     const L=window.L,m=leafRef.current,lrs=layersRef.current;
     if(lrs.route){m.removeLayer(lrs.route);lrs.route=null;}
     lrs.routeMarkers?.forEach(x=>{try{m.removeLayer(x);}catch{}});lrs.routeMarkers=[];
-    [lrs.xtdPort,lrs.xtdStbd,lrs.xtdFill].forEach(l=>{if(l) try{m.removeLayer(l);}catch{}});
-    lrs.xtdPort=lrs.xtdStbd=lrs.xtdFill=null;
+    [lrs.xtdPort,lrs.xtdStbd,lrs.xtdFill].forEach(arr=>{
+      if(Array.isArray(arr)) arr.forEach(l=>{try{m.removeLayer(l);}catch{}});
+      else if(arr) try{m.removeLayer(arr);}catch{};
+    });
+    lrs.xtdPort=null;lrs.xtdStbd=null;lrs.xtdFill=null;
     if(!activeRoute?.waypoints?.length) return;
     const wps=normalizeRoute(activeRoute.waypoints),c=colors;
     lrs.route=L.polyline(wps.map(w=>[w.lat,w.lon]),{color:c.route,weight:2.5,opacity:0.9,dashArray:'8 4',noClip:true}).addTo(m);
@@ -389,7 +427,42 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
       const li=L.divIcon({html:`<div style="background:rgba(0,0,0,0.65);color:#FFD700;font-size:10px;font-weight:600;font-family:monospace;white-space:nowrap;padding:1px 4px;border-radius:3px;pointer-events:none;">${bd.toFixed(0)}°T · ${dn.toFixed(1)} NM</div>`,className:'',iconSize:[0,0],iconAnchor:[-4,8]});
       lrs.routeMarkers.push(L.marker(mid,{icon:li,interactive:false,zIndexOffset:100}).addTo(m));
     }
-    if(wps.length>=2){const X=xtdNM,pp=[],sp=[];wps.forEach((wp,i)=>{let b;if(i===0) b=brg(wp.lat,wp.lon,wps[1].lat,wps[1].lon);else if(i===wps.length-1) b=brg(wps[i-1].lat,wps[i-1].lon,wp.lat,wp.lon);else{const b1=brg(wps[i-1].lat,wps[i-1].lon,wp.lat,wp.lon),b2=brg(wp.lat,wp.lon,wps[i+1].lat,wps[i+1].lon),df=((b2-b1+540)%360)-180;b=(b1+df/2+360)%360;}pp.push(offsetPt(wp.lat,wp.lon,(b-90+360)%360,X));sp.push(offsetPt(wp.lat,wp.lon,(b+90)%360,X));});lrs.xtdPort=L.polyline(pp,{color:c.xtd,weight:1.5,opacity:0.8,dashArray:'10 6'}).addTo(m);lrs.xtdStbd=L.polyline(sp,{color:c.xtd,weight:1.5,opacity:0.8,dashArray:'10 6'}).addTo(m);lrs.xtdFill=L.polygon([...pp,...[...sp].reverse()],{color:'transparent',fillColor:c.xtd,fillOpacity:0.06,weight:0}).addTo(m);}
+    if(wps.length>=2){
+      const X=xtdNM;
+      // Remove old XTD layers
+      [lrs.xtdPort,lrs.xtdStbd,lrs.xtdFill].forEach(l=>{if(l) try{m.removeLayer(l);}catch{}});
+      lrs.xtdPort=null;lrs.xtdStbd=null;lrs.xtdFill=null;
+      // Draw per-leg XTD so each leg has exactly ±X perpendicular offset
+      const portPts=[],stbdPts=[];
+      for(let i=0;i<wps.length-1;i++){
+        const legBrg=brg(wps[i].lat,wps[i].lon,wps[i+1].lat,wps[i+1].lon);
+        const portBrg=(legBrg-90+360)%360;
+        const stbdBrg=(legBrg+90)%360;
+        portPts.push(offsetPt(wps[i].lat,wps[i].lon,portBrg,X));
+        portPts.push(offsetPt(wps[i+1].lat,wps[i+1].lon,portBrg,X));
+        stbdPts.push(offsetPt(wps[i].lat,wps[i].lon,stbdBrg,X));
+        stbdPts.push(offsetPt(wps[i+1].lat,wps[i+1].lon,stbdBrg,X));
+      }
+      lrs.xtdPort=L.polyline(portPts.reduce((a,p,i)=>i%2===0&&i+1<portPts.length?[...a,[p,portPts[i+1]]]:a,[]).map(seg=>seg).flat().reduce((acc,p,i,arr)=>{if(i%2===0){if(i>0) acc.push(null);acc.push(p);}else acc.push(p);return acc;},[]).filter(Boolean),{color:c.xtd,weight:1.5,opacity:0.8,dashArray:'10 6'}).addTo(m);
+      // Simpler: just draw per-leg lines
+      lrs.xtdPort&&m.removeLayer(lrs.xtdPort);
+      lrs.xtdStbd&&m.removeLayer(lrs.xtdStbd);
+      lrs.xtdFill&&m.removeLayer(lrs.xtdFill);
+      const portLines=[],stbdLines=[],fillPolys=[];
+      for(let i=0;i<wps.length-1;i++){
+        const lb=brg(wps[i].lat,wps[i].lon,wps[i+1].lat,wps[i+1].lon);
+        const pb=(lb-90+360)%360,sb=(lb+90)%360;
+        const p1=offsetPt(wps[i].lat,wps[i].lon,pb,X);
+        const p2=offsetPt(wps[i+1].lat,wps[i+1].lon,pb,X);
+        const s1=offsetPt(wps[i].lat,wps[i].lon,sb,X);
+        const s2=offsetPt(wps[i+1].lat,wps[i+1].lon,sb,X);
+        portLines.push(L.polyline([p1,p2],{color:c.xtd,weight:1.5,opacity:0.8,dashArray:'10 6'}).addTo(m));
+        stbdLines.push(L.polyline([s1,s2],{color:c.xtd,weight:1.5,opacity:0.8,dashArray:'10 6'}).addTo(m));
+        fillPolys.push(L.polygon([p1,p2,s2,s1],{color:'transparent',fillColor:c.xtd,fillOpacity:0.06,weight:0}).addTo(m));
+      }
+      // Store as arrays for cleanup
+      lrs.xtdPort=portLines;lrs.xtdStbd=stbdLines;lrs.xtdFill=fillPolys;
+    }
     const routeChanged=activeRoute?.name!==prevRouteNameRef.current;
     if(routeChanged){prevRouteNameRef.current=activeRoute?.name||null;try{m.fitBounds(lrs.route.getBounds(),{padding:[60,60]});}catch{}}
   },[activeRoute,mapReady,colors,xtdNM]);
@@ -399,14 +472,35 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
     if(livePos.sog<0.2){setEtaResult(null);return;}
     const wps=activeRoute.waypoints,ti=Math.min(Math.max(selectedWpIdx,0),wps.length-1);
     const legSum=(a,b)=>{let d=0;for(let i=a;i<b;i++) d+=distNM(wps[i].lat,wps[i].lon,wps[i+1].lat,wps[i+1].lon);return d;};
+    // Find closest leg ship is on, then measure remaining route distance leg by leg
     let rem=Infinity;
-    for(let i=0;i<Math.min(ti+1,wps.length-1);i++){const d=distNM(livePos.lat,livePos.lon,wps[i+1].lat,wps[i+1].lon)+legSum(i+1,ti);if(d<rem) rem=d;}
-    const direct=distNM(livePos.lat,livePos.lon,wps[ti].lat,wps[ti].lon);
-    if(direct<rem) rem=direct;
+    for(let i=0;i<wps.length-1;i++){
+      // Project ship onto this leg, get distance along-track to end of leg
+      const legBrg=brg(wps[i].lat,wps[i].lon,wps[i+1].lat,wps[i+1].lon);
+      const shipBrg=brg(wps[i].lat,wps[i].lon,livePos.lat,livePos.lon);
+      const shipDistFromLegStart=distNM(wps[i].lat,wps[i].lon,livePos.lat,livePos.lon);
+      const along=shipDistFromLegStart*Math.cos(((legBrg-shipBrg)*Math.PI/180));
+      const legLen=distNM(wps[i].lat,wps[i].lon,wps[i+1].lat,wps[i+1].lon);
+      if(along>=0&&along<=legLen){
+        // Ship is on this leg - remaining = rest of this leg + all legs to ti
+        const restOfLeg=legLen-along;
+        const d=restOfLeg+legSum(i+1,ti);
+        if(d<rem) rem=d;
+      }
+    }
+    // Fallback: if no leg matched, use direct distance to next waypoint + legs ahead
+    if(rem===Infinity){
+      for(let i=0;i<=Math.min(ti,wps.length-2);i++){
+        const d=distNM(livePos.lat,livePos.lon,wps[i+1].lat,wps[i+1].lon)+legSum(i+1,ti);
+        if(d<rem) rem=d;
+      }
+    }
+    if(rem===Infinity) rem=distNM(livePos.lat,livePos.lon,wps[ti].lat,wps[ti].lon);
     const hrs=rem/livePos.sog,h=Math.floor(hrs),mn=Math.round((hrs%1)*60);
     const arr=new Date(Date.now()+hrs*3600000),pd=n=>String(n).padStart(2,'0');
     const mo=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][arr.getMonth()];
-    setEtaResult({remainNM:rem.toFixed(1),hrs:h,mins:mn,wpName:wps[ti].name||`WP${String(ti+1).padStart(2,'0')}`,arrivalStr:`${pd(arr.getDate())} ${mo} ${arr.getFullYear()} ${pd(arr.getHours())}:${pd(arr.getMinutes())} LT`});
+    const totalRouteDist=legSum(0,wps.length-1);
+    setEtaResult({remainNM:rem.toFixed(1),totalNM:totalRouteDist.toFixed(1),hrs:h,mins:mn,wpName:wps[ti].name||`WP${String(ti+1).padStart(2,'0')}`,arrivalStr:`${pd(arr.getDate())} ${mo} ${arr.getFullYear()} ${pd(arr.getHours())}:${pd(arr.getMinutes())} LT`});
   },[livePos,activeRoute,selectedWpIdx]);
 
   useEffect(()=>{
@@ -543,7 +637,7 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
 
   return(
     <div style={{flex:1,display:'flex',flexDirection:'column',background:'#040C1A',position:'relative',overflow:'hidden',minHeight:0,...(fullScreen?{position:'fixed',inset:0,zIndex:9999,minHeight:'100vh'}:{}),...(nightVision?{filter:'sepia(1) saturate(3) hue-rotate(300deg) brightness(0.7)'}:{})}}>
-      <div style={{height:48,display:'flex',alignItems:'center',padding:'0 10px',background:'#020810',borderBottom:`1px solid ${S.bd}`,flexShrink:0,gap:5}}>
+      <div style={{height:48,display:'flex',alignItems:'center',padding:'0 10px',background:'#020810',borderBottom:`1px solid ${S.bd}`,flexShrink:0,gap:5,overflowX:'auto',overflowY:'hidden',WebkitOverflowScrolling:'touch',scrollbarWidth:'none'}}>
         <span style={{color:S.cy,fontWeight:700,fontSize:'0.82rem',letterSpacing:1,flex:1}}>⚓ NAV MODE</span>
         <div style={{display:'flex',gap:2}}>{[['north','N↑'],['course','C↑'],['head','H↑']].map(([v,l])=>(<button key={v} onClick={()=>setDisplayMode(v)} style={{background:displayMode===v?'rgba(0,212,255,0.2)':'transparent',border:`1px solid ${displayMode===v?S.cy:S.vd}`,color:displayMode===v?S.cy:S.dm,borderRadius:5,padding:'3px 7px',fontSize:'0.65rem',cursor:'pointer'}}>{l}</button>))}</div>
         <div style={{display:'flex',gap:2}}>{[['night','🌙'],['day','☀'],['dusk','🏇']].map(([v,l])=>(<button key={v} onClick={()=>setMapMode(v)} style={{background:mapMode===v?'rgba(255,215,0,0.18)':'transparent',border:`1px solid ${mapMode===v?S.gd:S.vd}`,color:mapMode===v?S.gd:S.dm,borderRadius:5,padding:'3px 6px',fontSize:'0.72rem',cursor:'pointer'}}>{l}</button>))}</div>
@@ -640,7 +734,11 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
             <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'3px 8px',marginTop:4}}>{[['SOG',`${livePos.sog.toFixed(1)} kn`,S.gn],['COG',`${livePos.cog.toFixed(0)}°T`,S.gn]].map(([k,v,c])=>(<div key={k}><div style={{color:S.dm,fontSize:S.lb}}>{k}</div><div style={{color:c,fontFamily:'monospace',fontSize:'0.82rem',fontWeight:700}}>{v}</div></div>))}</div>
             <div style={{display:'flex',alignItems:'center',gap:6,marginTop:3}}><div><div style={{color:S.dm,fontSize:S.lb}}>ROT</div><div style={{color:Math.abs(rotValue||0)>10?S.rd:Math.abs(rotValue||0)>3?S.gd:S.gn,fontFamily:'monospace',fontSize:'0.78rem',fontWeight:700}}>{(rotValue||0)>0?'↻':'↺'} {Math.abs(rotValue||0).toFixed(1)}°/min</div></div>{offTrackAlarm&&<div style={{background:'rgba(255,71,87,0.2)',border:'1px solid #FF4757',borderRadius:4,padding:'2px 5px',fontSize:'0.56rem',color:S.rd,fontWeight:700}}>⚠ OFF TRACK</div>}</div>
             {!hudCollapsed&&(<div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'3px 8px',marginTop:3}}>{[['HDG',`${livePos.heading.toFixed(0)}°`,S.gd],['ACC',`${livePos.acc.toFixed(0)}m`,S.gd]].map(([k,v,c])=>(<div key={k}><div style={{color:S.dm,fontSize:S.lb}}>{k}</div><div style={{color:c,fontFamily:'monospace',fontSize:'0.82rem',fontWeight:700}}>{v}</div></div>))}</div>)}
-            {!hudCollapsed&&etaResult&&(<div style={{marginTop:5,borderTop:'1px solid rgba(0,255,136,0.15)',paddingTop:4}}><div style={{display:'flex',justifyContent:'space-between'}}>{[['REMAIN',etaResult.remainNM+' NM'],['ETA',etaResult.hrs+'h '+etaResult.mins+'m']].map(([k,v])=>(<div key={k}><div style={{color:S.dm,fontSize:S.lb}}>{k}</div><div style={{color:S.gn,fontFamily:'monospace',fontSize:'0.8rem',fontWeight:700}}>{v}</div></div>))}</div><div style={{color:S.dm,fontSize:'0.58rem',marginTop:2}}>→ {etaResult.wpName}</div>{etaResult.arrivalStr&&<div style={{color:S.gd,fontFamily:'monospace',fontSize:'0.62rem',marginTop:2}}>🕐 {etaResult.arrivalStr}</div>}</div>)}
+            {!hudCollapsed&&etaResult&&(<div style={{marginTop:5,borderTop:'1px solid rgba(0,255,136,0.15)',paddingTop:4}}>
+              <div style={{display:'flex',justifyContent:'space-between'}}>{[['TOTAL',etaResult.totalNM+' NM'],['REMAIN',etaResult.remainNM+' NM'],['ETA',etaResult.hrs+'h '+etaResult.mins+'m']].map(([k,v])=>(<div key={k}><div style={{color:S.dm,fontSize:S.lb}}>{k}</div><div style={{color:S.gn,fontFamily:'monospace',fontSize:'0.8rem',fontWeight:700}}>{v}</div></div>))}</div>
+              <div style={{color:S.dm,fontSize:'0.58rem',marginTop:2}}>→ {etaResult.wpName}</div>
+              {etaResult.arrivalStr&&<div style={{color:S.gd,fontFamily:'monospace',fontSize:'0.62rem',marginTop:2}}>🕐 {etaResult.arrivalStr}</div>}
+            </div>)}
           </div>):(gpsOn?<div style={{color:S.dm,fontSize:S.sm,fontStyle:'italic'}}>Acquiring GPS…</div>:<div style={{color:S.vd,fontSize:S.xs}}>Enable GPS to track vessel</div>)}
         </div>
       </div>
@@ -721,9 +819,31 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
             {aisSource==='bridge'&&<input value={localAisHost} onChange={e=>setLocalAisHost(e.target.value)} placeholder="ws://localhost:4002" style={{width:'100%',boxSizing:'border-box',background:'#06101C',color:S.cy,border:'1px solid #1A3050',borderRadius:4,padding:'5px 7px',fontSize:'0.63rem',outline:'none'}}/>}
             <div style={{borderTop:'1px solid rgba(0,212,255,0.1)',paddingTop:5}}><div style={{color:S.dm,fontSize:S.lb,marginBottom:3}}>AIS RANGE FILTER</div><div style={{display:'flex',gap:3,flexWrap:'wrap'}}>{[[0,'World'],[5,'5NM'],[10,'10NM'],[20,'20NM'],[50,'50NM'],[100,'100NM']].map(([n,l])=>(<button key={n} onClick={()=>setAisRange(n)} style={{background:aisRange===n?'rgba(0,212,255,0.18)':'transparent',border:`1px solid ${aisRange===n?S.cy:S.vd}`,color:aisRange===n?S.cy:S.dm,borderRadius:5,padding:'3px 6px',fontSize:'0.62rem',cursor:'pointer'}}>{l}</button>))}</div></div>
             {localAisAlert&&<div style={{background:'rgba(255,32,32,0.15)',border:'1px solid #FF3030',borderRadius:5,padding:'5px 7px',cursor:'pointer'}} onClick={()=>setLocalAisAlert(null)}><div style={{color:'#FF5050',fontSize:'0.72rem',fontWeight:700}}>⚠ CPA {localAisAlert?.cpa}NM — {localAisAlert?.name||localAisAlert?.mmsi}</div><div style={{color:S.vd,fontSize:'0.55rem'}}>Tap to dismiss</div></div>}
+            <div style={{borderTop:'1px solid rgba(0,212,255,0.1)',paddingTop:5}}>
+              <div style={{color:S.dm,fontSize:S.lb,marginBottom:3}}>COG VECTORS</div>
+              <label style={{display:'flex',alignItems:'center',gap:6,cursor:'pointer',fontSize:S.xs,color:showAllAisVectors?S.cy:S.dm,background:showAllAisVectors?'rgba(0,212,255,0.12)':'transparent',border:`1px solid ${showAllAisVectors?S.cy:S.vd}`,borderRadius:5,padding:'4px 7px',minHeight:24}}>
+                <input type="checkbox" checked={showAllAisVectors} onChange={e=>setShowAllAisVectors(e.target.checked)} style={{accentColor:S.cy}}/>
+                <span>{showAllAisVectors?'All target vectors ON':'Tap target to show vector'}</span>
+              </label>
+            </div>
           </div>)}
 
-          {activePanel==='eta'&&(<div>{activeRoute?.waypoints?.length>0?<ETACalculator totalNM={etaResult?.remainNM?parseFloat(etaResult.remainNM):0}/>:<div style={{color:S.dm,fontSize:S.sm,fontStyle:'italic',textAlign:'center',padding:'16px 0'}}>Load a route first</div>}</div>)}
+          {activePanel==='eta'&&(<div style={{display:'flex',flexDirection:'column',gap:6}}>
+            {activeRoute?.waypoints?.length>0?(
+              <>
+                {etaResult&&(<div style={{background:'#020810',borderRadius:6,padding:'8px',border:'1px solid rgba(0,255,136,0.2)',marginBottom:4}}>
+                  <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'4px 8px',marginBottom:4}}>
+                    <div><div style={{color:S.dm,fontSize:S.lb}}>TOTAL DIST</div><div style={{color:S.gd,fontFamily:'monospace',fontSize:'0.85rem',fontWeight:700}}>{etaResult.totalNM} NM</div></div>
+                    <div><div style={{color:S.dm,fontSize:S.lb}}>REMAINING</div><div style={{color:S.gn,fontFamily:'monospace',fontSize:'0.85rem',fontWeight:700}}>{etaResult.remainNM} NM</div></div>
+                    <div><div style={{color:S.dm,fontSize:S.lb}}>ETA</div><div style={{color:S.gn,fontFamily:'monospace',fontSize:'0.85rem',fontWeight:700}}>{etaResult.hrs}h {etaResult.mins}m</div></div>
+                    <div><div style={{color:S.dm,fontSize:S.lb}}>TO WP</div><div style={{color:S.cy,fontFamily:'monospace',fontSize:'0.72rem',fontWeight:700,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{etaResult.wpName}</div></div>
+                  </div>
+                  {etaResult.arrivalStr&&<div style={{color:S.gd,fontFamily:'monospace',fontSize:'0.62rem',borderTop:'1px solid rgba(255,215,0,0.15)',paddingTop:4}}>🕐 {etaResult.arrivalStr}</div>}
+                </div>)}
+                <ETACalculator totalNM={etaResult?.totalNM?parseFloat(etaResult.totalNM):activeRoute?.waypoints?.length>1?activeRoute.waypoints.reduce((s,w,i,a)=>i>0?s+distNM(a[i-1].lat,a[i-1].lon,w.lat,w.lon):s,0):0}/>
+              </>
+            ):<div style={{color:S.dm,fontSize:S.sm,fontStyle:'italic',textAlign:'center',padding:'16px 0'}}>Load a route first</div>}
+          </div>)}
 
           {activePanel==='zones'&&(<div style={{display:'flex',flexDirection:'column',gap:5}}>
             <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:2}}><div style={{color:S.dm,fontSize:S.lb,letterSpacing:0.5}}>MARITIME ZONES{Object.values(zoneOverlays).some(Boolean)&&<span style={{color:S.cy}}> ({Object.values(zoneOverlays).filter(Boolean).length})</span>}</div>{Object.values(zoneOverlays).some(Boolean)&&<button onClick={()=>setZoneOverlays({})} style={{background:'transparent',border:'none',color:S.rd,fontSize:'0.55rem',cursor:'pointer'}}>⭕ Off</button>}</div>
