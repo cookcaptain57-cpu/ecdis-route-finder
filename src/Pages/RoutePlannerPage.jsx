@@ -258,25 +258,77 @@ function RoutePlannerPage({ notify, sheetRoutes=[], portsDb=[] }){
     else notify('No ECDIS routes found — click Generate Auto Route','success');
   };
 
-  const useDbRoute=(r)=>{
+  // ── FIX 1: useDbRoute — robust multi-URL CORS-aware loader ────────────────
+  const useDbRoute = (r) => {
     setSearchMode('generating');
-    const url=r.fileUrl||r['File URL']||r['Download URL']||r['Drive Link']||Object.values(r).find(v=>typeof v==='string'&&v.includes('drive.google'));
-    const fallback=()=>{notify('Could not load ECDIS file — generating auto route','error');handleGenerateAutoRoute();};
-    if(url){
-      notify('Loading ECDIS route…','success');
-      let furl=url;
-      const gd=url.match(/\/d\/([a-zA-Z0-9_-]+)/);
-      if(gd)furl=`https://drive.google.com/uc?export=download&id=${gd[1]}`;
-      fetch(furl,{mode:'cors'}).then(res=>res.text()).then(text=>{
-        const result=parseRTZ(text);
-        if(result&&result.waypoints.length>0){
-          setWaypoints(result.waypoints);
-          setRouteName(r.fileName||r['File Name']||r['Route Name']||'ECDIS Route');
-          setRouteMeta(null);setSearchMode('done');
-          notify(`ECDIS route loaded: ${result.waypoints.length} WPs`,'success');
-        }else fallback();
-      }).catch(fallback);
-    }else{notify('No file in ECDIS record — generating auto route','success');handleGenerateAutoRoute();}
+
+    const url = r.fileUrl || r['File URL'] || r['Download URL'] || r['Drive Link'] ||
+      Object.values(r).find(v => typeof v === 'string' &&
+        (v.includes('drive.google') || v.includes('drive.usercontent') || v.toLowerCase().endsWith('.rtz')));
+
+    const doAutoRoute = () => {
+      notify('Generating auto route instead…', 'error');
+      handleGenerateAutoRoute();
+    };
+
+    if (!url) {
+      notify('No file link found in ECDIS record', 'error');
+      doAutoRoute();
+      return;
+    }
+
+    notify('Loading ECDIS route…', 'success');
+
+    // Extract Google Drive file ID
+    const gdMatch = url.match(/\/d\/([a-zA-Z0-9_-]+)/) ||
+                    url.match(/id=([a-zA-Z0-9_-]+)/);
+    const fileId = gdMatch?.[1];
+
+    // Build candidate URLs to try
+    const candidates = fileId ? [
+      `https://drive.usercontent.google.com/download?id=${fileId}&export=download&confirm=t`,
+      `https://drive.google.com/uc?export=download&id=${fileId}&confirm=t`,
+      `https://drive.google.com/uc?id=${fileId}&export=download`,
+    ] : [url];
+
+    const tryUrl = (urls) => {
+      if (urls.length === 0) {
+        // All attempts failed — show download link so user can open manually
+        notify(
+          `CORS blocked. File ID: ${fileId || 'unknown'}. Make sure it's shared publicly.`,
+          'error'
+        );
+        doAutoRoute();
+        return;
+      }
+      const [next, ...rest] = urls;
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 12000);
+
+      fetch(next, {
+        mode: 'cors',
+        signal: ctrl.signal,
+        headers: { Accept: 'application/xml,text/xml,*/*' },
+      })
+        .then(res => { clearTimeout(timer); if (!res.ok) throw new Error(res.status); return res.text(); })
+        .then(text => {
+          const result = parseRTZ(text);
+          if (result && result.waypoints.length >= 2) {
+            setWaypoints(result.waypoints);
+            setRouteName(
+              r.fileName || r['File Name'] || r['Route Name'] || 'ECDIS Route'
+            );
+            setRouteMeta(null);
+            setSearchMode('done');
+            notify(`✅ ECDIS route loaded: ${result.waypoints.length} WPs`, 'success');
+          } else {
+            tryUrl(rest);
+          }
+        })
+        .catch(() => { clearTimeout(timer); tryUrl(rest); });
+    };
+
+    tryUrl(candidates);
   };
 
   // ── Generate auto route ────────────────────────────────────────────────────
@@ -372,6 +424,30 @@ function RoutePlannerPage({ notify, sheetRoutes=[], portsDb=[] }){
     const fmts={rtz:{fn:()=>exportRTZ(name,manualWps),ext:'.rtz',mime:'application/xml'},gpx:{fn:()=>exportGPX(name,manualWps),ext:'.gpx',mime:'application/gpx+xml'},csv:{fn:()=>exportCSV(manualWps),ext:'.csv',mime:'text/csv'},nmea:{fn:()=>exportNMEAWPL(name,manualWps),ext:'-nmea.txt',mime:'text/plain'},furuno:{fn:()=>exportFurunoCSV(name,manualWps),ext:'-furuno.csv',mime:'text/csv'},jrc:{fn:()=>exportJRCCSV(name,manualWps),ext:'-jrc.csv',mime:'text/csv'},transas:{fn:()=>exportTransasXML(name,manualWps),ext:'-transas.xml',mime:'application/xml'},kml:{fn:()=>exportKML(name,manualWps),ext:'.kml',mime:'application/vnd.google-earth.kml+xml'}};
     const cfg=fmts[exportFormat]||fmts.rtz;
     downloadFile(cfg.fn(),`${safe}${cfg.ext}`,cfg.mime);
+  };
+
+  // ── FIX 2: Export auto route (same formats as manual) ─────────────────────
+  const handleExportAutoRoute = () => {
+    if (waypoints.length < 2) { notify('No route to export', 'error'); return; }
+    const name = routeName || 'Auto Route';
+    const safe = name.replace(/[^a-zA-Z0-9_-]/g, '-');
+    const fmts = {
+      rtz:     { fn: () => exportRTZ(name, waypoints),         ext: '.rtz',         mime: 'application/xml' },
+      gpx:     { fn: () => exportGPX(name, waypoints),         ext: '.gpx',         mime: 'application/gpx+xml' },
+      csv:     { fn: () => exportCSV(waypoints),                ext: '.csv',         mime: 'text/csv' },
+      nmea:    { fn: () => exportNMEAWPL(name, waypoints),     ext: '-nmea.txt',    mime: 'text/plain' },
+      furuno:  { fn: () => exportFurunoCSV(name, waypoints),   ext: '-furuno.csv',  mime: 'text/csv' },
+      jrc:     { fn: () => exportJRCCSV(name, waypoints),      ext: '-jrc.csv',     mime: 'text/csv' },
+      transas: { fn: () => exportTransasXML(name, waypoints),  ext: '-transas.xml', mime: 'application/xml' },
+      kml:     { fn: () => exportKML(name, waypoints),         ext: '.kml',         mime: 'application/vnd.google-earth.kml+xml' },
+    };
+    const cfg = fmts[exportFormat] || fmts.rtz;
+    try {
+      downloadFile(cfg.fn(), `${safe}${cfg.ext}`, cfg.mime);
+      notify(`Exported as ${exportFormat.toUpperCase()} ✅`, 'success');
+    } catch (e) {
+      notify(`Export failed: ${e.message}`, 'error');
+    }
   };
 
   // ── Route check — updated to include new zones ─────────────────────────────
@@ -665,16 +741,72 @@ function RoutePlannerPage({ notify, sheetRoutes=[], portsDb=[] }){
 
               {searchMode==='generating'&&!routeMeta&&(<div style={{textAlign:'center',padding:'1.5rem',color:'var(--text2)',fontSize:'0.8rem'}}><div className="spin" style={{margin:'0 auto 10px'}}/>Computing route via NavisphereX Router…</div>)}
 
-              {routeMeta&&searchMode==='done'&&(
-                <div style={{marginBottom:'0.8rem',background:'rgba(0,180,216,0.06)',border:'1px solid rgba(0,180,216,0.2)',borderRadius:10,padding:10}}>
-                  <div style={{fontSize:'0.72rem',fontWeight:700,color:'var(--cyan)',marginBottom:6}}>📊 Route Analysis</div>
-                  <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:4,marginBottom:8}}>
-                    {[['Total',`${routeMeta.totalNM.toFixed(0)} NM`],['ETA @12kn',`${routeMeta.etaAt12kn}h`],['ETA @15kn',`${routeMeta.etaAt15kn}h`],['Data',routeMeta.confidence?.split('(')[0]?.trim().substring(0,8)||'—']].map(([k,v])=>(<div key={k} style={{background:'var(--bg2)',borderRadius:6,padding:'5px 8px'}}><div style={{fontSize:'0.6rem',color:'var(--text2)'}}>{k}</div><div style={{fontSize:'0.74rem',color:'var(--gold)',fontFamily:'Orbitron,monospace'}}>{v}</div></div>))}
+              {/* ── FIX 3: routeMeta done block — with Export Route section ── */}
+              {routeMeta && searchMode === 'done' && (
+                <div style={{ marginBottom: '0.8rem', background: 'rgba(0,180,216,0.06)', border: '1px solid rgba(0,180,216,0.2)', borderRadius: 10, padding: 10 }}>
+                  {/* ── Route Analysis ── */}
+                  <div style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--cyan)', marginBottom: 6 }}>📊 Route Analysis</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4, marginBottom: 8 }}>
+                    {[
+                      ['Total', `${routeMeta.totalNM.toFixed(0)} NM`],
+                      ['ETA @12kn', `${routeMeta.etaAt12kn}h`],
+                      ['ETA @15kn', `${routeMeta.etaAt15kn}h`],
+                      ['Data', routeMeta.confidence?.split('(')[0]?.trim().substring(0, 8) || '—'],
+                    ].map(([k, v]) => (
+                      <div key={k} style={{ background: 'var(--bg2)', borderRadius: 6, padding: '5px 8px' }}>
+                        <div style={{ fontSize: '0.6rem', color: 'var(--text2)' }}>{k}</div>
+                        <div style={{ fontSize: '0.74rem', color: 'var(--gold)', fontFamily: 'Orbitron,monospace' }}>{v}</div>
+                      </div>
+                    ))}
                   </div>
-                  {routeMeta.canalInfo?.length>0&&routeMeta.canalInfo.map((c,i)=>(<div key={i} style={{padding:'5px 8px',borderRadius:6,marginBottom:3,fontSize:'0.7rem',background:c.status==='OK'?'rgba(0,200,150,0.12)':'rgba(231,76,60,0.14)',border:`1px solid ${c.status==='OK'?'rgba(0,200,150,0.35)':'rgba(231,76,60,0.4)'}`,color:c.status==='OK'?'#00C896':'#ff8080'}}>{c.status==='OK'?'✅':'🚫'} {c.canal}{c.reason&&<span style={{fontSize:'0.63rem',display:'block',opacity:0.85,marginTop:1}}>{c.reason}</span>}</div>))}
+
+                  {routeMeta.canalInfo?.length > 0 && routeMeta.canalInfo.map((c, i) => (
+                    <div key={i} style={{ padding: '5px 8px', borderRadius: 6, marginBottom: 3, fontSize: '0.7rem', background: c.status === 'OK' ? 'rgba(0,200,150,0.12)' : 'rgba(231,76,60,0.14)', border: `1px solid ${c.status === 'OK' ? 'rgba(0,200,150,0.35)' : 'rgba(231,76,60,0.4)'}`, color: c.status === 'OK' ? '#00C896' : '#ff8080' }}>
+                      {c.status === 'OK' ? '✅' : '🚫'} {c.canal}
+                      {c.reason && <span style={{ fontSize: '0.63rem', display: 'block', opacity: 0.85, marginTop: 1 }}>{c.reason}</span>}
+                    </div>
+                  ))}
+
                   {renderApiRouteInfo(apiRouteInfo)}
-                  <div style={{padding:'6px 8px',borderRadius:6,background:'rgba(231,76,60,0.08)',border:'1px solid rgba(231,76,60,0.2)',fontSize:'0.65rem',color:'#ff8080',lineHeight:1.45,marginTop:4}}>⚠ NOT certified for navigation. Verify with official ENC.</div>
-                  <button className="btn btn-secondary" style={{width:'100%',justifyContent:'center',fontSize:'0.7rem',padding:'5px',marginTop:8}} onClick={()=>setSearchMode('choose')}>↩ Change route selection</button>
+
+                  <div style={{ padding: '6px 8px', borderRadius: 6, background: 'rgba(231,76,60,0.08)', border: '1px solid rgba(231,76,60,0.2)', fontSize: '0.65rem', color: '#ff8080', lineHeight: 1.45, marginTop: 4 }}>
+                    ⚠ NOT certified for navigation. Verify with official ENC.
+                  </div>
+
+                  {/* ── Export Route (same formats as manual mode) ── */}
+                  <div style={{ marginTop: 10, paddingTop: 8, borderTop: '1px solid rgba(255,255,255,0.07)' }}>
+                    <div style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--text2)', marginBottom: 6 }}>⬇ Export Route</div>
+                    <select
+                      value={exportFormat}
+                      onChange={e => setExportFormat(e.target.value)}
+                      style={{ width: '100%', padding: '6px 8px', borderRadius: 7, background: 'var(--bg2)', border: '1px solid var(--border)', color: 'var(--text)', fontSize: '0.72rem', marginBottom: 6 }}
+                    >
+                      <option value="rtz">RTZ — CIRM Standard (.rtz)</option>
+                      <option value="gpx">GPX — GPS Exchange (.gpx)</option>
+                      <option value="csv">CSV — Generic (.csv)</option>
+                      <option value="nmea">NMEA 0183 WPL (.txt)</option>
+                      <option value="furuno">Furuno ECDIS (.csv)</option>
+                      <option value="jrc">JRC ECDIS (.csv)</option>
+                      <option value="transas">Transas / TECDIS (.xml)</option>
+                      <option value="kml">Google Earth KML (.kml)</option>
+                    </select>
+                    <button
+                      className="btn btn-gold"
+                      style={{ width: '100%', justifyContent: 'center', padding: '7px', fontSize: '0.74rem' }}
+                      onClick={handleExportAutoRoute}
+                      disabled={waypoints.length < 2}
+                    >
+                      ⬇ Export {exportFormat.toUpperCase()}
+                    </button>
+                  </div>
+
+                  <button
+                    className="btn btn-secondary"
+                    style={{ width: '100%', justifyContent: 'center', fontSize: '0.7rem', padding: '5px', marginTop: 8 }}
+                    onClick={() => setSearchMode('choose')}
+                  >
+                    ↩ Change route selection
+                  </button>
                 </div>
               )}
 
