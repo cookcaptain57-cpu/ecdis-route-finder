@@ -818,7 +818,7 @@ export default function App() {
           {tab === 'library' && <MaritimeLibraryPage setTab={switchTab} />}
           {tab === 'navmode' && <NavModePage notify={notify} sheetRoutes={[...routes, ...sheetRoutes]} portsDb={portsDb} setTab={switchTab} />}
           {/* ── ADDITION 4: Compass Error page render ─────────────────────── */}
-          {tab === 'compass' && <CompassErrorPage />}
+          {tab === 'compass' && <CompassErrorPage user={user} />}
           {tab === 'login'   && <LoginPage notify={notify} onLogin={(u, redirectTo, isNew, userName, userRank) => {
             setUser(u);
             setTab(redirectTo || 'home');
