@@ -44,12 +44,59 @@ const normalizeRoute = (wps) => {
   return out;
 };
 
+// ─── FIX 1: Proper CPA/TCPA computation (vector math, not broken formula) ───
+// Works entirely from lat/lon/cog/sog — no internet needed
+// Returns { cpa (NM), tcpa (hours) }
+const computeCPA = (own, tgt) => {
+  if (!own || !tgt) return { cpa: 9999, tcpa: 0 };
+  const sogOwn = own.sog || 0;
+  const sogTgt = tgt.sog || 0;
+  const cogOwn = (own.cog || 0) * Math.PI / 180;
+  const cogTgt = (tgt.cog || 0) * Math.PI / 180;
+
+  // Convert lat/lon offset to NM (flat-earth approx — fine for CPA ranges)
+  const dLat = (tgt.lat - own.lat) * 60;           // NM
+  const dLon = (tgt.lon - own.lon) * 60 * Math.cos(own.lat * Math.PI / 180); // NM
+
+  // Own velocity components (NM/hr)
+  const vOwnX = sogOwn * Math.sin(cogOwn);
+  const vOwnY = sogOwn * Math.cos(cogOwn);
+
+  // Target velocity components (NM/hr)
+  const vTgtX = sogTgt * Math.sin(cogTgt);
+  const vTgtY = sogTgt * Math.cos(cogTgt);
+
+  // Relative velocity
+  const vRelX = vTgtX - vOwnX;
+  const vRelY = vTgtY - vOwnY;
+
+  const vRel2 = vRelX * vRelX + vRelY * vRelY;
+
+  let tcpa;
+  if (vRel2 < 1e-8) {
+    // Vessels on same speed/course — CPA is current range, TCPA = 0
+    tcpa = 0;
+  } else {
+    // t = -(r · v) / |v|²  where r = relative position, v = relative velocity
+    tcpa = -(dLon * vRelX + dLat * vRelY) / vRel2;
+  }
+
+  if (tcpa < 0) tcpa = 0; // Already past CPA
+
+  // CPA position
+  const cpaLon = dLon + vRelX * tcpa;
+  const cpaLat = dLat + vRelY * tcpa;
+  const cpa = Math.sqrt(cpaLon * cpaLon + cpaLat * cpaLat);
+
+  return { cpa, tcpa };
+};
+
 export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
   const mapRef=useRef(null), leafRef=useRef(null);
   const baseTileRef=useRef(null), seamarkRef=useRef(null);
   const gebcoRefTile=useRef(null), emodnetTileRef=useRef(null);
   const encTileRef=useRef(null), esriBaseRef=useRef(null), gebcoWmsRef=useRef(null);
-  const layersRef=useRef({route:null,vessel:null,vector:null,ais:{},routeMarkers:[],rbLine:null,rbMarker:null,xtdPort:null,xtdStbd:null,xtdFill:null,pastTrack:null});
+  const layersRef=useRef({route:null,vessel:null,vector:null,ais:{},routeMarkers:[],rbLine:null,rbMarker:null,xtdPort:null,xtdStbd:null,xtdFill:null,pastTrack:null,guardZone:null});
   const chartLayersRef=useRef([]), aisWsRef=useRef(null), aisIntervalRef=useRef(null);
   const invalidateTimers=useRef([]), pastTrackRef=useRef([]);
   const rbModeRef=useRef(false), livePosRef=useRef(null), vectorMinsRef=useRef(6);
@@ -59,10 +106,15 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
   const aisRangeRef=useRef(0), aisSourceRef=useRef('internet');
   const prevRouteNameRef=useRef(null);
   const indonesiaEncLayerRef=useRef(null);
-  const lastHdgRef=useRef(null), lastHdgTimeRef=useRef(null);
+
+  // ─── FIX 4: ROT — track previous heading with timestamp properly ───
+  const prevHdgRef=useRef(null);
+  const prevHdgTimeRef=useRef(null);
+
   const offTrackTimerRef=useRef(null), alarmCooldownRef=useRef({});
   const anchorCircleRef=useRef(null), anchorAlarmCooldownRef=useRef(0);
   const wpAlarmCooldownRef=useRef(0);
+  const guardZoneAlarmCooldown=useRef({});
 
   const ls = k => localStorage.getItem(k);
   const [mapReady,setMapReady]=useState(false);
@@ -118,7 +170,8 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
   const [anchorPos,setAnchorPos]=useState(null);
   const [anchorRadius,setAnchorRadius]=useState(0.3);
   const [anchorAlarm,setAnchorAlarm]=useState(false);
-  const [speedAlarmKn,setSpeedAlarmKn]=useState(0);
+  // FIX 7: User-selectable speed alarm
+  const [speedAlarmKn,setSpeedAlarmKn]=useState(()=>Number(ls('nav_speedAlarm')||0));
   const [speedAlarmTriggered,setSpeedAlarmTriggered]=useState(false);
   const [wpArrivalNM,setWpArrivalNM]=useState(0.3);
   const [weatherData,setWeatherData]=useState(null);
@@ -130,6 +183,19 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
   const [portSearchResults,setPortSearchResults]=useState([]);
   const [editingWpNote,setEditingWpNote]=useState(0);
   const [wpNotes,setWpNotes]=useState({});
+  // FIX 6: Off-track alarm threshold selectable
+  const [offTrackNM,setOffTrackNM]=useState(()=>Number(ls('nav_offTrackNM')||xtdNM));
+  // FIX 8: Guard zone
+  const [guardZoneOn,setGuardZoneOn]=useState(false);
+  const [guardZoneRadiusNM,setGuardZoneRadiusNM]=useState(()=>Number(ls('nav_guardZoneNM')||2));
+  const [guardZoneAlarm,setGuardZoneAlarm]=useState(false);
+  const [guardZoneTargets,setGuardZoneTargets]=useState([]);
+  // FIX 5: Anchor watch circle calculator inputs
+  const [anchorShipLengthM,setAnchorShipLengthM]=useState(()=>Number(ls('nav_anchorLOA')||100));
+  const [anchorShackles,setAnchorShackles]=useState(()=>Number(ls('nav_anchorShackles')||3));
+
+  const [showAllAisVectors,setShowAllAisVectors]=useState(()=>localStorage.getItem('nav_aisVectors')==='true');
+  const [selectedAisMmsi,setSelectedAisMmsi]=useState(null);
 
   const safeInvalidate=useCallback(()=>{
     invalidateTimers.current.forEach(clearTimeout); invalidateTimers.current=[];
@@ -137,9 +203,23 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
     f(); invalidateTimers.current=[100,300,600,1000,1800].map(t=>setTimeout(f,t));
   },[]);
 
-  const distNM=(a,b,c,d)=>{const R=3440.065,r=Math.PI/180,x=Math.sin(((d-b)*r)/2)**2+Math.cos(b*r)*Math.cos(d*r)*Math.sin(((c-a)*r)/2)**2;return 2*R*Math.asin(Math.sqrt(x));};
-  const brg=(a,b,c,d)=>{const r=Math.PI/180,dl=(d-b)*r,y=Math.sin(dl)*Math.cos(d*r),x=Math.cos(a*r)*Math.sin(d*r)-Math.sin(a*r)*Math.cos(d*r)*Math.cos(dl);return((Math.atan2(y,x)/r)+360)%360;};
-  const calcCPA=(o,t)=>{const dx=t.lon-o.lon,dy=t.lat-o.lat,h=((dx*t.cog-dy*o.cog)||0)/1000;return{cpa:distNM(o.lat,o.lon,t.lat,t.lon),tcpa:Math.max(h,0)};};
+  // ─── FIX 2: Correct leg-by-leg distance using Haversine ───
+  const distNM=(lat1,lon1,lat2,lon2)=>{
+    const R=3440.065,r=Math.PI/180;
+    const dLat=(lat2-lat1)*r, dLon=(lon2-lon1)*r;
+    const a=Math.sin(dLat/2)**2+Math.cos(lat1*r)*Math.cos(lat2*r)*Math.sin(dLon/2)**2;
+    return 2*R*Math.asin(Math.sqrt(Math.min(1,a)));
+  };
+
+  // ─── Route total distance: sum every leg individually ───
+  const routeTotalNM=(wps)=>{
+    if(!wps||wps.length<2) return 0;
+    let d=0;
+    for(let i=0;i<wps.length-1;i++) d+=distNM(wps[i].lat,wps[i].lon,wps[i+1].lat,wps[i+1].lon);
+    return d;
+  };
+
+  const brg=(lat1,lon1,lat2,lon2)=>{const r=Math.PI/180,dl=(lon2-lon1)*r,y=Math.sin(dl)*Math.cos(lat2*r),x=Math.cos(lat1*r)*Math.sin(lat2*r)-Math.sin(lat1*r)*Math.cos(lat2*r)*Math.cos(dl);return((Math.atan2(y,x)/r)+360)%360;};
   const colreg=(o,t)=>{const b=(Math.atan2(t.lon-o.lon,t.lat-o.lat)*180/Math.PI+360)%360,r=(b-o.cog+360)%360;if(r>345||r<15) return "HEAD-ON";if(r>112.5&&r<247.5) return "OVERTAKING";if(r>15&&r<112.5) return "CROSSING-STBD";return "CROSSING-PORT";};
   const offsetPt=(lat,lon,bd,dn)=>{const R=3440.065,d=dn/R,b=bd*Math.PI/180,p1=lat*Math.PI/180,l1=lon*Math.PI/180,p2=Math.asin(Math.sin(p1)*Math.cos(d)+Math.cos(p1)*Math.sin(d)*Math.cos(b)),l2=l1+Math.atan2(Math.sin(b)*Math.sin(d)*Math.cos(p1),Math.cos(d)-Math.sin(p1)*Math.sin(p2));return[p2*180/Math.PI,l2*180/Math.PI];};
 
@@ -223,7 +303,7 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
       if(livePosRef.current) aisService.setOwnShip(livePosRef.current);
       const off1=aisService.on('status',({status,targets})=>{setLocalAisStatus(status||'connected');setLocalAisCount(typeof targets==='number'?targets:(targets?.size||0));});
       const off2=aisService.on('alert',al=>{setLocalAisAlert(al);notify(`⚠ COLLISION: ${al?.name||al?.mmsi} CPA ${al?.cpa}NM`,'error');setTimeout(()=>setLocalAisAlert(null),30000);});
-      const off3=aisService.on('update',({target,targets})=>{if(!target?.lat||!target?.lon) return;setAisTargets(prev=>({...prev,[target.mmsi]:{mmsi:target.mmsi,lat:target.lat,lon:target.lon,cog:target.cog||0,sog:target.sog||0,name:target.name||'',cpa:target.cpa,tcpa:target.tcpa,ts:Date.now()}}));setLocalAisCount(targets?.size||0);});
+      const off3=aisService.on('update',({target,targets})=>{if(!target?.lat||!target?.lon) return;setAisTargets(prev=>({...prev,[target.mmsi]:{mmsi:target.mmsi,lat:target.lat,lon:target.lon,cog:target.cog||0,sog:target.sog||0,name:target.name||'',ts:Date.now()}}));setLocalAisCount(targets?.size||0);});
       return()=>{try{off1();off2();off3();}catch{}aisService.stop();};
     }
     if(aisSource==='internet'){
@@ -264,11 +344,23 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
         if((aisSourceRef.current==='safepilot'||aisSourceRef.current==='bridge')&&livePosRef.current?.fromSafePilot) return;
         const la=pos.coords.latitude,ln=pos.coords.longitude;
         const sog=(pos.coords.speed||0)*1.94384,cog=pos.coords.heading||0,acc=pos.coords.accuracy||0;
-        const now2=Date.now(),dt=lastHdgTimeRef.current?((now2-lastHdgTimeRef.current)/60000):0;
-        const dHdg=lastHdgRef.current!==null?((cog-lastHdgRef.current+540)%360-180):0;
-        const rot=(dt>0&&sog>0.5)?Math.max(-720,Math.min(720,parseFloat((dHdg/dt).toFixed(1)))):0;
-        lastHdgRef.current=cog;lastHdgTimeRef.current=now2;
+
+        // ─── FIX 4: ROT calculation — proper time-delta rate of turn ───
+        const now2=Date.now();
+        let rot=0;
+        if(prevHdgRef.current!==null&&prevHdgTimeRef.current!==null&&sog>0.3){
+          const dtMin=(now2-prevHdgTimeRef.current)/60000; // minutes
+          if(dtMin>0&&dtMin<5){
+            // shortest-path angular delta
+            let delta=(cog-prevHdgRef.current+540)%360-180;
+            rot=parseFloat((delta/dtMin).toFixed(1));
+            rot=Math.max(-720,Math.min(720,rot));
+          }
+        }
+        prevHdgRef.current=cog;
+        prevHdgTimeRef.current=now2;
         setRotValue(rot);
+
         const fix={lat:la,lon:ln,sog,cog,heading:cog,acc,rot};
         setLivePos(fix);livePosRef.current=fix;
         const now=Date.now();pastTrackRef.current.push({lat:la,lon:ln,t:now});pastTrackRef.current=pastTrackRef.current.filter(p=>p.t>now-86400000);
@@ -281,25 +373,38 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
     return()=>navigator.geolocation.clearWatch(id);
   },[gpsOn]);
 
-
-  const [showAllAisVectors,setShowAllAisVectors]=useState(()=>localStorage.getItem('nav_aisVectors')==='true');
-  const [selectedAisMmsi,setSelectedAisMmsi]=useState(null);
   useEffect(()=>{localStorage.setItem('nav_aisVectors',showAllAisVectors);},[showAllAisVectors]);
 
+  // ─── FIX 1: AIS CPA/TCPA — pure vector math, computed every render, no internet ───
   useEffect(()=>{
     if(!leafRef.current||!window.L) return;
     const L=window.L,m=leafRef.current;
-    const rng=aisRangeRef.current,pos=livePosRef.current;
-    const own=layersRef.current.vessel?.getLatLng();
+    const ownPos=livePosRef.current;
+    const rng=aisRangeRef.current;
     const seen=new Set();
+
+    // ─── FIX 8: Guard zone breach tracking ───
+    const guardBreachers=[];
+
     Object.values(aisTargets).forEach(v=>{
       if(!v.lat||!v.lon) return;
-      if(rng>0&&pos&&distNM(pos.lat,pos.lon,v.lat,v.lon)>rng) return;
-      const cp=own&&pos?calcCPA({lat:own.lat,lon:own.lng,cog:pos.cog,sog:pos.sog},v):null;
-      const col=cp?.cpa<1?'#FF3030':cp?.cpa<3?'#FF9500':'#00D4FF';
-      const rng2=own&&pos?distNM(pos.lat,pos.lon,v.lat,v.lon).toFixed(1):'-';
-      const cl=own&&pos?colreg({lat:own.lat,lon:own.lng,cog:pos.cog},v):'N/A';
-      const popup=`<div style="font-size:13px;min-width:180px;line-height:1.7"><b style="color:${col}">${v.name||'AIS Vessel'}</b><br/><small>MMSI: ${v.mmsi}</small><br/>SOG: ${v.sog?.toFixed(1)}kn COG: ${v.cog?.toFixed(0)}°<br/>Range: ${rng2}NM<br/>CPA: ${cp?.cpa?.toFixed(2)||'-'}NM TCPA: ${cp?.tcpa?.toFixed(1)||'-'}h<br/>COLREG: ${cl}${cp?.cpa<1.5?'<br/><b style="color:#FF3030">⚠ COLLISION RISK</b>':''}</div>`;
+      if(rng>0&&ownPos&&distNM(ownPos.lat,ownPos.lon,v.lat,v.lon)>rng) return;
+
+      const rangNM=ownPos?distNM(ownPos.lat,ownPos.lon,v.lat,v.lon):null;
+      const brgDeg=ownPos?brg(ownPos.lat,ownPos.lon,v.lat,v.lon):null;
+
+      // ─── Immediate CPA/TCPA — pure vector, no async, no internet ───
+      const cpaTcpa=ownPos?computeCPA(
+        {lat:ownPos.lat,lon:ownPos.lon,sog:ownPos.sog||0,cog:ownPos.cog||0},
+        {lat:v.lat,lon:v.lon,sog:v.sog||0,cog:v.cog||0}
+      ):{cpa:9999,tcpa:0};
+
+      const col=cpaTcpa.cpa<1?'#FF3030':cpaTcpa.cpa<3?'#FF9500':'#00D4FF';
+      const cl=ownPos?colreg({lat:ownPos.lat,lon:ownPos.lng||ownPos.lon,cog:ownPos.cog},v):'N/A';
+
+      // ─── FIX 1b: Show bearing in popup ───
+      const popup=`<div style="font-size:13px;min-width:190px;line-height:1.8"><b style="color:${col}">${v.name||'AIS Vessel'}</b><br/><small>MMSI: ${v.mmsi}</small><br/>SOG: ${v.sog?.toFixed(1)}kn &nbsp; COG: ${v.cog?.toFixed(0)}°<br/>Range: ${rangNM!=null?rangNM.toFixed(1)+' NM':'—'} &nbsp; BRG: ${brgDeg!=null?brgDeg.toFixed(0)+'°T':'—'}<br/>CPA: <b style="color:${col}">${cpaTcpa.cpa<9000?cpaTcpa.cpa.toFixed(2):'—'} NM</b> &nbsp; TCPA: <b style="color:${col}">${cpaTcpa.tcpa>0?cpaTcpa.tcpa.toFixed(2):'0.00'} h</b><br/>COLREG: ${cl}${cpaTcpa.cpa<1.5&&cpaTcpa.tcpa>0?'<br/><b style="color:#FF3030">⚠ COLLISION RISK</b>':''}</div>`;
+
       seen.add(String(v.mmsi));
       const aisRot=(v.cog||0);
       const aisIcon=L.divIcon({html:`<div style="transform:rotate(${aisRot}deg);transform-origin:center;width:16px;height:22px;"><svg width="16" height="22" viewBox="0 0 16 22" fill="none"><polygon points="8,1 15,21 8,16 1,21" fill="${col}" stroke="#fff" stroke-width="1.2"/></svg></div>`,className:'',iconSize:[16,22],iconAnchor:[8,11]});
@@ -312,7 +417,7 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
         mk.on('click',()=>setSelectedAisMmsi(prev=>prev===String(v.mmsi)?null:String(v.mmsi)));
         if(!layersRef.current.ais[v.mmsi]) layersRef.current.ais[v.mmsi]={};
         layersRef.current.ais[v.mmsi].mk=mk;
-        if(cp?.cpa<1.5) notify(`⚠ CPA: MMSI ${v.mmsi} ${cp.cpa.toFixed(1)}NM`,'error');
+        if(cpaTcpa.cpa<1.5&&cpaTcpa.tcpa>0) notify(`⚠ CPA: MMSI ${v.mmsi} ${cpaTcpa.cpa.toFixed(2)}NM T+${cpaTcpa.tcpa.toFixed(1)}h`,'error');
       }
       const showVec=showAllAisVectors||(selectedAisMmsi===String(v.mmsi));
       if(showVec&&(v.sog||0)>0.1){
@@ -328,7 +433,22 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
         try{m.removeLayer(layersRef.current.ais[v.mmsi].vec);}catch{}
         layersRef.current.ais[v.mmsi].vec=null;
       }
+
+      // ─── FIX 8: Guard zone check ───
+      if(guardZoneOn&&ownPos&&rangNM!=null&&rangNM<=guardZoneRadiusNM){
+        guardBreachers.push(v.name||`MMSI ${v.mmsi}`);
+        const mmsiKey=String(v.mmsi);
+        const now=Date.now();
+        if(!guardZoneAlarmCooldown.current[mmsiKey]||now-guardZoneAlarmCooldown.current[mmsiKey]>30000){
+          guardZoneAlarmCooldown.current[mmsiKey]=now;
+          notify(`🔴 GUARD ZONE: ${v.name||v.mmsi} entered ${guardZoneRadiusNM}NM zone — ${rangNM.toFixed(1)}NM / ${brgDeg?.toFixed(0)}°T`,'error');
+        }
+      }
     });
+
+    setGuardZoneTargets(guardBreachers);
+    setGuardZoneAlarm(guardBreachers.length>0);
+
     Object.keys(layersRef.current.ais).forEach(mmsi=>{
       if(!seen.has(mmsi)){
         try{m.removeLayer(layersRef.current.ais[mmsi].mk);}catch{}
@@ -336,7 +456,8 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
         delete layersRef.current.ais[mmsi];
       }
     });
-  },[aisTargets,livePos,showAllAisVectors,selectedAisMmsi]);
+  },[aisTargets,livePos,showAllAisVectors,selectedAisMmsi,guardZoneOn,guardZoneRadiusNM]);
+
   useEffect(()=>{
     if(!mapReady||!leafRef.current||!window.L) return;
     const L=window.L,m=leafRef.current;
@@ -398,6 +519,11 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
   useEffect(()=>{localStorage.setItem('nav_zoneOverlays',JSON.stringify(zoneOverlays));},[zoneOverlays]);
   useEffect(()=>{localStorage.setItem('nav_cogPanelPos',JSON.stringify(cogPanelPos));},[cogPanelPos]);
   useEffect(()=>{localStorage.setItem('nav_cogPanel',cogPanelVisible);},[cogPanelVisible]);
+  useEffect(()=>{localStorage.setItem('nav_speedAlarm',speedAlarmKn);},[speedAlarmKn]);
+  useEffect(()=>{localStorage.setItem('nav_offTrackNM',offTrackNM);},[offTrackNM]);
+  useEffect(()=>{localStorage.setItem('nav_guardZoneNM',guardZoneRadiusNM);},[guardZoneRadiusNM]);
+  useEffect(()=>{localStorage.setItem('nav_anchorLOA',anchorShipLengthM);},[anchorShipLengthM]);
+  useEffect(()=>{localStorage.setItem('nav_anchorShackles',anchorShackles);},[anchorShackles]);
 
   useEffect(()=>{
     if(!mapReady||!leafRef.current||!window.L) return;
@@ -421,33 +547,20 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
       const ll=L.marker([wp.lat,wp.lon],{icon:li,interactive:false,zIndexOffset:200}).addTo(m);
       lrs.routeMarkers.push(mk,ll);
     });
+    // ─── FIX 2: Leg labels with correct leg-by-leg Haversine distance ───
     for(let i=0;i<wps.length-1;i++){
       const mid=[(wps[i].lat+wps[i+1].lat)/2,(wps[i].lon+wps[i+1].lon)/2];
-      const bd=brg(wps[i].lat,wps[i].lon,wps[i+1].lat,wps[i+1].lon),dn=distNM(wps[i].lat,wps[i].lon,wps[i+1].lat,wps[i+1].lon);
+      const bd=brg(wps[i].lat,wps[i].lon,wps[i+1].lat,wps[i+1].lon);
+      const dn=distNM(wps[i].lat,wps[i].lon,wps[i+1].lat,wps[i+1].lon);
       const li=L.divIcon({html:`<div style="background:rgba(0,0,0,0.65);color:#FFD700;font-size:10px;font-weight:600;font-family:monospace;white-space:nowrap;padding:1px 4px;border-radius:3px;pointer-events:none;">${bd.toFixed(0)}°T · ${dn.toFixed(1)} NM</div>`,className:'',iconSize:[0,0],iconAnchor:[-4,8]});
       lrs.routeMarkers.push(L.marker(mid,{icon:li,interactive:false,zIndexOffset:100}).addTo(m));
     }
     if(wps.length>=2){
       const X=xtdNM;
-      // Remove old XTD layers
-      [lrs.xtdPort,lrs.xtdStbd,lrs.xtdFill].forEach(l=>{if(l) try{m.removeLayer(l);}catch{}});
-      lrs.xtdPort=null;lrs.xtdStbd=null;lrs.xtdFill=null;
-      // Draw per-leg XTD so each leg has exactly ±X perpendicular offset
-      const portPts=[],stbdPts=[];
-      for(let i=0;i<wps.length-1;i++){
-        const legBrg=brg(wps[i].lat,wps[i].lon,wps[i+1].lat,wps[i+1].lon);
-        const portBrg=(legBrg-90+360)%360;
-        const stbdBrg=(legBrg+90)%360;
-        portPts.push(offsetPt(wps[i].lat,wps[i].lon,portBrg,X));
-        portPts.push(offsetPt(wps[i+1].lat,wps[i+1].lon,portBrg,X));
-        stbdPts.push(offsetPt(wps[i].lat,wps[i].lon,stbdBrg,X));
-        stbdPts.push(offsetPt(wps[i+1].lat,wps[i+1].lon,stbdBrg,X));
-      }
-      lrs.xtdPort=L.polyline(portPts.reduce((a,p,i)=>i%2===0&&i+1<portPts.length?[...a,[p,portPts[i+1]]]:a,[]).map(seg=>seg).flat().reduce((acc,p,i,arr)=>{if(i%2===0){if(i>0) acc.push(null);acc.push(p);}else acc.push(p);return acc;},[]).filter(Boolean),{color:c.xtd,weight:1.5,opacity:0.8,dashArray:'10 6'}).addTo(m);
-      // Simpler: just draw per-leg lines
-      lrs.xtdPort&&m.removeLayer(lrs.xtdPort);
-      lrs.xtdStbd&&m.removeLayer(lrs.xtdStbd);
-      lrs.xtdFill&&m.removeLayer(lrs.xtdFill);
+      [lrs.xtdPort,lrs.xtdStbd,lrs.xtdFill].forEach(arr=>{
+        if(Array.isArray(arr)) arr.forEach(l=>{try{m.removeLayer(l);}catch{}});
+        else if(arr) try{m.removeLayer(arr);}catch{};
+      });
       const portLines=[],stbdLines=[],fillPolys=[];
       for(let i=0;i<wps.length-1;i++){
         const lb=brg(wps[i].lat,wps[i].lon,wps[i+1].lat,wps[i+1].lon);
@@ -460,46 +573,51 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
         stbdLines.push(L.polyline([s1,s2],{color:c.xtd,weight:1.5,opacity:0.8,dashArray:'10 6'}).addTo(m));
         fillPolys.push(L.polygon([p1,p2,s2,s1],{color:'transparent',fillColor:c.xtd,fillOpacity:0.06,weight:0}).addTo(m));
       }
-      // Store as arrays for cleanup
       lrs.xtdPort=portLines;lrs.xtdStbd=stbdLines;lrs.xtdFill=fillPolys;
     }
     const routeChanged=activeRoute?.name!==prevRouteNameRef.current;
     if(routeChanged){prevRouteNameRef.current=activeRoute?.name||null;try{m.fitBounds(lrs.route.getBounds(),{padding:[60,60]});}catch{}}
   },[activeRoute,mapReady,colors,xtdNM]);
 
+  // ─── FIX 2: ETA uses correct leg-by-leg Haversine, remaining distance properly projected ───
   useEffect(()=>{
     if(!livePos||!activeRoute?.waypoints?.length){setEtaResult(null);return;}
     if(livePos.sog<0.2){setEtaResult(null);return;}
-    const wps=activeRoute.waypoints,ti=Math.min(Math.max(selectedWpIdx,0),wps.length-1);
-    const legSum=(a,b)=>{let d=0;for(let i=a;i<b;i++) d+=distNM(wps[i].lat,wps[i].lon,wps[i+1].lat,wps[i+1].lon);return d;};
-    // Find closest leg ship is on, then measure remaining route distance leg by leg
+    const wps=activeRoute.waypoints;
+    const ti=Math.min(Math.max(selectedWpIdx,0),wps.length-1);
+
+    // Sum legs from index a to b (exclusive)
+    const legSum=(a,b)=>{
+      let d=0;
+      for(let i=a;i<b;i++) d+=distNM(wps[i].lat,wps[i].lon,wps[i+1].lat,wps[i+1].lon);
+      return d;
+    };
+
+    // Total route distance = sum of ALL legs
+    const totalRouteDist=legSum(0,wps.length-1);
+
+    // Find the closest leg the ship is currently on, compute remaining correctly
     let rem=Infinity;
     for(let i=0;i<wps.length-1;i++){
-      // Project ship onto this leg, get distance along-track to end of leg
       const legBrg=brg(wps[i].lat,wps[i].lon,wps[i+1].lat,wps[i+1].lon);
       const shipBrg=brg(wps[i].lat,wps[i].lon,livePos.lat,livePos.lon);
       const shipDistFromLegStart=distNM(wps[i].lat,wps[i].lon,livePos.lat,livePos.lon);
-      const along=shipDistFromLegStart*Math.cos(((legBrg-shipBrg)*Math.PI/180));
+      const angleDiff=((legBrg-shipBrg)+540)%360-180;
+      const along=shipDistFromLegStart*Math.cos(angleDiff*Math.PI/180);
       const legLen=distNM(wps[i].lat,wps[i].lon,wps[i+1].lat,wps[i+1].lon);
-      if(along>=0&&along<=legLen){
-        // Ship is on this leg - remaining = rest of this leg + all legs to ti
-        const restOfLeg=legLen-along;
+      if(along>=0&&along<=legLen+0.1){
+        const restOfLeg=Math.max(0,legLen-along);
         const d=restOfLeg+legSum(i+1,ti);
         if(d<rem) rem=d;
       }
     }
-    // Fallback: if no leg matched, use direct distance to next waypoint + legs ahead
-    if(rem===Infinity){
-      for(let i=0;i<=Math.min(ti,wps.length-2);i++){
-        const d=distNM(livePos.lat,livePos.lon,wps[i+1].lat,wps[i+1].lon)+legSum(i+1,ti);
-        if(d<rem) rem=d;
-      }
-    }
-    if(rem===Infinity) rem=distNM(livePos.lat,livePos.lon,wps[ti].lat,wps[ti].lon);
+    // Fallback
+    if(rem===Infinity) rem=distNM(livePos.lat,livePos.lon,wps[ti].lat,wps[ti].lon)+legSum(Math.min(ti,wps.length-2)+1,ti);
+    if(rem===Infinity||rem<0) rem=distNM(livePos.lat,livePos.lon,wps[ti].lat,wps[ti].lon);
+
     const hrs=rem/livePos.sog,h=Math.floor(hrs),mn=Math.round((hrs%1)*60);
     const arr=new Date(Date.now()+hrs*3600000),pd=n=>String(n).padStart(2,'0');
     const mo=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][arr.getMonth()];
-    const totalRouteDist=legSum(0,wps.length-1);
     setEtaResult({remainNM:rem.toFixed(1),totalNM:totalRouteDist.toFixed(1),hrs:h,mins:mn,wpName:wps[ti].name||`WP${String(ti+1).padStart(2,'0')}`,arrivalStr:`${pd(arr.getDate())} ${mo} ${arr.getFullYear()} ${pd(arr.getHours())}:${pd(arr.getMinutes())} LT`});
   },[livePos,activeRoute,selectedWpIdx]);
 
@@ -584,9 +702,10 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
     if(anchorWatchOn&&anchorPos){anchorCircleRef.current=L.circle([anchorPos.lat,anchorPos.lon],{radius:anchorRadius*1852,color:anchorAlarm?'#FF2020':'#FFD700',fillColor:anchorAlarm?'#FF2020':'#FFD700',fillOpacity:0.08,weight:2,dashArray:'6 4'}).bindPopup(`<b>⚓ Anchor Drop</b><br/>Radius: ${anchorRadius}NM<br/>${anchorAlarm?'<b style="color:#FF2020">⚠ DRAGGING!</b>':'Holding'}`).addTo(m);}
   },[anchorWatchOn,anchorPos,anchorRadius,anchorAlarm,mapReady]);
 
+  // ─── FIX 7: Speed alarm ───
   useEffect(()=>{
     if(!livePos||speedAlarmKn<=0) return;
-    if(livePos.sog>speedAlarmKn){if(!speedAlarmTriggered){setSpeedAlarmTriggered(true);notify(`⚠ SPEED LIMIT — ${livePos.sog.toFixed(1)}kn exceeds ${speedAlarmKn}kn limit`,'error');}}
+    if(livePos.sog>speedAlarmKn){if(!speedAlarmTriggered){setSpeedAlarmTriggered(true);notify(`⚠ OVERSPEED — ${livePos.sog.toFixed(1)}kn exceeds ${speedAlarmKn}kn limit`,'error');}}
     else{setSpeedAlarmTriggered(false);}
   },[livePos,speedAlarmKn]);
 
@@ -596,6 +715,54 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
     const dist=distNM(livePos.lat,livePos.lon,wps[ti].lat,wps[ti].lon);
     if(dist<wpArrivalNM){const now=Date.now();if(now-wpAlarmCooldownRef.current>15000){wpAlarmCooldownRef.current=now;const wpName=wps[ti].name||`WP${String(ti+1).padStart(2,'0')}`;notify(`📍 Arriving at ${wpName} — ${dist.toFixed(2)}NM`,'error');if(ti<wps.length-1) setSelectedWpIdx(ti+1);else notify('🏁 Final waypoint reached!','error');}}
   },[livePos,activeRoute,selectedWpIdx,wpArrivalNM]);
+
+  // ─── FIX 6: Off-track alarm ───
+  useEffect(()=>{
+    if(!livePos||!activeRoute?.waypoints?.length){setOffTrackAlarm(false);return;}
+    const wps=activeRoute.waypoints;
+    let minXTD=Infinity;
+    for(let i=0;i<wps.length-1;i++){
+      const legBrg=brg(wps[i].lat,wps[i].lon,wps[i+1].lat,wps[i+1].lon);
+      const shipBrg=brg(wps[i].lat,wps[i].lon,livePos.lat,livePos.lon);
+      const shipDist=distNM(wps[i].lat,wps[i].lon,livePos.lat,livePos.lon);
+      const angleDiff=((legBrg-shipBrg)+540)%360-180;
+      const along=shipDist*Math.cos(angleDiff*Math.PI/180);
+      const legLen=distNM(wps[i].lat,wps[i].lon,wps[i+1].lat,wps[i+1].lon);
+      if(along>=0&&along<=legLen+0.5){
+        const xtd=Math.abs(shipDist*Math.sin(angleDiff*Math.PI/180));
+        if(xtd<minXTD) minXTD=xtd;
+      }
+    }
+    if(minXTD===Infinity) minXTD=distNM(livePos.lat,livePos.lon,wps[selectedWpIdx]?.lat||wps[0].lat,wps[selectedWpIdx]?.lon||wps[0].lon);
+    const threshold=offTrackNM||xtdNM;
+    if(minXTD>threshold){
+      setOffTrackAlarm(true);
+      const now=Date.now();
+      if(!alarmCooldownRef.current.offtrack||now-alarmCooldownRef.current.offtrack>30000){
+        alarmCooldownRef.current.offtrack=now;
+        notify(`⚠ OFF TRACK — ${(minXTD).toFixed(2)}NM from route (limit ${threshold}NM)`,'error');
+      }
+    } else {
+      setOffTrackAlarm(false);
+    }
+  },[livePos,activeRoute,offTrackNM,xtdNM,selectedWpIdx]);
+
+  // ─── FIX 8: Guard zone circle on map ───
+  useEffect(()=>{
+    if(!mapReady||!leafRef.current||!window.L) return;
+    const L=window.L,m=leafRef.current;
+    if(layersRef.current.guardZone){try{m.removeLayer(layersRef.current.guardZone);}catch{}layersRef.current.guardZone=null;}
+    if(guardZoneOn&&livePosRef.current){
+      const pos=livePosRef.current;
+      layersRef.current.guardZone=L.circle([pos.lat,pos.lon],{
+        radius:guardZoneRadiusNM*1852,
+        color:guardZoneAlarm?'#FF2020':'#FF6B35',
+        fillColor:guardZoneAlarm?'#FF2020':'#FF6B35',
+        fillOpacity:0.04,weight:2,
+        dashArray:'10 5'
+      }).bindPopup(`<b>🔴 Guard Zone</b><br/>Radius: ${guardZoneRadiusNM} NM<br/>${guardZoneTargets.length>0?`<b style="color:#FF2020">⚠ ${guardZoneTargets.length} target(s) inside</b>`:''}`).addTo(m);
+    }
+  },[guardZoneOn,guardZoneRadiusNM,guardZoneAlarm,livePos,mapReady]);
 
   const fetchWeather=async(lat,lon)=>{
     if(weatherLoading) return;
@@ -625,6 +792,14 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
     notify('✓ Track exported as GPX','error');
   };
 
+  // ─── FIX 5: Anchor watch circle calculator ───
+  const anchorWatchCircleNM=()=>{
+    // Watch circle = ship length + (shackles × 27.5m) + 30m safety buffer, converted to NM
+    const cableM=anchorShackles*27.5;
+    const totalM=anchorShipLengthM+cableM+30;
+    return (totalM/1852);
+  };
+
   const filteredSaved=savedRoutes.filter(r=>!savedSearch.trim()||(r.name||'').toLowerCase().includes(savedSearch.toLowerCase())).slice(0,100);
   const filteredDbRoutes=(sheetRoutes||[]).filter(r=>{if(!dbRouteSearch.trim()) return true;const k=dbRouteSearch.toLowerCase();const h=[r.name,r.Name,r['Route Name'],r.from,r.to,r.origin,r.destination].filter(Boolean).join(' ').toLowerCase();return h.includes(k);}).slice(0,60);
   const filteredDbCharts=savedCharts.filter(c=>!dbChartSearch.trim()||(c.name||'').toLowerCase().includes(dbChartSearch.toLowerCase())).slice(0,60);
@@ -644,7 +819,7 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
         <button onClick={()=>setShowPortSearch(v=>!v)} style={{background:showPortSearch?'rgba(0,212,255,0.2)':'transparent',border:`1px solid ${showPortSearch?S.cy:S.vd}`,color:showPortSearch?S.cy:S.dm,borderRadius:5,padding:'3px 7px',fontSize:'0.8rem',cursor:'pointer'}} title="Port Search">🔍</button>
         <button onClick={()=>setNightVision(v=>!v)} style={{background:nightVision?'rgba(255,0,0,0.2)':'transparent',border:`1px solid ${nightVision?'#FF2020':S.vd}`,color:nightVision?'#FF2020':S.dm,borderRadius:5,padding:'3px 7px',fontSize:'0.8rem',cursor:'pointer'}} title="Night Vision">🔴</button>
         <button onClick={()=>setCogPanelVisible(v=>!v)} style={{background:cogPanelVisible&&livePos?'rgba(0,212,255,0.15)':'transparent',border:`1px solid ${cogPanelVisible&&livePos?S.cy:S.vd}`,color:cogPanelVisible&&livePos?S.cy:S.dm,borderRadius:5,padding:'3px 7px',fontSize:'0.75rem',cursor:'pointer'}} title="Toggle SOG/COG panel">⊕</button>
-        <button onClick={()=>setFullScreen(v=>!v)} style={{background:fullScreen?'rgba(0,255,136,0.15)':'transparent',border:`1px solid ${fullScreen?S.gn:S.vd}`,color:fullScreen?S.gn:S.dm,borderRadius:5,padding:'3px 7px',fontSize:'0.9rem',cursor:'pointer'}}>{fullScreen?'⛶':'⛶'}</button>
+        <button onClick={()=>setFullScreen(v=>!v)} style={{background:fullScreen?'rgba(0,255,136,0.15)':'transparent',border:`1px solid ${fullScreen?S.gn:S.vd}`,color:fullScreen?S.gn:S.dm,borderRadius:5,padding:'3px 7px',fontSize:'0.9rem',cursor:'pointer'}}>⛶</button>
         <button onClick={()=>setShowMenu(v=>!v)} style={{background:showMenu?'rgba(0,212,255,0.2)':'transparent',border:`1px solid ${showMenu?S.cy:S.vd}`,color:showMenu?S.cy:S.dm,borderRadius:5,padding:'3px 9px',fontSize:'1rem',cursor:'pointer'}}>☰</button>
       </div>
 
@@ -668,6 +843,16 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
       <div style={{position:'absolute',bottom:36,left:8,zIndex:500,pointerEvents:'none'}}>
         <div style={{background:'rgba(4,12,26,0.85)',border:'1px solid rgba(0,212,255,0.25)',borderRadius:4,padding:'2px 7px',color:'#00D4FF',fontFamily:'monospace',fontSize:'0.6rem',fontWeight:700}}>Z{mapZoom}</div>
       </div>
+
+      {/* ─── FIX 6+7+8: Alarm banner row ─── */}
+      {(offTrackAlarm||speedAlarmTriggered||guardZoneAlarm||anchorAlarm)&&(
+        <div style={{position:'absolute',top:56,left:'50%',transform:'translateX(-50%)',zIndex:700,display:'flex',gap:5,flexWrap:'wrap',justifyContent:'center',pointerEvents:'none'}}>
+          {offTrackAlarm&&<div style={{background:'rgba(255,71,87,0.9)',border:'1px solid #FF4757',borderRadius:6,padding:'4px 10px',fontSize:'0.68rem',color:'#fff',fontWeight:700,boxShadow:'0 0 12px rgba(255,71,87,0.6)'}}>⚠ OFF TRACK</div>}
+          {speedAlarmTriggered&&<div style={{background:'rgba(255,107,53,0.9)',border:'1px solid #FF6B35',borderRadius:6,padding:'4px 10px',fontSize:'0.68rem',color:'#fff',fontWeight:700,boxShadow:'0 0 12px rgba(255,107,53,0.6)'}}>⚡ OVERSPEED {livePos?.sog.toFixed(1)}kn</div>}
+          {guardZoneAlarm&&<div style={{background:'rgba(255,32,32,0.9)',border:'1px solid #FF2020',borderRadius:6,padding:'4px 10px',fontSize:'0.68rem',color:'#fff',fontWeight:700,boxShadow:'0 0 12px rgba(255,0,0,0.8)'}}>🔴 GUARD ZONE {guardZoneTargets.length} TARGET{guardZoneTargets.length!==1?'S':''}</div>}
+          {anchorAlarm&&<div style={{background:'rgba(255,71,87,0.9)',border:'1px solid #FF4757',borderRadius:6,padding:'4px 10px',fontSize:'0.68rem',color:'#fff',fontWeight:700,boxShadow:'0 0 12px rgba(255,71,87,0.6)'}}>⚓ DRAGGING</div>}
+        </div>
+      )}
 
       {showPortSearch&&(
         <div style={{position:'absolute',top:56,left:'50%',transform:'translateX(-50%)',zIndex:700,background:'rgba(2,8,16,0.97)',border:`1px solid ${S.bd}`,borderRadius:12,padding:'10px 12px',width:260,backdropFilter:'blur(16px)',boxShadow:'0 8px 32px rgba(0,0,0,0.6)'}}>
@@ -748,7 +933,7 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
       ):(
         <div style={{position:'absolute',top:56,right:8,background:S.bg,border:`1px solid ${S.bd}`,borderRadius:10,padding:'8px 10px',zIndex:500,width:172,backdropFilter:'blur(10px)',maxHeight:'82vh',display:'flex',flexDirection:'column',boxShadow:'0 4px 20px rgba(0,0,0,0.5)'}}>
           <div style={{display:'flex',alignItems:'center',marginBottom:8,gap:4,flexWrap:'wrap'}}>
-            {[['route','ROUTE'],['rb','R/B'],['charts','CHARTS'],['enc','ENC'],['zones','🌐'],['ais_src','📡'],['eta','ETA'],['db','🗄'],['anchor','⚓'],['wx','🌤'],['tools','🔧']].map(([p,l])=>(<button key={p} onClick={()=>setActivePanel(p)} style={{flex:1,minWidth:42,background:activePanel===p?'rgba(0,212,255,0.18)':'transparent',border:`1px solid ${activePanel===p?S.cy:S.vd}`,color:activePanel===p?S.cy:S.dm,borderRadius:5,padding:'3px 2px',fontSize:'0.58rem',cursor:'pointer'}}>{l}</button>))}
+            {[['route','ROUTE'],['rb','R/B'],['charts','CHARTS'],['enc','ENC'],['zones','🌐'],['ais_src','📡'],['eta','ETA'],['db','🗄'],['anchor','⚓'],['guard','🔴'],['wx','🌤'],['tools','🔧']].map(([p,l])=>(<button key={p} onClick={()=>setActivePanel(p)} style={{flex:1,minWidth:38,background:activePanel===p?'rgba(0,212,255,0.18)':'transparent',border:`1px solid ${activePanel===p?S.cy:S.vd}`,color:activePanel===p?S.cy:S.dm,borderRadius:5,padding:'3px 2px',fontSize:'0.55rem',cursor:'pointer'}}>{l}</button>))}
             <button onClick={()=>setPanelCollapsed(true)} style={{background:'transparent',border:`1px solid ${S.vd}`,color:S.dm,borderRadius:5,padding:'3px 5px',fontSize:'0.65rem',cursor:'pointer'}}>▶</button>
           </div>
           <div style={{overflowY:'auto',overflowX:'hidden',flex:1,paddingRight:1}}>
@@ -758,7 +943,7 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
             <div style={{color:S.vd,fontSize:'0.55rem'}}>RTZ·GPX·RTE·CSV·JSON…</div>
             {activeRoute?.waypoints?.length>0&&(<div style={{borderTop:'1px solid rgba(0,212,255,0.15)',paddingTop:6}}>
               <div style={{color:S.cy,fontSize:S.sm,fontWeight:600,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',marginBottom:2}}>{activeRoute.name}</div>
-              <div style={{color:S.dm,fontSize:S.xs,marginBottom:4}}>{activeRoute.waypoints.length} WPs · XTD ±{xtdNM}NM</div>
+              <div style={{color:S.dm,fontSize:S.xs,marginBottom:4}}>{activeRoute.waypoints.length} WPs · XTD ±{xtdNM}NM · <span style={{color:S.gn}}>{routeTotalNM(activeRoute.waypoints).toFixed(1)} NM</span></div>
               <button onClick={saveRoute} style={{width:'100%',background:'transparent',border:'1px solid rgba(0,212,255,0.4)',color:S.cy,borderRadius:5,padding:'5px',fontSize:S.xs,cursor:'pointer',marginBottom:4}}>💾 Save to My Routes</button>
               <div style={{color:S.dm,fontSize:S.lb,marginBottom:3}}>ETA TO WAYPOINT</div>
               <select value={selectedWpIdx} onChange={e=>setSelectedWpIdx(Number(e.target.value))} style={{width:'100%',background:'#060F1C',color:S.cy,border:`1px solid ${S.vd}`,borderRadius:5,padding:'5px',fontSize:S.xs,marginBottom:4}}>
@@ -804,7 +989,6 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
                 {savedCharts.length===0&&<div style={{color:S.vd,fontSize:S.xs,fontStyle:'italic'}}>No saved charts</div>}
               </div>
             </div>
-            <div style={{color:S.dm,fontSize:'0.54rem',borderTop:'1px solid rgba(0,212,255,0.08)',paddingTop:4}}>Chart color: <span style={{color:colors.chart||'#FF2020'}}>■</span> — change in 🎨 Settings → Colors</div>
           </div>)}
 
           {activePanel==='enc'&&(<div style={{display:'flex',flexDirection:'column',gap:5}}>
@@ -840,7 +1024,7 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
                   </div>
                   {etaResult.arrivalStr&&<div style={{color:S.gd,fontFamily:'monospace',fontSize:'0.62rem',borderTop:'1px solid rgba(255,215,0,0.15)',paddingTop:4}}>🕐 {etaResult.arrivalStr}</div>}
                 </div>)}
-                <ETACalculator totalNM={etaResult?.totalNM?parseFloat(etaResult.totalNM):activeRoute?.waypoints?.length>1?activeRoute.waypoints.reduce((s,w,i,a)=>i>0?s+distNM(a[i-1].lat,a[i-1].lon,w.lat,w.lon):s,0):0}/>
+                <ETACalculator totalNM={etaResult?.totalNM?parseFloat(etaResult.totalNM):routeTotalNM(activeRoute?.waypoints||[])}/>
               </>
             ):<div style={{color:S.dm,fontSize:S.sm,fontStyle:'italic',textAlign:'center',padding:'16px 0'}}>Load a route first</div>}
           </div>)}
@@ -848,7 +1032,6 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
           {activePanel==='zones'&&(<div style={{display:'flex',flexDirection:'column',gap:5}}>
             <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:2}}><div style={{color:S.dm,fontSize:S.lb,letterSpacing:0.5}}>MARITIME ZONES{Object.values(zoneOverlays).some(Boolean)&&<span style={{color:S.cy}}> ({Object.values(zoneOverlays).filter(Boolean).length})</span>}</div>{Object.values(zoneOverlays).some(Boolean)&&<button onClick={()=>setZoneOverlays({})} style={{background:'transparent',border:'none',color:S.rd,fontSize:'0.55rem',cursor:'pointer'}}>⭕ Off</button>}</div>
             <div style={{display:'flex',flexDirection:'column',gap:3}}>{ZONE_OVERLAY_CFG.map(z=>{const on=!!zoneOverlays[z.k];return(<button key={z.k} onClick={()=>toggleZoneOverlay(z.k)} title={z.desc} style={{display:'flex',alignItems:'center',gap:6,background:on?`${z.color}18`:'transparent',border:`1px solid ${on?z.color:S.vd}`,color:on?z.color:S.dm,borderRadius:5,padding:'5px 8px',fontSize:'0.68rem',cursor:'pointer',width:'100%',textAlign:'left'}}><div style={{width:10,height:10,borderRadius:2,background:z.color,flexShrink:0,opacity:on?1:0.4}}/><div style={{flex:1}}><div style={{fontWeight:on?700:400,fontSize:'0.68rem'}}>{z.label}</div><div style={{fontSize:'0.56rem',color:on?z.color+'cc':S.vd,marginTop:1}}>{z.desc}</div></div>{on&&<span style={{fontSize:'0.6rem',color:z.color}}>✓</span>}</button>);})}</div>
-            <div style={{color:S.vd,fontSize:'0.55rem',marginTop:4,padding:'4px 0',borderTop:`1px solid ${S.vd}33`,lineHeight:1.5}}>Tap zone on map for regulation details</div>
           </div>)}
 
           {activePanel==='db'&&(<div style={{display:'flex',flexDirection:'column',gap:8}}>
@@ -857,20 +1040,90 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
             <div style={{borderTop:'1px solid rgba(0,212,255,0.12)',paddingTop:6}}><div style={{color:S.dm,fontSize:S.lb,letterSpacing:0.5,marginBottom:3}}>🗺 USER CHARTS ({savedCharts.length})</div><input placeholder="Search charts…" value={dbChartSearch} onChange={e=>setDbChartSearch(e.target.value)} style={{width:'100%',boxSizing:'border-box',background:'#060F1C',color:S.tx,border:`1px solid ${S.vd}`,borderRadius:5,padding:'5px 7px',fontSize:S.xs,outline:'none',marginBottom:3}}/><div style={{maxHeight:90,overflowY:'auto',display:'flex',flexDirection:'column',gap:2}}>{filteredDbCharts.length===0&&<div style={{color:S.vd,fontSize:S.xs,fontStyle:'italic'}}>{dbChartSearch?'No match':savedCharts.length===0?'No saved charts':''}</div>}{filteredDbCharts.map((c,i)=>(<div key={i} style={{display:'flex',gap:3}}><button onClick={()=>{loadSavedChart(c);setDbChartSearch('');}} style={{flex:1,background:'#060F1C',border:`1px solid ${chartOverlays.find(x=>x.name===c.name)?S.cy:S.vd}`,color:chartOverlays.find(x=>x.name===c.name)?S.cy:S.tx,borderRadius:5,padding:'4px 6px',fontSize:S.xs,cursor:'pointer',textAlign:'left',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={c.summary||c.name}>🗺 {c.name}</button><button onClick={()=>delSavedChart(c.name)} style={{background:'transparent',border:'1px solid rgba(255,71,87,0.35)',color:S.rd,borderRadius:4,padding:'3px 6px',fontSize:'0.65rem',cursor:'pointer'}}>✕</button></div>))}</div></div>
           </div>)}
 
+          {/* ─── FIX 5+6+7: Anchor watch with circle calculator, off-track alarm, speed alarm ─── */}
           {activePanel==='anchor'&&(<div style={{display:'flex',flexDirection:'column',gap:8}}>
             <div style={{color:S.dm,fontSize:S.lb,letterSpacing:0.5}}>⚓ ANCHOR WATCH</div>
+
+            {/* ─── Anchor Watch Circle Calculator ─── */}
+            <div style={{background:'rgba(255,215,0,0.05)',border:'1px solid rgba(255,215,0,0.2)',borderRadius:7,padding:'8px'}}>
+              <div style={{color:S.gd,fontSize:S.xs,fontWeight:700,marginBottom:6}}>📐 WATCH CIRCLE CALCULATOR</div>
+              <div style={{display:'flex',flexDirection:'column',gap:5}}>
+                <div><div style={{color:S.dm,fontSize:S.lb,marginBottom:2}}>Ship LOA (m)</div><input type="number" value={anchorShipLengthM} onChange={e=>setAnchorShipLengthM(Number(e.target.value))} min={10} max={400} style={{width:'100%',boxSizing:'border-box',background:'#06101C',color:S.cy,border:`1px solid ${S.vd}`,borderRadius:5,padding:'4px 7px',fontSize:S.xs,outline:'none',fontFamily:'monospace'}}/></div>
+                <div><div style={{color:S.dm,fontSize:S.lb,marginBottom:2}}>Shackles let go (1 = 27.5m)</div><div style={{display:'flex',gap:3,flexWrap:'wrap'}}>{[1,2,3,4,5,6,7,8].map(n=>(<button key={n} onClick={()=>setAnchorShackles(n)} style={{background:anchorShackles===n?'rgba(255,215,0,0.2)':'transparent',border:`1px solid ${anchorShackles===n?S.gd:S.vd}`,color:anchorShackles===n?S.gd:S.dm,borderRadius:4,padding:'2px 5px',fontSize:S.xs,cursor:'pointer'}}>{n}</button>))}</div></div>
+                <div style={{background:'rgba(0,0,0,0.3)',borderRadius:5,padding:'6px 8px',border:'1px solid rgba(255,215,0,0.25)'}}>
+                  <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:'4px'}}>
+                    <div><div style={{color:S.dm,fontSize:S.lb}}>Cable</div><div style={{color:S.gd,fontFamily:'monospace',fontSize:'0.75rem',fontWeight:700}}>{(anchorShackles*27.5).toFixed(0)}m</div></div>
+                    <div><div style={{color:S.dm,fontSize:S.lb}}>Total</div><div style={{color:S.gd,fontFamily:'monospace',fontSize:'0.75rem',fontWeight:700}}>{(anchorShipLengthM+anchorShackles*27.5+30).toFixed(0)}m</div></div>
+                    <div><div style={{color:S.dm,fontSize:S.lb}}>Radius</div><div style={{color:'#00FF88',fontFamily:'monospace',fontSize:'0.75rem',fontWeight:700}}>{anchorWatchCircleNM().toFixed(3)}NM</div></div>
+                  </div>
+                  <div style={{color:S.vd,fontSize:'0.52rem',marginTop:3}}>LOA + chain + 30m buffer</div>
+                </div>
+                <button onClick={()=>setAnchorRadius(parseFloat(anchorWatchCircleNM().toFixed(3)))} style={{background:'rgba(255,215,0,0.1)',border:'1px solid rgba(255,215,0,0.5)',color:S.gd,borderRadius:5,padding:'4px',fontSize:S.xs,cursor:'pointer'}}>↑ Use as alarm radius</button>
+              </div>
+            </div>
+
             {!anchorWatchOn?<div style={{display:'flex',flexDirection:'column',gap:6}}>
-              <div style={{color:S.dm,fontSize:S.xs}}>Alarm radius</div>
+              <div style={{color:S.dm,fontSize:S.xs}}>Manual alarm radius</div>
               <div style={{display:'flex',gap:3,flexWrap:'wrap'}}>{[0.1,0.2,0.3,0.5,1.0].map(r=>(<button key={r} onClick={()=>setAnchorRadius(r)} style={{background:anchorRadius===r?'rgba(255,215,0,0.2)':'transparent',border:`1px solid ${anchorRadius===r?S.gd:S.vd}`,color:anchorRadius===r?S.gd:S.dm,borderRadius:5,padding:'3px 6px',fontSize:S.xs,cursor:'pointer'}}>{r}NM</button>))}</div>
+              <div style={{color:S.dm,fontSize:S.lb}}>Current radius: <span style={{color:S.gd,fontFamily:'monospace'}}>{anchorRadius} NM ({(anchorRadius*1852).toFixed(0)}m)</span></div>
               <button onClick={()=>{if(!livePos){notify('Enable GPS first','error');return;}setAnchorPos({lat:livePos.lat,lon:livePos.lon});setAnchorWatchOn(true);notify('⚓ Anchor watch started','error');}} style={{background:'rgba(255,215,0,0.15)',border:'1px solid #FFD700',color:S.gd,borderRadius:7,padding:'9px',fontSize:S.sm,cursor:'pointer',fontWeight:700}}>⚓ Drop Anchor Here</button>
             </div>:<div style={{display:'flex',flexDirection:'column',gap:6}}>
               <div style={{background:anchorAlarm?'rgba(255,32,32,0.2)':'rgba(0,255,136,0.1)',border:`1px solid ${anchorAlarm?S.rd:S.gn}`,borderRadius:7,padding:'8px',textAlign:'center'}}><div style={{color:anchorAlarm?S.rd:S.gn,fontWeight:700,fontSize:S.sm}}>{anchorAlarm?'⚠ DRAGGING!':'✓ Holding'}</div>{livePos&&anchorPos&&<div style={{color:S.dm,fontSize:S.xs}}>{distNM(livePos.lat,livePos.lon,anchorPos.lat,anchorPos.lon).toFixed(3)}NM from drop</div>}</div>
-              <div style={{color:S.dm,fontSize:S.xs}}>Drop: {anchorPos?`${anchorPos.lat.toFixed(4)}°N`:'-'}</div>
-              <div style={{color:S.dm,fontSize:S.xs}}>Radius: {anchorRadius}NM</div>
+              <div style={{color:S.dm,fontSize:S.xs}}>Radius: {anchorRadius}NM ({(anchorRadius*1852).toFixed(0)}m)</div>
               <button onClick={()=>{setAnchorWatchOn(false);setAnchorPos(null);setAnchorAlarm(false);}} style={{background:'transparent',border:`1px solid ${S.rd}`,color:S.rd,borderRadius:6,padding:'7px',fontSize:S.xs,cursor:'pointer'}}>⛔ Stop Watch</button>
             </div>}
-            <div style={{borderTop:'1px solid rgba(0,212,255,0.1)',paddingTop:6}}><div style={{color:S.dm,fontSize:S.xs,marginBottom:3}}>⚡ SPEED ALARM</div><div style={{display:'flex',gap:3,flexWrap:'wrap'}}>{[[0,'Off'],[5,'5kn'],[8,'8kn'],[10,'10kn'],[12,'12kn'],[15,'15kn']].map(([v,l])=>(<button key={v} onClick={()=>{setSpeedAlarmKn(v);setSpeedAlarmTriggered(false);}} style={{background:speedAlarmKn===v?'rgba(255,107,53,0.2)':'transparent',border:`1px solid ${speedAlarmKn===v?'#FF6B35':S.vd}`,color:speedAlarmKn===v?'#FF6B35':S.dm,borderRadius:5,padding:'3px 5px',fontSize:S.xs,cursor:'pointer'}}>{l}</button>))}</div>{speedAlarmTriggered&&<div style={{color:S.rd,fontSize:S.xs,fontWeight:700,marginTop:3}}>⚠ SPEED EXCEEDED</div>}</div>
+
+            {/* ─── FIX 6: Off-track alarm ─── */}
+            <div style={{borderTop:'1px solid rgba(0,212,255,0.1)',paddingTop:6}}>
+              <div style={{color:S.dm,fontSize:S.xs,marginBottom:3}}>⚠ OFF-TRACK ALARM</div>
+              <div style={{display:'flex',gap:3,flexWrap:'wrap',marginBottom:4}}>{[0.1,0.25,0.5,1.0,2.0,3.0].map(v=>(<button key={v} onClick={()=>setOffTrackNM(v)} style={{background:offTrackNM===v?'rgba(255,71,87,0.2)':'transparent',border:`1px solid ${offTrackNM===v?S.rd:S.vd}`,color:offTrackNM===v?S.rd:S.dm,borderRadius:5,padding:'3px 5px',fontSize:S.xs,cursor:'pointer'}}>{v}NM</button>))}</div>
+              <div style={{color:offTrackAlarm?S.rd:S.dm,fontSize:S.xs,fontFamily:'monospace'}}>{offTrackAlarm?`🚨 OFF TRACK — alarm at ${offTrackNM}NM`:`Alarm at ${offTrackNM}NM from route`}</div>
+            </div>
+
+            {/* ─── FIX 7: User-selectable speed alarm ─── */}
+            <div style={{borderTop:'1px solid rgba(0,212,255,0.1)',paddingTop:6}}><div style={{color:S.dm,fontSize:S.xs,marginBottom:3}}>⚡ SPEED ALARM (kn)</div>
+              <div style={{display:'flex',gap:3,flexWrap:'wrap',marginBottom:4}}>{[[0,'OFF'],[3,'3'],[5,'5'],[8,'8'],[10,'10'],[12,'12'],[15,'15'],[18,'18'],[20,'20'],[25,'25']].map(([v,l])=>(<button key={v} onClick={()=>{setSpeedAlarmKn(v);setSpeedAlarmTriggered(false);}} style={{background:speedAlarmKn===v?'rgba(255,107,53,0.2)':'transparent',border:`1px solid ${speedAlarmKn===v?'#FF6B35':S.vd}`,color:speedAlarmKn===v?'#FF6B35':S.dm,borderRadius:5,padding:'3px 5px',fontSize:S.xs,cursor:'pointer'}}>{l}</button>))}</div>
+              <div><input type="number" min={0} max={50} placeholder="Custom kn…" onChange={e=>setSpeedAlarmKn(Number(e.target.value)||0)} style={{width:'100%',boxSizing:'border-box',background:'#06101C',color:S.cy,border:`1px solid ${S.vd}`,borderRadius:5,padding:'4px 7px',fontSize:S.xs,outline:'none',fontFamily:'monospace'}}/></div>
+              {speedAlarmTriggered&&<div style={{color:S.rd,fontSize:S.xs,fontWeight:700,marginTop:4}}>⚠ OVERSPEED {livePos?.sog.toFixed(1)}kn / limit {speedAlarmKn}kn</div>}
+              {!speedAlarmTriggered&&speedAlarmKn>0&&<div style={{color:S.dm,fontSize:S.lb,marginTop:2}}>Alarm set at {speedAlarmKn}kn</div>}
+            </div>
+
             <div style={{borderTop:'1px solid rgba(0,212,255,0.1)',paddingTop:6}}><div style={{color:S.dm,fontSize:S.xs,marginBottom:3}}>📍 WP ARRIVAL ALERT</div><div style={{display:'flex',gap:3,flexWrap:'wrap'}}>{[[0.1,'0.1'],[0.2,'0.2'],[0.3,'0.3'],[0.5,'0.5'],[1.0,'1.0']].map(([v,l])=>(<button key={v} onClick={()=>setWpArrivalNM(v)} style={{background:wpArrivalNM===v?'rgba(0,200,150,0.2)':'transparent',border:`1px solid ${wpArrivalNM===v?S.gn:S.vd}`,color:wpArrivalNM===v?S.gn:S.dm,borderRadius:5,padding:'3px 5px',fontSize:S.xs,cursor:'pointer'}}>{l}NM</button>))}</div></div>
+          </div>)}
+
+          {/* ─── FIX 8: Guard Zone panel ─── */}
+          {activePanel==='guard'&&(<div style={{display:'flex',flexDirection:'column',gap:8}}>
+            <div style={{color:S.dm,fontSize:S.lb,letterSpacing:0.5}}>🔴 GUARD ZONE</div>
+            <div style={{color:S.vd,fontSize:S.xs,lineHeight:1.5}}>Triggers alarm when any AIS target enters the set radius around own vessel.</div>
+
+            <div style={{display:'flex',flexDirection:'column',gap:5}}>
+              <div style={{color:S.dm,fontSize:S.xs,marginBottom:2}}>Zone radius</div>
+              <div style={{display:'flex',gap:3,flexWrap:'wrap'}}>{[[0.5,'0.5'],[1,'1'],[2,'2'],[3,'3'],[5,'5'],[10,'10'],[20,'20']].map(([v,l])=>(<button key={v} onClick={()=>setGuardZoneRadiusNM(v)} style={{background:guardZoneRadiusNM===v?'rgba(255,107,53,0.2)':'transparent',border:`1px solid ${guardZoneRadiusNM===v?'#FF6B35':S.vd}`,color:guardZoneRadiusNM===v?'#FF6B35':S.dm,borderRadius:5,padding:'3px 6px',fontSize:S.xs,cursor:'pointer'}}>{l}NM</button>))}</div>
+              <input type="number" min={0.1} max={50} step={0.1} value={guardZoneRadiusNM} onChange={e=>setGuardZoneRadiusNM(Number(e.target.value)||2)} style={{width:'100%',boxSizing:'border-box',background:'#06101C',color:S.cy,border:`1px solid ${S.vd}`,borderRadius:5,padding:'4px 7px',fontSize:S.xs,outline:'none',fontFamily:'monospace'}}/>
+            </div>
+
+            <button onClick={()=>setGuardZoneOn(v=>!v)} style={{background:guardZoneOn?'rgba(255,32,32,0.2)':'rgba(255,107,53,0.1)',border:`2px solid ${guardZoneOn?'#FF2020':'#FF6B35'}`,color:guardZoneOn?'#FF2020':'#FF6B35',borderRadius:8,padding:'10px',fontSize:S.sm,cursor:'pointer',fontWeight:700,textAlign:'center'}}>
+              {guardZoneOn?`🔴 GUARD ZONE ACTIVE (${guardZoneRadiusNM}NM)`:'🔴 Activate Guard Zone'}
+            </button>
+
+            {guardZoneOn&&(
+              <div style={{background:guardZoneAlarm?'rgba(255,32,32,0.15)':'rgba(0,255,136,0.08)',border:`1px solid ${guardZoneAlarm?'#FF2020':S.gn}`,borderRadius:7,padding:'8px'}}>
+                <div style={{color:guardZoneAlarm?'#FF2020':S.gn,fontWeight:700,fontSize:S.xs,marginBottom:guardZoneTargets.length>0?6:0}}>
+                  {guardZoneAlarm?`⚠ ${guardZoneTargets.length} TARGET${guardZoneTargets.length!==1?'S':''} IN ZONE`:'✓ Zone Clear'}
+                </div>
+                {guardZoneTargets.length>0&&(
+                  <div style={{display:'flex',flexDirection:'column',gap:2}}>
+                    {guardZoneTargets.map((name,i)=>(<div key={i} style={{color:'#FF5050',fontSize:S.lb,fontFamily:'monospace'}}>▶ {name}</div>))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div style={{color:S.vd,fontSize:'0.55rem',borderTop:'1px solid rgba(0,212,255,0.08)',paddingTop:4,lineHeight:1.5}}>
+              💡 Guard zone follows own vessel.<br/>
+              💡 Works with SafePilot/Bridge AIS — no internet needed.<br/>
+              💡 Circle shown on map in orange/red.
+            </div>
           </div>)}
 
           {activePanel==='wx'&&(<div style={{display:'flex',flexDirection:'column',gap:7}}>
@@ -884,10 +1137,10 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
           {activePanel==='tools'&&(<div style={{display:'flex',flexDirection:'column',gap:7}}>
             <div style={{color:S.dm,fontSize:S.lb,letterSpacing:0.5}}>🔧 TOOLS</div>
             <div style={{borderBottom:'1px solid rgba(0,212,255,0.1)',paddingBottom:7}}><div style={{color:S.dm,fontSize:S.xs,marginBottom:4}}>📤 TRACK EXPORT</div><button onClick={exportTrack} style={{width:'100%',background:'rgba(0,200,150,0.1)',border:`1px solid ${S.gn}`,color:S.gn,borderRadius:7,padding:'8px',fontSize:S.xs,cursor:'pointer',fontWeight:600}}>⬇ Export GPX File</button><div style={{color:S.vd,fontSize:'0.55rem',marginTop:3}}>Exports your past track as GPX</div></div>
-            <div style={{borderBottom:'1px solid rgba(0,212,255,0.1)',paddingBottom:7}}><div style={{color:S.dm,fontSize:S.xs,marginBottom:4}}>📡 AIS TARGETS ({Object.keys(aisTargets).length})</div><div style={{maxHeight:120,overflowY:'auto',display:'flex',flexDirection:'column',gap:2}}>{Object.values(aisTargets).sort((a,b)=>{if(!livePos) return 0;return distNM(livePos.lat,livePos.lon,a.lat,a.lon)-distNM(livePos.lat,livePos.lon,b.lat,b.lon);}).slice(0,20).map((v,i)=>{const dist=livePos?distNM(livePos.lat,livePos.lon,v.lat,v.lon):null;const bg=dist&&dist<1?'rgba(255,32,32,0.15)':dist&&dist<3?'rgba(255,150,0,0.1)':'transparent';return(<div key={v.mmsi} style={{background:bg,border:`1px solid ${S.vd}`,borderRadius:5,padding:'4px 6px',cursor:'pointer'}} onClick={()=>{if(leafRef.current) leafRef.current.setView([v.lat,v.lon],12);}}><div style={{color:S.cy,fontSize:'0.65rem',fontWeight:700,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{v.name||`MMSI ${v.mmsi}`}</div><div style={{color:S.dm,fontSize:'0.58rem',fontFamily:'monospace'}}>{dist?dist.toFixed(1)+'NM · ':''}{v.sog?.toFixed(1)}kn {v.cog?.toFixed(0)}°</div></div>);})} {Object.keys(aisTargets).length===0&&<div style={{color:S.vd,fontSize:S.xs,fontStyle:'italic'}}>No AIS targets</div>}</div></div>
+            <div style={{borderBottom:'1px solid rgba(0,212,255,0.1)',paddingBottom:7}}><div style={{color:S.dm,fontSize:S.xs,marginBottom:4}}>📡 AIS TARGETS ({Object.keys(aisTargets).length})</div><div style={{maxHeight:140,overflowY:'auto',display:'flex',flexDirection:'column',gap:2}}>{Object.values(aisTargets).sort((a,b)=>{if(!livePos) return 0;return distNM(livePos.lat,livePos.lon,a.lat,a.lon)-distNM(livePos.lat,livePos.lon,b.lat,b.lon);}).slice(0,25).map((v,i)=>{const dist=livePos?distNM(livePos.lat,livePos.lon,v.lat,v.lon):null;const brgDeg=livePos?brg(livePos.lat,livePos.lon,v.lat,v.lon):null;const cpaTcpa=livePos?computeCPA({lat:livePos.lat,lon:livePos.lon,sog:livePos.sog,cog:livePos.cog},{lat:v.lat,lon:v.lon,sog:v.sog,cog:v.cog}):{cpa:9999,tcpa:0};const bg=dist&&dist<1?'rgba(255,32,32,0.15)':dist&&dist<3?'rgba(255,150,0,0.1)':'transparent';return(<div key={v.mmsi} style={{background:bg,border:`1px solid ${S.vd}`,borderRadius:5,padding:'4px 6px',cursor:'pointer'}} onClick={()=>{if(leafRef.current) leafRef.current.setView([v.lat,v.lon],12);}}><div style={{color:S.cy,fontSize:'0.65rem',fontWeight:700,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{v.name||`MMSI ${v.mmsi}`}</div><div style={{color:S.dm,fontSize:'0.56rem',fontFamily:'monospace'}}>{dist!=null?dist.toFixed(1)+'NM':''}{brgDeg!=null?` ${brgDeg.toFixed(0)}°T`:''} · {v.sog?.toFixed(1)}kn {v.cog?.toFixed(0)}°</div><div style={{color:cpaTcpa.cpa<1?'#FF3030':cpaTcpa.cpa<3?'#FF9500':S.dm,fontSize:'0.54rem',fontFamily:'monospace'}}>CPA {cpaTcpa.cpa<9000?cpaTcpa.cpa.toFixed(2):'—'}NM T+{cpaTcpa.tcpa.toFixed(2)}h</div></div>);})} {Object.keys(aisTargets).length===0&&<div style={{color:S.vd,fontSize:S.xs,fontStyle:'italic'}}>No AIS targets</div>}</div></div>
             {activeRoute?.waypoints?.length>0&&(<div style={{borderBottom:'1px solid rgba(0,212,255,0.1)',paddingBottom:7}}><div style={{color:S.dm,fontSize:S.xs,marginBottom:4}}>📝 WAYPOINT NOTES</div><select value={editingWpNote??0} onChange={e=>setEditingWpNote(Number(e.target.value))} style={{width:'100%',background:'#060F1C',color:S.cy,border:`1px solid ${S.vd}`,borderRadius:5,padding:'4px',fontSize:S.xs,marginBottom:4}}>{activeRoute.waypoints.map((wp,i)=><option key={i} value={i}>WP{String(i+1).padStart(2,'0')} {wp.name||''}</option>)}</select><textarea value={wpNotes[editingWpNote??0]||''} onChange={e=>setWpNotes(prev=>({...prev,[editingWpNote??0]:e.target.value}))} placeholder="Add note for this waypoint..." rows={3} style={{width:'100%',boxSizing:'border-box',background:'#060F1C',color:S.tx,border:`1px solid ${S.vd}`,borderRadius:5,padding:'5px 7px',fontSize:S.xs,outline:'none',resize:'none',lineHeight:1.5}}/></div>)}
             <button onClick={()=>setNightVision(v=>!v)} style={{background:nightVision?'rgba(255,0,0,0.15)':'transparent',border:`1px solid ${nightVision?'#FF2020':S.vd}`,color:nightVision?'#FF2020':S.dm,borderRadius:7,padding:'8px',fontSize:S.xs,cursor:'pointer',fontWeight:700}}>🔴 Night Vision: {nightVision?'ON':'OFF'}</button>
-            <div style={{color:S.vd,fontSize:'0.58rem',borderTop:'1px solid rgba(0,212,255,0.08)',paddingTop:6,lineHeight:1.5}}>💡 Tap any AIS vessel on map to see CPA/TCPA popup.<br/>💡 Use R/B panel + tap map for range & bearing.<br/>💡 Route total distance shown in ETA panel.</div>
+            <div style={{color:S.vd,fontSize:'0.58rem',borderTop:'1px solid rgba(0,212,255,0.08)',paddingTop:6,lineHeight:1.5}}>💡 Tap any AIS vessel on map to see CPA/TCPA/BRG popup.<br/>💡 CPA/TCPA computed locally — works offline with SafePilot.<br/>💡 Guard zone panel: 🔴 tab.</div>
           </div>)}
 
           </div>
