@@ -130,54 +130,161 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
   const [portSearchResults,setPortSearchResults]=useState([]);
   const [editingWpNote,setEditingWpNote]=useState(0);
   const [wpNotes,setWpNotes]=useState({});
-  // New state for all improvements
-  const [showAllAisVectors,setShowAllAisVectors]=useState(()=>localStorage.getItem('nav_aisVectors')==='true');
-  const [selectedAisMmsi,setSelectedAisMmsi]=useState(null);
-  const [guardZoneNM,setGuardZoneNM]=useState(()=>Number(localStorage.getItem('nav_guardZone')||0));
-  const [guardZoneAlarm,setGuardZoneAlarm]=useState(false);
-  const guardZoneRef=useRef(null);
-  const guardAlarmCooldownRef=useRef(0);
-  const [plannedSpeedKn,setPlannedSpeedKn]=useState(()=>Number(localStorage.getItem('nav_plannedSpeed')||0));
-  const [wpArrivalPending,setWpArrivalPending]=useState(null);
-  const [nightLevel,setNightLevel]=useState(()=>Number(localStorage.getItem('nav_nightLevel')||0));
-  const [sogHistory,setSogHistory]=useState([]);
-  const sogHistoryRef=useRef([]);
-  const [liveHeading,setLiveHeading]=useState(null);
-  const invalidateDebounceRef=useRef(null);
 
-  useEffect(()=>{localStorage.setItem('nav_aisVectors',showAllAisVectors);},[showAllAisVectors]);
-
-  // AIS staleness cleanup - remove targets older than 10 minutes
-  useEffect(()=>{
-    const interval=setInterval(()=>{
-      const cutoff=Date.now()-600000; // 10 min
-      setAisTargets(prev=>{
-        const next={...prev};
-        let changed=false;
-        Object.keys(next).forEach(mmsi=>{if((next[mmsi].ts||0)<cutoff){delete next[mmsi];changed=true;}});
-        return changed?next:prev;
-      });
-    },30000);
-    return()=>clearInterval(interval);
+  const safeInvalidate=useCallback(()=>{
+    invalidateTimers.current.forEach(clearTimeout); invalidateTimers.current=[];
+    const f=()=>{try{leafRef.current?.invalidateSize({animate:false});}catch{}};
+    f(); invalidateTimers.current=[100,300,600,1000,1800].map(t=>setTimeout(f,t));
   },[]);
 
-  // Guard zone check
-  useEffect(()=>{
-    if(!guardZoneNM||!livePos) return;
-    Object.values(aisTargets).forEach(v=>{
-      if(!v.lat||!v.lon) return;
-      const d=distNM(livePos.lat,livePos.lon,v.lat,v.lon);
-      if(d<guardZoneNM){
-        const now=Date.now();
-        if(now-guardAlarmCooldownRef.current>20000){
-          guardAlarmCooldownRef.current=now;
-          setGuardZoneAlarm(true);
-          notify(`🚨 GUARD ZONE: ${v.name||v.mmsi} entered ${guardZoneNM}NM zone — ${d.toFixed(2)}NM`,'error');
-          setTimeout(()=>setGuardZoneAlarm(false),10000);
+  const distNM=(a,b,c,d)=>{const R=3440.065,r=Math.PI/180,x=Math.sin(((d-b)*r)/2)**2+Math.cos(b*r)*Math.cos(d*r)*Math.sin(((c-a)*r)/2)**2;return 2*R*Math.asin(Math.sqrt(x));};
+  const brg=(a,b,c,d)=>{const r=Math.PI/180,dl=(d-b)*r,y=Math.sin(dl)*Math.cos(d*r),x=Math.cos(a*r)*Math.sin(d*r)-Math.sin(a*r)*Math.cos(d*r)*Math.cos(dl);return((Math.atan2(y,x)/r)+360)%360;};
+  const calcCPA=(o,t)=>{const dx=t.lon-o.lon,dy=t.lat-o.lat,h=((dx*t.cog-dy*o.cog)||0)/1000;return{cpa:distNM(o.lat,o.lon,t.lat,t.lon),tcpa:Math.max(h,0)};};
+  const colreg=(o,t)=>{const b=(Math.atan2(t.lon-o.lon,t.lat-o.lat)*180/Math.PI+360)%360,r=(b-o.cog+360)%360;if(r>345||r<15) return "HEAD-ON";if(r>112.5&&r<247.5) return "OVERTAKING";if(r>15&&r<112.5) return "CROSSING-STBD";return "CROSSING-PORT";};
+  const offsetPt=(lat,lon,bd,dn)=>{const R=3440.065,d=dn/R,b=bd*Math.PI/180,p1=lat*Math.PI/180,l1=lon*Math.PI/180,p2=Math.asin(Math.sin(p1)*Math.cos(d)+Math.cos(p1)*Math.sin(d)*Math.cos(b)),l2=l1+Math.atan2(Math.sin(b)*Math.sin(d)*Math.cos(p1),Math.cos(d)-Math.sin(p1)*Math.sin(p2));return[p2*180/Math.PI,l2*180/Math.PI];};
+
+  const renderShip=(fix)=>{
+    if(!leafRef.current||!window.L) return;
+    const L=window.L,c=colorsRef.current,rot=(fix.cog-mapBearingRef.current+360)%360;
+    const icon=L.divIcon({html:`<div style="transform:rotate(${rot}deg);transform-origin:center;width:20px;height:28px;"><svg width="20" height="28" viewBox="0 0 20 28" fill="none"><polygon points="10,1 19,27 10,21 1,27" fill="${c.ship}" stroke="#fff" stroke-width="1.5"/></svg></div>`,className:'',iconSize:[20,28],iconAnchor:[10,14]});
+    if(!layersRef.current.vessel) layersRef.current.vessel=L.marker([fix.lat,fix.lon],{icon,zIndexOffset:9999}).addTo(leafRef.current);
+    else{layersRef.current.vessel.setLatLng([fix.lat,fix.lon]);layersRef.current.vessel.setIcon(icon);layersRef.current.vessel.setZIndexOffset(9999);}
+    const r=Math.PI/180,nm=Math.max(fix.sog,0.3)*(vectorMinsRef.current/60);
+    const vl=fix.lat+(nm/60)*Math.cos(fix.cog*r),vn=fix.lon+(nm/60)*Math.sin(fix.cog*r);
+    if(layersRef.current.vector){layersRef.current.vector.setLatLngs([[fix.lat,fix.lon],[vl,vn]]);layersRef.current.vector.setStyle({color:c.vector});}
+    else layersRef.current.vector=L.polyline([[fix.lat,fix.lon],[vl,vn]],{color:c.vector,weight:2,opacity:0.85,dashArray:'5 3'}).addTo(leafRef.current);
+    if(autoCenterRef.current){try{const m=leafRef.current,s=m.getSize(),p=m.project([fix.lat,fix.lon],m.getZoom());m.panTo(m.unproject(p.subtract([0,s.y*0.2]),m.getZoom()),{animate:true,duration:0.3});}catch{leafRef.current.panTo([fix.lat,fix.lon]);}}
+  };
+
+  const tryXml=(t,f)=>{try{const d=new DOMParser().parseFromString(t,'application/xml');if(d.querySelector('parsererror')) return null;const w=[];d.querySelectorAll('waypoint,Waypoint').forEach(e=>{const p=e.querySelector('position,Position');if(!p) return;const la=parseFloat(p.getAttribute('lat')||p.getAttribute('Lat')),lo=parseFloat(p.getAttribute('lon')||p.getAttribute('Lon'));if(!isNaN(la)&&!isNaN(lo)) w.push({lat:la,lon:lo,name:e.getAttribute('name')||e.getAttribute('Name')||''});});if(!w.length) d.querySelectorAll('rtept,wpt,trkpt').forEach(e=>{const la=parseFloat(e.getAttribute('lat')),lo=parseFloat(e.getAttribute('lon'));if(!isNaN(la)&&!isNaN(lo)) w.push({lat:la,lon:lo,name:e.querySelector('name')?.textContent?.trim()||''});});if(!w.length) return null;const n=d.querySelector('route,Route')?.getAttribute('name')||d.querySelector('gpx>metadata>name,rte>name')?.textContent?.trim()||f;return{name:n,waypoints:w};}catch{return null;}};
+  const tryJson=(t,f)=>{try{const p=JSON.parse(t);if(Array.isArray(p)){const w=p.filter(x=>x.lat!=null&&x.lon!=null);if(w.length) return{name:f,waypoints:w};}const w=p.waypoints||p.Waypoints;if(w?.length) return{name:p.name||f,waypoints:w};return null;}catch{return null;}};
+  const tryDelim=(t,f)=>{try{const w=[];for(const l of t.split('\n').map(x=>x.trim()).filter(x=>x&&!x.startsWith('#'))){if(/^(lat|lon|name|wp)/i.test(l)) continue;const p=l.split(/[,\t;|]+/).map(x=>x.replace(/["']/g,'').trim());if(p.length<2) continue;let la=parseFloat(p[0]),lo=parseFloat(p[1]);if(!isNaN(la)&&!isNaN(lo)&&Math.abs(la)<=90&&Math.abs(lo)<=180) w.push({lat:la,lon:lo,name:p[2]||''});}return w.length?{name:f,waypoints:w}:null;}catch{return null;}};
+  const parseRoute=(t,f)=>{const e=f.toLowerCase().split('.').pop();if(e==='rtzp') throw new Error('RTZP: unzip and load .rtz inside');if(t.trim().startsWith('<')||'rtz gpx rte rt3 rt4 rtx xml wpt'.includes(e)){const r=tryXml(t,f);if(r) return r;}const r2=tryJson(t,f);if(r2) return r2;const r3=tryXml(t,f);if(r3) return r3;const r4=tryDelim(t,f);if(r4) return r4;throw new Error('No waypoints found');};
+  const loadRoute=(e)=>{const fi=e.target.files?.[0];if(!fi) return;const r=new FileReader();r.onload=ev=>{try{const rt=parseRoute(ev.target.result,fi.name);if(!rt?.waypoints?.length) throw new Error('No waypoints');setActiveRoute(rt);setSelectedWpIdx(rt.waypoints.length-1);notify(`✓ ${rt.name} (${rt.waypoints.length} WPs)`,'error');}catch(er){notify(`Load failed: ${er.message}`,'error');}};r.readAsText(fi);e.target.value='';};
+  const saveRoute=()=>{if(!activeRoute) return;setSavedRoutes(prev=>{const i=prev.findIndex(r=>r.name===activeRoute.name);const u=i>=0?prev.map((r,j)=>j===i?activeRoute:r):[activeRoute,...prev].slice(0,100);localStorage.setItem('nav_savedRoutes',JSON.stringify(u));return u;});notify(`✓ Saved: ${activeRoute.name}`,'error');};
+  const delRoute=(n)=>{setSavedRoutes(prev=>{const u=prev.filter(r=>r.name!==n);localStorage.setItem('nav_savedRoutes',JSON.stringify(u));return u;});};
+
+  const tryUserChart=(t,f)=>{try{const d=new DOMParser().parseFromString(t,'application/xml');if(d.querySelector('parsererror')||!d.querySelector('userchart')) return null;const name=d.querySelector('userchart').getAttribute('name')||f,ft=[];d.querySelectorAll('lines > line').forEach(el=>{const a=el.querySelector('attribute'),tp=el.querySelector('type'),lt=parseInt(a?.getAttribute('lineType')||'1'),cd=tp?.getAttribute('checkDanger')==='1',co=[];el.querySelectorAll('vertex').forEach(v=>{const la=parseFloat(v.getAttribute('latitude')),lo=parseFloat(v.getAttribute('longitude'));if(!isNaN(la)&&!isNaN(lo)) co.push([lo,la]);});if(co.length>=2) ft.push({type:'Feature',properties:{featureType:'line',name:el.getAttribute('name')||'',lineType:lt,checkDanger:cd},geometry:{type:'LineString',coordinates:co}});});d.querySelectorAll('labels > label').forEach(el=>{const a=el.querySelector('attribute'),tp=el.querySelector('type'),lt=a?.getAttribute('labelText')||'',cd=tp?.getAttribute('checkDanger')==='1',v=el.querySelector('vertex');if(!v) return;const la=parseFloat(v.getAttribute('latitude')),lo=parseFloat(v.getAttribute('longitude'));if(!isNaN(la)&&!isNaN(lo)) ft.push({type:'Feature',properties:{featureType:'label',labelText:lt,checkDanger:cd},geometry:{type:'Point',coordinates:[lo,la]}});});d.querySelectorAll('polygons > polygon, areas > area').forEach(el=>{const tp=el.querySelector('type'),cd=tp?.getAttribute('checkDanger')==='1',co=[];el.querySelectorAll('vertex').forEach(v=>{const la=parseFloat(v.getAttribute('latitude')),lo=parseFloat(v.getAttribute('longitude'));if(!isNaN(la)&&!isNaN(lo)) co.push([lo,la]);});if(co.length>=3){if(co[0][0]!==co[co.length-1][0]) co.push(co[0]);ft.push({type:'Feature',properties:{featureType:'polygon',name:el.getAttribute('name')||'',checkDanger:cd},geometry:{type:'Polygon',coordinates:[co]}});}});if(!ft.length) return null;const lines=ft.filter(x=>x.properties.featureType==='line').length,labels=ft.filter(x=>x.properties.featureType==='label').length;return{name,summary:`${lines} lines · ${labels} labels`,data:{type:'FeatureCollection',features:ft}};}catch{return null;}};
+  const tryGeoJSON=(t,f)=>{try{const d=JSON.parse(t);if(['FeatureCollection','Feature','Point','LineString','Polygon'].includes(d.type)) return{name:f,data:d};return null;}catch{return null;}};
+  const tryKML=(t,f)=>{try{const d=new DOMParser().parseFromString(t,'application/xml');if(d.querySelector('parsererror')) return null;const ft=[],pc=s=>s.trim().split(/\s+/).map(p=>{const[lo,la]=p.split(',').map(Number);return(!isNaN(la)&&!isNaN(lo))?[lo,la]:null;}).filter(Boolean);d.querySelectorAll('Placemark').forEach(pm=>{const n=pm.querySelector('name')?.textContent?.trim()||'';const pt=pm.querySelector('Point coordinates');if(pt) pc(pt.textContent).forEach(([lo,la])=>ft.push({type:'Feature',properties:{name:n,featureType:'point'},geometry:{type:'Point',coordinates:[lo,la]}}));const ls=pm.querySelector('LineString coordinates');if(ls){const c=pc(ls.textContent);if(c.length) ft.push({type:'Feature',properties:{name:n,featureType:'line'},geometry:{type:'LineString',coordinates:c}});}});if(!ft.length) return null;return{name:f,data:{type:'FeatureCollection',features:ft}};}catch{return null;}};
+  const loadChart=(e)=>{const fi=e.target.files?.[0];if(!fi) return;const r=new FileReader();r.onload=ev=>{try{const t=ev.target.result;const ov=tryUserChart(t,fi.name)||tryGeoJSON(t,fi.name)||tryKML(t,fi.name);if(!ov) throw new Error('Unsupported format. Supported: ECDIS XML, GeoJSON, KML');if(leafRef.current&&window.L){const L=window.L,m=leafRef.current;if(!m.getPane('chartPane')){const cp=m.createPane('chartPane');cp.style.zIndex='450';cp.style.pointerEvents='none';}const layer=L.geoJSON(ov.data,{pane:'chartPane',style:ft=>{const p=ft.properties,dg=p.checkDanger,da=p.lineType===2?'8 5':p.lineType===3?'3 5':null;const cc=colorsRef.current.chart||'#FF2020';return{color:dg?'#FF2020':cc,weight:3,opacity:1,dashArray:da,fillColor:dg?'#FF2020':cc,fillOpacity:0.12};},pointToLayer:(ft,ll)=>{const p=ft.properties;if(p.featureType==='label'){const cc2=colorsRef.current.chart||'#FF2020';return L.marker(ll,{icon:L.divIcon({html:`<div style="background:rgba(0,0,20,0.8);color:${p.checkDanger?'#FF2020':cc2};font-size:11px;font-weight:700;white-space:nowrap;font-family:monospace;padding:1px 4px;border-radius:3px;pointer-events:none;line-height:1.3;border:1px solid ${p.checkDanger?'#FF2020':cc2}40;">${p.labelText||''}</div>`,className:'',iconAnchor:[0,8]}),interactive:false,zIndexOffset:300});}const cc=colorsRef.current.chart||'#FF2020';return L.circleMarker(ll,{radius:6,color:cc,fillOpacity:0.85,weight:2}).bindPopup(`<b>${p.name||''}</b>`);},onEachFeature:(ft,l)=>{if(ft.properties.name&&ft.properties.featureType!=='label') l.bindPopup(`<b>${ft.properties.name}</b><br/>${ft.properties.checkDanger?'Danger':'Feature'}`);}}).addTo(m);layer.bringToFront();chartLayersRef.current.push({id:ov.name,layer});try{const b=layer.getBounds();if(b.isValid()) m.fitBounds(b,{padding:[40,40]});}catch{}}setChartOverlays(prev=>[...prev,{name:ov.name,summary:ov.summary||''}]);notify(`✓ ${ov.name}${ov.summary?' ('+ov.summary+')':''}`,'error');}catch(er){notify(`Chart failed: ${er.message}`,'error');}};r.readAsText(fi);e.target.value='';};
+
+  const loadIndonesiaEnc=useCallback(async()=>{
+    if(!leafRef.current||!window.L||indonesiaEncLayerRef.current) return;
+    notify('⏳ Loading Indonesia ENC…','error');
+    try{
+      const res=await fetch(INDONESIA_ENC_URL);
+      if(!res.ok) throw new Error(`HTTP ${res.status}`);
+      const geojson=await res.json();
+      const L=window.L,m=leafRef.current;
+      if(!m.getPane('indonesiaPane')){const cp=m.createPane('indonesiaPane');cp.style.zIndex='445';cp.style.pointerEvents='none';}
+      const depthOnly={...geojson,features:(geojson.features||[]).filter(f=>['depth_area','depth_contour','sounding'].includes(f.properties?.type||f.properties?.featureType||''))};
+      const layer=L.geoJSON(depthOnly,{
+        pane:'indonesiaPane',
+        style:ft=>{
+          const t=ft.properties?.type||ft.properties?.featureType||'';
+          if(t==='depth_area') return{color:'#0050AA',weight:0,fillColor:'#AADDFF',fillOpacity:0.18};
+          if(t==='depth_contour') return{color:'#0050AA',weight:0.8,opacity:0.6,dashArray:'3 3'};
+          return{opacity:0,weight:0,color:'transparent',fillOpacity:0};
+        },
+        pointToLayer:(ft,ll)=>{
+          const p=ft.properties;
+          if(p.type==='sounding'||p.featureType==='sounding')
+            return L.marker(ll,{icon:L.divIcon({html:`<div style="color:#00D4FF;font-size:9px;font-weight:700;font-family:monospace;white-space:nowrap;text-shadow:1px 1px 2px #000;pointer-events:none;">${p.depth!=null?p.depth:''}</div>`,className:'',iconSize:[0,0],iconAnchor:[8,6]}),interactive:false});
+          return L.circleMarker(ll,{radius:3,color:'#00BFFF',fillOpacity:0.6,weight:1});
         }
-      }
-    });
-  },[aisTargets,livePos,guardZoneNM]);
+      }).addTo(m);
+      indonesiaEncLayerRef.current=layer;
+      notify(`✓ Indonesia ENC loaded (${geojson.features?.length||0} features)`,'error');
+    }catch(e){notify(`Indonesia ENC: ${e.message}`,'error');}
+  },[]);
+
+  const removeIndonesiaEnc=useCallback(()=>{
+    if(indonesiaEncLayerRef.current&&leafRef.current){
+      try{leafRef.current.removeLayer(indonesiaEncLayerRef.current);}catch{}
+      indonesiaEncLayerRef.current=null;
+    }
+  },[]);
+
+  const removeChart=(n)=>{const i=chartLayersRef.current.findIndex(c=>c.id===n);if(i>=0){try{leafRef.current?.removeLayer(chartLayersRef.current[i].layer);}catch{}chartLayersRef.current.splice(i,1);}setChartOverlays(prev=>prev.filter(c=>c.name!==n));};
+  const saveChart=(ov)=>{if(!ov) return;setSavedCharts(prev=>{const i=prev.findIndex(c=>c.name===ov.name);const u=i>=0?prev.map((c,j)=>j===i?ov:c):[ov,...prev].slice(0,50);localStorage.setItem('nav_savedCharts',JSON.stringify(u));return u;});notify(`✓ Chart saved: ${ov.name}`,'error');};
+  const delSavedChart=(n)=>{setSavedCharts(prev=>{const u=prev.filter(c=>c.name!==n);localStorage.setItem('nav_savedCharts',JSON.stringify(u));return u;});};
+  const loadSavedChart=(saved)=>{if(!saved?.data||!leafRef.current||!window.L) return;const L=window.L,m=leafRef.current;if(!m.getPane('chartPane')){const cp=m.createPane('chartPane');cp.style.zIndex='450';cp.style.pointerEvents='none';}const cc=colorsRef.current.chart||'#FF2020';const layer=L.geoJSON(saved.data,{pane:'chartPane',style:ft=>{const p=ft.properties,dg=p.checkDanger,da=p.lineType===2?'8 5':p.lineType===3?'3 5':null;return{color:dg?'#FF2020':cc,weight:3,opacity:1,dashArray:da,fillColor:dg?'#FF2020':cc,fillOpacity:0.12};},pointToLayer:(ft,ll)=>{const p=ft.properties;if(p.featureType==='label'){return L.marker(ll,{icon:L.divIcon({html:`<div style="background:rgba(0,0,20,0.8);color:${p.checkDanger?'#FF2020':cc};font-size:11px;font-weight:700;white-space:nowrap;font-family:monospace;padding:1px 4px;border-radius:3px;pointer-events:none;line-height:1.3;border:1px solid ${p.checkDanger?'#FF2020':cc}40;">${p.labelText||''}</div>`,className:'',iconAnchor:[0,8]}),interactive:false,zIndexOffset:300});}return L.circleMarker(ll,{radius:6,color:cc,fillOpacity:0.85,weight:2}).bindPopup(`<b>${p.name||''}</b>`);},onEachFeature:(ft,l)=>{if(ft.properties.name&&ft.properties.featureType!=='label') l.bindPopup(`<b>${ft.properties.name}</b><br/>${ft.properties.checkDanger?'Danger':'Feature'}`);}}).addTo(m);layer.bringToFront();chartLayersRef.current.push({id:saved.name,layer});try{const b=layer.getBounds();if(b.isValid()) m.fitBounds(b,{padding:[40,40]});}catch{}setChartOverlays(prev=>{if(prev.find(c=>c.name===saved.name)) return prev;return[...prev,{name:saved.name,summary:saved.summary||''}];});notify(`✓ ${saved.name}`,'error');};
+
+  useEffect(()=>{
+    aisSourceRef.current=aisSource;
+    aisService.stop(); aisWsRef.current?.close(); aisWsRef.current=null;
+    clearInterval(aisIntervalRef.current); aisIntervalRef.current=null;
+    setAisStatus('off'); setLocalAisStatus('off'); setLocalAisCount(0);
+    if(aisSource==='off'){setAisTargets({});return;}
+    if(aisSource==='safepilot'||aisSource==='bridge'){
+      const hosts=aisSource==='bridge'?[localAisHost,...AIS_SOURCES.bridge.hosts]:AIS_SOURCES.safepilot.hosts;
+      aisService.start(hosts);
+      if(livePosRef.current) aisService.setOwnShip(livePosRef.current);
+      const off1=aisService.on('status',({status,targets})=>{setLocalAisStatus(status||'connected');setLocalAisCount(typeof targets==='number'?targets:(targets?.size||0));});
+      const off2=aisService.on('alert',al=>{setLocalAisAlert(al);notify(`⚠ COLLISION: ${al?.name||al?.mmsi} CPA ${al?.cpa}NM`,'error');setTimeout(()=>setLocalAisAlert(null),30000);});
+      const off3=aisService.on('update',({target,targets})=>{if(!target?.lat||!target?.lon) return;setAisTargets(prev=>({...prev,[target.mmsi]:{mmsi:target.mmsi,lat:target.lat,lon:target.lon,cog:target.cog||0,sog:target.sog||0,name:target.name||'',cpa:target.cpa,tcpa:target.tcpa,ts:Date.now()}}));setLocalAisCount(targets?.size||0);});
+      return()=>{try{off1();off2();off3();}catch{}aisService.stop();};
+    }
+    if(aisSource==='internet'){
+      let retry=null;
+      const fetchAPI=async()=>{
+        const pos=livePosRef.current,range=aisRangeRef.current||50,la=pos?.lat||0,ln=pos?.lon||0;
+        for(const url of[`https://api.vesselapi.com/v1/vessel/list?lat=${la}&lng=${ln}&radius=${range}`,`https://api.vesselapi.com/v1/vessels?lat=${la}&lng=${ln}&radius=${range}`]){
+          try{const r=await fetch(url,{headers:{'Authorization':VESSEL_API_KEY,'x-api-key':VESSEL_API_KEY}});if(!r.ok) continue;const data=await r.json();const v=data?.vessels||data?.data||data?.results||(Array.isArray(data)?data:[]);if(Array.isArray(v)&&v.length>0){setAisStatus('connected');const t={};v.forEach(x=>{const m=x.mmsi||x.MMSI;const la=parseFloat(x.lat||x.latitude||0),ln=parseFloat(x.lon||x.lng||x.longitude||0);if(m&&la&&ln) t[m]={mmsi:m,lat:la,lon:ln,cog:parseFloat(x.cog||0),sog:parseFloat(x.sog||x.speed||0),name:(x.name||x.shipName||'').trim(),ts:Date.now()};});setAisTargets(t);return;}}catch{}}
+        setAisStatus('connecting');
+        if(aisWsRef.current?.readyState===WebSocket.OPEN) return;
+        const ws=new WebSocket("wss://stream.aisstream.io/v0/stream");
+        aisWsRef.current=ws;
+        ws.onopen=()=>{setAisStatus('connected');ws.send(JSON.stringify({APIKey:AISSTREAM_KEY,BoundingBoxes:[[[-90,-180],[90,180]]],FilterMessageTypes:["PositionReport"]}));};
+        ws.onmessage=msg=>{try{const d=JSON.parse(msg.data);const p=d?.Message?.PositionReport,m=d?.MetaData;if(!p||!m||p.Latitude===0) return;setAisTargets(prev=>({...prev,[m.MMSI]:{mmsi:m.MMSI,name:(m.ShipName||'').trim(),lat:p.Latitude,lon:p.Longitude,cog:p.CourseOverGround||0,sog:p.SpeedOverGround||0,ts:Date.now()}}));}catch{}};
+        ws.onerror=()=>setAisStatus('error');
+        ws.onclose=ev=>{if(ev.code!==1000){setAisStatus('connecting');retry=setTimeout(()=>{if(aisSourceRef.current==='internet') fetchAPI();},5000);}};
+      };
+      setAisStatus('connecting'); fetchAPI();
+      aisIntervalRef.current=setInterval(fetchAPI,30000);
+      return()=>{clearTimeout(retry);clearInterval(aisIntervalRef.current);aisWsRef.current?.close();};
+    }
+  },[aisSource,localAisHost]);
+
+  useEffect(()=>{
+    if(aisSource!=='safepilot'&&aisSource!=='bridge') return;
+    const off=aisService.on('ownPos',pos=>{if(!pos?.lat) return;const fix={lat:pos.lat,lon:pos.lon,sog:pos.sog||0,cog:pos.cog||0,heading:pos.hdg||pos.cog||0,acc:5,fromSafePilot:true};setLivePos(fix);livePosRef.current=fix;aisService.setOwnShip(fix);renderShip(fix);
+      const now=Date.now();pastTrackRef.current.push({lat:fix.lat,lon:fix.lon,t:now});pastTrackRef.current=pastTrackRef.current.filter(p=>p.t>now-86400000);});
+    return()=>{try{off();}catch{}};
+  },[aisSource]);
+
+  useEffect(()=>{if(livePos&&(aisSource==='safepilot'||aisSource==='bridge')) aisService.setOwnShip(livePos);},[livePos,aisSource]);
+
+  useEffect(()=>{
+    if(!gpsOn) return;
+    if(!navigator.geolocation){notify("GPS not supported","error");return;}
+    const id=navigator.geolocation.watchPosition(pos=>{
+      try{
+        if((aisSourceRef.current==='safepilot'||aisSourceRef.current==='bridge')&&livePosRef.current?.fromSafePilot) return;
+        const la=pos.coords.latitude,ln=pos.coords.longitude;
+        const sog=(pos.coords.speed||0)*1.94384,cog=pos.coords.heading||0,acc=pos.coords.accuracy||0;
+        const now2=Date.now(),dt=lastHdgTimeRef.current?((now2-lastHdgTimeRef.current)/60000):0;
+        const dHdg=lastHdgRef.current!==null?((cog-lastHdgRef.current+540)%360-180):0;
+        const rot=(dt>0&&sog>0.5)?Math.max(-720,Math.min(720,parseFloat((dHdg/dt).toFixed(1)))):0;
+        lastHdgRef.current=cog;lastHdgTimeRef.current=now2;
+        setRotValue(rot);
+        const fix={lat:la,lon:ln,sog,cog,heading:cog,acc,rot};
+        setLivePos(fix);livePosRef.current=fix;
+        const now=Date.now();pastTrackRef.current.push({lat:la,lon:ln,t:now});pastTrackRef.current=pastTrackRef.current.filter(p=>p.t>now-86400000);
+        renderShip(fix);
+        if(trackHoursRef.current>0&&window.L){const cut=now-trackHoursRef.current*3600000,pts=pastTrackRef.current.filter(p=>p.t>cut).map(p=>[p.lat,p.lon]);if(pts.length>1){const L=window.L,c=colorsRef.current;if(layersRef.current.pastTrack){layersRef.current.pastTrack.setLatLngs(pts);layersRef.current.pastTrack.setStyle({color:c.track});}else layersRef.current.pastTrack=L.polyline(pts,{color:c.track,weight:2,opacity:0.7}).addTo(leafRef.current);}}
+        else if(layersRef.current.pastTrack){leafRef.current?.removeLayer(layersRef.current.pastTrack);layersRef.current.pastTrack=null;}
+        if(rbModeRef.current&&rbTargetRef.current){const t=rbTargetRef.current;setRbResult({rangeNM:distNM(la,ln,t.lat,t.lon).toFixed(2),bearing:brg(la,ln,t.lat,t.lon).toFixed(1),lat:t.lat.toFixed(5),lon:t.lon.toFixed(5)});if(layersRef.current.rbLine) layersRef.current.rbLine.setLatLngs([[la,ln],[t.lat,t.lon]]);}
+      }catch(e){console.warn('[GPS]',e);}
+    },()=>notify("GPS error","error"),{enableHighAccuracy:true,maximumAge:0,timeout:30000});
+    return()=>navigator.geolocation.clearWatch(id);
+  },[gpsOn]);
+
+
+  const [showAllAisVectors,setShowAllAisVectors]=useState(()=>localStorage.getItem('nav_aisVectors')==='true');
+  const [selectedAisMmsi,setSelectedAisMmsi]=useState(null);
+  useEffect(()=>{localStorage.setItem('nav_aisVectors',showAllAisVectors);},[showAllAisVectors]);
 
   useEffect(()=>{
     if(!leafRef.current||!window.L) return;
@@ -185,59 +292,27 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
     const rng=aisRangeRef.current,pos=livePosRef.current;
     const own=layersRef.current.vessel?.getLatLng();
     const seen=new Set();
-    const now=Date.now();
     Object.values(aisTargets).forEach(v=>{
       if(!v.lat||!v.lon) return;
       if(rng>0&&pos&&distNM(pos.lat,pos.lon,v.lat,v.lon)>rng) return;
-      const age=now-(v.ts||0);
-      const stale5=age>300000; // >5min
-      const stale10=age>600000; // >10min - skip render
-      if(stale10) return;
-      seen.add(String(v.mmsi));
       const cp=own&&pos?calcCPA({lat:own.lat,lon:own.lng,cog:pos.cog,sog:pos.sog},v):null;
-      const bcrbct=own&&pos?calcBCRBCT({lat:own.lat,lon:own.lng,cog:pos.cog,sog:pos.sog},{lat:v.lat,lon:v.lon,cog:v.cog||0,sog:v.sog||0}):{bcr:null,bct:null};
-      const baseCol=cp?.cpa<1?'#FF3030':cp?.cpa<3?'#FF9500':'#00D4FF';
-      const col=stale5?'#888888':baseCol;
-      const rng2=own&&pos?distNM(pos.lat,pos.lon,v.lat,v.lon).toFixed(2):'-';
-      const bearing2=own&&pos?brg(pos.lat,pos.lon,v.lat,v.lon).toFixed(1):'-';
-      const situation=own&&pos?colreg({lat:own.lat,lon:own.lng,cog:pos.cog},v):'N/A';
-      const action=colregAction(situation);
-      const staleLabel=stale5?'<span style="color:#FF8800;font-size:10px"> ⚠ STALE '+(Math.floor(age/60000))+'min</span>':'';
-      const popup=`<div style="font-size:12px;min-width:200px;line-height:1.8;font-family:monospace">
-<b style="color:${col};font-size:13px">${v.name||'AIS Vessel'}</b>${staleLabel}<br/>
-<span style="color:#888">MMSI: ${v.mmsi}</span><br/>
-<hr style="border-color:#333;margin:3px 0"/>
-<b style="color:#5A7A90">POSITION</b><br/>
-${toDMS(v.lat,true)}<br/>${toDMS(v.lon,false)}<br/>
-<hr style="border-color:#333;margin:3px 0"/>
-<div style="display:grid;grid-template-columns:1fr 1fr;gap:2px 8px">
-<div><span style="color:#5A7A90">RNG</span><br/><b style="color:#FFD700">${rng2} NM</b></div>
-<div><span style="color:#5A7A90">BRG</span><br/><b style="color:#FFD700">${bearing2}°T</b></div>
-<div><span style="color:#5A7A90">SOG</span><br/><b>${v.sog?.toFixed(1)} kn</b></div>
-<div><span style="color:#5A7A90">COG</span><br/><b>${v.cog?.toFixed(0)}°T</b></div>
-<div><span style="color:#5A7A90">CPA</span><br/><b style="color:${cp?.cpa<1?'#FF3030':cp?.cpa<3?'#FF9500':'#00FF88'}">${cp?.cpa?.toFixed(2)||'-'} NM</b></div>
-<div><span style="color:#5A7A90">TCPA</span><br/><b style="color:${cp?.tcpa<30?'#FF9500':'#aaa'}">${cp?.tcpa?.toFixed(0)||'-'} min</b></div>
-<div><span style="color:#5A7A90">BCR</span><br/><b>${bcrbct.bcr||'-'} NM</b></div>
-<div><span style="color:#5A7A90">BCT</span><br/><b>${bcrbct.bct||'-'} min</b></div>
-</div>
-<hr style="border-color:#333;margin:3px 0"/>
-<span style="color:#5A7A90">COLREG: </span><b style="color:${cp?.cpa<1.5?'#FF3030':'#FFD700'}">${situation}</b><br/>
-<span style="color:#aaa;font-size:10px">→ ${action}</span>
-${cp?.cpa<1.5?'<br/><b style="color:#FF3030">⚠ COLLISION RISK</b>':''}
-</div>`;
+      const col=cp?.cpa<1?'#FF3030':cp?.cpa<3?'#FF9500':'#00D4FF';
+      const rng2=own&&pos?distNM(pos.lat,pos.lon,v.lat,v.lon).toFixed(1):'-';
+      const cl=own&&pos?colreg({lat:own.lat,lon:own.lng,cog:pos.cog},v):'N/A';
+      const popup=`<div style="font-size:13px;min-width:180px;line-height:1.7"><b style="color:${col}">${v.name||'AIS Vessel'}</b><br/><small>MMSI: ${v.mmsi}</small><br/>SOG: ${v.sog?.toFixed(1)}kn COG: ${v.cog?.toFixed(0)}°<br/>Range: ${rng2}NM<br/>CPA: ${cp?.cpa?.toFixed(2)||'-'}NM TCPA: ${cp?.tcpa?.toFixed(1)||'-'}h<br/>COLREG: ${cl}${cp?.cpa<1.5?'<br/><b style="color:#FF3030">⚠ COLLISION RISK</b>':''}</div>`;
+      seen.add(String(v.mmsi));
       const aisRot=(v.cog||0);
-      const opacity=stale5?0.5:1;
-      const aisIcon=L.divIcon({html:`<div style="transform:rotate(${aisRot}deg);transform-origin:center;width:16px;height:22px;opacity:${opacity}"><svg width="16" height="22" viewBox="0 0 16 22" fill="none"><polygon points="8,1 15,21 8,16 1,21" fill="${col}" stroke="#fff" stroke-width="1.2"/></svg></div>`,className:'',iconSize:[16,22],iconAnchor:[8,11]});
+      const aisIcon=L.divIcon({html:`<div style="transform:rotate(${aisRot}deg);transform-origin:center;width:16px;height:22px;"><svg width="16" height="22" viewBox="0 0 16 22" fill="none"><polygon points="8,1 15,21 8,16 1,21" fill="${col}" stroke="#fff" stroke-width="1.2"/></svg></div>`,className:'',iconSize:[16,22],iconAnchor:[8,11]});
       if(layersRef.current.ais[v.mmsi]?.mk){
         layersRef.current.ais[v.mmsi].mk.setLatLng([v.lat,v.lon]);
         layersRef.current.ais[v.mmsi].mk.setIcon(aisIcon);
         layersRef.current.ais[v.mmsi].mk.setPopupContent(popup);
       } else {
-        const mk=L.marker([v.lat,v.lon],{icon:aisIcon,zIndexOffset:500}).bindPopup(popup,{maxWidth:280}).addTo(m);
+        const mk=L.marker([v.lat,v.lon],{icon:aisIcon,zIndexOffset:500}).bindPopup(popup).addTo(m);
         mk.on('click',()=>setSelectedAisMmsi(prev=>prev===String(v.mmsi)?null:String(v.mmsi)));
         if(!layersRef.current.ais[v.mmsi]) layersRef.current.ais[v.mmsi]={};
         layersRef.current.ais[v.mmsi].mk=mk;
-        if(cp?.cpa<1.5) notify(`⚠ CPA: ${v.name||v.mmsi} ${cp.cpa.toFixed(1)}NM TCPA:${cp.tcpa?.toFixed(0)}min`,'error');
+        if(cp?.cpa<1.5) notify(`⚠ CPA: MMSI ${v.mmsi} ${cp.cpa.toFixed(1)}NM`,'error');
       }
       const showVec=showAllAisVectors||(selectedAisMmsi===String(v.mmsi));
       if(showVec&&(v.sog||0)>0.1){
@@ -245,9 +320,9 @@ ${cp?.cpa<1.5?'<br/><b style="color:#FF3030">⚠ COLLISION RISK</b>':''}
         const vl=v.lat+(nm2/60)*Math.cos((v.cog||0)*r2),vn=v.lon+(nm2/60)*Math.sin((v.cog||0)*r2);
         if(layersRef.current.ais[v.mmsi]?.vec){
           layersRef.current.ais[v.mmsi].vec.setLatLngs([[v.lat,v.lon],[vl,vn]]);
-          layersRef.current.ais[v.mmsi].vec.setStyle({color:col,opacity:opacity});
+          layersRef.current.ais[v.mmsi].vec.setStyle({color:col});
         } else {
-          layersRef.current.ais[v.mmsi].vec=L.polyline([[v.lat,v.lon],[vl,vn]],{color:col,weight:1.5,opacity:0.7*opacity,dashArray:'4 3'}).addTo(m);
+          layersRef.current.ais[v.mmsi].vec=L.polyline([[v.lat,v.lon],[vl,vn]],{color:col,weight:1.5,opacity:0.7,dashArray:'4 3'}).addTo(m);
         }
       } else if(layersRef.current.ais[v.mmsi]?.vec){
         try{m.removeLayer(layersRef.current.ais[v.mmsi].vec);}catch{}
@@ -314,7 +389,7 @@ ${cp?.cpa<1.5?'<br/><b style="color:#FF3030">⚠ COLLISION RISK</b>':''}
   useEffect(()=>{localStorage.setItem('nav_deepDepth',deepDepth);},[deepDepth]);
   useEffect(()=>{localStorage.setItem('nav_draft',shipDraft);},[shipDraft]);
   useEffect(()=>{localStorage.setItem('nav_xtdNM',xtdNM);},[xtdNM]);
-  // Fullscreen handled via inline style on root div - no DOM body manipulation needed
+  useEffect(()=>{if(fullScreen){document.documentElement.style.overflow='hidden';}else{document.documentElement.style.overflow='';}return()=>{document.documentElement.style.overflow='';};},[fullScreen]);
   useEffect(()=>{localStorage.setItem('nav_aisSource',aisSource);},[aisSource]);
   useEffect(()=>{localStorage.setItem('nav_shipProfile',JSON.stringify(shipProfile));},[shipProfile]);
   useEffect(()=>{localStorage.setItem('nav_localAisHost',localAisHost);},[localAisHost]);
@@ -323,8 +398,6 @@ ${cp?.cpa<1.5?'<br/><b style="color:#FF3030">⚠ COLLISION RISK</b>':''}
   useEffect(()=>{localStorage.setItem('nav_zoneOverlays',JSON.stringify(zoneOverlays));},[zoneOverlays]);
   useEffect(()=>{localStorage.setItem('nav_cogPanelPos',JSON.stringify(cogPanelPos));},[cogPanelPos]);
   useEffect(()=>{localStorage.setItem('nav_cogPanel',cogPanelVisible);},[cogPanelVisible]);
-  useEffect(()=>{localStorage.setItem('nav_aisVectors',showAllAisVectors);},[showAllAisVectors]);
-  useEffect(()=>{localStorage.setItem('nav_nightLevel',nightLevel);},[nightLevel]);
 
   useEffect(()=>{
     if(!mapReady||!leafRef.current||!window.L) return;
@@ -396,8 +469,7 @@ ${cp?.cpa<1.5?'<br/><b style="color:#FF3030">⚠ COLLISION RISK</b>':''}
 
   useEffect(()=>{
     if(!livePos||!activeRoute?.waypoints?.length){setEtaResult(null);return;}
-    const effectiveSog=livePos.sog>=0.2?livePos.sog:(plannedSpeedKn>0?plannedSpeedKn:0);
-    if(effectiveSog<0.1){setEtaResult(null);return;}
+    if(livePos.sog<0.2){setEtaResult(null);return;}
     const wps=activeRoute.waypoints,ti=Math.min(Math.max(selectedWpIdx,0),wps.length-1);
     const legSum=(a,b)=>{let d=0;for(let i=a;i<b;i++) d+=distNM(wps[i].lat,wps[i].lon,wps[i+1].lat,wps[i+1].lon);return d;};
     // Find closest leg ship is on, then measure remaining route distance leg by leg
@@ -424,28 +496,11 @@ ${cp?.cpa<1.5?'<br/><b style="color:#FF3030">⚠ COLLISION RISK</b>':''}
       }
     }
     if(rem===Infinity) rem=distNM(livePos.lat,livePos.lon,wps[ti].lat,wps[ti].lon);
-    const hrs=rem/effectiveSog,h=Math.floor(hrs),mn=Math.round((hrs%1)*60);
+    const hrs=rem/livePos.sog,h=Math.floor(hrs),mn=Math.round((hrs%1)*60);
     const arr=new Date(Date.now()+hrs*3600000),pd=n=>String(n).padStart(2,'0');
     const mo=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][arr.getMonth()];
     const totalRouteDist=legSum(0,wps.length-1);
-    // Build WP ETA list for all waypoints
-    const wpEtaList=wps.map((wp,i)=>{
-      if(i===0) return null;
-      let wpRem=Infinity;
-      for(let j=0;j<Math.min(i+1,wps.length-1);j++){
-        const legB=brg(wps[j].lat,wps[j].lon,wps[j+1].lat,wps[j+1].lon);
-        const shipB=brg(wps[j].lat,wps[j].lon,livePos.lat,livePos.lon);
-        const sDist=distNM(wps[j].lat,wps[j].lon,livePos.lat,livePos.lon);
-        const along=sDist*Math.cos(((legB-shipB)*Math.PI/180));
-        const legLen=distNM(wps[j].lat,wps[j].lon,wps[j+1].lat,wps[j+1].lon);
-        if(along>=0&&along<=legLen){const d=(legLen-along)+legSum(j+1,i);if(d<wpRem) wpRem=d;}
-      }
-      if(wpRem===Infinity) wpRem=distNM(livePos.lat,livePos.lon,wp.lat,wp.lon)+legSum(i,i<wps.length-1?i:i);
-      const wpHrs=wpRem/effectiveSog;
-      const wpArr=new Date(Date.now()+wpHrs*3600000);
-      return{name:wp.name||`WP${String(i+1).padStart(2,'0')}`,distNM:wpRem.toFixed(1),arrTime:`${pd(wpArr.getHours())}:${pd(wpArr.getMinutes())}`};
-    }).filter(Boolean);
-    setEtaResult({remainNM:rem.toFixed(1),totalNM:totalRouteDist.toFixed(1),hrs:h,mins:mn,wpName:wps[ti].name||`WP${String(ti+1).padStart(2,'0')}`,arrivalStr:`${pd(arr.getDate())} ${mo} ${arr.getFullYear()} ${pd(arr.getHours())}:${pd(arr.getMinutes())} LT`,wpEtaList,usingPlanned:livePos.sog<0.2&&plannedSpeedKn>0});
+    setEtaResult({remainNM:rem.toFixed(1),totalNM:totalRouteDist.toFixed(1),hrs:h,mins:mn,wpName:wps[ti].name||`WP${String(ti+1).padStart(2,'0')}`,arrivalStr:`${pd(arr.getDate())} ${mo} ${arr.getFullYear()} ${pd(arr.getHours())}:${pd(arr.getMinutes())} LT`});
   },[livePos,activeRoute,selectedWpIdx]);
 
   useEffect(()=>{
@@ -529,20 +584,6 @@ ${cp?.cpa<1.5?'<br/><b style="color:#FF3030">⚠ COLLISION RISK</b>':''}
     if(anchorWatchOn&&anchorPos){anchorCircleRef.current=L.circle([anchorPos.lat,anchorPos.lon],{radius:anchorRadius*1852,color:anchorAlarm?'#FF2020':'#FFD700',fillColor:anchorAlarm?'#FF2020':'#FFD700',fillOpacity:0.08,weight:2,dashArray:'6 4'}).bindPopup(`<b>⚓ Anchor Drop</b><br/>Radius: ${anchorRadius}NM<br/>${anchorAlarm?'<b style="color:#FF2020">⚠ DRAGGING!</b>':'Holding'}`).addTo(m);}
   },[anchorWatchOn,anchorPos,anchorRadius,anchorAlarm,mapReady]);
 
-  // Guard zone ring on map
-  useEffect(()=>{
-    if(!mapReady||!leafRef.current||!window.L) return;
-    const L=window.L,m=leafRef.current;
-    if(guardZoneRef.current){try{m.removeLayer(guardZoneRef.current);}catch{}guardZoneRef.current=null;}
-    if(guardZoneNM>0&&livePos){
-      guardZoneRef.current=L.circle([livePos.lat,livePos.lon],{
-        radius:guardZoneNM*1852,color:guardZoneAlarm?'#FF2020':'#FF6B35',
-        fillColor:guardZoneAlarm?'#FF2020':'#FF6B35',fillOpacity:0.05,
-        weight:1.5,dashArray:'6 4',
-      }).bindTooltip(`Guard Zone ${guardZoneNM}NM`,{permanent:false}).addTo(m);
-    }
-  },[guardZoneNM,livePos?.lat,livePos?.lon,guardZoneAlarm,mapReady]);
-
   useEffect(()=>{
     if(!livePos||speedAlarmKn<=0) return;
     if(livePos.sog>speedAlarmKn){if(!speedAlarmTriggered){setSpeedAlarmTriggered(true);notify(`⚠ SPEED LIMIT — ${livePos.sog.toFixed(1)}kn exceeds ${speedAlarmKn}kn limit`,'error');}}
@@ -553,20 +594,7 @@ ${cp?.cpa<1.5?'<br/><b style="color:#FF3030">⚠ COLLISION RISK</b>':''}
     if(!livePos||!activeRoute?.waypoints?.length) return;
     const wps=activeRoute.waypoints,ti=Math.min(Math.max(selectedWpIdx,0),wps.length-1);
     const dist=distNM(livePos.lat,livePos.lon,wps[ti].lat,wps[ti].lon);
-    if(dist<wpArrivalNM){
-      const now=Date.now();
-      if(now-wpAlarmCooldownRef.current>15000){
-        wpAlarmCooldownRef.current=now;
-        const wpName=wps[ti].name||`WP${String(ti+1).padStart(2,'0')}`;
-        if(ti<wps.length-1){
-          setWpArrivalPending({idx:ti,name:wpName,dist:dist.toFixed(2),nextIdx:ti+1});
-          notify(`📍 Arriving ${wpName} — ${dist.toFixed(2)}NM — Confirm advance`,'error');
-        } else {
-          notify('🏁 Final waypoint reached!','error');
-          setWpArrivalPending({idx:ti,name:wpName,dist:dist.toFixed(2),nextIdx:null});
-        }
-      }
-    }
+    if(dist<wpArrivalNM){const now=Date.now();if(now-wpAlarmCooldownRef.current>15000){wpAlarmCooldownRef.current=now;const wpName=wps[ti].name||`WP${String(ti+1).padStart(2,'0')}`;notify(`📍 Arriving at ${wpName} — ${dist.toFixed(2)}NM`,'error');if(ti<wps.length-1) setSelectedWpIdx(ti+1);else notify('🏁 Final waypoint reached!','error');}}
   },[livePos,activeRoute,selectedWpIdx,wpArrivalNM]);
 
   const fetchWeather=async(lat,lon)=>{
@@ -608,13 +636,13 @@ ${cp?.cpa<1.5?'<br/><b style="color:#FF3030">⚠ COLLISION RISK</b>':''}
   const S={bg:'rgba(4,12,26,0.97)',bd:'rgba(0,212,255,0.28)',tx:'#D0E8F8',dm:'#5A7A90',vd:'#243850',cy:'#00D4FF',gn:'#00FF88',gd:'#FFD700',rd:'#FF4757',sm:'0.78rem',xs:'0.68rem',lb:'0.58rem'};
 
   return(
-    <div style={{flex:1,display:'flex',flexDirection:'column',background:'#040C1A',position:'relative',overflow:'hidden',minHeight:0,...(fullScreen?{position:'fixed',inset:0,zIndex:9999,minHeight:'100vh'}:{}),...(nightLevel===1?{filter:'brightness(0.4)'}:nightLevel===2?{filter:'sepia(1) saturate(4) hue-rotate(300deg) brightness(0.6)'}:{})}}>
-      <div style={{height:48,minHeight:48,display:'flex',alignItems:'center',padding:'0 6px',background:'#020810',borderBottom:`1px solid ${S.bd}`,flexShrink:0,gap:3,overflowX:'auto',overflowY:'hidden',WebkitOverflowScrolling:'touch',scrollbarWidth:'none',msOverflowStyle:'none'}}>
+    <div style={{flex:1,display:'flex',flexDirection:'column',background:'#040C1A',position:'relative',overflow:'hidden',minHeight:0,...(fullScreen?{position:'fixed',inset:0,zIndex:9999,minHeight:'100vh'}:{}),...(nightVision?{filter:'sepia(1) saturate(3) hue-rotate(300deg) brightness(0.7)'}:{})}}>
+      <div style={{height:48,display:'flex',alignItems:'center',padding:'0 10px',background:'#020810',borderBottom:`1px solid ${S.bd}`,flexShrink:0,gap:5,overflowX:'auto',overflowY:'hidden',WebkitOverflowScrolling:'touch',scrollbarWidth:'none'}}>
         <span style={{color:S.cy,fontWeight:700,fontSize:'0.82rem',letterSpacing:1,flex:1}}>⚓ NAV MODE</span>
         <div style={{display:'flex',gap:2}}>{[['north','N↑'],['course','C↑'],['head','H↑']].map(([v,l])=>(<button key={v} onClick={()=>setDisplayMode(v)} style={{background:displayMode===v?'rgba(0,212,255,0.2)':'transparent',border:`1px solid ${displayMode===v?S.cy:S.vd}`,color:displayMode===v?S.cy:S.dm,borderRadius:5,padding:'3px 7px',fontSize:'0.65rem',cursor:'pointer'}}>{l}</button>))}</div>
         <div style={{display:'flex',gap:2}}>{[['night','🌙'],['day','☀'],['dusk','🏇']].map(([v,l])=>(<button key={v} onClick={()=>setMapMode(v)} style={{background:mapMode===v?'rgba(255,215,0,0.18)':'transparent',border:`1px solid ${mapMode===v?S.gd:S.vd}`,color:mapMode===v?S.gd:S.dm,borderRadius:5,padding:'3px 6px',fontSize:'0.72rem',cursor:'pointer'}}>{l}</button>))}</div>
         <button onClick={()=>setShowPortSearch(v=>!v)} style={{background:showPortSearch?'rgba(0,212,255,0.2)':'transparent',border:`1px solid ${showPortSearch?S.cy:S.vd}`,color:showPortSearch?S.cy:S.dm,borderRadius:5,padding:'3px 7px',fontSize:'0.8rem',cursor:'pointer'}} title="Port Search">🔍</button>
-        <button onClick={()=>setNightLevel(v=>(v+1)%3)} style={{background:nightLevel>0?'rgba(255,0,0,0.2)':'transparent',border:`1px solid ${nightLevel>0?'#FF2020':S.vd}`,color:nightLevel>0?'#FF2020':S.dm,borderRadius:5,padding:'3px 7px',fontSize:'0.8rem',cursor:'pointer',flexShrink:0}} title="Night Vision">🔴{nightLevel>0?nightLevel:''}</button>
+        <button onClick={()=>setNightVision(v=>!v)} style={{background:nightVision?'rgba(255,0,0,0.2)':'transparent',border:`1px solid ${nightVision?'#FF2020':S.vd}`,color:nightVision?'#FF2020':S.dm,borderRadius:5,padding:'3px 7px',fontSize:'0.8rem',cursor:'pointer'}} title="Night Vision">🔴</button>
         <button onClick={()=>setCogPanelVisible(v=>!v)} style={{background:cogPanelVisible&&livePos?'rgba(0,212,255,0.15)':'transparent',border:`1px solid ${cogPanelVisible&&livePos?S.cy:S.vd}`,color:cogPanelVisible&&livePos?S.cy:S.dm,borderRadius:5,padding:'3px 7px',fontSize:'0.75rem',cursor:'pointer'}} title="Toggle SOG/COG panel">⊕</button>
         <button onClick={()=>setFullScreen(v=>!v)} style={{background:fullScreen?'rgba(0,255,136,0.15)':'transparent',border:`1px solid ${fullScreen?S.gn:S.vd}`,color:fullScreen?S.gn:S.dm,borderRadius:5,padding:'3px 7px',fontSize:'0.9rem',cursor:'pointer'}}>{fullScreen?'⛶':'⛶'}</button>
         <button onClick={()=>setShowMenu(v=>!v)} style={{background:showMenu?'rgba(0,212,255,0.2)':'transparent',border:`1px solid ${showMenu?S.cy:S.vd}`,color:showMenu?S.cy:S.dm,borderRadius:5,padding:'3px 9px',fontSize:'1rem',cursor:'pointer'}}>☰</button>
@@ -682,7 +710,7 @@ ${cp?.cpa<1.5?'<br/><b style="color:#FF3030">⚠ COLLISION RISK</b>':''}
 
       <div style={{position:'absolute',left:hudPos.x,top:hudPos.y,zIndex:600,background:S.bg,border:`1px solid ${gpsOn?S.bd:'rgba(42,64,85,0.4)'}`,borderRadius:10,minWidth:182,touchAction:'none',boxShadow:'0 4px 20px rgba(0,0,0,0.5)'}} onTouchStart={onTS} onTouchMove={onTM} onTouchEnd={onTE} onMouseDown={e=>{if(e.button!==0)return;hudDragRef.current={dx:e.clientX-hudPos.x,dy:e.clientY-hudPos.y};const mm=ev=>{if(!hudDragRef.current)return;setHudPos({x:Math.max(0,Math.min(window.innerWidth-185,ev.clientX-hudDragRef.current.dx)),y:Math.max(50,Math.min(window.innerHeight-200,ev.clientY-hudDragRef.current.dy))});};const mu=()=>{hudDragRef.current=null;window.removeEventListener('mousemove',mm);window.removeEventListener('mouseup',mu);};window.addEventListener('mousemove',mm);window.addEventListener('mouseup',mu);}}>
         <div style={{display:'flex',alignItems:'center',padding:'6px 10px',gap:5,cursor:'grab',borderBottom:'1px solid rgba(0,212,255,0.12)'}}>
-          <span style={{color:S.dm,fontSize:'0.7rem',flex:1}}>⠸ {shipProfile?.name||'SHIP DATA'}{anchorWatchOn?<span style={{color:S.gd,marginLeft:4}}>⚓</span>:''}{guardZoneNM>0?<span style={{color:'#FF6B35',marginLeft:2,fontSize:'0.6rem'}}>🛡{guardZoneNM}NM</span>:''}</span>
+          <span style={{color:S.dm,fontSize:'0.7rem',flex:1}}>⠸ {shipProfile?.name||'SHIP DATA'}</span>
           <button onClick={()=>setTogCollapsed(v=>!v)} style={{background:'transparent',border:`1px solid ${S.vd}`,color:S.dm,borderRadius:4,padding:'1px 5px',fontSize:'0.62rem',cursor:'pointer'}}>{togCollapsed?'▼':'▲'} CTRL</button>
           <button onClick={()=>setAutoCenterRaw(v=>!v)} style={{background:autoCenter?'rgba(0,255,136,0.15)':'transparent',border:`1px solid ${autoCenter?S.gn:S.vd}`,color:autoCenter?S.gn:S.dm,borderRadius:4,padding:'1px 5px',fontSize:'0.62rem',cursor:'pointer'}}>{autoCenter?'CTR':'FREE'}</button>
           <button onClick={()=>setHudCollapsed(v=>!v)} style={{background:'transparent',border:'none',color:S.dm,fontSize:'0.8rem',cursor:'pointer'}}>{hudCollapsed?'▼':'▲'}</button>
@@ -699,21 +727,11 @@ ${cp?.cpa<1.5?'<br/><b style="color:#FF3030">⚠ COLLISION RISK</b>':''}
             </label>
             {rbResult&&rbMode&&(<div style={{background:'rgba(0,0,0,0.4)',borderRadius:5,padding:'5px 7px',border:'1px solid rgba(255,215,0,0.3)'}}><div style={{display:'flex',gap:10}}>{[['RNG',rbResult.rangeNM+' NM',S.gd],['BRG',rbResult.bearing+'°T',S.gd]].map(([k,v,c])=>(<div key={k}><div style={{color:S.dm,fontSize:S.lb}}>{k}</div><div style={{color:c,fontFamily:'monospace',fontSize:'0.78rem',fontWeight:700}}>{v}</div></div>))}{livePos?.sog>0.2&&<div><div style={{color:S.dm,fontSize:S.lb}}>TTG</div><div style={{color:S.gn,fontFamily:'monospace',fontSize:'0.78rem',fontWeight:700}}>{(()=>{const h=parseFloat(rbResult.rangeNM)/livePos.sog,hr=Math.floor(h),mn=Math.round((h-hr)*60);return hr>0?`${hr}h${mn}m`:`${mn}m`;})()}</div></div>}</div></div>)}
             {gpsOn&&(<div><div style={{color:S.dm,fontSize:S.lb,marginBottom:3}}>COG VECTOR</div><div style={{display:'flex',gap:3}}>{[6,12,20,30,60].map(n=>(<button key={n} onClick={()=>setVectorMins(n)} style={{background:vectorMins===n?'rgba(0,212,255,0.2)':'transparent',border:`1px solid ${vectorMins===n?S.cy:S.vd}`,color:vectorMins===n?S.cy:S.dm,borderRadius:4,padding:'2px 5px',fontSize:'0.62rem',cursor:'pointer'}}>{n}m</button>))}</div></div>)}
-            <label style={{display:'flex',alignItems:'center',gap:6,cursor:'pointer',fontSize:S.xs,color:showAllAisVectors?S.cy:S.dm,minHeight:22,marginTop:2}}>
-              <input type="checkbox" checked={showAllAisVectors} onChange={e=>setShowAllAisVectors(e.target.checked)} style={{accentColor:S.cy}}/>
-              📡 {showAllAisVectors?'AIS vectors ON':'AIS vectors (tap target)'}
-            </label>
             {activeRoute&&(<div><div style={{color:S.dm,fontSize:S.lb,marginBottom:3}}>XTD</div><div style={{display:'flex',gap:3,flexWrap:'wrap'}}>{[0.1,0.25,0.5,1.0,2.0].map(n=>(<button key={n} onClick={()=>setXtdNM(n)} style={{background:xtdNM===n?'rgba(255,179,0,0.2)':'transparent',border:`1px solid ${xtdNM===n?S.gd:S.vd}`,color:xtdNM===n?S.gd:S.dm,borderRadius:4,padding:'2px 5px',fontSize:'0.58rem',cursor:'pointer'}}>{n}NM</button>))}</div></div>)}
           </div>)}
           {livePos?(<div>
             <div style={{color:S.cy,fontFamily:'monospace',fontSize:'0.75rem',lineHeight:1.8}}>{toDMS(livePos.lat,true)}<br/>{toDMS(livePos.lon,false)}</div>
-            {(aisSource==='safepilot'||aisSource==='bridge')&&liveHeading!=null&&(
-              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',background:'rgba(255,215,0,0.08)',border:'1px solid rgba(255,215,0,0.25)',borderRadius:4,padding:'2px 6px',marginBottom:3,marginTop:3}}>
-                <div style={{color:S.dm,fontSize:S.lb}}>HDG <span style={{color:'#666',fontSize:'0.48rem'}}>(GYRO)</span></div>
-                <div style={{color:'#FFD700',fontFamily:'monospace',fontSize:'0.9rem',fontWeight:700}}>{liveHeading.toFixed(1)}°T</div>
-              </div>
-            )}
-            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'3px 8px',marginTop:2}}>{[['SOG',`${livePos.sog.toFixed(1)} kn`,S.gn],['COG',`${livePos.cog.toFixed(0)}°T`,S.gn]].map(([k,v,c])=>(<div key={k}><div style={{color:S.dm,fontSize:S.lb}}>{k}</div><div style={{color:c,fontFamily:'monospace',fontSize:'0.82rem',fontWeight:700}}>{v}</div></div>))}</div>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'3px 8px',marginTop:4}}>{[['SOG',`${livePos.sog.toFixed(1)} kn`,S.gn],['COG',`${livePos.cog.toFixed(0)}°T`,S.gn]].map(([k,v,c])=>(<div key={k}><div style={{color:S.dm,fontSize:S.lb}}>{k}</div><div style={{color:c,fontFamily:'monospace',fontSize:'0.82rem',fontWeight:700}}>{v}</div></div>))}</div>
             <div style={{display:'flex',alignItems:'center',gap:6,marginTop:3}}><div><div style={{color:S.dm,fontSize:S.lb}}>ROT</div><div style={{color:Math.abs(rotValue||0)>10?S.rd:Math.abs(rotValue||0)>3?S.gd:S.gn,fontFamily:'monospace',fontSize:'0.78rem',fontWeight:700}}>{(rotValue||0)>0?'↻':'↺'} {Math.abs(rotValue||0).toFixed(1)}°/min</div></div>{offTrackAlarm&&<div style={{background:'rgba(255,71,87,0.2)',border:'1px solid #FF4757',borderRadius:4,padding:'2px 5px',fontSize:'0.56rem',color:S.rd,fontWeight:700}}>⚠ OFF TRACK</div>}</div>
             {!hudCollapsed&&(<div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'3px 8px',marginTop:3}}>{[['HDG',`${livePos.heading.toFixed(0)}°`,S.gd],['ACC',`${livePos.acc.toFixed(0)}m`,S.gd]].map(([k,v,c])=>(<div key={k}><div style={{color:S.dm,fontSize:S.lb}}>{k}</div><div style={{color:c,fontFamily:'monospace',fontSize:'0.82rem',fontWeight:700}}>{v}</div></div>))}</div>)}
             {!hudCollapsed&&etaResult&&(<div style={{marginTop:5,borderTop:'1px solid rgba(0,255,136,0.15)',paddingTop:4}}>
@@ -725,74 +743,11 @@ ${cp?.cpa<1.5?'<br/><b style="color:#FF3030">⚠ COLLISION RISK</b>':''}
         </div>
       </div>
 
-      {/* WP ARRIVAL CONFIRMATION BANNER */}
-      {wpArrivalPending&&(
-        <div style={{position:'absolute',bottom:60,left:'50%',transform:'translateX(-50%)',zIndex:700,background:'rgba(0,200,136,0.95)',border:'1px solid #00FF88',borderRadius:10,padding:'10px 14px',minWidth:240,backdropFilter:'blur(10px)',boxShadow:'0 4px 20px rgba(0,0,0,0.5)',textAlign:'center'}}>
-          <div style={{color:'#000',fontWeight:700,fontSize:'0.85rem',marginBottom:4}}>📍 Arriving: {wpArrivalPending.name}</div>
-          <div style={{color:'#004',fontSize:'0.7rem',marginBottom:8}}>{wpArrivalPending.dist} NM from waypoint</div>
-          <div style={{display:'flex',gap:8,justifyContent:'center'}}>
-            <button onClick={()=>{if(wpArrivalPending.nextIdx!=null) setSelectedWpIdx(wpArrivalPending.nextIdx);setWpArrivalPending(null);}} style={{background:'#004',color:'#00FF88',border:'none',borderRadius:6,padding:'6px 16px',fontSize:'0.78rem',fontWeight:700,cursor:'pointer'}}>✓ Advance to Next WP</button>
-            <button onClick={()=>setWpArrivalPending(null)} style={{background:'rgba(0,0,0,0.3)',color:'#fff',border:'1px solid rgba(255,255,255,0.3)',borderRadius:6,padding:'6px 12px',fontSize:'0.78rem',cursor:'pointer'}}>Stay</button>
-          </div>
-        </div>
-      )}
-
-      {/* GUARD ZONE ALARM BANNER */}
-      {guardZoneAlarm&&(
-        <div style={{position:'absolute',top:56,left:'50%',transform:'translateX(-50%)',zIndex:710,background:'rgba(255,32,32,0.95)',border:'1px solid #FF2020',borderRadius:8,padding:'6px 14px',backdropFilter:'blur(8px)'}}>
-          <div style={{color:'#fff',fontWeight:700,fontSize:'0.82rem'}}>🚨 GUARD ZONE BREACH</div>
-        </div>
-      )}
-
-      {/* SOG SPARKLINE */}
-      {livePos&&sogHistory.length>3&&!hudCollapsed&&(
-        <div style={{position:'absolute',left:hudPos.x,top:hudPos.y+240,zIndex:599,pointerEvents:'none'}}>
-          <svg width="182" height="28" style={{display:'block'}}>
-            <rect width="182" height="28" fill="rgba(4,12,26,0.85)" rx="4"/>
-            {(()=>{
-              const pts=sogHistory.slice(-60);
-              const maxS=Math.max(...pts.map(p=>p.sog),1);
-              const w=182,h=24,pad=3;
-              return pts.map((p,i)=>{
-                if(i===0) return null;
-                const x1=pad+(i-1)*(w-pad*2)/(pts.length-1);
-                const x2=pad+i*(w-pad*2)/(pts.length-1);
-                const y1=h-pad-(pts[i-1].sog/maxS)*(h-pad*2);
-                const y2=h-pad-(p.sog/maxS)*(h-pad*2);
-                return <line key={i} x1={x1} y1={y1} x2={x2} y2={y2} stroke="#00FF88" strokeWidth="1.5" opacity="0.8"/>;
-              });
-            })()}
-            <text x="4" y="10" fill="#5A7A90" fontSize="7" fontFamily="monospace">SOG 30min</text>
-            <text x="140" y="10" fill="#00FF88" fontSize="8" fontFamily="monospace">{livePos.sog.toFixed(1)}kn</text>
-          </svg>
-        </div>
-      )}
-
-      {/* COMPASS ROSE - top center, visible in course-up/head-up mode */}
-      {displayMode!=='north'&&mapReady&&(
-        <div style={{position:'absolute',top:56,left:'50%',transform:'translateX(-50%)',zIndex:502,pointerEvents:'none'}}>
-          <svg width="44" height="44" viewBox="0 0 44 44">
-            <circle cx="22" cy="22" r="20" fill="rgba(2,8,16,0.8)" stroke="rgba(0,212,255,0.4)" strokeWidth="1"/>
-            {(()=>{
-              const bearing=displayMode==='course'?(livePos?.cog||0):(livePos?.heading||livePos?.cog||0);
-              const rot=-bearing;
-              return(
-                <g transform={`rotate(${rot} 22 22)`}>
-                  <polygon points="22,4 24.5,20 22,18 19.5,20" fill="#FF4757"/>
-                  <polygon points="22,40 24.5,24 22,26 19.5,24" fill="#aaa"/>
-                  <text x="22" y="13" textAnchor="middle" fill="#FF4757" fontSize="7" fontWeight="700" fontFamily="monospace">N</text>
-                </g>
-              );
-            })()}
-          </svg>
-        </div>
-      )}
-
       {panelCollapsed?(
         <button onClick={()=>setPanelCollapsed(false)} style={{position:'absolute',top:'50%',right:0,transform:'translateY(-50%)',background:'rgba(4,12,26,0.95)',border:`1px solid ${S.bd}`,color:S.cy,borderRadius:'8px 0 0 8px',padding:'12px 6px',fontSize:'0.7rem',cursor:'pointer',zIndex:500,writingMode:'vertical-rl'}}>◀ PANEL</button>
       ):(
         <div style={{position:'absolute',top:56,right:8,background:S.bg,border:`1px solid ${S.bd}`,borderRadius:10,padding:'8px 10px',zIndex:500,width:172,backdropFilter:'blur(10px)',maxHeight:'82vh',display:'flex',flexDirection:'column',boxShadow:'0 4px 20px rgba(0,0,0,0.5)'}}>
-          <div style={{display:'flex',alignItems:'center',marginBottom:8,gap:3,overflowX:'auto',overflowY:'hidden',scrollbarWidth:'none',WebkitOverflowScrolling:'touch',flexShrink:0,paddingBottom:2}}>
+          <div style={{display:'flex',alignItems:'center',marginBottom:8,gap:4,flexWrap:'wrap'}}>
             {[['route','ROUTE'],['rb','R/B'],['charts','CHARTS'],['enc','ENC'],['zones','🌐'],['ais_src','📡'],['eta','ETA'],['db','🗄'],['anchor','⚓'],['wx','🌤'],['tools','🔧']].map(([p,l])=>(<button key={p} onClick={()=>setActivePanel(p)} style={{flex:1,minWidth:42,background:activePanel===p?'rgba(0,212,255,0.18)':'transparent',border:`1px solid ${activePanel===p?S.cy:S.vd}`,color:activePanel===p?S.cy:S.dm,borderRadius:5,padding:'3px 2px',fontSize:'0.58rem',cursor:'pointer'}}>{l}</button>))}
             <button onClick={()=>setPanelCollapsed(true)} style={{background:'transparent',border:`1px solid ${S.vd}`,color:S.dm,borderRadius:5,padding:'3px 5px',fontSize:'0.65rem',cursor:'pointer'}}>▶</button>
           </div>
@@ -803,7 +758,7 @@ ${cp?.cpa<1.5?'<br/><b style="color:#FF3030">⚠ COLLISION RISK</b>':''}
             <div style={{color:S.vd,fontSize:'0.55rem'}}>RTZ·GPX·RTE·CSV·JSON…</div>
             {activeRoute?.waypoints?.length>0&&(<div style={{borderTop:'1px solid rgba(0,212,255,0.15)',paddingTop:6}}>
               <div style={{color:S.cy,fontSize:S.sm,fontWeight:600,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',marginBottom:2}}>{activeRoute.name}</div>
-              <div style={{color:S.dm,fontSize:S.xs,marginBottom:4}}>{activeRoute.waypoints.length} WPs · XTD ±{xtdNM}NM{(()=>{const wps=activeRoute.waypoints;let d=0;for(let i=1;i<wps.length;i++) d+=distNM(wps[i-1].lat,wps[i-1].lon,wps[i].lat,wps[i].lon);return d>0?` · ${d.toFixed(1)}NM total`:'';})()}</div>
+              <div style={{color:S.dm,fontSize:S.xs,marginBottom:4}}>{activeRoute.waypoints.length} WPs · XTD ±{xtdNM}NM</div>
               <button onClick={saveRoute} style={{width:'100%',background:'transparent',border:'1px solid rgba(0,212,255,0.4)',color:S.cy,borderRadius:5,padding:'5px',fontSize:S.xs,cursor:'pointer',marginBottom:4}}>💾 Save to My Routes</button>
               <div style={{color:S.dm,fontSize:S.lb,marginBottom:3}}>ETA TO WAYPOINT</div>
               <select value={selectedWpIdx} onChange={e=>setSelectedWpIdx(Number(e.target.value))} style={{width:'100%',background:'#060F1C',color:S.cy,border:`1px solid ${S.vd}`,borderRadius:5,padding:'5px',fontSize:S.xs,marginBottom:4}}>
@@ -876,35 +831,14 @@ ${cp?.cpa<1.5?'<br/><b style="color:#FF3030">⚠ COLLISION RISK</b>':''}
           {activePanel==='eta'&&(<div style={{display:'flex',flexDirection:'column',gap:6}}>
             {activeRoute?.waypoints?.length>0?(
               <>
-                {/* Planned speed when not moving */}
-                <div style={{borderBottom:'1px solid rgba(0,212,255,0.1)',paddingBottom:6}}>
-                  <div style={{color:S.dm,fontSize:S.lb,marginBottom:3}}>PLANNED SPEED (when stopped)</div>
-                  <div style={{display:'flex',gap:3,flexWrap:'wrap'}}>{[[0,'GPS'],[5,'5kn'],[8,'8kn'],[10,'10kn'],[12,'12kn'],[15,'15kn'],[18,'18kn']].map(([v,l])=>(<button key={v} onClick={()=>{setPlannedSpeedKn(v);localStorage.setItem('nav_plannedSpeed',v);}} style={{background:plannedSpeedKn===v?'rgba(0,212,255,0.2)':'transparent',border:`1px solid ${plannedSpeedKn===v?S.cy:S.vd}`,color:plannedSpeedKn===v?S.cy:S.dm,borderRadius:4,padding:'2px 5px',fontSize:'0.58rem',cursor:'pointer'}}>{l}</button>))}</div>
-                </div>
                 {etaResult&&(<div style={{background:'#020810',borderRadius:6,padding:'8px',border:'1px solid rgba(0,255,136,0.2)',marginBottom:4}}>
                   <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'4px 8px',marginBottom:4}}>
                     <div><div style={{color:S.dm,fontSize:S.lb}}>TOTAL DIST</div><div style={{color:S.gd,fontFamily:'monospace',fontSize:'0.85rem',fontWeight:700}}>{etaResult.totalNM} NM</div></div>
                     <div><div style={{color:S.dm,fontSize:S.lb}}>REMAINING</div><div style={{color:S.gn,fontFamily:'monospace',fontSize:'0.85rem',fontWeight:700}}>{etaResult.remainNM} NM</div></div>
                     <div><div style={{color:S.dm,fontSize:S.lb}}>ETA</div><div style={{color:S.gn,fontFamily:'monospace',fontSize:'0.85rem',fontWeight:700}}>{etaResult.hrs}h {etaResult.mins}m</div></div>
-                    <div><div style={{color:S.dm,fontSize:S.lb}}>SPEED</div><div style={{color:etaResult.usingPlanned?S.gd:S.gn,fontFamily:'monospace',fontSize:'0.85rem',fontWeight:700}}>{etaResult.usingPlanned?`${plannedSpeedKn}kn*`:`${livePos?.sog?.toFixed(1)||'-'}kn`}</div></div>
+                    <div><div style={{color:S.dm,fontSize:S.lb}}>TO WP</div><div style={{color:S.cy,fontFamily:'monospace',fontSize:'0.72rem',fontWeight:700,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{etaResult.wpName}</div></div>
                   </div>
                   {etaResult.arrivalStr&&<div style={{color:S.gd,fontFamily:'monospace',fontSize:'0.62rem',borderTop:'1px solid rgba(255,215,0,0.15)',paddingTop:4}}>🕐 {etaResult.arrivalStr}</div>}
-                  {etaResult.usingPlanned&&<div style={{color:S.gd,fontSize:'0.52rem',marginTop:2}}>* Using planned speed — GPS SOG too low</div>}
-                </div>)}
-                {/* WP ETA list */}
-                {etaResult?.wpEtaList?.length>0&&(<div style={{borderTop:'1px solid rgba(0,212,255,0.1)',paddingTop:5}}>
-                  <div style={{color:S.dm,fontSize:S.lb,marginBottom:4}}>WAYPOINT ETA LIST</div>
-                  <div style={{maxHeight:120,overflowY:'auto',display:'flex',flexDirection:'column',gap:2}}>
-                    {etaResult.wpEtaList.map((wp,i)=>(
-                      <div key={i} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'3px 6px',background:i%2===0?'rgba(0,212,255,0.04)':'transparent',borderRadius:4}}>
-                        <div style={{color:S.tx,fontSize:'0.62rem',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',maxWidth:90}}>{wp.name}</div>
-                        <div style={{display:'flex',gap:8,flexShrink:0}}>
-                          <div style={{color:S.dm,fontSize:'0.58rem'}}>{wp.distNM}NM</div>
-                          <div style={{color:S.gd,fontFamily:'monospace',fontSize:'0.62rem',fontWeight:700}}>{wp.arrTime}</div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
                 </div>)}
                 <ETACalculator totalNM={etaResult?.totalNM?parseFloat(etaResult.totalNM):activeRoute?.waypoints?.length>1?activeRoute.waypoints.reduce((s,w,i,a)=>i>0?s+distNM(a[i-1].lat,a[i-1].lon,w.lat,w.lon):s,0):0}/>
               </>
@@ -937,11 +871,6 @@ ${cp?.cpa<1.5?'<br/><b style="color:#FF3030">⚠ COLLISION RISK</b>':''}
             </div>}
             <div style={{borderTop:'1px solid rgba(0,212,255,0.1)',paddingTop:6}}><div style={{color:S.dm,fontSize:S.xs,marginBottom:3}}>⚡ SPEED ALARM</div><div style={{display:'flex',gap:3,flexWrap:'wrap'}}>{[[0,'Off'],[5,'5kn'],[8,'8kn'],[10,'10kn'],[12,'12kn'],[15,'15kn']].map(([v,l])=>(<button key={v} onClick={()=>{setSpeedAlarmKn(v);setSpeedAlarmTriggered(false);}} style={{background:speedAlarmKn===v?'rgba(255,107,53,0.2)':'transparent',border:`1px solid ${speedAlarmKn===v?'#FF6B35':S.vd}`,color:speedAlarmKn===v?'#FF6B35':S.dm,borderRadius:5,padding:'3px 5px',fontSize:S.xs,cursor:'pointer'}}>{l}</button>))}</div>{speedAlarmTriggered&&<div style={{color:S.rd,fontSize:S.xs,fontWeight:700,marginTop:3}}>⚠ SPEED EXCEEDED</div>}</div>
             <div style={{borderTop:'1px solid rgba(0,212,255,0.1)',paddingTop:6}}><div style={{color:S.dm,fontSize:S.xs,marginBottom:3}}>📍 WP ARRIVAL ALERT</div><div style={{display:'flex',gap:3,flexWrap:'wrap'}}>{[[0.1,'0.1'],[0.2,'0.2'],[0.3,'0.3'],[0.5,'0.5'],[1.0,'1.0']].map(([v,l])=>(<button key={v} onClick={()=>setWpArrivalNM(v)} style={{background:wpArrivalNM===v?'rgba(0,200,150,0.2)':'transparent',border:`1px solid ${wpArrivalNM===v?S.gn:S.vd}`,color:wpArrivalNM===v?S.gn:S.dm,borderRadius:5,padding:'3px 5px',fontSize:S.xs,cursor:'pointer'}}>{l}NM</button>))}</div></div>
-            <div style={{borderTop:'1px solid rgba(0,212,255,0.1)',paddingTop:6}}>
-              <div style={{color:S.dm,fontSize:S.xs,marginBottom:3}}>🛡 GUARD ZONE {guardZoneAlarm&&<span style={{color:S.rd}}>⚠ BREACH</span>}</div>
-              <div style={{display:'flex',gap:3,flexWrap:'wrap'}}>{[[0,'Off'],[0.5,'0.5'],[1,'1NM'],[2,'2NM'],[3,'3NM'],[5,'5NM']].map(([v,l])=>(<button key={v} onClick={()=>{setGuardZoneNM(v);localStorage.setItem('nav_guardZone',v);}} style={{background:guardZoneNM===v?'rgba(255,107,53,0.2)':'transparent',border:`1px solid ${guardZoneNM===v?'#FF6B35':S.vd}`,color:guardZoneNM===v?'#FF6B35':S.dm,borderRadius:5,padding:'3px 5px',fontSize:S.xs,cursor:'pointer'}}>{l}</button>))}</div>
-              {guardZoneNM>0&&<div style={{color:'#FF6B35',fontSize:'0.55rem',marginTop:3}}>Active: {guardZoneNM}NM ring — AIS targets trigger alarm on entry</div>}
-            </div>
           </div>)}
 
           {activePanel==='wx'&&(<div style={{display:'flex',flexDirection:'column',gap:7}}>
@@ -957,7 +886,7 @@ ${cp?.cpa<1.5?'<br/><b style="color:#FF3030">⚠ COLLISION RISK</b>':''}
             <div style={{borderBottom:'1px solid rgba(0,212,255,0.1)',paddingBottom:7}}><div style={{color:S.dm,fontSize:S.xs,marginBottom:4}}>📤 TRACK EXPORT</div><button onClick={exportTrack} style={{width:'100%',background:'rgba(0,200,150,0.1)',border:`1px solid ${S.gn}`,color:S.gn,borderRadius:7,padding:'8px',fontSize:S.xs,cursor:'pointer',fontWeight:600}}>⬇ Export GPX File</button><div style={{color:S.vd,fontSize:'0.55rem',marginTop:3}}>Exports your past track as GPX</div></div>
             <div style={{borderBottom:'1px solid rgba(0,212,255,0.1)',paddingBottom:7}}><div style={{color:S.dm,fontSize:S.xs,marginBottom:4}}>📡 AIS TARGETS ({Object.keys(aisTargets).length})</div><div style={{maxHeight:120,overflowY:'auto',display:'flex',flexDirection:'column',gap:2}}>{Object.values(aisTargets).sort((a,b)=>{if(!livePos) return 0;return distNM(livePos.lat,livePos.lon,a.lat,a.lon)-distNM(livePos.lat,livePos.lon,b.lat,b.lon);}).slice(0,20).map((v,i)=>{const dist=livePos?distNM(livePos.lat,livePos.lon,v.lat,v.lon):null;const bg=dist&&dist<1?'rgba(255,32,32,0.15)':dist&&dist<3?'rgba(255,150,0,0.1)':'transparent';return(<div key={v.mmsi} style={{background:bg,border:`1px solid ${S.vd}`,borderRadius:5,padding:'4px 6px',cursor:'pointer'}} onClick={()=>{if(leafRef.current) leafRef.current.setView([v.lat,v.lon],12);}}><div style={{color:S.cy,fontSize:'0.65rem',fontWeight:700,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{v.name||`MMSI ${v.mmsi}`}</div><div style={{color:S.dm,fontSize:'0.58rem',fontFamily:'monospace'}}>{dist?dist.toFixed(1)+'NM · ':''}{v.sog?.toFixed(1)}kn {v.cog?.toFixed(0)}°</div></div>);})} {Object.keys(aisTargets).length===0&&<div style={{color:S.vd,fontSize:S.xs,fontStyle:'italic'}}>No AIS targets</div>}</div></div>
             {activeRoute?.waypoints?.length>0&&(<div style={{borderBottom:'1px solid rgba(0,212,255,0.1)',paddingBottom:7}}><div style={{color:S.dm,fontSize:S.xs,marginBottom:4}}>📝 WAYPOINT NOTES</div><select value={editingWpNote??0} onChange={e=>setEditingWpNote(Number(e.target.value))} style={{width:'100%',background:'#060F1C',color:S.cy,border:`1px solid ${S.vd}`,borderRadius:5,padding:'4px',fontSize:S.xs,marginBottom:4}}>{activeRoute.waypoints.map((wp,i)=><option key={i} value={i}>WP{String(i+1).padStart(2,'0')} {wp.name||''}</option>)}</select><textarea value={wpNotes[editingWpNote??0]||''} onChange={e=>setWpNotes(prev=>({...prev,[editingWpNote??0]:e.target.value}))} placeholder="Add note for this waypoint..." rows={3} style={{width:'100%',boxSizing:'border-box',background:'#060F1C',color:S.tx,border:`1px solid ${S.vd}`,borderRadius:5,padding:'5px 7px',fontSize:S.xs,outline:'none',resize:'none',lineHeight:1.5}}/></div>)}
-            <button onClick={()=>setNightLevel(v=>(v+1)%3)} style={{background:nightLevel>0?'rgba(255,0,0,0.15)':'transparent',border:`1px solid ${nightLevel>0?'#FF2020':S.vd}`,color:nightLevel>0?'#FF2020':S.dm,borderRadius:7,padding:'8px',fontSize:S.xs,cursor:'pointer',fontWeight:700}}>🔴 Night Vision: {['OFF','DIM','RED'][nightLevel]}</button>
+            <button onClick={()=>setNightVision(v=>!v)} style={{background:nightVision?'rgba(255,0,0,0.15)':'transparent',border:`1px solid ${nightVision?'#FF2020':S.vd}`,color:nightVision?'#FF2020':S.dm,borderRadius:7,padding:'8px',fontSize:S.xs,cursor:'pointer',fontWeight:700}}>🔴 Night Vision: {nightVision?'ON':'OFF'}</button>
             <div style={{color:S.vd,fontSize:'0.58rem',borderTop:'1px solid rgba(0,212,255,0.08)',paddingTop:6,lineHeight:1.5}}>💡 Tap any AIS vessel on map to see CPA/TCPA popup.<br/>💡 Use R/B panel + tap map for range & bearing.<br/>💡 Route total distance shown in ETA panel.</div>
           </div>)}
 
