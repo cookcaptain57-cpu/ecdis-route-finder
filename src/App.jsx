@@ -34,6 +34,8 @@ import NoticesPage             from "./Pages/NoticesPage";
 import SeaTimeCalculatorPage   from "./Pages/SeaTimeCalculatorPage";
 // ── ADDITION 1: CompassErrorPage import ──────────────────────────────────────
 import CompassErrorPage        from "./Pages/CompassErrorPage";
+// ── ADDITION: CrewWelfarePage import ─────────────────────────────────────────
+import CrewWelfarePage         from "./Pages/CrewWelfarePage";
 
 const S = `
   @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700;900&family=Exo+2:wght@300;400;500;600&display=swap');
@@ -573,6 +575,8 @@ export default function App() {
     { k: 'notices', i: '📢', l: 'Port Notices' },
     // ── ADDITION 2: Compass Error tab entry ──────────────────────────────────
     { k: 'compass', i: '🧭', l: 'Compass Error' },
+    // ── ADDITION: Crew Welfare tab entry ─────────────────────────────────────
+    { k: 'welfare', i: '⚓', l: 'Crew Welfare' },
     { k: 'library', i: '📖', l: 'Maritime Library' },
     ...(user ? [{ k: 'account', i: '👤', l: 'My Account' }] : []),
     ...(isAdmin ? [{ k: 'admin', i: '🛡', l: 'Admin' }] : []),
@@ -819,6 +823,8 @@ export default function App() {
           {tab === 'navmode' && <NavModePage notify={notify} sheetRoutes={[...routes, ...sheetRoutes]} portsDb={portsDb} setTab={switchTab} />}
           {/* ── ADDITION 4: Compass Error page render ─────────────────────── */}
           {tab === 'compass' && <CompassErrorPage user={user} />}
+          {/* ── ADDITION: Crew Welfare page render ──────────────────────────── */}
+          {tab === 'welfare' && <CrewWelfarePage />}
           {tab === 'login'   && <LoginPage notify={notify} onLogin={(u, redirectTo, isNew, userName, userRank) => {
             setUser(u);
             setTab(redirectTo || 'home');
