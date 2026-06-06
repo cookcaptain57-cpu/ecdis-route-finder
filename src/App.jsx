@@ -33,6 +33,8 @@ import CertificateTrackerPage  from "./Pages/CertificateTrackerPage";
 import NoticesPage             from "./Pages/NoticesPage";
 import SeaTimeCalculatorPage   from "./Pages/SeaTimeCalculatorPage";
 import CompassErrorPage        from "./Pages/CompassErrorPage";
+// ── CHANGE 1: Added EmergencyPage import ──
+import EmergencyPage           from "./Pages/EmergencyPage";
 
 const S = `
   @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700;900&family=Exo+2:wght@300;400;500;600&display=swap');
@@ -95,6 +97,7 @@ const S = `
   .si-btn.active{background:rgba(0,180,216,0.1);color:var(--cyan);}
   .si-btn.gold.active{background:rgba(240,165,0,0.1);color:var(--gold);}
   .si-btn.green.active{background:rgba(0,200,150,0.1);color:var(--green);}
+  .si-btn.red.active{background:rgba(255,71,87,0.12);color:var(--red);}
   .si-icon{font-size:1.05rem;width:22px;text-align:center;flex-shrink:0;}
 
   /* ── Mobile menu 2-per-row ── */
@@ -442,21 +445,22 @@ export default function App() {
     localStorage.setItem('notif_read', JSON.stringify([...allIds]));
   };
 
-  // ── TABS: updated icons, Route Planner = 📐, Routes = 🚢, Charts = 📡 ──
+  // ── CHANGE 2: Added emergency tab to TABS array ──
   const TABS = [
-    { k:'home',    i:'🏠', l:'Dashboard' },
-    { k:'routes',  i:'🚢', l:'Routes' },
-    { k:'charts',  i:'📡', l:'ECDIS Charts',  cls:'gold' },
-    { k:'planner', i:'📐', l:'Route Planner', cls:'green' },
-    { k:'navmode', i:'🧭', l:'Nav Mode',      cls:'green' },
-    { k:'ports',   i:'⚓', l:'Ports Database' },
-    { k:'vessel',  i:'🛳', l:'Vessel Search' },
-    { k:'voyage',  i:'🧮', l:'Voyage Calc' },
-    { k:'certs',   i:'📜', l:'Certificates' },
-    { k:'seatime', i:'⏱', l:'Sea Time' },
-    { k:'notices', i:'📢', l:'Port Notices' },
-    { k:'compass', i:'🔭', l:'Compass Error' },
-    { k:'library', i:'📚', l:'Library' },
+    { k:'home',      i:'🏠', l:'Dashboard' },
+    { k:'routes',    i:'🚢', l:'Routes' },
+    { k:'charts',    i:'📡', l:'ECDIS Charts',  cls:'gold' },
+    { k:'planner',   i:'📐', l:'Route Planner', cls:'green' },
+    { k:'navmode',   i:'🧭', l:'Nav Mode',      cls:'green' },
+    { k:'ports',     i:'⚓', l:'Ports Database' },
+    { k:'vessel',    i:'🛳', l:'Vessel Search' },
+    { k:'voyage',    i:'🧮', l:'Voyage Calc' },
+    { k:'certs',     i:'📜', l:'Certificates' },
+    { k:'seatime',   i:'⏱', l:'Sea Time' },
+    { k:'notices',   i:'📢', l:'Port Notices' },
+    { k:'compass',   i:'🔭', l:'Compass Error' },
+    { k:'library',   i:'📚', l:'Library' },
+    { k:'emergency', i:'🚨', l:'Emergency',     cls:'red' },
     ...(user ? [{ k:'account', i:'👤', l:'My Account' }] : []),
     ...(isAdmin ? [{ k:'admin', i:'🛡', l:'Admin' }] : []),
   ];
@@ -709,21 +713,23 @@ export default function App() {
             )}
 
             {/* Pages */}
-            {tab==='home'    && <HomePage routes={routes} charts={charts} onSearch={handleSearch} setTab={switchTab} user={user} portsDb={portsDb} userProfile={userProfile} />}
-            {tab==='routes'  && <RoutesPage searchQuery={searchQ} notify={notify} user={user} setTab={switchTab} sheetRoutes={sheetRoutes} sheetLoading={routesLoading} />}
-            {tab==='charts'  && <ChartsPage notify={notify} user={user} setTab={switchTab} isAdmin={isAdmin} sheetCharts={sheetCharts} sheetLoading={chartsLoading} />}
-            {tab==='planner' && <RoutePlannerPage notify={notify} sheetRoutes={[...routes,...sheetRoutes]} portsDb={portsDb} />}
-            {tab==='ports'   && <PortSearchPage portsDb={portsDb} sheetLoading={portsLoading} refreshSheets={refreshPorts} />}
-            {tab==='vessel'  && <VesselSearchPage />}
-            {tab==='voyage'  && <VoyageCalculatorPage portsDb={portsDb} />}
-            {tab==='certs'   && <CertificateTrackerPage user={user} notify={notify} />}
-            {tab==='seatime' && <SeaTimeCalculatorPage  user={user} notify={notify} />}
-            {tab==='notices' && <NoticesPage notify={notify} />}
-            {tab==='compass' && <CompassErrorPage />}
-            {tab==='account' && user && <AccountPage user={user} userProfile={userProfile} setUserProfile={setUserProfile} notify={notify} setTab={switchTab} />}
-            {tab==='library' && <MaritimeLibraryPage setTab={switchTab} />}
-            {tab==='navmode' && <NavModePage notify={notify} sheetRoutes={[...routes,...sheetRoutes]} portsDb={portsDb} setTab={switchTab} />}
-            {tab==='login'   && <LoginPage notify={notify} onLogin={(u, redirectTo, isNew, userName, userRank) => {
+            {tab==='home'      && <HomePage routes={routes} charts={charts} onSearch={handleSearch} setTab={switchTab} user={user} portsDb={portsDb} userProfile={userProfile} />}
+            {tab==='routes'    && <RoutesPage searchQuery={searchQ} notify={notify} user={user} setTab={switchTab} sheetRoutes={sheetRoutes} sheetLoading={routesLoading} />}
+            {tab==='charts'    && <ChartsPage notify={notify} user={user} setTab={switchTab} isAdmin={isAdmin} sheetCharts={sheetCharts} sheetLoading={chartsLoading} />}
+            {tab==='planner'   && <RoutePlannerPage notify={notify} sheetRoutes={[...routes,...sheetRoutes]} portsDb={portsDb} />}
+            {tab==='ports'     && <PortSearchPage portsDb={portsDb} sheetLoading={portsLoading} refreshSheets={refreshPorts} />}
+            {tab==='vessel'    && <VesselSearchPage />}
+            {tab==='voyage'    && <VoyageCalculatorPage portsDb={portsDb} />}
+            {tab==='certs'     && <CertificateTrackerPage user={user} notify={notify} />}
+            {tab==='seatime'   && <SeaTimeCalculatorPage  user={user} notify={notify} />}
+            {tab==='notices'   && <NoticesPage notify={notify} />}
+            {tab==='compass'   && <CompassErrorPage />}
+            {tab==='account'   && user && <AccountPage user={user} userProfile={userProfile} setUserProfile={setUserProfile} notify={notify} setTab={switchTab} />}
+            {tab==='library'   && <MaritimeLibraryPage setTab={switchTab} />}
+            {tab==='navmode'   && <NavModePage notify={notify} sheetRoutes={[...routes,...sheetRoutes]} portsDb={portsDb} setTab={switchTab} />}
+            {/* ── CHANGE 3: Added EmergencyPage render ── */}
+            {tab==='emergency' && <EmergencyPage />}
+            {tab==='login'     && <LoginPage notify={notify} onLogin={(u, redirectTo, isNew, userName, userRank) => {
               setUser(u); setTab(redirectTo || 'home');
               if (!sessionStorage.getItem('welcome_shown')) {
                 sessionStorage.setItem('welcome_shown', '1');
