@@ -600,7 +600,7 @@ export default function App() {
     }
   };
 
-  const isPlannerFull = tab === 'planner' || tab === 'navmode';
+  const isPlannerFull = tab === 'planner' || tab === 'navmode' || tab === 'welfare';
 
   return (
     <>
@@ -869,7 +869,7 @@ export default function App() {
           )}
         </div>
 
-        {tab !== 'planner' && <Footer />}
+        {tab !== 'planner' && tab !== 'welfare' && <Footer />}
         {notif && <Notif key={notif.key} msg={notif.msg} type={notif.type} onClose={() => setNotif(null)} />}
 
         {welcomePopup && (
