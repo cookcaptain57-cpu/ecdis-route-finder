@@ -195,37 +195,7 @@ export default function HomePage({ routes, charts, onSearch, setTab, user, ports
               {user && <span style={{ color:'var(--cyan)' }}> Welcome{userProfile?.rank ? `, ${userProfile.rank} ` : ', '}{userProfile?.name?.split(' ')[0] || user.email.split('@')[0]}!</span>}
             </p>
 
-            {/* CTA buttons */}
-            <div style={{ display:'flex', gap:10, flexWrap:'wrap', marginBottom:'1.2rem' }}>
-              <button onClick={() => setTab('routes')} style={{ display:'flex', alignItems:'center', gap:8,
-                padding:'11px 18px', background:'rgba(0,180,216,0.12)', border:'1px solid rgba(0,180,216,0.4)',
-                borderRadius:10, cursor:'pointer', color:'var(--text)', fontFamily:'Exo 2,sans-serif',
-                fontSize:'0.82rem', fontWeight:600, transition:'all 0.2s' }}
-                onMouseEnter={e=>e.currentTarget.style.background='rgba(0,180,216,0.22)'}
-                onMouseLeave={e=>e.currentTarget.style.background='rgba(0,180,216,0.12)'}>
-                <span style={{ fontSize:'1.1rem' }}>🔍</span>
-                <div style={{ textAlign:'left' }}>
-                  <div>Search Routes / Ports</div>
-                  <div style={{ fontSize:'0.66rem', color:'var(--text3)' }}>Search anything…</div>
-                </div>
-                <span style={{ color:'var(--cyan)', marginLeft:4 }}>→</span>
-              </button>
-              <button onClick={() => setTab('planner')} style={{ display:'flex', alignItems:'center', gap:8,
-                padding:'11px 18px', background:'rgba(0,200,150,0.12)', border:'1px solid rgba(0,200,150,0.4)',
-                borderRadius:10, cursor:'pointer', color:'var(--text)', fontFamily:'Exo 2,sans-serif',
-                fontSize:'0.82rem', fontWeight:600, transition:'all 0.2s' }}
-                onMouseEnter={e=>e.currentTarget.style.background='rgba(0,200,150,0.22)'}
-                onMouseLeave={e=>e.currentTarget.style.background='rgba(0,200,150,0.12)'}>
-                <span style={{ fontSize:'1.1rem' }}>📐</span>
-                <div style={{ textAlign:'left' }}>
-                  <div>Open Route Planner</div>
-                  <div style={{ fontSize:'0.66rem', color:'var(--text3)' }}>Plan your voyage</div>
-                </div>
-                <span style={{ color:'var(--green)', marginLeft:4 }}>→</span>
-              </button>
-            </div>
-
-            {/* Unified search */}
+            {/* ── Single unified search bar (CTA buttons removed) ── */}
             <div ref={wRef} style={{ position:'relative', maxWidth:500 }}>
               <div style={{ display:'flex', gap:8 }}>
                 <div className="siw" style={{ flex:1 }}>
@@ -233,7 +203,8 @@ export default function HomePage({ routes, charts, onSearch, setTab, user, ports
                   <input className="si" style={{ paddingLeft:40, fontSize:'0.86rem' }}
                     placeholder="Search routes, charts, ports… type anything"
                     value={q}
-                    onChange={e => { setQ(e.target.value); doSearch(e.target.value); }} />
+                    onChange={e => { setQ(e.target.value); doSearch(e.target.value); }}
+                    onKeyDown={e => e.key==='Enter' && q.trim() && onSearch(q)} />
                 </div>
                 <button className="btn btn-primary" style={{ padding:'0 16px', fontSize:'0.8rem', flexShrink:0 }}
                   onClick={() => { if (q.trim()) onSearch(q); }}>Search</button>
@@ -315,8 +286,8 @@ export default function HomePage({ routes, charts, onSearch, setTab, user, ports
           <div style={{ fontFamily:'Orbitron,monospace', fontSize:'0.78rem', fontWeight:700, letterSpacing:'0.06em' }}>Explore NavisphereX Marine</div>
         </div>
 
-        {/* Feature cards — 3 per row desktop, 2 mobile */}
-        <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(200px,1fr))', gap:'0.8rem', marginBottom:'1.4rem' }}>
+        {/* ── Feature cards: 2-per-row mobile, 3-per-row desktop ── */}
+        <div className="hp-features-grid" style={{ marginBottom:'1.4rem' }}>
           {FEATURES.map((f,i) => (
             <div key={i} onClick={()=>setTab(f.tab)}
               style={{ background:'var(--card)', border:'1px solid var(--border)', borderRadius:16,
@@ -324,13 +295,11 @@ export default function HomePage({ routes, charts, onSearch, setTab, user, ports
                 overflow:'hidden', display:'flex', flexDirection:'column', gap:10 }}
               onMouseEnter={e=>{e.currentTarget.style.borderColor=f.color+'55';e.currentTarget.style.transform='translateY(-3px)';e.currentTarget.style.boxShadow=`0 12px 32px rgba(0,0,0,0.5),0 0 20px ${f.color}18`;}}
               onMouseLeave={e=>{e.currentTarget.style.borderColor='var(--border)';e.currentTarget.style.transform='translateY(0)';e.currentTarget.style.boxShadow='none';}}>
-              {/* Background glow */}
               <div style={{ position:'absolute', top:0, left:0, right:0, height:2, background:f.bg, opacity:0.6 }} />
               {f.badge && (
                 <span style={{ position:'absolute', top:10, right:10, padding:'2px 7px', borderRadius:6, fontSize:'0.56rem',
                   fontWeight:700, background:'rgba(0,200,100,0.15)', color:'var(--green)', border:'1px solid rgba(0,200,100,0.3)' }}>{f.badge}</span>
               )}
-              {/* Icon container */}
               <div style={{ width:52, height:52, borderRadius:14, background:f.bg, display:'flex',
                 alignItems:'center', justifyContent:'center', fontSize:'1.7rem',
                 boxShadow:`0 6px 20px ${f.color}40` }}>
@@ -357,9 +326,7 @@ export default function HomePage({ routes, charts, onSearch, setTab, user, ports
             onMouseEnter={e=>{e.currentTarget.style.borderColor='rgba(0,180,216,0.4)';e.currentTarget.style.boxShadow='0 8px 28px rgba(0,0,0,0.4)';}}
             onMouseLeave={e=>{e.currentTarget.style.borderColor='rgba(0,180,216,0.2)';e.currentTarget.style.boxShadow='none';}}>
             <div style={{ width:50, height:50, borderRadius:'50%', background:'linear-gradient(135deg,var(--cyan),var(--blue))',
-              display:'flex', alignItems:'center', justifyContent:'center', fontSize:'1.5rem', flexShrink:0 }}>
-              👤
-            </div>
+              display:'flex', alignItems:'center', justifyContent:'center', fontSize:'1.5rem', flexShrink:0 }}>👤</div>
             <div style={{ flex:1 }}>
               <div style={{ fontFamily:'Orbitron,monospace', fontSize:'0.82rem', fontWeight:700, color:'var(--cyan)', marginBottom:2 }}>MY ACCOUNT</div>
               <div style={{ fontSize:'0.74rem', color:'var(--text2)' }}>
@@ -444,7 +411,7 @@ export default function HomePage({ routes, charts, onSearch, setTab, user, ports
                   onChange={e=>setWeatherQ(e.target.value)} />
               </div>
               {weatherSugg.length > 0 && (
-                <div style={{ position:'absolute', top:'calc(100%+4px)', left:0, right:0, zIndex:200,
+                <div style={{ position:'absolute', top:'calc(100% + 4px)', left:0, right:0, zIndex:200,
                   background:'var(--card)', border:'1px solid var(--border)', borderRadius:8,
                   boxShadow:'0 8px 24px rgba(0,0,0,0.5)', overflow:'hidden', maxHeight:150, overflowY:'auto' }}>
                   {weatherSugg.map((p,i)=>(
@@ -473,29 +440,23 @@ export default function HomePage({ routes, charts, onSearch, setTab, user, ports
           </div>
         </div>
 
-        {/* Bottom search */}
-        <div style={{ background:'var(--card)', border:'1px solid var(--border)', borderRadius:14, padding:'1rem', display:'flex', gap:8 }}>
-          <div className="siw" style={{ flex:1 }}>
-            <span className="si-ic">🔍</span>
-            <input className="si" style={{ paddingLeft:42 }}
-              placeholder="Search routes, ports, charts, books…"
-              value={q} onChange={e=>{ setQ(e.target.value); doSearch(e.target.value); }}
-              onKeyDown={e=>e.key==='Enter'&&q.trim()&&onSearch(q)} />
-          </div>
-          <button className="btn btn-primary" style={{ padding:'0 18px', flexShrink:0 }} onClick={()=>q.trim()&&onSearch(q)}>Search</button>
-        </div>
+        {/* ── Bottom search and footer info REMOVED ── */}
 
-        {/* Footer info */}
-        <div style={{ textAlign:'center', marginTop:'1.4rem', paddingTop:'1rem', borderTop:'1px solid var(--border)',
-          fontSize:'0.64rem', color:'var(--text3)', lineHeight:1.8 }}>
-          <strong style={{ color:'var(--text2)' }}>NavisphereX Marine</strong> · Owner: Manish Bharti · © 2026
-          <br />Follow for maritime updates: <span style={{ color:'#e1306c' }}>@Manish_the_navigator</span>
-          {isOffline && <span style={{ color:'var(--green)', marginLeft:8 }}>· ✅ Available offline</span>}
-        </div>
       </div>
 
       <style>{`
         @keyframes float { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-10px)} }
+        /* 2-per-row on mobile, 3-per-row on desktop */
+        .hp-features-grid {
+          display: grid;
+          grid-template-columns: repeat(2, 1fr);
+          gap: 0.8rem;
+        }
+        @media(min-width: 640px) {
+          .hp-features-grid {
+            grid-template-columns: repeat(3, 1fr);
+          }
+        }
       `}</style>
     </div>
   );
