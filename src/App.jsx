@@ -33,8 +33,11 @@ import CertificateTrackerPage  from "./Pages/CertificateTrackerPage";
 import NoticesPage             from "./Pages/NoticesPage";
 import SeaTimeCalculatorPage   from "./Pages/SeaTimeCalculatorPage";
 import CompassErrorPage        from "./Pages/CompassErrorPage";
-// ── CHANGE 1: Added EmergencyPage import ──
 import EmergencyPage           from "./Pages/EmergencyPage";
+import KnotsRopesMooringPage   from "./Pages/KnotsRopesMooringPage";
+import NavigationBridgePage    from "./Pages/NavigationBridgePage";
+// ── ADDITION: CrewWelfarePage import ─────────────────────────────────────────
+import CrewWelfarePage         from "./Pages/CrewWelfarePage";
 
 const S = `
   @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700;900&family=Exo+2:wght@300;400;500;600&display=swap');
@@ -81,7 +84,6 @@ const S = `
   .burger{display:none;flex-direction:column;gap:4px;cursor:pointer;padding:8px;background:none;border:none;}
   .burger span{width:20px;height:2px;background:var(--text);border-radius:2px;}
 
-  /* Hide nav-row2 on mobile, show sidebar on desktop */
   @media(max-width:900px){.nav-row2{display:none;}.burger{display:flex;}.app-sidebar{display:none !important;}}
   @media(min-width:901px){.burger{display:none;}.nav-row2{display:none;}}
 
@@ -183,7 +185,6 @@ const S = `
   @keyframes spin{to{transform:rotate(360deg);}}
   @keyframes shimmer{0%{background-position:200% 0;}100%{background-position:-200% 0;}}
 
-  /* ── Light mode ── */
   [data-theme="light"]{--bg:#f0f5fa;--bg2:#e4ecf4;--card:#ffffff;--text:#0a1628;--text2:#3a4a6a;
     --text3:#6a7a9a;--border:rgba(0,0,0,0.1);--border2:rgba(0,0,0,0.18);--cyan:#0070cc;
     --blue:#0050aa;--green:#007a50;--gold:#b07000;--red:#cc2233;}
@@ -445,13 +446,12 @@ export default function App() {
     localStorage.setItem('notif_read', JSON.stringify([...allIds]));
   };
 
-  // ── CHANGE 2: Added emergency tab to TABS array ──
   const TABS = [
     { k:'home',      i:'🏠', l:'Dashboard' },
     { k:'routes',    i:'🚢', l:'Routes' },
-    { k:'charts',    i:'📡', l:'ECDIS Charts',  cls:'gold' },
-    { k:'planner',   i:'📐', l:'Route Planner', cls:'green' },
-    { k:'navmode',   i:'🧭', l:'Nav Mode',      cls:'green' },
+    { k:'charts',    i:'📡', l:'ECDIS Charts',   cls:'gold' },
+    { k:'planner',   i:'📐', l:'Route Planner',  cls:'green' },
+    { k:'navmode',   i:'🧭', l:'Nav Mode',       cls:'green' },
     { k:'ports',     i:'⚓', l:'Ports Database' },
     { k:'vessel',    i:'🛳', l:'Vessel Search' },
     { k:'voyage',    i:'🧮', l:'Voyage Calc' },
@@ -460,7 +460,11 @@ export default function App() {
     { k:'notices',   i:'📢', l:'Port Notices' },
     { k:'compass',   i:'🔭', l:'Compass Error' },
     { k:'library',   i:'📚', l:'Library' },
-    { k:'emergency', i:'🚨', l:'Emergency',     cls:'red' },
+    { k:'knots',     i:'🪢', l:'Knots & Mooring' },
+    { k:'emergency', i:'🚨', l:'Emergency',      cls:'red' },
+    { k:'navbridge', i:'🗺', l:'Nav & Bridge' },
+    // ── ADDITION: Crew Welfare tab ────────────────────────────────────────────
+    { k:'welfare',   i:'⚓', l:'Crew Welfare' },
     ...(user ? [{ k:'account', i:'👤', l:'My Account' }] : []),
     ...(isAdmin ? [{ k:'admin', i:'🛡', l:'Admin' }] : []),
   ];
@@ -481,13 +485,13 @@ export default function App() {
     }
   };
 
-  const isPlannerFull = tab === 'planner' || tab === 'navmode';
+  // ── welfare gets same full-height treatment as planner/navmode ────────────
+  const isPlannerFull = tab === 'planner' || tab === 'navmode' || tab === 'welfare';
 
   return (
     <>
       <style>{S}</style>
 
-      {/* Offline banner */}
       {!isOnline && (
         <div style={{ position:'fixed', bottom:72, left:'50%', transform:'translateX(-50%)', zIndex:9994,
           background:'rgba(4,12,26,0.97)', border:'1px solid rgba(240,165,0,0.4)', borderRadius:12,
@@ -501,7 +505,6 @@ export default function App() {
         </div>
       )}
 
-      {/* Splash screen */}
       {!authChecked && (
         <div style={{ position:'fixed', inset:0, background:'var(--bg)', zIndex:99999,
           display:'flex', alignItems:'center', justifyContent:'center',
@@ -523,7 +526,6 @@ export default function App() {
       <div className="grid-bg" />
       <div className="app">
 
-        {/* ── Top Nav: Row 1 = brand + controls ── */}
         <nav className="nav">
           <div className="nav-row1">
             <div className="nav-brand" onClick={() => switchTab('home')} style={{ cursor:'pointer' }}>
@@ -568,7 +570,6 @@ export default function App() {
           </div>
         </nav>
 
-        {/* ── Mobile menu: 2-per-row grid ── */}
         <div className={`mob-menu ${menuOpen ? 'open' : ''}`}>
           {TABS.map(t => (
             <button key={t.k} className={`mtab ${tab===t.k?'active':''}`} onClick={() => switchTab(t.k)}>
@@ -585,7 +586,6 @@ export default function App() {
           }
         </div>
 
-        {/* Blocked screen */}
         {isBlocked && (
           <div style={{ position:'fixed', inset:0, background:'var(--bg)', zIndex:9999, display:'flex', alignItems:'center', justifyContent:'center', padding:'1.5rem' }}>
             <div style={{ maxWidth:400, width:'100%', background:'var(--card)', border:'2px solid rgba(255,60,60,0.5)', borderRadius:16, padding:'2rem', textAlign:'center' }}>
@@ -602,10 +602,8 @@ export default function App() {
           </div>
         )}
 
-        {/* ── App body: sidebar + content ── */}
         <div className="app-body">
 
-          {/* Desktop sidebar */}
           <aside className="app-sidebar">
             <div style={{ padding:'4px 6px 8px', marginBottom:2 }}>
               <div style={{ fontSize:'0.52rem', color:'var(--text3)', textTransform:'uppercase', letterSpacing:'0.14em' }}>NAVIGATION</div>
@@ -623,7 +621,6 @@ export default function App() {
                 <span className="si-icon">🚪</span> Logout
               </button>
             )}
-            {/* Promo card */}
             <div style={{ marginTop:'auto', padding:'0.8rem 0.3rem 0' }}>
               <div style={{ background:'linear-gradient(135deg,#0F2444,#1A3A5C)', border:'1px solid var(--border)', borderRadius:12, padding:'0.9rem', textAlign:'center' }}>
                 <div style={{ fontSize:'1.4rem', marginBottom:4 }}>🧭</div>
@@ -634,10 +631,9 @@ export default function App() {
             </div>
           </aside>
 
-          {/* Main content area */}
-          <div className="app-content">
+          {/* ── app-content: overflow hidden when welfare/planner/navmode ── */}
+          <div className="app-content" style={{ overflow: isPlannerFull ? 'hidden' : 'auto' }}>
 
-            {/* Sync banner */}
             {syncBanner && (
               <div style={{ position:'sticky', top:0, left:0, right:0, height:3, zIndex:200, overflow:'hidden', flexShrink:0 }}>
                 {syncBanner==='syncing'
@@ -672,7 +668,6 @@ export default function App() {
               </div>
             )}
 
-            {/* Back button */}
             {tab!=='home' && prevTab && (
               <div style={{ padding:'8px 16px 0', flexShrink:0 }}>
                 <button className="btn btn-secondary" style={{ padding:'5px 12px', fontSize:'0.72rem', display:'flex', alignItems:'center', gap:6 }}
@@ -680,7 +675,6 @@ export default function App() {
               </div>
             )}
 
-            {/* Notification panel */}
             {showNotifPanel && (
               <div style={{ position:'fixed', top:0, right:0, width:310, maxWidth:'95vw',
                 height:'100vh', background:'var(--card)', border:'1px solid var(--border)',
@@ -712,7 +706,7 @@ export default function App() {
               </div>
             )}
 
-            {/* Pages */}
+            {/* ── Pages ── */}
             {tab==='home'      && <HomePage routes={routes} charts={charts} onSearch={handleSearch} setTab={switchTab} user={user} portsDb={portsDb} userProfile={userProfile} />}
             {tab==='routes'    && <RoutesPage searchQuery={searchQ} notify={notify} user={user} setTab={switchTab} sheetRoutes={sheetRoutes} sheetLoading={routesLoading} />}
             {tab==='charts'    && <ChartsPage notify={notify} user={user} setTab={switchTab} isAdmin={isAdmin} sheetCharts={sheetCharts} sheetLoading={chartsLoading} />}
@@ -727,8 +721,11 @@ export default function App() {
             {tab==='account'   && user && <AccountPage user={user} userProfile={userProfile} setUserProfile={setUserProfile} notify={notify} setTab={switchTab} />}
             {tab==='library'   && <MaritimeLibraryPage setTab={switchTab} />}
             {tab==='navmode'   && <NavModePage notify={notify} sheetRoutes={[...routes,...sheetRoutes]} portsDb={portsDb} setTab={switchTab} />}
-            {/* ── CHANGE 3: Added EmergencyPage render ── */}
             {tab==='emergency' && <EmergencyPage />}
+            {tab==='knots'     && <KnotsRopesMooringPage />}
+            {tab==='navbridge' && <NavigationBridgePage />}
+            {/* ── ADDITION: Crew Welfare page render ───────────────────────── */}
+            {tab==='welfare'   && <CrewWelfarePage />}
             {tab==='login'     && <LoginPage notify={notify} onLogin={(u, redirectTo, isNew, userName, userRank) => {
               setUser(u); setTab(redirectTo || 'home');
               if (!sessionStorage.getItem('welcome_shown')) {
@@ -745,6 +742,7 @@ export default function App() {
                   chartsSyncProgress={chartsSyncProgress} portsSyncProgress={portsSyncProgress} />
               : <div className="section"><div className="empty"><div className="empty-icon">🔒</div><div className="empty-t">Admin Access Only</div></div></div>
             )}
+
             {authChecked && !user && tab!=='home' && tab!=='login' && (
               <div style={{ display:'flex', flex:1, alignItems:'center', justifyContent:'center', padding:'2rem' }}>
                 <div style={{ maxWidth:380, width:'100%', background:'var(--card)', border:'1px solid var(--border2)', borderRadius:16, padding:'2rem', textAlign:'center' }}>
@@ -759,10 +757,11 @@ export default function App() {
               </div>
             )}
 
-            {tab!=='planner' && <Footer />}
+            {/* ── Footer hidden for full-screen pages ── */}
+            {!isPlannerFull && <Footer />}
 
-          </div>{/* end app-content */}
-        </div>{/* end app-body */}
+          </div>
+        </div>
 
         {notif && <Notif key={notif.key} msg={notif.msg} type={notif.type} onClose={() => setNotif(null)} />}
         {welcomePopup && <WelcomePopup type={welcomePopup.type} name={welcomePopup.name} rank={welcomePopup.rank} onClose={() => setWelcomePopup(null)} />}
