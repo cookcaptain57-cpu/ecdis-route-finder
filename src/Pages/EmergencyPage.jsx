@@ -365,7 +365,6 @@ const S = {
     whiteSpace: "nowrap",
     background: "none",
     border: "none",
-    borderBottom: active ? "2px solid #ef4444" : "2px solid transparent",
     fontFamily: "'IBM Plex Mono', monospace",
     transition: "color 0.2s",
   }),
