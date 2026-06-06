@@ -1,0 +1,1340 @@
+/* eslint-disable */
+import { useState, useEffect, useCallback } from "react";
+
+// ─── INTERNAL DATA ────────────────────────────────────────────────────────────
+
+const CURRENCIES = [
+  { code: "USD", name: "US Dollar", symbol: "$", flag: "🇺🇸" },
+  { code: "EUR", name: "Euro", symbol: "€", flag: "🇪🇺" },
+  { code: "GBP", name: "British Pound", symbol: "£", flag: "🇬🇧" },
+  { code: "PHP", name: "Philippine Peso", symbol: "₱", flag: "🇵🇭" },
+  { code: "INR", name: "Indian Rupee", symbol: "₹", flag: "🇮🇳" },
+  { code: "IDR", name: "Indonesian Rupiah", symbol: "Rp", flag: "🇮🇩" },
+  { code: "MYR", name: "Malaysian Ringgit", symbol: "RM", flag: "🇲🇾" },
+  { code: "SGD", name: "Singapore Dollar", symbol: "S$", flag: "🇸🇬" },
+  { code: "CNY", name: "Chinese Yuan", symbol: "¥", flag: "🇨🇳" },
+  { code: "JPY", name: "Japanese Yen", symbol: "¥", flag: "🇯🇵" },
+  { code: "KRW", name: "South Korean Won", symbol: "₩", flag: "🇰🇷" },
+  { code: "AUD", name: "Australian Dollar", symbol: "A$", flag: "🇦🇺" },
+  { code: "CAD", name: "Canadian Dollar", symbol: "C$", flag: "🇨🇦" },
+  { code: "AED", name: "UAE Dirham", symbol: "د.إ", flag: "🇦🇪" },
+  { code: "NGN", name: "Nigerian Naira", symbol: "₦", flag: "🇳🇬" },
+  { code: "GHS", name: "Ghanaian Cedi", symbol: "₵", flag: "🇬🇭" },
+  { code: "UAH", name: "Ukrainian Hryvnia", symbol: "₴", flag: "🇺🇦" },
+  { code: "RUB", name: "Russian Ruble", symbol: "₽", flag: "🇷🇺" },
+  { code: "BRL", name: "Brazilian Real", symbol: "R$", flag: "🇧🇷" },
+  { code: "MXN", name: "Mexican Peso", symbol: "$", flag: "🇲🇽" },
+  { code: "ZAR", name: "South African Rand", symbol: "R", flag: "🇿🇦" },
+  { code: "SEK", name: "Swedish Krona", symbol: "kr", flag: "🇸🇪" },
+  { code: "NOK", name: "Norwegian Krone", symbol: "kr", flag: "🇳🇴" },
+  { code: "DKK", name: "Danish Krone", symbol: "kr", flag: "🇩🇰" },
+  { code: "CHF", name: "Swiss Franc", symbol: "Fr", flag: "🇨🇭" },
+  { code: "HKD", name: "Hong Kong Dollar", symbol: "HK$", flag: "🇭🇰" },
+  { code: "TWD", name: "Taiwan Dollar", symbol: "NT$", flag: "🇹🇼" },
+  { code: "PLN", name: "Polish Zloty", symbol: "zł", flag: "🇵🇱" },
+  { code: "HRK", name: "Croatian Kuna", symbol: "kn", flag: "🇭🇷" },
+  { code: "TRY", name: "Turkish Lira", symbol: "₺", flag: "🇹🇷" },
+];
+
+const ISWAN_CONTACTS = [
+  {
+    org: "ISWAN (International Seafarers' Welfare and Assistance Network)",
+    service: "SeafarerHelp Hotline",
+    phone: "+44 20 7323 2737",
+    email: "help@seafarerhelp.org",
+    website: "www.seafarerhelp.org",
+    hours: "24/7 — Free & Confidential",
+    languages: "English, Filipino, Hindi, Russian, Arabic + more",
+    description: "Free, confidential helpline for seafarers and their families. Emotional support, welfare advice, financial guidance.",
+    icon: "🌊",
+    color: "#00B4D8",
+  },
+  {
+    org: "Mission to Seafarers",
+    service: "Port Chaplaincy & Support",
+    phone: "+44 20 7248 5202",
+    email: "contactus@missiontoseafarers.org",
+    website: "www.missiontoseafarers.org",
+    hours: "Office hours — Port chaplains worldwide",
+    languages: "Multiple languages via port chaplains",
+    description: "Practical and emotional support through port chaplains globally. Welfare, communication, and crisis assistance.",
+    icon: "⚓",
+    color: "#F0A500",
+  },
+  {
+    org: "Sailors' Society",
+    service: "Wellness at Sea Program",
+    phone: "+44 23 8051 5950",
+    email: "info@sailors-society.org",
+    website: "www.sailors-society.org",
+    hours: "Office hours + port chaplains",
+    languages: "English and local languages",
+    description: "Wellness at Sea training, crisis counseling, and port welfare. Chaplains in over 90 ports worldwide.",
+    icon: "🧭",
+    color: "#00C896",
+  },
+  {
+    org: "ITF Seafarers' Trust",
+    service: "Seafarer Support & Rights",
+    phone: "+44 20 7403 2733",
+    email: "seafarers@itf.org.uk",
+    website: "www.itfseafarers.org",
+    hours: "Office hours",
+    languages: "Multiple languages",
+    description: "Advocacy, welfare grants, and inspector support for seafarers facing rights violations, abandonment, or hardship.",
+    icon: "🏛️",
+    color: "#7C3AED",
+  },
+  {
+    org: "Apostleship of the Sea (AoS)",
+    service: "Catholic Maritime Welfare",
+    phone: "+44 20 7901 1950",
+    email: "aos@cbcew.org.uk",
+    website: "www.apostleshipofthesea.org.uk",
+    hours: "Port chaplains available globally",
+    languages: "Multiple languages",
+    description: "Pastoral and practical support for seafarers of all faiths through a global network of port chaplains.",
+    icon: "✝️",
+    color: "#1565C0",
+  },
+  {
+    org: "SAMHI (Seafarers' Mental Health Initiative)",
+    service: "Mental Health Resources",
+    phone: "Via ISWAN / SeafarerHelp",
+    email: "help@seafarerhelp.org",
+    website: "www.seahealth.org",
+    hours: "24/7 via SeafarerHelp",
+    languages: "Multiple languages",
+    description: "Dedicated mental health resources, self-assessment tools, and referral support for seafarers at sea or ashore.",
+    icon: "🧠",
+    color: "#FF4757",
+  },
+];
+
+const MENTAL_HEALTH_QUESTIONS = [
+  { id: "mh1", text: "I have felt down, hopeless, or had little interest in activities", category: "mood" },
+  { id: "mh2", text: "I have been feeling anxious, nervous, or on edge", category: "anxiety" },
+  { id: "mh3", text: "I have had trouble sleeping or sleeping too much", category: "sleep" },
+  { id: "mh4", text: "I have felt isolated or disconnected from family and friends", category: "social" },
+  { id: "mh5", text: "I have been irritable, angry, or easily frustrated", category: "mood" },
+  { id: "mh6", text: "I have had difficulty concentrating on tasks", category: "cognitive" },
+  { id: "mh7", text: "I have been consuming alcohol more than usual", category: "substance" },
+  { id: "mh8", text: "I have had thoughts of harming myself", category: "crisis" },
+  { id: "mh9", text: "I feel my work is meaningful and I am coping well", category: "resilience", reversed: true },
+  { id: "mh10", text: "I have someone I can talk to when feeling low", category: "support", reversed: true },
+];
+
+const FATIGUE_QUESTIONS = [
+  { id: "f1", text: "Hours slept in last 24 hours", type: "select", options: ["<4 hrs", "4–5 hrs", "5–6 hrs", "6–7 hrs", "7–8 hrs", ">8 hrs"], weights: [5, 4, 3, 2, 1, 0] },
+  { id: "f2", text: "Hours on duty in last 24 hours", type: "select", options: ["≤8 hrs", "9–10 hrs", "11–12 hrs", "13–14 hrs", ">14 hrs"], weights: [0, 1, 2, 3, 5] },
+  { id: "f3", text: "Days since last proper rest day (≥10 hrs sleep)", type: "select", options: ["0–1 days", "2–3 days", "4–5 days", "6–7 days", ">7 days"], weights: [0, 1, 2, 3, 5] },
+  { id: "f4", text: "Current physical fatigue level", type: "scale", label: "None → Extreme" },
+  { id: "f5", text: "Current mental fatigue / alertness level", type: "scale", label: "Alert → Exhausted" },
+  { id: "f6", text: "Weather / sea conditions affecting rest", type: "select", options: ["Calm", "Moderate", "Rough", "Very rough", "Extreme"], weights: [0, 1, 2, 3, 4] },
+  { id: "f7", text: "How many times did you wake during last sleep period?", type: "select", options: ["0", "1–2", "3–4", ">4"], weights: [0, 1, 2, 3] },
+];
+
+// ─── STORAGE HELPERS ──────────────────────────────────────────────────────────
+const LS = {
+  get: (key, fallback) => { try { const v = localStorage.getItem(`cw_${key}`); return v ? JSON.parse(v) : fallback; } catch { return fallback; } },
+  set: (key, val) => { try { localStorage.setItem(`cw_${key}`, JSON.stringify(val)); } catch {} },
+};
+
+// ─── SHARED UI COMPONENTS ─────────────────────────────────────────────────────
+const Card = ({ children, style = {} }) => (
+  <div style={{
+    background: "var(--card)",
+    border: "1px solid var(--border)",
+    borderRadius: 14,
+    padding: "1.2rem",
+    marginBottom: "1rem",
+    ...style,
+  }}>{children}</div>
+);
+
+const Label = ({ children }) => (
+  <div style={{ fontSize: "0.7rem", color: "var(--text2)", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 6, fontFamily: "'Orbitron', monospace" }}>
+    {children}
+  </div>
+);
+
+const Input = ({ value, onChange, type = "text", placeholder, min, max, step, style = {} }) => (
+  <input
+    type={type}
+    value={value}
+    onChange={e => onChange(e.target.value)}
+    placeholder={placeholder}
+    min={min} max={max} step={step}
+    style={{
+      width: "100%",
+      background: "var(--bg2)",
+      border: "1px solid var(--border2)",
+      borderRadius: 8,
+      padding: "0.55rem 0.8rem",
+      color: "var(--text)",
+      fontSize: "0.88rem",
+      fontFamily: "'Exo 2', sans-serif",
+      outline: "none",
+      ...style,
+    }}
+  />
+);
+
+const Select = ({ value, onChange, children, style = {} }) => (
+  <select
+    value={value}
+    onChange={e => onChange(e.target.value)}
+    style={{
+      width: "100%",
+      background: "var(--bg2)",
+      border: "1px solid var(--border2)",
+      borderRadius: 8,
+      padding: "0.55rem 0.8rem",
+      color: "var(--text)",
+      fontSize: "0.85rem",
+      outline: "none",
+      ...style,
+    }}
+  >{children}</select>
+);
+
+const Result = ({ label, value, color = "var(--cyan)" }) => (
+  <div style={{
+    background: "var(--bg)",
+    border: `1px solid ${color}33`,
+    borderRadius: 10,
+    padding: "0.8rem 1rem",
+    marginTop: "0.7rem",
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+  }}>
+    <span style={{ fontSize: "0.78rem", color: "var(--text2)" }}>{label}</span>
+    <span style={{ fontFamily: "'Orbitron', monospace", fontSize: "0.95rem", color, fontWeight: 700 }}>{value}</span>
+  </div>
+);
+
+const Btn = ({ children, onClick, color = "var(--cyan)", style = {}, small }) => (
+  <button
+    onClick={onClick}
+    style={{
+      background: `${color}18`,
+      border: `1px solid ${color}`,
+      borderRadius: 8,
+      color,
+      padding: small ? "0.35rem 0.8rem" : "0.6rem 1.2rem",
+      fontSize: small ? "0.72rem" : "0.82rem",
+      fontFamily: "'Orbitron', monospace",
+      cursor: "pointer",
+      letterSpacing: "0.06em",
+      transition: "all 0.2s",
+      ...style,
+    }}
+  >{children}</button>
+);
+
+const SectionTitle = ({ icon, title, subtitle }) => (
+  <div style={{ marginBottom: "1.2rem" }}>
+    <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
+      <span style={{ fontSize: "1.3rem" }}>{icon}</span>
+      <span style={{ fontFamily: "'Orbitron', monospace", fontSize: "0.9rem", fontWeight: 700, color: "var(--cyan)" }}>{title}</span>
+    </div>
+    {subtitle && <div style={{ fontSize: "0.72rem", color: "var(--text2)", paddingLeft: 36 }}>{subtitle}</div>}
+  </div>
+);
+
+const fmt = (n, d = 2) => isNaN(n) ? "—" : Number(n).toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
+
+// ─── TOOL 1: CURRENCY CONVERTER ───────────────────────────────────────────────
+function CurrencyConverter() {
+  const [amount, setAmount] = useState(() => LS.get("curr_amount", "1000"));
+  const [from, setFrom] = useState(() => LS.get("curr_from", "USD"));
+  const [to, setTo] = useState(() => LS.get("curr_to", "PHP"));
+  const [rate, setRate] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [lastFetch, setLastFetch] = useState(null);
+  const [manualRate, setManualRate] = useState(() => LS.get("curr_manual", ""));
+  const [useManual, setUseManual] = useState(false);
+
+  useEffect(() => { LS.set("curr_amount", amount); }, [amount]);
+  useEffect(() => { LS.set("curr_from", from); }, [from]);
+  useEffect(() => { LS.set("curr_to", to); }, [to]);
+  useEffect(() => { LS.set("curr_manual", manualRate); }, [manualRate]);
+
+  const fetchRate = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`https://api.exchangerate-api.com/v4/latest/${from}`);
+      const data = await res.json();
+      setRate(data.rates[to]);
+      setLastFetch(new Date().toLocaleTimeString());
+    } catch {
+      setRate(null);
+    }
+    setLoading(false);
+  }, [from, to]);
+
+  useEffect(() => { if (!useManual) fetchRate(); }, [from, to, useManual]);
+
+  const activeRate = useManual ? parseFloat(manualRate) : rate;
+  const converted = activeRate ? parseFloat(amount) * activeRate : null;
+  const fromCur = CURRENCIES.find(c => c.code === from);
+  const toCur = CURRENCIES.find(c => c.code === to);
+
+  return (
+    <div>
+      <SectionTitle icon="💱" title="Currency Converter" subtitle="Live rates via ExchangeRate-API · Manual override available" />
+      <Card>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
+          <div>
+            <Label>From</Label>
+            <Select value={from} onChange={setFrom}>
+              {CURRENCIES.map(c => <option key={c.code} value={c.code}>{c.flag} {c.code} — {c.name}</option>)}
+            </Select>
+          </div>
+          <div>
+            <Label>To</Label>
+            <Select value={to} onChange={setTo}>
+              {CURRENCIES.map(c => <option key={c.code} value={c.code}>{c.flag} {c.code} — {c.name}</option>)}
+            </Select>
+          </div>
+        </div>
+        <Label>Amount ({fromCur?.symbol})</Label>
+        <Input type="number" value={amount} onChange={setAmount} placeholder="Enter amount" />
+
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 12 }}>
+          <label style={{ fontSize: "0.75rem", color: "var(--text2)", display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
+            <input type="checkbox" checked={useManual} onChange={e => setUseManual(e.target.checked)} />
+            Use manual rate
+          </label>
+          {useManual && (
+            <Input value={manualRate} onChange={setManualRate} type="number" placeholder="e.g. 56.50" style={{ width: 140 }} />
+          )}
+          {!useManual && (
+            <Btn small onClick={fetchRate}>{loading ? "..." : "↺ Refresh"}</Btn>
+          )}
+        </div>
+
+        {activeRate && !isNaN(converted) && (
+          <>
+            <Result
+              label={`${fmt(amount, 2)} ${from} =`}
+              value={`${toCur?.symbol}${fmt(converted, 2)} ${to}`}
+              color="var(--gold)"
+            />
+            <Result label="Exchange rate" value={`1 ${from} = ${fmt(activeRate, 4)} ${to}`} />
+            <Result label="Reverse rate" value={`1 ${to} = ${fmt(1 / activeRate, 4)} ${from}`} />
+            {lastFetch && !useManual && (
+              <div style={{ fontSize: "0.65rem", color: "var(--text3)", textAlign: "right", marginTop: 6 }}>
+                Last updated: {lastFetch}
+              </div>
+            )}
+          </>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+// ─── TOOL 2: WAGE CALCULATOR ──────────────────────────────────────────────────
+function WageCalculator() {
+  const [basic, setBasic] = useState(() => LS.get("wage_basic", ""));
+  const [currency, setCurrency] = useState(() => LS.get("wage_currency", "USD"));
+  const [rank, setRank] = useState(() => LS.get("wage_rank", "Officer"));
+  const [months, setMonths] = useState(() => LS.get("wage_months", "9"));
+
+  useEffect(() => { LS.set("wage_basic", basic); }, [basic]);
+  useEffect(() => { LS.set("wage_currency", currency); }, [currency]);
+  useEffect(() => { LS.set("wage_rank", rank); }, [rank]);
+  useEffect(() => { LS.set("wage_months", months); }, [months]);
+
+  const b = parseFloat(basic) || 0;
+  const m = parseFloat(months) || 0;
+  const cur = CURRENCIES.find(c => c.code === currency);
+
+  // Standard maritime breakdown
+  const fixedOT = b * 0.25;
+  const leaveWages = b * 0.0833 * m;
+  const vacationPay = b * 0.0833;
+  const total = b + fixedOT;
+  const contractTotal = total * m;
+  const annualGross = total * 12;
+
+  return (
+    <div>
+      <SectionTitle icon="💵" title="Wage Calculator" subtitle="Basic wage breakdown per ITF/CBA standards" />
+      <Card>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
+          <div>
+            <Label>Rank / Position</Label>
+            <Select value={rank} onChange={setRank}>
+              {["Master","Chief Officer","2nd Officer","3rd Officer","Chief Engineer","2nd Engineer","3rd Engineer","4th Engineer","Bosun","AB Seaman","OS","Cook","Steward","Officer","Rating"].map(r => (
+                <option key={r} value={r}>{r}</option>
+              ))}
+            </Select>
+          </div>
+          <div>
+            <Label>Currency</Label>
+            <Select value={currency} onChange={setCurrency}>
+              {CURRENCIES.map(c => <option key={c.code} value={c.code}>{c.flag} {c.code}</option>)}
+            </Select>
+          </div>
+        </div>
+        <Label>Basic Monthly Wage ({cur?.symbol})</Label>
+        <Input type="number" value={basic} onChange={setBasic} placeholder="e.g. 1800" />
+        <div style={{ marginTop: 12 }}>
+          <Label>Contract Length (months)</Label>
+          <Input type="number" value={months} onChange={setMonths} placeholder="e.g. 9" min="1" max="24" />
+        </div>
+
+        {b > 0 && (
+          <>
+            <Result label="Basic Wage / month" value={`${cur?.symbol}${fmt(b)}`} />
+            <Result label="Fixed OT (25% of basic)" value={`${cur?.symbol}${fmt(fixedOT)}`} />
+            <Result label="Vacation Pay / month (1/12)" value={`${cur?.symbol}${fmt(vacationPay)}`} color="var(--green)" />
+            <Result label="Total Monthly Package" value={`${cur?.symbol}${fmt(total)}`} color="var(--gold)" />
+            {m > 0 && (
+              <>
+                <div style={{ height: 1, background: "var(--border)", margin: "10px 0" }} />
+                <Result label={`Contract Total (${months} months)`} value={`${cur?.symbol}${fmt(contractTotal)}`} color="var(--gold)" />
+                <Result label={`Leave Wages (${months} months)`} value={`${cur?.symbol}${fmt(leaveWages)}`} />
+                <Result label="Annualised Gross (est.)" value={`${cur?.symbol}${fmt(annualGross)}`} color="var(--cyan)" />
+              </>
+            )}
+          </>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+// ─── TOOL 3: OVERTIME CALCULATOR ─────────────────────────────────────────────
+function OvertimeCalculator() {
+  const [basic, setBasic] = useState(() => LS.get("ot_basic", ""));
+  const [currency, setCurrency] = useState(() => LS.get("ot_currency", "USD"));
+  const [hoursWorked, setHoursWorked] = useState(() => LS.get("ot_hours", ""));
+  const [regularHours, setRegularHours] = useState(() => LS.get("ot_regular", "208"));
+  const [otRate, setOtRate] = useState(() => LS.get("ot_rate", "1.25"));
+
+  useEffect(() => { LS.set("ot_basic", basic); }, [basic]);
+  useEffect(() => { LS.set("ot_currency", currency); }, [currency]);
+  useEffect(() => { LS.set("ot_hours", hoursWorked); }, [hoursWorked]);
+  useEffect(() => { LS.set("ot_regular", regularHours); }, [regularHours]);
+  useEffect(() => { LS.set("ot_rate", otRate); }, [otRate]);
+
+  const b = parseFloat(basic) || 0;
+  const hw = parseFloat(hoursWorked) || 0;
+  const rh = parseFloat(regularHours) || 208;
+  const or = parseFloat(otRate) || 1.25;
+  const cur = CURRENCIES.find(c => c.code === currency);
+
+  const hourlyRate = b / rh;
+  const otHours = Math.max(0, hw - rh);
+  const regularPay = Math.min(hw, rh) * hourlyRate;
+  const otPay = otHours * hourlyRate * or;
+  const totalPay = regularPay + otPay;
+
+  return (
+    <div>
+      <SectionTitle icon="⏱️" title="Overtime Calculator" subtitle="MLC 2006 compliant · Customisable OT multiplier" />
+      <Card>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
+          <div>
+            <Label>Currency</Label>
+            <Select value={currency} onChange={setCurrency}>
+              {CURRENCIES.map(c => <option key={c.code} value={c.code}>{c.flag} {c.code}</option>)}
+            </Select>
+          </div>
+          <div>
+            <Label>OT Multiplier</Label>
+            <Select value={otRate} onChange={setOtRate}>
+              <option value="1.25">1.25× (Standard)</option>
+              <option value="1.5">1.5× (Time & Half)</option>
+              <option value="2.0">2.0× (Double)</option>
+              <option value="1.0">1.0× (Flat rate)</option>
+            </Select>
+          </div>
+        </div>
+        <Label>Basic Monthly Wage ({cur?.symbol})</Label>
+        <Input type="number" value={basic} onChange={setBasic} placeholder="e.g. 1800" />
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 12 }}>
+          <div>
+            <Label>Regular Hours / Month</Label>
+            <Input type="number" value={regularHours} onChange={setRegularHours} placeholder="208" />
+          </div>
+          <div>
+            <Label>Actual Hours Worked</Label>
+            <Input type="number" value={hoursWorked} onChange={setHoursWorked} placeholder="e.g. 240" />
+          </div>
+        </div>
+
+        {b > 0 && hw > 0 && (
+          <>
+            <Result label="Hourly Rate" value={`${cur?.symbol}${fmt(hourlyRate, 3)}/hr`} />
+            <Result label={`Regular Pay (${Math.min(hw, rh)} hrs)`} value={`${cur?.symbol}${fmt(regularPay)}`} />
+            <Result label={`OT Hours`} value={`${fmt(otHours, 0)} hrs`} color={otHours > 0 ? "var(--gold)" : "var(--text2)"} />
+            <Result label={`OT Pay (${or}×)`} value={`${cur?.symbol}${fmt(otPay)}`} color="var(--gold)" />
+            <Result label="Total Pay" value={`${cur?.symbol}${fmt(totalPay)}`} color="var(--green)" />
+            {hw > 208 && (
+              <div style={{ marginTop: 8, padding: "8px 12px", background: "rgba(240,165,0,0.08)", border: "1px solid var(--gold)33", borderRadius: 8, fontSize: "0.7rem", color: "var(--gold)" }}>
+                ⚠️ MLC 2006: Maximum work hours = 14 hrs/day · 72 hrs/week. Verify compliance.
+              </div>
+            )}
+          </>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+// ─── TOOL 4: ALLOTMENT CALCULATOR ────────────────────────────────────────────
+function AllotmentCalculator() {
+  const [basic, setBasic] = useState(() => LS.get("allt_basic", ""));
+  const [currency, setCurrency] = useState(() => LS.get("allt_currency", "USD"));
+  const [pct, setPct] = useState(() => LS.get("allt_pct", "80"));
+  const [fixedAmt, setFixedAmt] = useState(() => LS.get("allt_fixed", ""));
+  const [mode, setMode] = useState(() => LS.get("allt_mode", "pct"));
+  const [convRate, setConvRate] = useState(() => LS.get("allt_convrate", ""));
+  const [homeCurrency, setHomeCurrency] = useState(() => LS.get("allt_homecur", "PHP"));
+
+  useEffect(() => { LS.set("allt_basic", basic); LS.set("allt_currency", currency); LS.set("allt_pct", pct); LS.set("allt_fixed", fixedAmt); LS.set("allt_mode", mode); LS.set("allt_convrate", convRate); LS.set("allt_homecur", homeCurrency); }, [basic, currency, pct, fixedAmt, mode, convRate, homeCurrency]);
+
+  const b = parseFloat(basic) || 0;
+  const allotment = mode === "pct" ? b * (parseFloat(pct) / 100) : parseFloat(fixedAmt) || 0;
+  const retained = b - allotment;
+  const cr = parseFloat(convRate) || 0;
+  const homeAmt = cr > 0 ? allotment * cr : null;
+  const cur = CURRENCIES.find(c => c.code === currency);
+  const homeCur = CURRENCIES.find(c => c.code === homeCurrency);
+
+  return (
+    <div>
+      <SectionTitle icon="📤" title="Allotment Calculator" subtitle="Plan how much to remit home each month" />
+      <Card>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
+          <div>
+            <Label>Wage Currency</Label>
+            <Select value={currency} onChange={setCurrency}>
+              {CURRENCIES.map(c => <option key={c.code} value={c.code}>{c.flag} {c.code}</option>)}
+            </Select>
+          </div>
+          <div>
+            <Label>Home Currency</Label>
+            <Select value={homeCurrency} onChange={setHomeCurrency}>
+              {CURRENCIES.map(c => <option key={c.code} value={c.code}>{c.flag} {c.code}</option>)}
+            </Select>
+          </div>
+        </div>
+        <Label>Monthly Basic Wage ({cur?.symbol})</Label>
+        <Input type="number" value={basic} onChange={setBasic} placeholder="e.g. 1800" />
+
+        <div style={{ display: "flex", gap: 8, margin: "12px 0 8px" }}>
+          {["pct", "fixed"].map(m => (
+            <Btn key={m} small onClick={() => setMode(m)} color={mode === m ? "var(--cyan)" : "var(--text3)"}>
+              {m === "pct" ? "By %" : "Fixed Amount"}
+            </Btn>
+          ))}
+        </div>
+
+        {mode === "pct" ? (
+          <div>
+            <Label>Allotment Percentage</Label>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <input type="range" min="0" max="100" value={pct} onChange={e => setPct(e.target.value)}
+                style={{ flex: 1, accentColor: "var(--cyan)" }} />
+              <span style={{ fontFamily: "'Orbitron', monospace", color: "var(--cyan)", minWidth: 42 }}>{pct}%</span>
+            </div>
+          </div>
+        ) : (
+          <div>
+            <Label>Fixed Allotment Amount ({cur?.symbol})</Label>
+            <Input type="number" value={fixedAmt} onChange={setFixedAmt} placeholder="e.g. 1400" />
+          </div>
+        )}
+
+        <div style={{ marginTop: 12 }}>
+          <Label>Conversion Rate (1 {currency} = ? {homeCurrency}) — optional</Label>
+          <Input type="number" value={convRate} onChange={setConvRate} placeholder="Enter rate manually" />
+        </div>
+
+        {b > 0 && (
+          <>
+            <Result label="Allotment (to family)" value={`${cur?.symbol}${fmt(allotment)}`} color="var(--gold)" />
+            <Result label="Retained onboard" value={`${cur?.symbol}${fmt(retained)}`} />
+            <Result label="Allotment %" value={`${fmt((allotment / b) * 100, 1)}%`} color="var(--cyan)" />
+            {homeAmt && (
+              <Result label={`In ${homeCurrency}`} value={`${homeCur?.symbol}${fmt(homeAmt)}`} color="var(--green)" />
+            )}
+          </>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+// ─── TOOL 5: SAVINGS PLANNER ─────────────────────────────────────────────────
+function SavingsPlanner() {
+  const [income, setIncome] = useState(() => LS.get("sav_income", ""));
+  const [currency, setCurrency] = useState(() => LS.get("sav_currency", "USD"));
+  const [goal, setGoal] = useState(() => LS.get("sav_goal", ""));
+  const [months, setMonths] = useState(() => LS.get("sav_months", "9"));
+  const [expenses, setExpenses] = useState(() => LS.get("sav_expenses", ""));
+  const [existing, setExisting] = useState(() => LS.get("sav_existing", "0"));
+
+  useEffect(() => { LS.set("sav_income", income); LS.set("sav_currency", currency); LS.set("sav_goal", goal); LS.set("sav_months", months); LS.set("sav_expenses", expenses); LS.set("sav_existing", existing); }, [income, currency, goal, months, expenses, existing]);
+
+  const inc = parseFloat(income) || 0;
+  const exp = parseFloat(expenses) || 0;
+  const g = parseFloat(goal) || 0;
+  const m = parseFloat(months) || 1;
+  const ex = parseFloat(existing) || 0;
+  const cur = CURRENCIES.find(c => c.code === currency);
+
+  const monthlySavings = inc - exp;
+  const contractSavings = monthlySavings * m;
+  const totalWithExisting = contractSavings + ex;
+  const savingsRate = inc > 0 ? (monthlySavings / inc) * 100 : 0;
+  const monthsToGoal = g > 0 && monthlySavings > 0 ? Math.ceil((g - ex) / monthlySavings) : null;
+  const progressPct = g > 0 ? Math.min(100, (totalWithExisting / g) * 100) : 0;
+
+  return (
+    <div>
+      <SectionTitle icon="🏦" title="Savings Planner" subtitle="Track and plan your contract savings goals" />
+      <Card>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
+          <div>
+            <Label>Currency</Label>
+            <Select value={currency} onChange={setCurrency}>
+              {CURRENCIES.map(c => <option key={c.code} value={c.code}>{c.flag} {c.code}</option>)}
+            </Select>
+          </div>
+          <div>
+            <Label>Contract Length (months)</Label>
+            <Input type="number" value={months} onChange={setMonths} placeholder="9" />
+          </div>
+        </div>
+        <Label>Monthly Income ({cur?.symbol})</Label>
+        <Input type="number" value={income} onChange={setIncome} placeholder="e.g. 2000" />
+        <div style={{ marginTop: 10 }}>
+          <Label>Monthly Expenses / Allotment ({cur?.symbol})</Label>
+          <Input type="number" value={expenses} onChange={setExpenses} placeholder="e.g. 400" />
+        </div>
+        <div style={{ marginTop: 10 }}>
+          <Label>Existing Savings ({cur?.symbol})</Label>
+          <Input type="number" value={existing} onChange={setExisting} placeholder="e.g. 5000" />
+        </div>
+        <div style={{ marginTop: 10 }}>
+          <Label>Savings Goal ({cur?.symbol}) — optional</Label>
+          <Input type="number" value={goal} onChange={setGoal} placeholder="e.g. 20000" />
+        </div>
+
+        {inc > 0 && (
+          <>
+            <Result label="Monthly Savings" value={`${cur?.symbol}${fmt(monthlySavings)}`} color={monthlySavings >= 0 ? "var(--green)" : "var(--red)"} />
+            <Result label="Savings Rate" value={`${fmt(savingsRate, 1)}%`} color={savingsRate >= 30 ? "var(--green)" : savingsRate >= 10 ? "var(--gold)" : "var(--red)"} />
+            <Result label={`Contract Savings (${months} mo)`} value={`${cur?.symbol}${fmt(contractSavings)}`} color="var(--cyan)" />
+            <Result label="Total incl. existing" value={`${cur?.symbol}${fmt(totalWithExisting)}`} color="var(--gold)" />
+            {g > 0 && (
+              <>
+                <div style={{ marginTop: 10 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.7rem", color: "var(--text2)", marginBottom: 6 }}>
+                    <span>Goal progress</span>
+                    <span style={{ color: "var(--cyan)" }}>{fmt(progressPct, 1)}%</span>
+                  </div>
+                  <div style={{ height: 8, background: "var(--bg)", borderRadius: 4, overflow: "hidden" }}>
+                    <div style={{ height: "100%", width: `${progressPct}%`, background: "linear-gradient(90deg,var(--cyan),var(--green))", borderRadius: 4, transition: "width 0.4s" }} />
+                  </div>
+                </div>
+                {monthsToGoal && <Result label="Months to reach goal" value={`${monthsToGoal} months`} color="var(--purple)" />}
+              </>
+            )}
+          </>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+// ─── TOOL 6: LEAVE PLANNER ────────────────────────────────────────────────────
+function LeavePlanner() {
+  const [joinDate, setJoinDate] = useState(() => LS.get("lv_join", ""));
+  const [contractMonths, setContractMonths] = useState(() => LS.get("lv_contract", "9"));
+  const [leaveRatio, setLeaveRatio] = useState(() => LS.get("lv_ratio", "1:2"));
+  const [plannedLeave, setPlannedLeave] = useState(() => LS.get("lv_planned", "30"));
+
+  useEffect(() => { LS.set("lv_join", joinDate); LS.set("lv_contract", contractMonths); LS.set("lv_ratio", leaveRatio); LS.set("lv_planned", plannedLeave); }, [joinDate, contractMonths, leaveRatio, plannedLeave]);
+
+  const ratioMap = { "1:1": 1, "1:2": 0.5, "1:3": 0.333, "2:1": 2, "3:1": 3 };
+  const rVal = ratioMap[leaveRatio] || 0.5;
+  const cm = parseFloat(contractMonths) || 0;
+  const pl = parseFloat(plannedLeave) || 0;
+
+  const seaDays = cm * 30;
+  const earnedLeaveDays = seaDays * rVal;
+  const leaveEndDate = joinDate ? (() => {
+    const d = new Date(joinDate);
+    d.setMonth(d.getMonth() + cm);
+    return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+  })() : null;
+
+  const nextSignOnDate = joinDate && pl > 0 ? (() => {
+    const d = new Date(joinDate);
+    d.setMonth(d.getMonth() + cm);
+    d.setDate(d.getDate() + pl);
+    return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+  })() : null;
+
+  const leaveBalance = earnedLeaveDays - pl;
+
+  return (
+    <div>
+      <SectionTitle icon="🗓️" title="Leave Planner" subtitle="Calculate earned leave and plan your next sign-on" />
+      <Card>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
+          <div>
+            <Label>Join Date</Label>
+            <Input type="date" value={joinDate} onChange={setJoinDate} />
+          </div>
+          <div>
+            <Label>Contract Length (months)</Label>
+            <Input type="number" value={contractMonths} onChange={setContractMonths} placeholder="9" />
+          </div>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
+          <div>
+            <Label>Leave Ratio (leave:sea)</Label>
+            <Select value={leaveRatio} onChange={setLeaveRatio}>
+              {Object.keys(ratioMap).map(r => <option key={r} value={r}>{r}</option>)}
+            </Select>
+          </div>
+          <div>
+            <Label>Planned Leave Days</Label>
+            <Input type="number" value={plannedLeave} onChange={setPlannedLeave} placeholder="30" />
+          </div>
+        </div>
+
+        {cm > 0 && (
+          <>
+            <Result label="Sea Days" value={`${fmt(seaDays, 0)} days`} />
+            <Result label={`Earned Leave (${leaveRatio} ratio)`} value={`${fmt(earnedLeaveDays, 0)} days`} color="var(--cyan)" />
+            {leaveEndDate && <Result label="Contract End Date" value={leaveEndDate} color="var(--gold)" />}
+            {nextSignOnDate && <Result label="Est. Next Sign-On" value={nextSignOnDate} color="var(--green)" />}
+            <Result
+              label="Leave Balance (after plan)"
+              value={`${fmt(leaveBalance, 0)} days`}
+              color={leaveBalance >= 0 ? "var(--green)" : "var(--red)"}
+            />
+          </>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+// ─── TOOL 7: RELIEF DATE CALCULATOR ─────────────────────────────────────────
+function ReliefDateCalculator() {
+  const [joinDate, setJoinDate] = useState(() => LS.get("rel_join", ""));
+  const [contractMin, setContractMin] = useState(() => LS.get("rel_min", "7"));
+  const [contractMax, setContractMax] = useState(() => LS.get("rel_max", "11"));
+  const [notes, setNotes] = useState(() => LS.get("rel_notes", ""));
+
+  useEffect(() => { LS.set("rel_join", joinDate); LS.set("rel_min", contractMin); LS.set("rel_max", contractMax); LS.set("rel_notes", notes); }, [joinDate, contractMin, contractMax, notes]);
+
+  const addMonths = (dateStr, months) => {
+    if (!dateStr) return null;
+    const d = new Date(dateStr);
+    d.setMonth(d.getMonth() + months);
+    return d;
+  };
+
+  const fmt2 = d => d ? d.toLocaleDateString("en-GB", { weekday: "short", day: "2-digit", month: "short", year: "numeric" }) : "—";
+  const today = new Date();
+  const minDate = addMonths(joinDate, parseFloat(contractMin) || 0);
+  const maxDate = addMonths(joinDate, parseFloat(contractMax) || 0);
+
+  const daysToMin = minDate ? Math.max(0, Math.ceil((minDate - today) / 86400000)) : null;
+  const daysToMax = maxDate ? Math.max(0, Math.ceil((maxDate - today) / 86400000)) : null;
+  const daysOnboard = joinDate ? Math.floor((today - new Date(joinDate)) / 86400000) : null;
+  const inWindow = minDate && maxDate ? today >= minDate && today <= maxDate : false;
+
+  return (
+    <div>
+      <SectionTitle icon="🔄" title="Relief Date Calculator" subtitle="Track your relief window and days remaining" />
+      <Card>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 12 }}>
+          <div>
+            <Label>Join Date</Label>
+            <Input type="date" value={joinDate} onChange={setJoinDate} />
+          </div>
+          <div>
+            <Label>Min Contract (mo)</Label>
+            <Input type="number" value={contractMin} onChange={setContractMin} placeholder="7" />
+          </div>
+          <div>
+            <Label>Max Contract (mo)</Label>
+            <Input type="number" value={contractMax} onChange={setContractMax} placeholder="11" />
+          </div>
+        </div>
+
+        {joinDate && daysOnboard !== null && (
+          <>
+            <Result label="Days Onboard So Far" value={`${daysOnboard} days`} color={daysOnboard > 200 ? "var(--red)" : "var(--text)"} />
+            <Result label="Earliest Relief Date" value={fmt2(minDate)} color="var(--cyan)" />
+            <Result label="Latest Relief Date" value={fmt2(maxDate)} color="var(--gold)" />
+
+            {!inWindow && daysToMin !== null && daysToMin > 0 && (
+              <Result label="Days Until Relief Window Opens" value={`${daysToMin} days`} color="var(--text2)" />
+            )}
+            {inWindow && (
+              <>
+                <div style={{ marginTop: 8, padding: "10px 14px", background: "rgba(0,200,150,0.1)", border: "1px solid var(--green)", borderRadius: 10, fontSize: "0.78rem", color: "var(--green)", textAlign: "center" }}>
+                  ✅ You are currently within your relief window
+                </div>
+                {daysToMax !== null && <Result label="Days Until Max Contract" value={`${daysToMax} days`} color="var(--red)" />}
+              </>
+            )}
+            {daysToMax === 0 && (
+              <div style={{ marginTop: 8, padding: "10px 14px", background: "rgba(255,71,87,0.1)", border: "1px solid var(--red)", borderRadius: 10, fontSize: "0.78rem", color: "var(--red)", textAlign: "center" }}>
+                ⚠️ Maximum contract duration reached — relief required
+              </div>
+            )}
+          </>
+        )}
+
+        <div style={{ marginTop: 12 }}>
+          <Label>Notes</Label>
+          <textarea
+            value={notes}
+            onChange={e => setNotes(e.target.value)}
+            placeholder="Port, vessel name, next assignment..."
+            style={{
+              width: "100%", minHeight: 60, background: "var(--bg2)", border: "1px solid var(--border2)",
+              borderRadius: 8, padding: "0.55rem 0.8rem", color: "var(--text)", fontSize: "0.82rem",
+              fontFamily: "'Exo 2', sans-serif", resize: "vertical", outline: "none",
+            }}
+          />
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+// ─── TOOL 8: CONTRACT TRACKER ─────────────────────────────────────────────────
+function ContractTracker() {
+  const [contracts, setContracts] = useState(() => LS.get("ct_list", []));
+  const [form, setForm] = useState({ vessel: "", rank: "", company: "", start: "", end: "", notes: "" });
+  const [adding, setAdding] = useState(false);
+
+  useEffect(() => { LS.set("ct_list", contracts); }, [contracts]);
+
+  const addContract = () => {
+    if (!form.vessel || !form.start) return;
+    setContracts(prev => [{ ...form, id: Date.now() }, ...prev]);
+    setForm({ vessel: "", rank: "", company: "", start: "", end: "", notes: "" });
+    setAdding(false);
+  };
+
+  const removeContract = id => setContracts(prev => prev.filter(c => c.id !== id));
+
+  const totalDays = contracts.reduce((acc, c) => {
+    if (!c.start || !c.end) return acc;
+    return acc + Math.max(0, Math.floor((new Date(c.end) - new Date(c.start)) / 86400000));
+  }, 0);
+
+  return (
+    <div>
+      <SectionTitle icon="📋" title="Contract Tracker" subtitle="Log your sea service history" />
+
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+        <div style={{ fontSize: "0.75rem", color: "var(--text2)" }}>
+          {contracts.length} contract{contracts.length !== 1 ? "s" : ""} · {fmt(totalDays, 0)} total sea days logged
+        </div>
+        <Btn small onClick={() => setAdding(a => !a)}>{adding ? "✕ Cancel" : "+ Add Contract"}</Btn>
+      </div>
+
+      {adding && (
+        <Card style={{ border: "1px solid var(--cyan)44", marginBottom: 14 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
+            <div><Label>Vessel Name</Label><Input value={form.vessel} onChange={v => setForm(f => ({ ...f, vessel: v }))} placeholder="MV Example" /></div>
+            <div><Label>Rank</Label><Input value={form.rank} onChange={v => setForm(f => ({ ...f, rank: v }))} placeholder="2nd Officer" /></div>
+            <div><Label>Company</Label><Input value={form.company} onChange={v => setForm(f => ({ ...f, company: v }))} placeholder="Shipping Co." /></div>
+            <div />
+            <div><Label>Start Date</Label><Input type="date" value={form.start} onChange={v => setForm(f => ({ ...f, start: v }))} /></div>
+            <div><Label>End Date</Label><Input type="date" value={form.end} onChange={v => setForm(f => ({ ...f, end: v }))} /></div>
+          </div>
+          <Label>Notes</Label>
+          <textarea value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
+            placeholder="Flag, trade area, vessel type..."
+            style={{ width: "100%", minHeight: 50, background: "var(--bg2)", border: "1px solid var(--border2)", borderRadius: 8, padding: "0.5rem 0.8rem", color: "var(--text)", fontSize: "0.82rem", fontFamily: "'Exo 2', sans-serif", resize: "vertical", outline: "none", marginBottom: 10 }} />
+          <Btn onClick={addContract}>💾 Save Contract</Btn>
+        </Card>
+      )}
+
+      {contracts.length === 0 && !adding && (
+        <Card><div style={{ textAlign: "center", color: "var(--text3)", fontSize: "0.8rem", padding: "1rem 0" }}>No contracts logged yet. Add your first one above.</div></Card>
+      )}
+
+      {contracts.map(c => {
+        const days = c.start && c.end ? Math.max(0, Math.floor((new Date(c.end) - new Date(c.start)) / 86400000)) : null;
+        return (
+          <Card key={c.id} style={{ marginBottom: 8 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+              <div>
+                <div style={{ fontFamily: "'Orbitron', monospace", fontSize: "0.85rem", color: "var(--cyan)", marginBottom: 4 }}>{c.vessel}</div>
+                <div style={{ fontSize: "0.78rem", color: "var(--text2)" }}>{c.rank}{c.company ? ` · ${c.company}` : ""}</div>
+                <div style={{ fontSize: "0.72rem", color: "var(--text3)", marginTop: 4 }}>
+                  {c.start} → {c.end || "ongoing"}{days !== null ? ` · ${days} days` : ""}
+                </div>
+                {c.notes && <div style={{ fontSize: "0.7rem", color: "var(--text3)", marginTop: 3 }}>{c.notes}</div>}
+              </div>
+              <button onClick={() => removeContract(c.id)} style={{ background: "none", border: "none", color: "var(--red)", cursor: "pointer", fontSize: "1rem", padding: "2px 6px" }}>✕</button>
+            </div>
+          </Card>
+        );
+      })}
+    </div>
+  );
+}
+
+// ─── TOOL 9: MENTAL HEALTH SELF-CHECK ────────────────────────────────────────
+function MentalHealthCheck() {
+  const [answers, setAnswers] = useState(() => LS.get("mh_answers", {}));
+  const [submitted, setSubmitted] = useState(false);
+
+  useEffect(() => { LS.set("mh_answers", answers); }, [answers]);
+
+  const scaleLabels = ["Never", "Rarely", "Sometimes", "Often", "Always"];
+
+  const setAnswer = (id, val) => setAnswers(prev => ({ ...prev, [id]: val }));
+
+  const allAnswered = MENTAL_HEALTH_QUESTIONS.every(q => answers[q.id] !== undefined);
+
+  const calcScore = () => {
+    let score = 0;
+    MENTAL_HEALTH_QUESTIONS.forEach(q => {
+      const val = answers[q.id] ?? 0;
+      score += q.reversed ? (4 - val) : val;
+    });
+    return score;
+  };
+
+  const score = allAnswered ? calcScore() : null;
+  const maxScore = MENTAL_HEALTH_QUESTIONS.length * 4;
+  const crisis = answers["mh8"] >= 3;
+
+  const riskLevel = score === null ? null :
+    score <= 8 ? { label: "Low – Coping Well", color: "var(--green)" } :
+    score <= 18 ? { label: "Moderate – Monitor", color: "var(--gold)" } :
+    score <= 28 ? { label: "High – Seek Support", color: "var(--red)" } :
+    { label: "Critical – Get Help Now", color: "var(--red)" };
+
+  return (
+    <div>
+      <SectionTitle icon="🧠" title="Mental Health Self-Check" subtitle="Private · Stored locally only · Not a clinical diagnosis" />
+
+      {crisis && (
+        <div style={{ padding: "12px 16px", background: "rgba(255,71,87,0.15)", border: "2px solid var(--red)", borderRadius: 12, marginBottom: 16, fontSize: "0.82rem", color: "var(--red)", lineHeight: 1.6 }}>
+          🆘 <strong>If you are having thoughts of harming yourself, please reach out immediately.</strong><br />
+          Call <strong>SeafarerHelp: +44 20 7323 2737</strong> — free, confidential, 24/7.
+        </div>
+      )}
+
+      <Card>
+        <div style={{ fontSize: "0.72rem", color: "var(--text2)", marginBottom: 14, lineHeight: 1.6 }}>
+          Rate each statement over the <strong style={{ color: "var(--text)" }}>past 2 weeks</strong>. Your answers are private and never leave your device.
+        </div>
+
+        {MENTAL_HEALTH_QUESTIONS.map((q, i) => (
+          <div key={q.id} style={{ marginBottom: 16, paddingBottom: 16, borderBottom: i < MENTAL_HEALTH_QUESTIONS.length - 1 ? "1px solid var(--border)" : "none" }}>
+            <div style={{ fontSize: "0.82rem", color: "var(--text)", marginBottom: 8, lineHeight: 1.5 }}>
+              <span style={{ color: "var(--text3)", marginRight: 6 }}>{i + 1}.</span>{q.text}
+              {q.id === "mh8" && <span style={{ color: "var(--red)", marginLeft: 6 }}>⚠️</span>}
+            </div>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              {scaleLabels.map((label, val) => (
+                <button
+                  key={val}
+                  onClick={() => setAnswer(q.id, val)}
+                  style={{
+                    padding: "5px 10px",
+                    borderRadius: 6,
+                    border: `1px solid ${answers[q.id] === val ? "var(--cyan)" : "var(--border2)"}`,
+                    background: answers[q.id] === val ? "rgba(0,180,216,0.15)" : "var(--bg2)",
+                    color: answers[q.id] === val ? "var(--cyan)" : "var(--text2)",
+                    fontSize: "0.7rem",
+                    cursor: "pointer",
+                    transition: "all 0.15s",
+                  }}
+                >{label}</button>
+              ))}
+            </div>
+          </div>
+        ))}
+
+        {allAnswered && riskLevel && (
+          <div style={{ marginTop: 16, padding: "14px 16px", background: `${riskLevel.color}15`, border: `1px solid ${riskLevel.color}55`, borderRadius: 12 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+              <span style={{ fontFamily: "'Orbitron', monospace", fontSize: "0.82rem", color: riskLevel.color }}>{riskLevel.label}</span>
+              <span style={{ fontFamily: "'Orbitron', monospace", fontSize: "0.8rem", color: riskLevel.color }}>{score}/{maxScore}</span>
+            </div>
+            <div style={{ height: 8, background: "var(--bg)", borderRadius: 4, overflow: "hidden" }}>
+              <div style={{ height: "100%", width: `${(score / maxScore) * 100}%`, background: riskLevel.color, borderRadius: 4 }} />
+            </div>
+            {score > 8 && (
+              <div style={{ marginTop: 10, fontSize: "0.72rem", color: "var(--text2)", lineHeight: 1.6 }}>
+                Consider talking to someone. SeafarerHelp (<strong style={{ color: "var(--cyan)" }}>+44 20 7323 2737</strong>) is free, confidential, and available 24/7 in multiple languages.
+              </div>
+            )}
+          </div>
+        )}
+
+        {!allAnswered && (
+          <div style={{ fontSize: "0.7rem", color: "var(--text3)", marginTop: 8 }}>
+            Answer all {MENTAL_HEALTH_QUESTIONS.length} questions to see your result.
+          </div>
+        )}
+
+        <div style={{ marginTop: 12 }}>
+          <Btn small color="var(--text3)" onClick={() => { setAnswers({}); setSubmitted(false); }}>↺ Reset</Btn>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+// ─── TOOL 10: FATIGUE ASSESSMENT ─────────────────────────────────────────────
+function FatigueAssessment() {
+  const [answers, setAnswers] = useState(() => LS.get("fatigue_answers", {}));
+
+  useEffect(() => { LS.set("fatigue_answers", answers); }, [answers]);
+
+  const setAnswer = (id, val) => setAnswers(prev => ({ ...prev, [id]: val }));
+
+  const allAnswered = FATIGUE_QUESTIONS.every(q => answers[q.id] !== undefined);
+
+  const calcFatigue = () => {
+    let total = 0;
+    FATIGUE_QUESTIONS.forEach(q => {
+      const val = answers[q.id];
+      if (q.type === "select" && q.weights) {
+        total += q.weights[val] ?? 0;
+      } else if (q.type === "scale") {
+        total += parseInt(val) || 0;
+      }
+    });
+    return total;
+  };
+
+  const score = allAnswered ? calcFatigue() : null;
+  const maxScore = 30;
+
+  const riskLevel = score === null ? null :
+    score <= 6 ? { label: "Low Fatigue — Fit for Duty", color: "var(--green)", advice: "Current levels appear manageable. Maintain regular rest patterns." } :
+    score <= 14 ? { label: "Moderate Fatigue — Monitor", color: "var(--gold)", advice: "Plan additional rest time. Avoid complex navigation tasks if possible." } :
+    score <= 22 ? { label: "High Fatigue — Caution", color: "var(--red)", advice: "Inform your OOW/Master. Avoid solo watchkeeping. Rest is required." } :
+    { label: "Critical Fatigue — Not Fit for Duty", color: "var(--red)", advice: "Do not stand watch. Notify Master immediately. Rest is mandatory per MLC 2006." };
+
+  return (
+    <div>
+      <SectionTitle icon="😴" title="Fatigue Assessment" subtitle="MLC 2006 / STCW rest hour awareness tool" />
+
+      <Card>
+        <div style={{ fontSize: "0.72rem", color: "var(--text2)", marginBottom: 14, lineHeight: 1.6 }}>
+          Answer honestly. Results are stored <strong style={{ color: "var(--text)" }}>locally only</strong> and are for personal awareness, not official reporting.
+        </div>
+
+        {FATIGUE_QUESTIONS.map((q, i) => (
+          <div key={q.id} style={{ marginBottom: 16, paddingBottom: 16, borderBottom: i < FATIGUE_QUESTIONS.length - 1 ? "1px solid var(--border)" : "none" }}>
+            <div style={{ fontSize: "0.82rem", color: "var(--text)", marginBottom: 8 }}>
+              <span style={{ color: "var(--text3)", marginRight: 6 }}>{i + 1}.</span>{q.text}
+            </div>
+            {q.type === "select" && (
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                {q.options.map((opt, idx) => (
+                  <button key={idx} onClick={() => setAnswer(q.id, idx)}
+                    style={{
+                      padding: "5px 10px", borderRadius: 6, fontSize: "0.7rem", cursor: "pointer", transition: "all 0.15s",
+                      border: `1px solid ${answers[q.id] === idx ? "var(--cyan)" : "var(--border2)"}`,
+                      background: answers[q.id] === idx ? "rgba(0,180,216,0.15)" : "var(--bg2)",
+                      color: answers[q.id] === idx ? "var(--cyan)" : "var(--text2)",
+                    }}
+                  >{opt}</button>
+                ))}
+              </div>
+            )}
+            {q.type === "scale" && (
+              <div>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.65rem", color: "var(--text3)", marginBottom: 4 }}>
+                  <span>{q.label?.split("→")[0]?.trim()}</span>
+                  <span>{q.label?.split("→")[1]?.trim()}</span>
+                </div>
+                <div style={{ display: "flex", gap: 5 }}>
+                  {[0, 1, 2, 3, 4].map(v => (
+                    <button key={v} onClick={() => setAnswer(q.id, v)}
+                      style={{
+                        flex: 1, padding: "6px 0", borderRadius: 6, fontSize: "0.75rem", cursor: "pointer", transition: "all 0.15s",
+                        border: `1px solid ${answers[q.id] === v ? "var(--cyan)" : "var(--border2)"}`,
+                        background: answers[q.id] === v ? "rgba(0,180,216,0.2)" : "var(--bg2)",
+                        color: answers[q.id] === v ? "var(--cyan)" : "var(--text2)",
+                      }}
+                    >{v}</button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        ))}
+
+        {allAnswered && riskLevel && (
+          <div style={{ marginTop: 16, padding: "14px 16px", background: `${riskLevel.color}15`, border: `1px solid ${riskLevel.color}55`, borderRadius: 12 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+              <span style={{ fontFamily: "'Orbitron', monospace", fontSize: "0.82rem", color: riskLevel.color }}>{riskLevel.label}</span>
+              <span style={{ fontFamily: "'Orbitron', monospace", fontSize: "0.8rem", color: riskLevel.color }}>{score}/{maxScore}</span>
+            </div>
+            <div style={{ height: 8, background: "var(--bg)", borderRadius: 4, overflow: "hidden", marginBottom: 10 }}>
+              <div style={{ height: "100%", width: `${(score / maxScore) * 100}%`, background: riskLevel.color, borderRadius: 4 }} />
+            </div>
+            <div style={{ fontSize: "0.75rem", color: "var(--text2)", lineHeight: 1.6 }}>{riskLevel.advice}</div>
+          </div>
+        )}
+
+        <div style={{ marginTop: 12 }}>
+          <Btn small color="var(--text3)" onClick={() => setAnswers({})}>↺ Reset</Btn>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+// ─── TOOL 11: ISWAN CONTACTS ─────────────────────────────────────────────────
+function ISWANContacts() {
+  const [expanded, setExpanded] = useState(null);
+
+  return (
+    <div>
+      <SectionTitle icon="📞" title="ISWAN & Welfare Contacts" subtitle="Free · Confidential · Available 24/7 for seafarers worldwide" />
+
+      <div style={{ padding: "10px 14px", background: "rgba(0,180,216,0.08)", border: "1px solid var(--cyan)33", borderRadius: 10, marginBottom: 14, fontSize: "0.75rem", color: "var(--text2)", lineHeight: 1.7 }}>
+        🌊 All organisations listed below provide <strong style={{ color: "var(--text)" }}>free, confidential support</strong> to seafarers and their families. You are not alone.
+      </div>
+
+      {ISWAN_CONTACTS.map((contact, i) => (
+        <Card key={i} style={{ cursor: "pointer", border: `1px solid ${expanded === i ? contact.color + "55" : "var(--border)"}` }}
+          onClick={() => setExpanded(expanded === i ? null : i)}>
+          <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+            <div style={{
+              width: 42, height: 42, borderRadius: 10, background: `${contact.color}18`,
+              border: `1px solid ${contact.color}44`, display: "flex", alignItems: "center",
+              justifyContent: "center", fontSize: "1.2rem", flexShrink: 0,
+            }}>{contact.icon}</div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontFamily: "'Orbitron', monospace", fontSize: "0.8rem", color: contact.color, marginBottom: 3 }}>{contact.service}</div>
+              <div style={{ fontSize: "0.72rem", color: "var(--text2)" }}>{contact.org}</div>
+              <div style={{ fontSize: "0.7rem", color: "var(--text3)", marginTop: 3 }}>{contact.hours}</div>
+            </div>
+            <div style={{ color: "var(--text3)", fontSize: "0.8rem" }}>{expanded === i ? "▲" : "▼"}</div>
+          </div>
+
+          {expanded === i && (
+            <div style={{ marginTop: 14, paddingTop: 14, borderTop: "1px solid var(--border)" }}>
+              <div style={{ fontSize: "0.78rem", color: "var(--text2)", lineHeight: 1.7, marginBottom: 12 }}>{contact.description}</div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                <a href={`tel:${contact.phone.replace(/\s/g, "")}`} style={{ textDecoration: "none" }}>
+                  <div style={{ padding: "8px 12px", background: `${contact.color}15`, border: `1px solid ${contact.color}44`, borderRadius: 8, display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ fontSize: "1rem" }}>📱</span>
+                    <div>
+                      <div style={{ fontSize: "0.65rem", color: "var(--text3)" }}>Phone</div>
+                      <div style={{ fontSize: "0.72rem", color: contact.color, fontWeight: 600 }}>{contact.phone}</div>
+                    </div>
+                  </div>
+                </a>
+                <a href={`mailto:${contact.email}`} style={{ textDecoration: "none" }}>
+                  <div style={{ padding: "8px 12px", background: `${contact.color}15`, border: `1px solid ${contact.color}44`, borderRadius: 8, display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ fontSize: "1rem" }}>✉️</span>
+                    <div>
+                      <div style={{ fontSize: "0.65rem", color: "var(--text3)" }}>Email</div>
+                      <div style={{ fontSize: "0.72rem", color: contact.color, fontWeight: 600 }}>{contact.email}</div>
+                    </div>
+                  </div>
+                </a>
+              </div>
+              <div style={{ marginTop: 8, padding: "8px 12px", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 8 }}>
+                <span style={{ fontSize: "0.65rem", color: "var(--text3)" }}>Website: </span>
+                <span style={{ fontSize: "0.72rem", color: "var(--cyan)" }}>{contact.website}</span>
+              </div>
+              <div style={{ marginTop: 6, fontSize: "0.68rem", color: "var(--text3)" }}>
+                🌐 Languages: {contact.languages}
+              </div>
+            </div>
+          )}
+        </Card>
+      ))}
+    </div>
+  );
+}
+
+// ─── TAB CONFIGURATION ────────────────────────────────────────────────────────
+const TABS = [
+  {
+    key: "finance",
+    label: "Finance",
+    icon: "💰",
+    tools: [
+      { key: "currency", label: "Currency", icon: "💱", component: CurrencyConverter },
+      { key: "wage", label: "Wage", icon: "💵", component: WageCalculator },
+      { key: "overtime", label: "Overtime", icon: "⏱️", component: OvertimeCalculator },
+      { key: "allotment", label: "Allotment", icon: "📤", component: AllotmentCalculator },
+      { key: "savings", label: "Savings", icon: "🏦", component: SavingsPlanner },
+    ],
+  },
+  {
+    key: "planning",
+    label: "Planning",
+    icon: "📅",
+    tools: [
+      { key: "leave", label: "Leave", icon: "🗓️", component: LeavePlanner },
+      { key: "relief", label: "Relief Date", icon: "🔄", component: ReliefDateCalculator },
+      { key: "contract", label: "Contracts", icon: "📋", component: ContractTracker },
+    ],
+  },
+  {
+    key: "wellbeing",
+    label: "Wellbeing",
+    icon: "🧠",
+    tools: [
+      { key: "mental", label: "Mental Health", icon: "🧠", component: MentalHealthCheck },
+      { key: "fatigue", label: "Fatigue", icon: "😴", component: FatigueAssessment },
+      { key: "iswan", label: "ISWAN", icon: "📞", component: ISWANContacts },
+    ],
+  },
+];
+
+// ─── MAIN PAGE ────────────────────────────────────────────────────────────────
+export default function CrewWelfarePage() {
+  const [activeTab, setActiveTab] = useState(() => LS.get("cw_tab", "finance"));
+  const [activeTool, setActiveTool] = useState(() => LS.get("cw_tool", "currency"));
+
+  useEffect(() => { LS.set("cw_tab", activeTab); }, [activeTab]);
+  useEffect(() => { LS.set("cw_tool", activeTool); }, [activeTool]);
+
+  const currentTab = TABS.find(t => t.key === activeTab) || TABS[0];
+  const currentTool = currentTab.tools.find(t => t.key === activeTool) || currentTab.tools[0];
+  const ToolComponent = currentTool.component;
+
+  const switchTab = (tabKey) => {
+    const tab = TABS.find(t => t.key === tabKey);
+    setActiveTab(tabKey);
+    setActiveTool(tab.tools[0].key);
+  };
+
+  return (
+    <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
+
+      {/* ── Page Header */}
+      <div style={{
+        padding: "1.2rem 1.2rem 0",
+        background: "linear-gradient(180deg, rgba(7,20,40,0.6) 0%, transparent 100%)",
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 4 }}>
+          <div style={{
+            width: 40, height: 40,
+            background: "linear-gradient(135deg, var(--cyan), var(--purple))",
+            borderRadius: 10,
+            display: "flex", alignItems: "center", justifyContent: "center",
+            fontSize: "1.1rem",
+            boxShadow: "0 0 16px rgba(0,180,216,0.35)",
+          }}>⚓</div>
+          <div>
+            <div style={{ fontFamily: "'Orbitron', monospace", fontSize: "0.9rem", fontWeight: 700, color: "var(--text)" }}>
+              CREW WELFARE
+            </div>
+            <div style={{ fontSize: "0.65rem", color: "var(--cyan)", textTransform: "uppercase", letterSpacing: "0.12em" }}>
+              Financial · Planning · Wellbeing Tools
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Main Tab Bar */}
+      <div style={{
+        display: "flex",
+        borderBottom: "1px solid var(--border)",
+        padding: "0.8rem 1.2rem 0",
+        gap: 4,
+      }}>
+        {TABS.map(tab => (
+          <button
+            key={tab.key}
+            onClick={() => switchTab(tab.key)}
+            style={{
+              flex: 1,
+              padding: "0.5rem 0",
+              background: activeTab === tab.key ? "rgba(0,180,216,0.12)" : "transparent",
+              border: "none",
+              borderBottom: `2px solid ${activeTab === tab.key ? "var(--cyan)" : "transparent"}`,
+              borderRadius: "6px 6px 0 0",
+              color: activeTab === tab.key ? "var(--cyan)" : "var(--text3)",
+              fontFamily: "'Orbitron', monospace",
+              fontSize: "0.62rem",
+              fontWeight: 700,
+              letterSpacing: "0.06em",
+              cursor: "pointer",
+              transition: "all 0.2s",
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: 4,
+            }}
+          >
+            <span style={{ fontSize: "1rem" }}>{tab.icon}</span>
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {/* ── Tool Sub-Nav */}
+      <div style={{
+        display: "flex",
+        gap: 6,
+        padding: "0.7rem 1.2rem",
+        overflowX: "auto",
+        borderBottom: "1px solid var(--border)",
+        scrollbarWidth: "none",
+      }}>
+        {currentTab.tools.map(tool => (
+          <button
+            key={tool.key}
+            onClick={() => setActiveTool(tool.key)}
+            style={{
+              flexShrink: 0,
+              padding: "0.35rem 0.85rem",
+              borderRadius: 20,
+              border: `1px solid ${activeTool === tool.key ? "var(--cyan)" : "var(--border2)"}`,
+              background: activeTool === tool.key ? "rgba(0,180,216,0.15)" : "var(--bg2)",
+              color: activeTool === tool.key ? "var(--cyan)" : "var(--text2)",
+              fontSize: "0.72rem",
+              fontFamily: "'Exo 2', sans-serif",
+              cursor: "pointer",
+              transition: "all 0.2s",
+              display: "flex",
+              alignItems: "center",
+              gap: 5,
+            }}
+          >
+            <span>{tool.icon}</span>
+            {tool.label}
+          </button>
+        ))}
+      </div>
+
+      {/* ── Tool Content */}
+      <div style={{
+        flex: 1,
+        overflowY: "auto",
+        padding: "1rem 1.2rem 2rem",
+      }}>
+        <ToolComponent key={activeTool} />
+      </div>
+    </div>
+  );
+}
