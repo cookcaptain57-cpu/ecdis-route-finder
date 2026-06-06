@@ -1174,7 +1174,7 @@ function ISWANContacts() {
 }
 
 // ─── TAB CONFIGURATION ────────────────────────────────────────────────────────
-const TABS = [
+const CW_TABS = [
   {
     key: "finance",
     label: "Finance",
@@ -1217,14 +1217,15 @@ export default function CrewWelfarePage() {
   useEffect(() => { LS.set("cw_tab", activeTab); }, [activeTab]);
   useEffect(() => { LS.set("cw_tool", activeTool); }, [activeTool]);
 
-  const currentTab = TABS.find(t => t.key === activeTab) || TABS[0];
+  const currentTab = CW_TABS.find(t => t.key === activeTab) || CW_TABS[0];
   const currentTool = currentTab.tools.find(t => t.key === activeTool) || currentTab.tools[0];
   const ToolComponent = currentTool.component;
 
   const switchTab = (tabKey) => {
-    const tab = TABS.find(t => t.key === tabKey);
+    const found = CW_TABS.find(t => t.key === tabKey);
+    if (!found) return;
     setActiveTab(tabKey);
-    setActiveTool(tab.tools[0].key);
+    setActiveTool(found.tools[0].key);
   };
 
   return (
@@ -1262,18 +1263,18 @@ export default function CrewWelfarePage() {
         padding: "0.8rem 1.2rem 0",
         gap: 4,
       }}>
-        {TABS.map(tab => (
+        {CW_TABS.map(cwTab => (
           <button
-            key={tab.key}
-            onClick={() => switchTab(tab.key)}
+            key={cwTab.key}
+            onClick={() => switchTab(cwTab.key)}
             style={{
               flex: 1,
               padding: "0.5rem 0",
-              background: activeTab === tab.key ? "rgba(0,180,216,0.12)" : "transparent",
+              background: activeTab === cwTab.key ? "rgba(0,180,216,0.12)" : "transparent",
               border: "none",
-              borderBottom: `2px solid ${activeTab === tab.key ? "var(--cyan)" : "transparent"}`,
+              borderBottom: `2px solid ${activeTab === cwTab.key ? "var(--cyan)" : "transparent"}`,
               borderRadius: "6px 6px 0 0",
-              color: activeTab === tab.key ? "var(--cyan)" : "var(--text3)",
+              color: activeTab === cwTab.key ? "var(--cyan)" : "var(--text3)",
               fontFamily: "'Orbitron', monospace",
               fontSize: "0.62rem",
               fontWeight: 700,
@@ -1286,8 +1287,8 @@ export default function CrewWelfarePage() {
               gap: 4,
             }}
           >
-            <span style={{ fontSize: "1rem" }}>{tab.icon}</span>
-            {tab.label}
+            <span style={{ fontSize: "1rem" }}>{cwTab.icon}</span>
+            {cwTab.label}
           </button>
         ))}
       </div>
