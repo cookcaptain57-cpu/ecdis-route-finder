@@ -37,6 +37,7 @@ import EmergencyPage           from "./Pages/EmergencyPage";
 import KnotsRopesMooringPage   from "./Pages/KnotsRopesMooringPage";
 import NavigationBridgePage    from "./Pages/NavigationBridgePage";
 import CrewWelfarePage         from "./Pages/CrewWelfarePage";
+import CrewJourneyPage         from "./Pages/CrewJourneyPage";
 
 const S = `
   @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700;900&family=Exo+2:wght@300;400;500;600&display=swap');
@@ -53,11 +54,7 @@ const S = `
     background-image:linear-gradient(rgba(0,180,216,0.04) 1px,transparent 1px),linear-gradient(90deg,rgba(0,180,216,0.04) 1px,transparent 1px);
     background-size:60px 60px;animation:gm 20s linear infinite;}
   @keyframes gm{to{background-position:60px 60px;}}
-
-  /* ── FIX 1: height:100vh (not min-height) so content area is bounded & scrollable ── */
   .app{position:relative;z-index:2;height:100vh;display:flex;flex-direction:column;overflow:hidden;}
-
-  /* ── Nav ── */
   .nav{position:relative;z-index:100;background:rgba(4,12,26,0.97);backdrop-filter:blur(20px);
     border-bottom:1px solid var(--border);padding:0 1.2rem;
     box-shadow:0 4px 30px rgba(0,0,0,0.5);flex-shrink:0;}
@@ -84,18 +81,12 @@ const S = `
   @keyframes pulse{0%,100%{opacity:1;}50%{opacity:0.4;}}
   .burger{display:none;flex-direction:column;gap:4px;cursor:pointer;padding:8px;background:none;border:none;}
   .burger span{width:20px;height:2px;background:var(--text);border-radius:2px;}
-
   @media(max-width:900px){.nav-row2{display:none;}.burger{display:flex;}.app-sidebar{display:none !important;}}
   @media(min-width:901px){.burger{display:none;}.nav-row2{display:none;}}
-
-  /* ── Desktop Sidebar ── */
   .app-body{display:flex;flex:1;min-height:0;overflow:hidden;}
   .app-sidebar{width:220px;flex-shrink:0;background:rgba(4,12,26,0.97);border-right:1px solid var(--border);
     display:flex;flex-direction:column;overflow-y:auto;padding:0.6rem 0.5rem 1rem;}
-
-  /* ── FIX 2: overflow-y:auto + min-height:0 so desktop pages actually scroll ── */
   .app-content{flex:1;overflow-y:auto;display:flex;flex-direction:column;min-width:0;min-height:0;}
-
   .si-btn{display:flex;align-items:center;gap:9px;padding:9px 10px;border:none;background:transparent;
     color:var(--text2);font-family:'Exo 2',sans-serif;font-size:0.78rem;cursor:pointer;
     border-radius:9px;transition:all 0.2s;text-align:left;width:100%;white-space:nowrap;}
@@ -105,8 +96,6 @@ const S = `
   .si-btn.green.active{background:rgba(0,200,150,0.1);color:var(--green);}
   .si-btn.red.active{background:rgba(255,71,87,0.12);color:var(--red);}
   .si-icon{font-size:1.05rem;width:22px;text-align:center;flex-shrink:0;}
-
-  /* ── FIX 3: Mobile menu — overscroll-behavior:contain stops background page from scrolling ── */
   .mob-menu{display:none;position:fixed;top:56px;left:0;right:0;background:rgba(4,12,26,0.98);
     backdrop-filter:blur(20px);border-bottom:1px solid var(--border);z-index:99;padding:0.7rem;
     max-height:calc(100vh - 56px);overflow-y:auto;
@@ -118,7 +107,6 @@ const S = `
   .mtab:hover{background:rgba(255,255,255,0.08);color:var(--text);}
   .mtab.active{background:rgba(0,180,216,0.12);color:var(--cyan);border-color:rgba(0,180,216,0.3);}
   .mtab-full{grid-column:1/-1;}
-
   .siw{flex:1;position:relative;}
   .si{width:100%;padding:12px 15px 12px 42px;background:var(--bg2);border:1.5px solid var(--border2);
     border-radius:10px;color:var(--text);font-family:'Exo 2',sans-serif;font-size:0.9rem;outline:none;transition:all 0.25s;}
@@ -189,7 +177,6 @@ const S = `
   .spin{width:20px;height:20px;border:2px solid var(--border2);border-top-color:var(--cyan);border-radius:50%;animation:spin 0.8s linear infinite;flex-shrink:0;}
   @keyframes spin{to{transform:rotate(360deg);}}
   @keyframes shimmer{0%{background-position:200% 0;}100%{background-position:-200% 0;}}
-
   [data-theme="light"]{--bg:#f0f5fa;--bg2:#e4ecf4;--card:#ffffff;--text:#0a1628;--text2:#3a4a6a;
     --text3:#6a7a9a;--border:rgba(0,0,0,0.1);--border2:rgba(0,0,0,0.18);--cyan:#0070cc;
     --blue:#0050aa;--green:#007a50;--gold:#b07000;--red:#cc2233;}
@@ -200,7 +187,6 @@ const S = `
   [data-theme="light"] .ntab.active,[data-theme="light"] .si-btn.active{color:var(--cyan) !important;}
   [data-theme="light"] .file-card,[data-theme="light"] .auth-card{background:#ffffff;}
   [data-theme="light"] .footer{background:#e4ecf4;}
-
   .empty{text-align:center;padding:3rem 1rem;color:var(--text3);}
   .empty-icon{font-size:2.8rem;margin-bottom:1rem;}
   .empty-t{font-family:'Orbitron',monospace;font-size:0.82rem;margin-bottom:6px;color:var(--text2);}
@@ -444,7 +430,6 @@ export default function App() {
     });
   }, [user?.uid]);
 
-  // ── FIX 4: Lock body scroll when mobile menu is open (prevents page scrolling behind menu) ──
   useEffect(() => {
     document.body.style.overflow = menuOpen ? 'hidden' : '';
     return () => { document.body.style.overflow = ''; };
@@ -458,23 +443,24 @@ export default function App() {
   };
 
   const TABS = [
-    { k:'home',      i:'🏠', l:'Dashboard' },
-    { k:'routes',    i:'🚢', l:'Routes' },
-    { k:'charts',    i:'📡', l:'ECDIS Charts',   cls:'gold' },
-    { k:'planner',   i:'📐', l:'Route Planner',  cls:'green' },
-    { k:'navmode',   i:'🧭', l:'Nav Mode',       cls:'green' },
-    { k:'ports',     i:'⚓', l:'Ports Database' },
-    { k:'vessel',    i:'🛳', l:'Vessel Search' },
-    { k:'voyage',    i:'🧮', l:'Voyage Calc' },
-    { k:'certs',     i:'📜', l:'Certificates' },
-    { k:'seatime',   i:'⏱', l:'Sea Time' },
-    { k:'notices',   i:'📢', l:'Port Notices' },
-    { k:'compass',   i:'🔭', l:'Compass Error' },
-    { k:'library',   i:'📚', l:'Library' },
-    { k:'knots',     i:'🪢', l:'Knots & Mooring' },
-    { k:'emergency', i:'🚨', l:'Emergency',      cls:'red' },
-    { k:'navbridge', i:'🗺', l:'Nav & Bridge' },
-    { k:'welfare',   i:'⚓', l:'Crew Welfare' },
+    { k:'home',        i:'🏠', l:'Dashboard' },
+    { k:'routes',      i:'🚢', l:'Routes' },
+    { k:'charts',      i:'📡', l:'ECDIS Charts',   cls:'gold' },
+    { k:'planner',     i:'📐', l:'Route Planner',  cls:'green' },
+    { k:'navmode',     i:'🧭', l:'Nav Mode',       cls:'green' },
+    { k:'ports',       i:'⚓', l:'Ports Database' },
+    { k:'vessel',      i:'🛳', l:'Vessel Search' },
+    { k:'voyage',      i:'🧮', l:'Voyage Calc' },
+    { k:'certs',       i:'📜', l:'Certificates' },
+    { k:'seatime',     i:'⏱', l:'Sea Time' },
+    { k:'notices',     i:'📢', l:'Port Notices' },
+    { k:'compass',     i:'🔭', l:'Compass Error' },
+    { k:'library',     i:'📚', l:'Library' },
+    { k:'knots',       i:'🪢', l:'Knots & Mooring' },
+    { k:'emergency',   i:'🚨', l:'Emergency',      cls:'red' },
+    { k:'navbridge',   i:'🗺', l:'Nav & Bridge' },
+    { k:'welfare',     i:'⚓', l:'Crew Welfare' },
+    { k:'crewjourney', i:'🧳', l:'Crew Journey' },
     ...(user ? [{ k:'account', i:'👤', l:'My Account' }] : []),
     ...(isAdmin ? [{ k:'admin', i:'🛡', l:'Admin' }] : []),
   ];
@@ -577,7 +563,6 @@ export default function App() {
           </div>
         </nav>
 
-        {/* Mobile menu — 2-per-row, scrollable, background scroll locked */}
         <div className={`mob-menu ${menuOpen ? 'open' : ''}`}>
           {TABS.map(t => (
             <button key={t.k} className={`mtab ${tab===t.k?'active':''}`} onClick={() => switchTab(t.k)}>
@@ -639,7 +624,6 @@ export default function App() {
             </div>
           </aside>
 
-          {/* app-content: overflow hidden for full-screen pages, else overflow-y:auto for scrolling */}
           <div className="app-content" style={{ overflowY: isPlannerFull ? 'hidden' : 'auto' }}>
 
             {syncBanner && (
@@ -715,25 +699,26 @@ export default function App() {
             )}
 
             {/* ── All Pages ── */}
-            {tab==='home'      && <HomePage routes={routes} charts={charts} onSearch={handleSearch} setTab={switchTab} user={user} portsDb={portsDb} userProfile={userProfile} />}
-            {tab==='routes'    && <RoutesPage searchQuery={searchQ} notify={notify} user={user} setTab={switchTab} sheetRoutes={sheetRoutes} sheetLoading={routesLoading} />}
-            {tab==='charts'    && <ChartsPage notify={notify} user={user} setTab={switchTab} isAdmin={isAdmin} sheetCharts={sheetCharts} sheetLoading={chartsLoading} />}
-            {tab==='planner'   && <RoutePlannerPage notify={notify} sheetRoutes={[...routes,...sheetRoutes]} portsDb={portsDb} />}
-            {tab==='ports'     && <PortSearchPage portsDb={portsDb} sheetLoading={portsLoading} refreshSheets={refreshPorts} />}
-            {tab==='vessel'    && <VesselSearchPage />}
-            {tab==='voyage'    && <VoyageCalculatorPage portsDb={portsDb} />}
-            {tab==='certs'     && <CertificateTrackerPage user={user} notify={notify} />}
-            {tab==='seatime'   && <SeaTimeCalculatorPage  user={user} notify={notify} />}
-            {tab==='notices'   && <NoticesPage notify={notify} />}
-            {tab==='compass'   && <CompassErrorPage />}
-            {tab==='account'   && user && <AccountPage user={user} userProfile={userProfile} setUserProfile={setUserProfile} notify={notify} setTab={switchTab} />}
-            {tab==='library'   && <MaritimeLibraryPage setTab={switchTab} />}
-            {tab==='navmode'   && <NavModePage notify={notify} sheetRoutes={[...routes,...sheetRoutes]} portsDb={portsDb} setTab={switchTab} />}
-            {tab==='emergency' && <EmergencyPage />}
-            {tab==='knots'     && <KnotsRopesMooringPage />}
-            {tab==='navbridge' && <NavigationBridgePage />}
-            {tab==='welfare'   && <CrewWelfarePage />}
-            {tab==='login'     && <LoginPage notify={notify} onLogin={(u, redirectTo, isNew, userName, userRank) => {
+            {tab==='home'        && <HomePage routes={routes} charts={charts} onSearch={handleSearch} setTab={switchTab} user={user} portsDb={portsDb} userProfile={userProfile} />}
+            {tab==='routes'      && <RoutesPage searchQuery={searchQ} notify={notify} user={user} setTab={switchTab} sheetRoutes={sheetRoutes} sheetLoading={routesLoading} />}
+            {tab==='charts'      && <ChartsPage notify={notify} user={user} setTab={switchTab} isAdmin={isAdmin} sheetCharts={sheetCharts} sheetLoading={chartsLoading} />}
+            {tab==='planner'     && <RoutePlannerPage notify={notify} sheetRoutes={[...routes,...sheetRoutes]} portsDb={portsDb} />}
+            {tab==='ports'       && <PortSearchPage portsDb={portsDb} sheetLoading={portsLoading} refreshSheets={refreshPorts} />}
+            {tab==='vessel'      && <VesselSearchPage />}
+            {tab==='voyage'      && <VoyageCalculatorPage portsDb={portsDb} />}
+            {tab==='certs'       && <CertificateTrackerPage user={user} notify={notify} />}
+            {tab==='seatime'     && <SeaTimeCalculatorPage  user={user} notify={notify} />}
+            {tab==='notices'     && <NoticesPage notify={notify} />}
+            {tab==='compass'     && <CompassErrorPage />}
+            {tab==='account'     && user && <AccountPage user={user} userProfile={userProfile} setUserProfile={setUserProfile} notify={notify} setTab={switchTab} />}
+            {tab==='library'     && <MaritimeLibraryPage setTab={switchTab} />}
+            {tab==='navmode'     && <NavModePage notify={notify} sheetRoutes={[...routes,...sheetRoutes]} portsDb={portsDb} setTab={switchTab} />}
+            {tab==='emergency'   && <EmergencyPage />}
+            {tab==='knots'       && <KnotsRopesMooringPage />}
+            {tab==='navbridge'   && <NavigationBridgePage />}
+            {tab==='welfare'     && <CrewWelfarePage />}
+            {tab==='crewjourney' && <CrewJourneyPage user={user} userProfile={userProfile} notify={notify} />}
+            {tab==='login'       && <LoginPage notify={notify} onLogin={(u, redirectTo, isNew, userName, userRank) => {
               setUser(u); setTab(redirectTo || 'home');
               if (!sessionStorage.getItem('welcome_shown')) {
                 sessionStorage.setItem('welcome_shown', '1');
@@ -764,7 +749,6 @@ export default function App() {
               </div>
             )}
 
-            {/* FIX 5: Footer hidden on homepage AND on full-screen pages */}
             {!isPlannerFull && tab !== 'home' && <Footer />}
 
           </div>
