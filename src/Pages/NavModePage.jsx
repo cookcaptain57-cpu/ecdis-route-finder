@@ -86,8 +86,9 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
   const depthCheckOnRef=useRef(false),contoursRef=useRef({shallow:10,safety:20,deep:200,draft:6});
   const aisRangeRef=useRef(0),aisSourceRef=useRef('internet');
   const prevRouteNameRef=useRef(null),indonesiaEncLayerRef=useRef(null);
-  // FIX 4: Shared ROT refs used by both GPS and SafePilot
+  // ROT tracking — separate refs per source to avoid interference
   const prevHdgRef=useRef(null),prevHdgTimeRef=useRef(null);
+  const spPrevHdgRef=useRef(null),spPrevHdgTimeRef=useRef(null);
   const alarmCooldownRef=useRef({}),anchorAlarmCooldownRef=useRef(0),wpAlarmCooldownRef=useRef(0);
   const guardZoneAlarmCooldown=useRef({});
   const ownMmsiRef=useRef(null);
@@ -104,7 +105,7 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
   const [depthSources,setDepthSources]=useState(()=>{try{const a=JSON.parse(ls('nav_depthSources')||'[]');return new Set(Array.isArray(a)?a:[]);}catch{return new Set();}});
   const [activeRoute,setActiveRoute]=useState(()=>{try{return JSON.parse(ls('nav_activeRoute')||'null');}catch{return null;}});
   const [livePos,setLivePos]=useState(null);
-  const [selectedWpIdx,setSelectedWpIdx]=useState(0);
+  const [selectedWpIdx,setSelectedWpIdx]=useState(()=>Number(ls('nav_selectedWpIdx')||0));
   const [rbMode,setRbMode]=useState(false),[rbResult,setRbResult]=useState(null);
   const [etaResult,setEtaResult]=useState(null),[activePanel,setActivePanel]=useState('route');
   const [vectorMins,setVectorMins]=useState(()=>Number(ls('nav_vectorMins')||6));
@@ -168,8 +169,8 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
   const [anchorShackles,setAnchorShackles]=useState(()=>Number(ls('nav_anchorShackles')||3));
   const [showAllAisVectors,setShowAllAisVectors]=useState(()=>localStorage.getItem('nav_aisVectors')==='true');
   const [selectedAisMmsi,setSelectedAisMmsi]=useState(null);
-  // FIX 2: Movable AIS info panel (React state, not Leaflet popup)
-  const [aisPopup,setAisPopup]=useState(null); // {mmsi,x,y,expanded}
+  // AIS popup as full React state — no ref reads at render time (crash fix)
+  const [aisPopup,setAisPopup]=useState(null); // {mmsi,x,y,expanded,data}
 
   const safeInvalidate=useCallback(()=>{invalidateTimers.current.forEach(clearTimeout);invalidateTimers.current=[];const f=()=>{try{leafRef.current?.invalidateSize({animate:false});}catch{}};f();invalidateTimers.current=[100,300,600,1000,1800].map(t=>setTimeout(f,t));},[]);
 
@@ -179,19 +180,21 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
   const colreg=(o,t)=>{const b=(Math.atan2(t.lon-o.lon,t.lat-o.lat)*180/Math.PI+360)%360,rel=(b-o.cog+360)%360;if(rel>345||rel<15)return"HEAD-ON";if(rel>112.5&&rel<247.5)return"OVERTAKING";if(rel>15&&rel<112.5)return"CROSSING-STBD";return"CROSSING-PORT";};
   const offsetPt=(lat,lon,bd,dn)=>{const R=3440.065,d=dn/R,b=bd*Math.PI/180,p1=lat*Math.PI/180,l1=lon*Math.PI/180,p2=Math.asin(Math.sin(p1)*Math.cos(d)+Math.cos(p1)*Math.sin(d)*Math.cos(b)),l2=l1+Math.atan2(Math.sin(b)*Math.sin(d)*Math.cos(p1),Math.cos(d)-Math.sin(p1)*Math.sin(p2));return[p2*180/Math.PI,l2*180/Math.PI];};
 
-  // FIX 4: Shared ROT calc — used by BOTH GPS path and SafePilot path
-  const calcROT=(newCog,nowMs)=>{
+  // ROT calc helper — takes explicit prev refs so GPS and SafePilot don't interfere
+  const calcROTWith=(newCog,nowMs,hRef,tRef)=>{
     let rot=0;
-    if(prevHdgRef.current!==null&&prevHdgTimeRef.current!==null){
-      const dtMin=(nowMs-prevHdgTimeRef.current)/60000;
-      if(dtMin>0&&dtMin<5){
-        const delta=(newCog-prevHdgRef.current+540)%360-180;
+    if(hRef.current!==null&&tRef.current!==null){
+      const dtMin=(nowMs-tRef.current)/60000;
+      if(dtMin>0.003&&dtMin<5){ // at least 0.2s gap to avoid /0
+        const delta=(newCog-hRef.current+540)%360-180;
         rot=Math.max(-720,Math.min(720,parseFloat((delta/dtMin).toFixed(1))));
       }
     }
-    prevHdgRef.current=newCog; prevHdgTimeRef.current=nowMs;
+    hRef.current=newCog; tRef.current=nowMs;
     return rot;
   };
+  const calcROT=(newCog,nowMs)=>calcROTWith(newCog,nowMs,prevHdgRef,prevHdgTimeRef);
+  const calcROTSafePilot=(newCog,nowMs)=>calcROTWith(newCog,nowMs,spPrevHdgRef,spPrevHdgTimeRef);
 
   const renderShip=fix=>{
     if(!leafRef.current||!window.L)return;
@@ -282,18 +285,23 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
     }
   },[aisSource,localAisHost]);
 
-  // FIX 4: SafePilot own position WITH ROT
+  // SafePilot own position — separate ROT calculation, crash-safe renderShip
   useEffect(()=>{
     if(aisSource!=='safepilot'&&aisSource!=='bridge')return;
     const off=aisService.on('ownPos',pos=>{
-      if(!pos?.lat)return;
-      const now=Date.now();
-      const rot=calcROT(pos.hdg||pos.cog||0, now); // ROT now works for SafePilot
-      setRotValue(rot);
-      const fix={lat:pos.lat,lon:pos.lon,sog:pos.sog||0,cog:pos.cog||0,heading:pos.hdg||pos.cog||0,acc:5,rot,fromSafePilot:true};
-      setLivePos(fix);livePosRef.current=fix;aisService.setOwnShip(fix);renderShip(fix);
-      pastTrackRef.current.push({lat:fix.lat,lon:fix.lon,t:now});
-      pastTrackRef.current=pastTrackRef.current.filter(p=>p.t>now-86400000);
+      if(!pos?.lat||!pos?.lon)return;
+      try{
+        const now=Date.now();
+        const cogVal=typeof pos.cog==='number'?pos.cog:(pos.hdg||0);
+        const rot=calcROTSafePilot(cogVal,now);
+        setRotValue(rot);
+        const fix={lat:pos.lat,lon:pos.lon,sog:pos.sog||0,cog:cogVal,heading:pos.hdg||cogVal,acc:5,rot,fromSafePilot:true};
+        setLivePos(fix);livePosRef.current=fix;
+        try{aisService.setOwnShip(fix);}catch{}
+        try{renderShip(fix);}catch(e){console.warn('[renderShip SP]',e);}
+        pastTrackRef.current.push({lat:fix.lat,lon:fix.lon,t:now});
+        pastTrackRef.current=pastTrackRef.current.filter(p=>p.t>now-86400000);
+      }catch(e){console.warn('[ownPos handler]',e);}
     });
     return()=>{try{off();}catch{}};
   },[aisSource]);
@@ -362,21 +370,32 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
       if(layersRef.current.ais[v.mmsi]?.mk){
         layersRef.current.ais[v.mmsi].mk.setLatLng([v.lat,v.lon]);
         layersRef.current.ais[v.mmsi].mk.setIcon(aisIcon);
-        layersRef.current.ais[v.mmsi].data=liveData; // always update live data
+        layersRef.current.ais[v.mmsi].data=liveData;
+        // If popup is open for this vessel, update its data live
+        setAisPopup(prev=>prev?.mmsi===String(v.mmsi)?{...prev,data:liveData}:prev);
       } else {
         const mk=L.marker([v.lat,v.lon],{icon:aisIcon,zIndexOffset:500}).addTo(m);
-        // FIX 2: click opens movable React panel instead of fixed Leaflet popup
-        mk.on('click',e2=>{
-          const pt=m.latLngToContainerPoint([v.lat,v.lon]);
-          setAisPopup({mmsi:String(v.mmsi),x:Math.min(pt.x+12,window.innerWidth-225),y:Math.min(pt.y,window.innerHeight-320),expanded:false});
-          setSelectedAisMmsi(String(v.mmsi));
+        // Store snapshot of liveData at click time — no ref reads during render
+        mk.on('click',()=>{
+          try{
+            const pt=m.latLngToContainerPoint([v.lat,v.lon]);
+            const snapData=layersRef.current.ais[String(v.mmsi)]?.data||liveData;
+            setAisPopup({
+              mmsi:String(v.mmsi),
+              x:Math.min(pt.x+12,window.innerWidth-225),
+              y:Math.min(pt.y,window.innerHeight-320),
+              expanded:false,
+              data:snapData
+            });
+            setSelectedAisMmsi(String(v.mmsi));
+          }catch(e){console.warn('[AIS click]',e);}
         });
         if(!layersRef.current.ais[v.mmsi])layersRef.current.ais[v.mmsi]={};
         layersRef.current.ais[v.mmsi].mk=mk;
         layersRef.current.ais[v.mmsi].data=liveData;
         if(cpaTcpa.cpa<1.5&&cpaTcpa.tcpa>0&&cpaTcpa.tcpa<3)notify(`⚠ CPA: ${v.name||v.mmsi} ${cpaTcpa.cpa.toFixed(2)}NM T+${cpaTcpa.tcpa.toFixed(1)}h`,'error');
       }
-      layersRef.current.ais[v.mmsi].data=liveData; // always update
+      layersRef.current.ais[v.mmsi].data=liveData;
 
       const showVec=showAllAisVectors||(selectedAisMmsi===String(v.mmsi));
       if(showVec&&(v.sog||0)>0.1){
@@ -454,6 +473,7 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
   useEffect(()=>{localStorage.setItem('nav_xtdNM',xtdNM);},[xtdNM]);
   useEffect(()=>{if(fullScreen){document.documentElement.style.overflow='hidden';}else{document.documentElement.style.overflow='';}return()=>{document.documentElement.style.overflow='';};},[fullScreen]);
   useEffect(()=>{localStorage.setItem('nav_aisSource',aisSource);},[aisSource]);
+  useEffect(()=>{localStorage.setItem('nav_selectedWpIdx',selectedWpIdx);},[selectedWpIdx]);
   useEffect(()=>{localStorage.setItem('nav_shipProfile',JSON.stringify(shipProfile));ownMmsiRef.current=shipProfile?.mmsi?String(shipProfile.mmsi):null;},[shipProfile]);
   useEffect(()=>{localStorage.setItem('nav_localAisHost',localAisHost);},[localAisHost]);
   useEffect(()=>{if(activeRoute)localStorage.setItem('nav_activeRoute',JSON.stringify(activeRoute));else localStorage.removeItem('nav_activeRoute');},[activeRoute]);
@@ -612,8 +632,8 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
   const onTE=()=>{hudDragRef.current=null;};
   const toggleDepth=id=>{setDepthSources(prev=>{const next=new Set(prev);if(next.has(id))next.delete(id);else next.add(id);return next;});};
   const S={bg:'rgba(4,12,26,0.97)',bd:'rgba(0,212,255,0.28)',tx:'#D0E8F8',dm:'#5A7A90',vd:'#243850',cy:'#00D4FF',gn:'#00FF88',gd:'#FFD700',rd:'#FF4757',sm:'0.78rem',xs:'0.68rem',lb:'0.58rem'};
-  // Live popup data from layersRef
-  const aisPopupData=aisPopup?layersRef.current.ais?.[aisPopup.mmsi]?.data:null;
+  // AIS popup data comes from state directly — no layersRef read at render (crash fix)
+  const aisPopupData=aisPopup?.data||null;
 
   return(
     <div style={{flex:1,display:'flex',flexDirection:'column',background:'#040C1A',position:'relative',overflow:'hidden',minHeight:0,...(fullScreen?{position:'fixed',inset:0,zIndex:9999,minHeight:'100vh'}:{}),...(nightVision?{filter:'sepia(1) saturate(3) hue-rotate(300deg) brightness(0.7)'}:{})}}>
@@ -632,9 +652,9 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
 
       <div ref={mapRef} style={{flex:1,minHeight:0}}/>
 
-      {/* FIX 6: Compass rose — top-right, transparent, rotates with COG */}
-      <div style={{position:'absolute',top:58,right:panelCollapsed?8:188,zIndex:490,pointerEvents:'none',opacity:0.88,transition:'right 0.2s'}}>
-        <CompassRose cog={livePos?.cog||0} size={72}/>
+      {/* Compass rose — bottom right, transparent, rotates with COG */}
+      <div style={{position:'absolute',bottom:48,right:panelCollapsed?8:188,zIndex:490,pointerEvents:'none',opacity:0.88,transition:'right 0.2s'}}>
+        <CompassRose cog={livePos?.cog||0} size={70}/>
       </div>
 
       {/* Zoom */}
@@ -675,18 +695,21 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
         <div
           style={{position:'absolute',left:aisPopup.x,top:aisPopup.y,zIndex:800,background:'rgba(2,8,20,0.97)',border:`2px solid ${aisPopupData.cpaTcpa?.cpa<1?'#FF3030':aisPopupData.cpaTcpa?.cpa<3?'#FF9500':'rgba(0,212,255,0.55)'}`,borderRadius:10,minWidth:205,maxWidth:260,backdropFilter:'blur(14px)',boxShadow:'0 4px 24px rgba(0,0,0,0.7)',touchAction:'none',userSelect:'none'}}
           onTouchStart={e=>{const t=e.touches[0];aisPopupDragRef.current={dx:t.clientX-aisPopup.x,dy:t.clientY-aisPopup.y};}}
-          onTouchMove={e=>{if(!aisPopupDragRef.current)return;e.stopPropagation();const t=e.touches[0];setAisPopup(p=>({...p,x:Math.max(0,Math.min(window.innerWidth-220,t.clientX-aisPopupDragRef.current.dx)),y:Math.max(56,Math.min(window.innerHeight-200,t.clientY-aisPopupDragRef.current.dy))}));}}
+          onTouchMove={e=>{if(!aisPopupDragRef.current)return;e.stopPropagation();const t=e.touches[0];setAisPopup(p=>p?{...p,x:Math.max(0,Math.min(window.innerWidth-220,t.clientX-aisPopupDragRef.current.dx)),y:Math.max(56,Math.min(window.innerHeight-200,t.clientY-aisPopupDragRef.current.dy))}:p);}}
           onTouchEnd={()=>{aisPopupDragRef.current=null;}}
-          onMouseDown={e=>{if(e.button!==0)return;const ox=e.clientX-aisPopup.x,oy=e.clientY-aisPopup.y;const mm=ev=>{setAisPopup(p=>({...p,x:Math.max(0,Math.min(window.innerWidth-220,ev.clientX-ox)),y:Math.max(56,Math.min(window.innerHeight-200,ev.clientY-oy))}));};const mu=()=>{window.removeEventListener('mousemove',mm);window.removeEventListener('mouseup',mu);};window.addEventListener('mousemove',mm);window.addEventListener('mouseup',mu);}}
+          onMouseDown={e=>{if(e.button!==0||e.target.tagName==='BUTTON')return;const ox=e.clientX-aisPopup.x,oy=e.clientY-aisPopup.y;const mm=ev=>{setAisPopup(p=>p?{...p,x:Math.max(0,Math.min(window.innerWidth-220,ev.clientX-ox)),y:Math.max(56,Math.min(window.innerHeight-200,ev.clientY-oy))}:p);};const mu=()=>{window.removeEventListener('mousemove',mm);window.removeEventListener('mouseup',mu);};window.addEventListener('mousemove',mm);window.addEventListener('mouseup',mu);}}
         >
           <div style={{display:'flex',alignItems:'center',padding:'6px 10px',borderBottom:'1px solid rgba(0,212,255,0.15)',cursor:'grab',gap:6}}>
-            <span style={{color:S.cy,fontWeight:700,fontSize:'0.78rem',flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>⛵ {aisPopupData.name||`MMSI ${aisPopupData.mmsi}`}</span>
-            <button onClick={()=>setAisPopup(p=>({...p,expanded:!p.expanded}))} style={{background:'transparent',border:`1px solid ${S.vd}`,color:S.gd,borderRadius:4,padding:'1px 5px',fontSize:'0.58rem',cursor:'pointer'}}>{aisPopup.expanded?'▲ LESS':'▼ MORE'}</button>
-            <button onClick={()=>{setAisPopup(null);setSelectedAisMmsi(null);}} style={{background:'transparent',border:'none',color:S.dm,fontSize:'0.9rem',cursor:'pointer',lineHeight:1}}>✕</button>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{color:S.cy,fontWeight:700,fontSize:'0.82rem',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>⛵ {aisPopupData.name||'Unknown Vessel'}</div>
+              <div style={{color:S.dm,fontSize:'0.58rem',fontFamily:'monospace'}}>MMSI: {aisPopupData.mmsi}</div>
+            </div>
+            <button onClick={()=>setAisPopup(p=>({...p,expanded:!p.expanded}))} style={{background:'transparent',border:`1px solid ${S.vd}`,color:S.gd,borderRadius:4,padding:'1px 5px',fontSize:'0.58rem',cursor:'pointer',flexShrink:0}}>{aisPopup.expanded?'▲ LESS':'▼ MORE'}</button>
+            <button onClick={()=>{setAisPopup(null);setSelectedAisMmsi(null);}} style={{background:'transparent',border:'none',color:S.dm,fontSize:'0.9rem',cursor:'pointer',lineHeight:1,flexShrink:0}}>✕</button>
           </div>
           <div style={{padding:'8px 10px',display:'flex',flexDirection:'column',gap:4}}>
             <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'3px 8px'}}>
-              {[['MMSI',aisPopupData.mmsi],['SOG',`${(aisPopupData.sog||0).toFixed(1)} kn`],['COG',`${(aisPopupData.cog||0).toFixed(0)}°T`],['HDG',aisPopupData.hdg?`${aisPopupData.hdg.toFixed(0)}°`:'—'],['Range',aisPopupData.rangNM!=null?`${aisPopupData.rangNM.toFixed(2)} NM`:'—'],['BRG',aisPopupData.brgDeg!=null?`${aisPopupData.brgDeg.toFixed(0)}°T`:'—']].map(([k,v])=>(<div key={k}><div style={{color:S.dm,fontSize:'0.54rem'}}>{k}</div><div style={{color:S.tx,fontFamily:'monospace',fontSize:'0.7rem',fontWeight:600}}>{v}</div></div>))}
+              {[['SOG',`${(aisPopupData.sog||0).toFixed(1)} kn`],['COG',`${(aisPopupData.cog||0).toFixed(0)}°T`],['HDG',aisPopupData.hdg?`${Number(aisPopupData.hdg).toFixed(0)}°`:'—'],['ROT',aisPopupData.rot!=null?`${Number(aisPopupData.rot).toFixed(1)}°/m`:'—'],['Range',aisPopupData.rangNM!=null?`${aisPopupData.rangNM.toFixed(2)} NM`:'—'],['BRG',aisPopupData.brgDeg!=null?`${aisPopupData.brgDeg.toFixed(0)}°T`:'—']].map(([k,v])=>(<div key={k}><div style={{color:S.dm,fontSize:'0.54rem'}}>{k}</div><div style={{color:S.tx,fontFamily:'monospace',fontSize:'0.7rem',fontWeight:600}}>{v}</div></div>))}
             </div>
             <div style={{background:'rgba(0,0,0,0.35)',borderRadius:6,padding:'5px 8px',border:`1px solid ${aisPopupData.cpaTcpa?.cpa<1?'rgba(255,48,48,0.5)':aisPopupData.cpaTcpa?.cpa<3?'rgba(255,149,0,0.4)':'rgba(0,212,255,0.18)'}`}}>
               <div style={{display:'flex',justifyContent:'space-between'}}>
@@ -696,26 +719,26 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
               </div>
               {aisPopupData.cpaTcpa?.cpa<1.5&&aisPopupData.cpaTcpa?.tcpa>0&&<div style={{color:'#FF3030',fontSize:'0.62rem',fontWeight:700,marginTop:3}}>⚠ COLLISION RISK</div>}
             </div>
-            {/* FIX 3: Full expanded AIS data — all fields from AIS feed */}
+            {/* Expandable full AIS data — all fields */}
             {aisPopup.expanded&&(
               <div style={{borderTop:'1px solid rgba(0,212,255,0.12)',paddingTop:5,display:'flex',flexDirection:'column',gap:3}}>
                 {[
+                  ['MMSI', String(aisPopupData.mmsi||'—')],
                   ['Call Sign', aisPopupData.callsign||'—'],
                   ['IMO', aisPopupData.imo||'—'],
                   ['Ship Type', aisPopupData.shipType||'—'],
                   ['Nav Status', aisPopupData.navStatus||'—'],
-                  ['ROT', aisPopupData.rot!=null?`${aisPopupData.rot}°/min`:'—'],
                   ['LOA', aisPopupData.length?`${aisPopupData.length} m`:'—'],
                   ['Beam', aisPopupData.beam?`${aisPopupData.beam} m`:'—'],
                   ['Draught', aisPopupData.draught?`${aisPopupData.draught} m`:'—'],
                   ['Destination', aisPopupData.destination||'—'],
-                  ['Lat', aisPopupData.lat?toDMS(aisPopupData.lat,true):'—'],
-                  ['Lon', aisPopupData.lon?toDMS(aisPopupData.lon,false):'—'],
+                  ['Lat', aisPopupData.lat?toDMS(Number(aisPopupData.lat),true):'—'],
+                  ['Lon', aisPopupData.lon?toDMS(Number(aisPopupData.lon),false):'—'],
                 ].map(([k,v])=>(<div key={k} style={{display:'flex',justifyContent:'space-between',gap:6,borderBottom:'1px solid rgba(255,255,255,0.04)',paddingBottom:2}}>
                   <span style={{color:S.dm,fontSize:'0.58rem',flexShrink:0,width:72}}>{k}</span>
                   <span style={{color:S.tx,fontFamily:'monospace',fontSize:'0.6rem',textAlign:'right',wordBreak:'break-word'}}>{v}</span>
                 </div>))}
-                <button onClick={()=>{if(leafRef.current&&aisPopupData.lat)leafRef.current.setView([aisPopupData.lat,aisPopupData.lon],13);}} style={{marginTop:4,background:'rgba(0,212,255,0.1)',border:`1px solid ${S.cy}`,color:S.cy,borderRadius:5,padding:'5px',fontSize:'0.62rem',cursor:'pointer'}}>🎯 Centre on Target</button>
+                <button onClick={()=>{if(leafRef.current&&aisPopupData.lat)leafRef.current.setView([Number(aisPopupData.lat),Number(aisPopupData.lon)],13);}} style={{marginTop:4,background:'rgba(0,212,255,0.1)',border:`1px solid ${S.cy}`,color:S.cy,borderRadius:5,padding:'5px',fontSize:'0.62rem',cursor:'pointer'}}>🎯 Centre on Target</button>
               </div>
             )}
           </div>
