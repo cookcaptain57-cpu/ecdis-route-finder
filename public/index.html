@@ -1,7 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
   <head>
-    <meta http-equiv="delegate-ch" content="sec-ch-ua-platform-version https://navispherex.vercel.app">
     <link rel="manifest" href="/manifest.json">
     <meta name="theme-color" content="#0a192f">
     <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -12,15 +11,49 @@
     <meta name="description" content="ECDIS Route Finder - Maritime Navigation System for professional navigators and ship officers" />
     <title>ECDIS Route Finder</title>
     <style>
-  body { margin: 0; background: #040C1A; }
-  
-  /* Add padding for Android status bar when in WebView app */
-  @media all {
-    :root {
-      --status-bar-height: env(safe-area-inset-top, 0px);
-    }
-  }
+      body { margin: 0; background: #040C1A; }
     </style>
+    <script>
+    (function() {
+      if (!navigator.geolocation) return;
+      const _original = navigator.geolocation;
+      const TWA_OPTS_HIGH = { 
+        enableHighAccuracy: true, 
+        maximumAge: 0, 
+        timeout: 60000 
+      };
+      const TWA_OPTS_LOW = { 
+        enableHighAccuracy: false, 
+        maximumAge: 30000, 
+        timeout: 60000 
+      };
+      const _wrap = (successCb, errorCb, options) => {
+        const opts = Object.assign({}, TWA_OPTS_HIGH, options || {});
+        opts.timeout = Math.max(opts.timeout || 0, 60000);
+        const wrappedError = (err) => {
+          if (err.code === 2 || err.code === 3) {
+            _original.getCurrentPosition.call(
+              _original, successCb, errorCb, TWA_OPTS_LOW
+            );
+          } else {
+            errorCb && errorCb(err);
+          }
+        };
+        return { successCb, wrappedError, opts };
+      };
+      const _getCurrentPosition = _original.getCurrentPosition.bind(_original);
+      navigator.geolocation.getCurrentPosition = function(success, error, options) {
+        const { successCb, wrappedError, opts } = _wrap(success, error, options);
+        _getCurrentPosition(successCb, wrappedError, opts);
+      };
+      const _watchPosition = _original.watchPosition.bind(_original);
+      navigator.geolocation.watchPosition = function(success, error, options) {
+        const { successCb, wrappedError, opts } = _wrap(success, error, options);
+        return _watchPosition(successCb, wrappedError, opts);
+      };
+      console.log('[GPS] TWA/PWA GPS fix applied globally');
+    })();
+    </script>
   </head>
   <body>
     <noscript>You need to enable JavaScript to run this app.</noscript>
