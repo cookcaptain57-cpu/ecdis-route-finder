@@ -15,20 +15,38 @@
     <script>
     (function() {
       if (!navigator.geolocation) return;
+
+      // ── Detect TWA / Android WebView ──
+      const ua = navigator.userAgent || '';
+      const isTWA = (
+        document.referrer.startsWith('android-app://') ||
+        ua.includes('; wv)') ||
+        ua.includes('Version/') && ua.includes('wv') ||
+        window.matchMedia('(display-mode: standalone)').matches &&
+        ua.includes('Android')
+      );
+
+      // ── In TWA — use native geolocation directly, no wrapper ──
+      if (isTWA) {
+        console.log('[GPS] TWA detected — using native geolocation directly');
+        return;
+      }
+
+      // ── In browser/PWA — apply wrapper ──
       const _original = navigator.geolocation;
-      const TWA_OPTS_HIGH = { 
-        enableHighAccuracy: true, 
-        maximumAge: 0, 
-        timeout: 60000 
+      const TWA_OPTS_HIGH = {
+        enableHighAccuracy: true,
+        maximumAge: 0,
+        timeout: 30000
       };
-      const TWA_OPTS_LOW = { 
-        enableHighAccuracy: false, 
-        maximumAge: 30000, 
-        timeout: 60000 
+      const TWA_OPTS_LOW = {
+        enableHighAccuracy: false,
+        maximumAge: 30000,
+        timeout: 30000
       };
       const _wrap = (successCb, errorCb, options) => {
         const opts = Object.assign({}, TWA_OPTS_HIGH, options || {});
-        opts.timeout = Math.max(opts.timeout || 0, 60000);
+        opts.timeout = Math.max(opts.timeout || 0, 30000);
         const wrappedError = (err) => {
           if (err.code === 2 || err.code === 3) {
             _original.getCurrentPosition.call(
@@ -50,7 +68,7 @@
         const { successCb, wrappedError, opts } = _wrap(success, error, options);
         return _watchPosition(successCb, wrappedError, opts);
       };
-      console.log('[GPS] TWA/PWA GPS fix applied globally');
+      console.log('[GPS] Browser/PWA GPS fix applied');
     })();
     </script>
   </head>
