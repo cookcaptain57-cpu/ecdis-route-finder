@@ -1,10 +1,22 @@
-[{
-  "relation": ["delegate_permission/common.handle_all_urls"],
-  "target": {
-    "namespace": "android_app",
-    "package_name": "app.vercel.navispherex.twa",
-    "sha256_cert_fingerprints": [
-      "11:DA:1E:61:51:37:32:B7:21:5C:B1:9A:7A:05:4F:E9:58:B4:85:2D:15:94:29:C6:F0:6C:2E:F1:64:60:BC:17"
-    ]
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "app.vercel.navispherex.twa",
+      "sha256_cert_fingerprints": [
+        "11:DA:1E:61:51:37:32:B7:21:5C:B1:9A:7A:05:4F:E9:58:B4:85:2D:15:94:29:C6:F0:6C:2E:F1:64:60:BC:17"
+      ]
+    }
+  },
+  {
+    "relation": ["delegate_permission/common.get_accounts"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "app.vercel.navispherex.twa",
+      "sha256_cert_fingerprints": [
+        "11:DA:1E:61:51:37:32:B7:21:5C:B1:9A:7A:05:4F:E9:58:B4:85:2D:15:94:29:C6:F0:6C:2E:F1:64:60:BC:17"
+      ]
+    }
   }
-}]
+]
