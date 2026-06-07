@@ -63,6 +63,13 @@ export default function HomePage({ routes, charts, onSearch, setTab, user, ports
   const [expCerts,    setExpCerts]    = useState([]);
   const [cachedRoutes,setCachedRoutes]= useState([]);
   const [cachedCharts,setCachedCharts]= useState([]);
+  const [showTabSettings, setShowTabSettings] = useState(false);
+  const [pinnedTabs, setPinnedTabs]   = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('hp_pinned_tabs') || 'null');
+      return saved || ['routes','charts','planner','navmode','ports','library'];
+    } catch { return ['routes','charts','planner','navmode','ports','library']; }
+  });
   const wRef = useRef();
 
   useEffect(() => {
@@ -124,14 +131,40 @@ export default function HomePage({ routes, charts, onSearch, setTab, user, ports
 
   const wc = weather ? weatherIcon(weather.code) : null;
 
-  const FEATURES = [
-    { icon:'🚢', label:'ROUTES',          desc:'Browse, search & download routes in multiple formats.',  tab:'routes',  color:'#00B4D8', bg:'linear-gradient(135deg,#00B4D8,#1565C0)' },
-    { icon:'📡', label:'ECDIS CHARTS',    desc:'Access charts for all major ECDIS brands.',             tab:'charts',  color:'#F0A500', bg:'linear-gradient(135deg,#F0A500,#D4900A)' },
-    { icon:'📐', label:'ROUTE PLANNER',   desc:'Plan optimised routes with advanced tools.',            tab:'planner', color:'#00C896', bg:'linear-gradient(135deg,#00C896,#00a87a)' },
-    { icon:'🧭', label:'NAV MODE',        desc:'Navigate with precision using smart nav mode.',         tab:'navmode', color:'#A78BFA', bg:'linear-gradient(135deg,#7C3AED,#A78BFA)', badge:'NEW' },
-    { icon:'⚓', label:'PORTS DATABASE',  desc:'Explore 27,000+ global ports with coordinates.',       tab:'ports',   color:'#00B4D8', bg:'linear-gradient(135deg,#00B4D8,#0070cc)' },
-    { icon:'📚', label:'MARITIME LIBRARY',desc:'SOLAS, MARPOL, IMO, STCW & more reference books.',    tab:'library', color:'#F0A500', bg:'linear-gradient(135deg,#F0A500,#b07000)' },
+  const ALL_FEATURES = [
+    { icon:'🚢', label:'ROUTES',          desc:'Browse, search & download routes.',                     tab:'routes',    color:'#00B4D8', bg:'linear-gradient(135deg,#00B4D8,#1565C0)' },
+    { icon:'📡', label:'ECDIS CHARTS',    desc:'Charts for all major ECDIS brands.',                   tab:'charts',    color:'#F0A500', bg:'linear-gradient(135deg,#F0A500,#D4900A)' },
+    { icon:'📐', label:'ROUTE PLANNER',   desc:'Plan optimised routes with advanced tools.',           tab:'planner',   color:'#00C896', bg:'linear-gradient(135deg,#00C896,#00a87a)' },
+    { icon:'🧭', label:'NAV MODE',        desc:'Navigate with precision.',                             tab:'navmode',   color:'#A78BFA', bg:'linear-gradient(135deg,#7C3AED,#A78BFA)', badge:'NEW' },
+    { icon:'⚓', label:'PORTS DATABASE',  desc:'27,000+ global ports with coordinates.',               tab:'ports',     color:'#00B4D8', bg:'linear-gradient(135deg,#00B4D8,#0070cc)' },
+    { icon:'📚', label:'MARITIME LIBRARY',desc:'SOLAS, MARPOL, IMO, STCW & more.',                   tab:'library',   color:'#F0A500', bg:'linear-gradient(135deg,#F0A500,#b07000)' },
+    { icon:'🛳', label:'VESSEL SEARCH',   desc:'Search by IMO, MMSI or flag state.',                  tab:'vessel',    color:'#A78BFA', bg:'linear-gradient(135deg,#7C3AED,#A78BFA)' },
+    { icon:'🧮', label:'VOYAGE CALC',     desc:'Calculate distance, duration and fuel.',              tab:'voyage',    color:'#00C896', bg:'linear-gradient(135deg,#00C896,#00a87a)' },
+    { icon:'📜', label:'CERTIFICATES',    desc:'Track STCW certificate expiry dates.',                tab:'certs',     color:'#F0A500', bg:'linear-gradient(135deg,#F0A500,#b07000)' },
+    { icon:'⏱', label:'SEA TIME',        desc:'Log sea service time across all ships.',              tab:'seatime',   color:'#00B4D8', bg:'linear-gradient(135deg,#00B4D8,#1565C0)' },
+    { icon:'📢', label:'PORT NOTICES',    desc:'Closures, restrictions & warnings.',                  tab:'notices',   color:'#ff6b35', bg:'linear-gradient(135deg,#ff6b35,#cc4400)' },
+    { icon:'🔭', label:'COMPASS ERROR',   desc:'Calculate and log compass errors.',                   tab:'compass',   color:'#A78BFA', bg:'linear-gradient(135deg,#7C3AED,#A78BFA)' },
+    { icon:'🪢', label:'KNOTS & MOORING', desc:'Reference guide for knots and mooring.',              tab:'knots',     color:'#00C896', bg:'linear-gradient(135deg,#00C896,#00a87a)' },
+    { icon:'🚨', label:'EMERGENCY',       desc:'Emergency procedures & contacts.',                    tab:'emergency', color:'#FF4757', bg:'linear-gradient(135deg,#FF4757,#cc2233)' },
+    { icon:'🗺', label:'NAV & BRIDGE',    desc:'Navigation and bridge procedures.',                   tab:'navbridge', color:'#00B4D8', bg:'linear-gradient(135deg,#00B4D8,#1565C0)' },
   ];
+
+  // Only show the pinned tabs as feature cards
+  const FEATURES = ALL_FEATURES.filter(f => pinnedTabs.includes(f.tab));
+
+  const savePinnedTabs = (tabs) => {
+    setPinnedTabs(tabs);
+    localStorage.setItem('hp_pinned_tabs', JSON.stringify(tabs));
+  };
+
+  const togglePin = (tabKey) => {
+    if (pinnedTabs.includes(tabKey)) {
+      savePinnedTabs(pinnedTabs.filter(k => k !== tabKey));
+    } else {
+      if (pinnedTabs.length >= 6) return; // max 6
+      savePinnedTabs([...pinnedTabs, tabKey]);
+    }
+  };
 
   const KNOWLEDGE = [
     { icon:'⚓', label:'SOLAS',        sub:'Safety of Life at Sea',        tab:'library' },
@@ -283,8 +316,71 @@ export default function HomePage({ routes, charts, onSearch, setTab, user, ports
         {/* ── Explore section ── */}
         <div style={{ marginBottom:'0.6rem', display:'flex', alignItems:'center', gap:10 }}>
           <div style={{ width:4, height:22, background:'linear-gradient(180deg,var(--cyan),var(--blue))', borderRadius:2 }} />
-          <div style={{ fontFamily:'Orbitron,monospace', fontSize:'0.78rem', fontWeight:700, letterSpacing:'0.06em' }}>Explore NavisphereX Marine</div>
+          <div style={{ fontFamily:'Orbitron,monospace', fontSize:'0.78rem', fontWeight:700, letterSpacing:'0.06em', flex:1 }}>Explore NavisphereX Marine</div>
+          <button onClick={() => setShowTabSettings(true)}
+            title="Customise which tabs show here"
+            style={{ background:'rgba(0,180,216,0.08)', border:'1px solid rgba(0,180,216,0.25)', borderRadius:7,
+              padding:'4px 9px', cursor:'pointer', fontSize:'0.72rem', color:'var(--cyan)',
+              display:'flex', alignItems:'center', gap:5, fontFamily:'Exo 2,sans-serif' }}>
+            ⚙️ Customise
+          </button>
         </div>
+
+        {/* Tab Customisation Modal */}
+        {showTabSettings && (
+          <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.65)', zIndex:9990,
+            display:'flex', alignItems:'flex-end', justifyContent:'center' }}
+            onClick={e => e.target === e.currentTarget && setShowTabSettings(false)}>
+            <div style={{ background:'var(--card)', border:'1px solid var(--border)', borderRadius:'18px 18px 0 0',
+              padding:'1.4rem', width:'100%', maxWidth:600, maxHeight:'80vh', overflowY:'auto' }}>
+              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'0.4rem' }}>
+                <div style={{ fontFamily:'Orbitron,monospace', fontSize:'0.82rem', fontWeight:700, color:'var(--cyan)' }}>
+                  ⚙️ Customise Dashboard Tabs
+                </div>
+                <button onClick={() => setShowTabSettings(false)}
+                  style={{ background:'none', border:'none', color:'var(--text3)', cursor:'pointer', fontSize:'1.3rem' }}>✕</button>
+              </div>
+              <div style={{ fontSize:'0.72rem', color:'var(--text3)', marginBottom:'1rem' }}>
+                Select up to <strong style={{ color:'var(--cyan)' }}>6 tabs</strong> to show on your dashboard.
+                Currently selected: <strong style={{ color:pinnedTabs.length>=6?'var(--gold)':'var(--green)' }}>{pinnedTabs.length}/6</strong>
+              </div>
+              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8 }}>
+                {ALL_FEATURES.map(f => {
+                  const pinned = pinnedTabs.includes(f.tab);
+                  const disabled = !pinned && pinnedTabs.length >= 6;
+                  return (
+                    <div key={f.tab}
+                      onClick={() => !disabled && togglePin(f.tab)}
+                      style={{ display:'flex', alignItems:'center', gap:10, padding:'10px 12px',
+                        borderRadius:10, border:`1px solid ${pinned?f.color+'55':'var(--border)'}`,
+                        background: pinned?`${f.color}12`:'rgba(255,255,255,0.02)',
+                        cursor: disabled?'not-allowed':'pointer', opacity: disabled?0.45:1,
+                        transition:'all 0.15s' }}>
+                      <div style={{ width:34, height:34, borderRadius:9, background:f.bg,
+                        display:'flex', alignItems:'center', justifyContent:'center',
+                        fontSize:'1.2rem', flexShrink:0 }}>{f.icon}</div>
+                      <div style={{ flex:1, minWidth:0 }}>
+                        <div style={{ fontFamily:'Orbitron,monospace', fontSize:'0.6rem', fontWeight:700,
+                          color:pinned?f.color:'var(--text2)' }}>{f.label}</div>
+                      </div>
+                      <div style={{ width:18, height:18, borderRadius:'50%', flexShrink:0,
+                        background: pinned?'var(--green)':'rgba(255,255,255,0.08)',
+                        border:`1px solid ${pinned?'var(--green)':'var(--border)'}`,
+                        display:'flex', alignItems:'center', justifyContent:'center',
+                        fontSize:'0.7rem', color:'white' }}>
+                        {pinned ? '✓' : ''}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              <button className="btn btn-primary" style={{ width:'100%', justifyContent:'center', marginTop:'1rem' }}
+                onClick={() => setShowTabSettings(false)}>
+                ✅ Done
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* ── Feature cards: 2-per-row mobile, 3-per-row desktop ── */}
         <div className="hp-features-grid" style={{ marginBottom:'1.4rem' }}>
