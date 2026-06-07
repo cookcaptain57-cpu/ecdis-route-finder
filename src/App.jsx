@@ -566,14 +566,12 @@ export default function App() {
                   borderRadius:8, padding:'5px 9px', cursor:'pointer', fontSize:'0.95rem' }}>
                 {theme === 'dark' ? '☀️' : '🌙'}
               </button>
-              {user
-                ? <div className="uc" onClick={() => { signOut(auth); notify('Logged out','info'); }}>
-                    👥 {userProfile?.name?.split(' ')[0] || user.email.split('@')[0]}{isAdmin?' 🛡':''} · Logout
-                  </div>
-                : authChecked
-                  ? <button className="ntab" onClick={() => switchTab('login')}>🔐 Login</button>
-                  : <div className="spin" style={{ width:14, height:14, flexShrink:0 }} />
-              }
+              {!user && authChecked && (
+                <button className="ntab" onClick={() => switchTab('login')}>🔐 Login</button>
+              )}
+              {!user && !authChecked && (
+                <div className="spin" style={{ width:14, height:14, flexShrink:0 }} />
+              )}
               <button className="burger" onClick={() => setMenuOpen(o => !o)}><span /><span /><span /></button>
             </div>
           </div>
