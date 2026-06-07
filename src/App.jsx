@@ -36,7 +36,6 @@ import CompassErrorPage        from "./Pages/CompassErrorPage";
 import EmergencyPage           from "./Pages/EmergencyPage";
 import KnotsRopesMooringPage   from "./Pages/KnotsRopesMooringPage";
 import NavigationBridgePage    from "./Pages/NavigationBridgePage";
-// ── ADDITION: CrewWelfarePage import ─────────────────────────────────────────
 import CrewWelfarePage         from "./Pages/CrewWelfarePage";
 
 const S = `
@@ -54,10 +53,12 @@ const S = `
     background-image:linear-gradient(rgba(0,180,216,0.04) 1px,transparent 1px),linear-gradient(90deg,rgba(0,180,216,0.04) 1px,transparent 1px);
     background-size:60px 60px;animation:gm 20s linear infinite;}
   @keyframes gm{to{background-position:60px 60px;}}
-  .app{position:relative;z-index:2;min-height:100vh;display:flex;flex-direction:column;}
+
+  /* ── FIX 1: height:100vh (not min-height) so content area is bounded & scrollable ── */
+  .app{position:relative;z-index:2;height:100vh;display:flex;flex-direction:column;overflow:hidden;}
 
   /* ── Nav ── */
-  .nav{position:sticky;top:0;z-index:100;background:rgba(4,12,26,0.97);backdrop-filter:blur(20px);
+  .nav{position:relative;z-index:100;background:rgba(4,12,26,0.97);backdrop-filter:blur(20px);
     border-bottom:1px solid var(--border);padding:0 1.2rem;
     box-shadow:0 4px 30px rgba(0,0,0,0.5);flex-shrink:0;}
   .nav-row1{display:flex;align-items:center;justify-content:space-between;height:56px;}
@@ -91,7 +92,10 @@ const S = `
   .app-body{display:flex;flex:1;min-height:0;overflow:hidden;}
   .app-sidebar{width:220px;flex-shrink:0;background:rgba(4,12,26,0.97);border-right:1px solid var(--border);
     display:flex;flex-direction:column;overflow-y:auto;padding:0.6rem 0.5rem 1rem;}
-  .app-content{flex:1;overflow:auto;display:flex;flex-direction:column;min-width:0;}
+
+  /* ── FIX 2: overflow-y:auto + min-height:0 so desktop pages actually scroll ── */
+  .app-content{flex:1;overflow-y:auto;display:flex;flex-direction:column;min-width:0;min-height:0;}
+
   .si-btn{display:flex;align-items:center;gap:9px;padding:9px 10px;border:none;background:transparent;
     color:var(--text2);font-family:'Exo 2',sans-serif;font-size:0.78rem;cursor:pointer;
     border-radius:9px;transition:all 0.2s;text-align:left;width:100%;white-space:nowrap;}
@@ -102,11 +106,12 @@ const S = `
   .si-btn.red.active{background:rgba(255,71,87,0.12);color:var(--red);}
   .si-icon{font-size:1.05rem;width:22px;text-align:center;flex-shrink:0;}
 
-  /* ── Mobile menu 2-per-row ── */
+  /* ── FIX 3: Mobile menu — overscroll-behavior:contain stops background page from scrolling ── */
   .mob-menu{display:none;position:fixed;top:56px;left:0;right:0;background:rgba(4,12,26,0.98);
     backdrop-filter:blur(20px);border-bottom:1px solid var(--border);z-index:99;padding:0.7rem;
-    max-height:80vh;overflow-y:auto;}
-  .mob-menu.open{display:grid;grid-template-columns:1fr 1fr;gap:6px;}
+    max-height:calc(100vh - 56px);overflow-y:auto;
+    overscroll-behavior:contain;-webkit-overflow-scrolling:touch;}
+  .mob-menu.open{display:grid;grid-template-columns:1fr 1fr;gap:6px;overflow-y:auto;}
   .mtab{padding:10px 12px;border:1px solid var(--border);background:rgba(255,255,255,0.04);color:var(--text2);
     font-family:'Exo 2',sans-serif;font-size:0.8rem;cursor:pointer;border-radius:9px;
     text-align:left;transition:all 0.2s;display:flex;align-items:center;gap:8px;}
@@ -439,6 +444,12 @@ export default function App() {
     });
   }, [user?.uid]);
 
+  // ── FIX 4: Lock body scroll when mobile menu is open (prevents page scrolling behind menu) ──
+  useEffect(() => {
+    document.body.style.overflow = menuOpen ? 'hidden' : '';
+    return () => { document.body.style.overflow = ''; };
+  }, [menuOpen]);
+
   const unreadCount = notifications.filter(n => !readNotifIds.has(n.id)).length;
   const markAllRead = () => {
     const allIds = new Set(notifications.map(n => n.id));
@@ -463,7 +474,6 @@ export default function App() {
     { k:'knots',     i:'🪢', l:'Knots & Mooring' },
     { k:'emergency', i:'🚨', l:'Emergency',      cls:'red' },
     { k:'navbridge', i:'🗺', l:'Nav & Bridge' },
-    // ── ADDITION: Crew Welfare tab ────────────────────────────────────────────
     { k:'welfare',   i:'⚓', l:'Crew Welfare' },
     ...(user ? [{ k:'account', i:'👤', l:'My Account' }] : []),
     ...(isAdmin ? [{ k:'admin', i:'🛡', l:'Admin' }] : []),
@@ -485,7 +495,6 @@ export default function App() {
     }
   };
 
-  // ── welfare gets same full-height treatment as planner/navmode ────────────
   const isPlannerFull = tab === 'planner' || tab === 'navmode' || tab === 'welfare';
 
   return (
@@ -570,6 +579,7 @@ export default function App() {
           </div>
         </nav>
 
+        {/* Mobile menu — 2-per-row, scrollable, background scroll locked */}
         <div className={`mob-menu ${menuOpen ? 'open' : ''}`}>
           {TABS.map(t => (
             <button key={t.k} className={`mtab ${tab===t.k?'active':''}`} onClick={() => switchTab(t.k)}>
@@ -631,8 +641,8 @@ export default function App() {
             </div>
           </aside>
 
-          {/* ── app-content: overflow hidden when welfare/planner/navmode ── */}
-          <div className="app-content" style={{ overflow: isPlannerFull ? 'hidden' : 'auto' }}>
+          {/* app-content: overflow hidden for full-screen pages, else overflow-y:auto for scrolling */}
+          <div className="app-content" style={{ overflowY: isPlannerFull ? 'hidden' : 'auto' }}>
 
             {syncBanner && (
               <div style={{ position:'sticky', top:0, left:0, right:0, height:3, zIndex:200, overflow:'hidden', flexShrink:0 }}>
@@ -706,7 +716,7 @@ export default function App() {
               </div>
             )}
 
-            {/* ── Pages ── */}
+            {/* ── All Pages ── */}
             {tab==='home'      && <HomePage routes={routes} charts={charts} onSearch={handleSearch} setTab={switchTab} user={user} portsDb={portsDb} userProfile={userProfile} />}
             {tab==='routes'    && <RoutesPage searchQuery={searchQ} notify={notify} user={user} setTab={switchTab} sheetRoutes={sheetRoutes} sheetLoading={routesLoading} />}
             {tab==='charts'    && <ChartsPage notify={notify} user={user} setTab={switchTab} isAdmin={isAdmin} sheetCharts={sheetCharts} sheetLoading={chartsLoading} />}
@@ -724,7 +734,6 @@ export default function App() {
             {tab==='emergency' && <EmergencyPage />}
             {tab==='knots'     && <KnotsRopesMooringPage />}
             {tab==='navbridge' && <NavigationBridgePage />}
-            {/* ── ADDITION: Crew Welfare page render ───────────────────────── */}
             {tab==='welfare'   && <CrewWelfarePage />}
             {tab==='login'     && <LoginPage notify={notify} onLogin={(u, redirectTo, isNew, userName, userRank) => {
               setUser(u); setTab(redirectTo || 'home');
@@ -757,8 +766,8 @@ export default function App() {
               </div>
             )}
 
-            {/* ── Footer hidden for full-screen pages ── */}
-            {!isPlannerFull && <Footer />}
+            {/* FIX 5: Footer hidden on homepage AND on full-screen pages */}
+            {!isPlannerFull && tab !== 'home' && <Footer />}
 
           </div>
         </div>
