@@ -94,6 +94,9 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
   const ownMmsiRef=useRef(null);
   // FIX 2: movable AIS popup drag ref
   const aisPopupDragRef=useRef(null);
+  // Popup data stored in refs to avoid setAisPopup inside render loops (flicker fix)
+  const aisPopupMmsiRef=useRef(null);
+  const aisPopupDataRef=useRef(null);
 
   const ls=k=>localStorage.getItem(k);
   const [mapReady,setMapReady]=useState(false);
@@ -335,58 +338,51 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
 
   useEffect(()=>{localStorage.setItem('nav_aisVectors',showAllAisVectors);},[showAllAisVectors]);
 
-  // ── AIS rendering: FIX 1 own-ship filter, FIX 2 movable panel, FIX 3 all fields, live TCPA ──
+  // ── AIS marker rendering — only on aisTargets change, never on GPS ticks ──
+  // own position read from livePosRef (ref) so livePos state not in deps
   useEffect(()=>{
     if(!leafRef.current||!window.L)return;
     const L=window.L,m=leafRef.current;
     const ownPos=livePosRef.current;
     const rng=aisRangeRef.current;
-    const ownMmsi=ownMmsiRef.current||(shipProfile?.mmsi?String(shipProfile.mmsi):null);
+    const ownMmsi=ownMmsiRef.current;
     const seen=new Set();
     const guardBreachers=[];
 
     Object.values(aisTargets).forEach(v=>{
       if(!v.lat||!v.lon)return;
-      // FIX 1: Skip own ship by MMSI or very close proximity (<10m)
       if(ownMmsi&&String(v.mmsi)===ownMmsi)return;
       if(ownPos&&distNM(ownPos.lat,ownPos.lon,v.lat,v.lon)<0.005)return;
       if(rng>0&&ownPos&&distNM(ownPos.lat,ownPos.lon,v.lat,v.lon)>rng)return;
 
       const rangNM=ownPos?distNM(ownPos.lat,ownPos.lon,v.lat,v.lon):null;
       const brgDeg=ownPos?brg(ownPos.lat,ownPos.lon,v.lat,v.lon):null;
-      // Live CPA/TCPA — recalculated every render with current own position
       const cpaTcpa=ownPos?computeCPA(
         {lat:ownPos.lat,lon:ownPos.lon,sog:ownPos.sog||0,cog:ownPos.cog||0},
         {lat:v.lat,lon:v.lon,sog:v.sog||0,cog:v.cog||0}
       ):{cpa:9999,tcpa:0};
-
       const col=cpaTcpa.cpa<1?'#FF3030':cpaTcpa.cpa<3?'#FF9500':'#00D4FF';
       const cl=ownPos?colreg({lat:ownPos.lat,lon:ownPos.lon,cog:ownPos.cog},v):'N/A';
       const liveData={...v,rangNM,brgDeg,cpaTcpa,cl};
-
       seen.add(String(v.mmsi));
+
       const aisIcon=L.divIcon({html:`<div style="transform:rotate(${v.cog||0}deg);transform-origin:center;width:16px;height:22px;"><svg width="16" height="22" viewBox="0 0 16 22" fill="none"><polygon points="8,1 15,21 8,16 1,21" fill="${col}" stroke="#fff" stroke-width="1.2"/></svg></div>`,className:'',iconSize:[16,22],iconAnchor:[8,11]});
 
       if(layersRef.current.ais[v.mmsi]?.mk){
         layersRef.current.ais[v.mmsi].mk.setLatLng([v.lat,v.lon]);
         layersRef.current.ais[v.mmsi].mk.setIcon(aisIcon);
         layersRef.current.ais[v.mmsi].data=liveData;
-        // If popup is open for this vessel, update its data live
-        setAisPopup(prev=>prev?.mmsi===String(v.mmsi)?{...prev,data:liveData}:prev);
+        // Update ref only — no setState here (prevents flicker)
+        if(aisPopupMmsiRef.current===String(v.mmsi)) aisPopupDataRef.current=liveData;
       } else {
         const mk=L.marker([v.lat,v.lon],{icon:aisIcon,zIndexOffset:500}).addTo(m);
-        // Store snapshot of liveData at click time — no ref reads during render
         mk.on('click',()=>{
           try{
             const pt=m.latLngToContainerPoint([v.lat,v.lon]);
-            const snapData=layersRef.current.ais[String(v.mmsi)]?.data||liveData;
-            setAisPopup({
-              mmsi:String(v.mmsi),
-              x:Math.min(pt.x+12,window.innerWidth-225),
-              y:Math.min(pt.y,window.innerHeight-320),
-              expanded:false,
-              data:snapData
-            });
+            const snap=layersRef.current.ais[String(v.mmsi)]?.data||liveData;
+            aisPopupMmsiRef.current=String(v.mmsi);
+            aisPopupDataRef.current=snap;
+            setAisPopup({mmsi:String(v.mmsi),x:Math.min(pt.x+12,window.innerWidth-225),y:Math.min(pt.y,window.innerHeight-320),expanded:false});
             setSelectedAisMmsi(String(v.mmsi));
           }catch(e){console.warn('[AIS click]',e);}
         });
@@ -395,7 +391,6 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
         layersRef.current.ais[v.mmsi].data=liveData;
         if(cpaTcpa.cpa<1.5&&cpaTcpa.tcpa>0&&cpaTcpa.tcpa<3)notify(`⚠ CPA: ${v.name||v.mmsi} ${cpaTcpa.cpa.toFixed(2)}NM T+${cpaTcpa.tcpa.toFixed(1)}h`,'error');
       }
-      layersRef.current.ais[v.mmsi].data=liveData;
 
       const showVec=showAllAisVectors||(selectedAisMmsi===String(v.mmsi));
       if(showVec&&(v.sog||0)>0.1){
@@ -405,7 +400,6 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
         else layersRef.current.ais[v.mmsi].vec=L.polyline([[v.lat,v.lon],[vl,vn]],{color:col,weight:1.5,opacity:0.7,dashArray:'4 3'}).addTo(m);
       } else if(layersRef.current.ais[v.mmsi]?.vec){try{m.removeLayer(layersRef.current.ais[v.mmsi].vec);}catch{}layersRef.current.ais[v.mmsi].vec=null;}
 
-      // Guard zone
       if(guardZoneOn&&ownPos&&rangNM!=null&&rangNM<=guardZoneRadiusNM){
         guardBreachers.push(v.name||`MMSI ${v.mmsi}`);
         const key=String(v.mmsi),now2=Date.now();
@@ -413,13 +407,27 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
       }
     });
 
-    setGuardZoneTargets(guardBreachers);setGuardZoneAlarm(guardBreachers.length>0);
-    Object.keys(layersRef.current.ais).forEach(mmsi=>{
-      if(!seen.has(mmsi)){try{m.removeLayer(layersRef.current.ais[mmsi].mk);}catch{}try{if(layersRef.current.ais[mmsi].vec)m.removeLayer(layersRef.current.ais[mmsi].vec);}catch{}delete layersRef.current.ais[mmsi];}
-    });
-  },[aisTargets,livePos,showAllAisVectors,selectedAisMmsi,guardZoneOn,guardZoneRadiusNM]);
+    // Batch guard state — only update if actually changed
+    setGuardZoneTargets(prev=>{const same=prev.length===guardBreachers.length&&prev.every((x,i)=>x===guardBreachers[i]);return same?prev:guardBreachers;});
+    setGuardZoneAlarm(guardBreachers.length>0);
 
-  // Tile layers
+    Object.keys(layersRef.current.ais).forEach(mmsi=>{
+      if(!seen.has(mmsi)){
+        try{m.removeLayer(layersRef.current.ais[mmsi].mk);}catch{}
+        try{if(layersRef.current.ais[mmsi].vec)m.removeLayer(layersRef.current.ais[mmsi].vec);}catch{}
+        delete layersRef.current.ais[mmsi];
+        if(aisPopupMmsiRef.current===mmsi){aisPopupMmsiRef.current=null;aisPopupDataRef.current=null;setAisPopup(null);}
+      }
+    });
+  // NO livePos in deps — GPS ticks don't re-run this effect (flicker fix)
+  },[aisTargets,showAllAisVectors,selectedAisMmsi,guardZoneOn,guardZoneRadiusNM]);
+
+  // Live CPA refresh for open popup — runs on GPS tick but only updates ref, no DOM
+  useEffect(()=>{
+    if(!aisPopup||!livePosRef.current||!aisPopupMmsiRef.current)return;
+    const stored=layersRef.current.ais[aisPopupMmsiRef.current]?.data;
+    if(stored)aisPopupDataRef.current=stored;
+  },[livePos,aisPopup]);
   useEffect(()=>{
     if(!mapReady||!leafRef.current||!window.L)return;
     const L=window.L,m=leafRef.current;
@@ -632,8 +640,8 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
   const onTE=()=>{hudDragRef.current=null;};
   const toggleDepth=id=>{setDepthSources(prev=>{const next=new Set(prev);if(next.has(id))next.delete(id);else next.add(id);return next;});};
   const S={bg:'rgba(4,12,26,0.97)',bd:'rgba(0,212,255,0.28)',tx:'#D0E8F8',dm:'#5A7A90',vd:'#243850',cy:'#00D4FF',gn:'#00FF88',gd:'#FFD700',rd:'#FF4757',sm:'0.78rem',xs:'0.68rem',lb:'0.58rem'};
-  // AIS popup data comes from state directly — no layersRef read at render (crash fix)
-  const aisPopupData=aisPopup?.data||null;
+  // Read popup data from ref at render time — updated by AIS loop without setState
+  const aisPopupData=aisPopup?aisPopupDataRef.current:null;
 
   return(
     <div style={{flex:1,display:'flex',flexDirection:'column',background:'#040C1A',position:'relative',overflow:'hidden',minHeight:0,...(fullScreen?{position:'fixed',inset:0,zIndex:9999,minHeight:'100vh'}:{}),...(nightVision?{filter:'sepia(1) saturate(3) hue-rotate(300deg) brightness(0.7)'}:{})}}>
