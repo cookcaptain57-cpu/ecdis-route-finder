@@ -5,7 +5,7 @@ export default function CrewWelfarePage() {
   const [tab, setTab] = useState("finance");
 
   return (
-    <div style={{ padding: "2rem", color: "var(--text)", flex: 1 }}>
+    <div style={{ color: "var(--text)", flex: 1, height: "100%", overflowY: "auto", display: "flex", flexDirection: "column" }}>
       <h2 style={{ fontFamily: "'Orbitron',monospace", color: "var(--cyan)", marginBottom: "1rem" }}>
         CREW WELFARE
       </h2>
