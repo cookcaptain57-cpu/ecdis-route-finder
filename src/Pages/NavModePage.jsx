@@ -47,29 +47,56 @@ const computeCPA=(own,tgt)=>{
   return{cpa:Math.sqrt(cLon*cLon+cLat*cLat),tcpa};
 };
 
-// ── Compass Rose SVG ──
-const CompassRose=({cog=0,size=70})=>{
-  const ticks=Array.from({length:36},(_,i)=>i*10);
-  const cardinals=['N','NE','E','SE','S','SW','W','NW'];
-  const cardDeg=[0,45,90,135,180,225,270,315];
+// ── Compass Rose — canvas-based, drawn imperatively to avoid React re-renders ──
+const drawCompassRose=(canvas,cog)=>{
+  if(!canvas)return;
+  const size=canvas.width,ctx=canvas.getContext('2d');
   const r=size/2-2,cx=size/2,cy=size/2;
-  return(
-    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{display:'block'}}>
-      <circle cx={cx} cy={cy} r={r} fill="rgba(2,8,20,0.52)" stroke="rgba(0,212,255,0.32)" strokeWidth="1"/>
-      {ticks.map(deg=>{
-        const rad=(deg-cog-90)*Math.PI/180;
-        const isMaj=deg%90===0,isMed=deg%45===0;
-        const r0=isMaj?r-10:isMed?r-7:r-5;
-        return(<line key={deg} x1={cx+r0*Math.cos(rad)} y1={cy+r0*Math.sin(rad)} x2={cx+r*Math.cos(rad)} y2={cy+r*Math.sin(rad)} stroke={isMaj?'#00D4FF':isMed?'rgba(0,212,255,0.55)':'rgba(0,212,255,0.25)'} strokeWidth={isMaj?1.5:0.8}/>);
-      })}
-      {cardinals.map((lbl,i)=>{
-        const deg=cardDeg[i],rad=(deg-cog-90)*Math.PI/180,rr=r-15;
-        return(<text key={lbl} x={cx+rr*Math.cos(rad)} y={cy+rr*Math.sin(rad)} fill={deg===0?'#FF4757':'#00D4FF'} fontSize={deg%90===0?8:5} fontFamily="monospace" fontWeight="700" textAnchor="middle" dominantBaseline="middle">{lbl}</text>);
-      })}
-      {(()=>{const rad=(-cog-90)*Math.PI/180,rr=r-4;return(<polygon points={`${cx+rr*Math.cos(rad)},${cy+rr*Math.sin(rad)} ${cx+5*Math.cos(rad+Math.PI*0.6)},${cy+5*Math.sin(rad+Math.PI*0.6)} ${cx+5*Math.cos(rad-Math.PI*0.6)},${cy+5*Math.sin(rad-Math.PI*0.6)}`} fill="#FF4757"/>);})()}
-      <circle cx={cx} cy={cy} r={3} fill="#00D4FF"/>
-    </svg>
-  );
+  ctx.clearRect(0,0,size,size);
+  ctx.beginPath();ctx.arc(cx,cy,r,0,2*Math.PI);
+  ctx.fillStyle='rgba(2,8,20,0.55)';ctx.fill();
+  ctx.strokeStyle='rgba(0,212,255,0.35)';ctx.lineWidth=1;ctx.stroke();
+  for(let deg=0;deg<360;deg+=10){
+    const rad=(deg-cog-90)*Math.PI/180;
+    const isMaj=deg%90===0,isMed=deg%45===0;
+    const r0=isMaj?r-10:isMed?r-7:r-5;
+    ctx.beginPath();
+    ctx.moveTo(cx+r0*Math.cos(rad),cy+r0*Math.sin(rad));
+    ctx.lineTo(cx+r*Math.cos(rad),cy+r*Math.sin(rad));
+    ctx.strokeStyle=isMaj?'#00D4FF':isMed?'rgba(0,212,255,0.55)':'rgba(0,212,255,0.25)';
+    ctx.lineWidth=isMaj?1.5:0.8;ctx.stroke();
+  }
+  const cards=[['N',0,'#FF4757'],['E',90,'#00D4FF'],['S',180,'#00D4FF'],['W',270,'#00D4FF']];
+  ctx.textAlign='center';ctx.textBaseline='middle';
+  cards.forEach(([lbl,deg,col])=>{
+    const rad=(deg-cog-90)*Math.PI/180,rr=r-13;
+    ctx.fillStyle=col;ctx.font='bold 8px monospace';
+    ctx.fillText(lbl,cx+rr*Math.cos(rad),cy+rr*Math.sin(rad));
+  });
+  // North arrow
+  const rad=(-cog-90)*Math.PI/180,rr=r-4;
+  ctx.beginPath();
+  ctx.moveTo(cx+rr*Math.cos(rad),cy+rr*Math.sin(rad));
+  ctx.lineTo(cx+5*Math.cos(rad+Math.PI*0.6),cy+5*Math.sin(rad+Math.PI*0.6));
+  ctx.lineTo(cx+5*Math.cos(rad-Math.PI*0.6),cy+5*Math.sin(rad-Math.PI*0.6));
+  ctx.closePath();ctx.fillStyle='#FF4757';ctx.fill();
+  ctx.beginPath();ctx.arc(cx,cy,3,0,2*Math.PI);ctx.fillStyle='#00D4FF';ctx.fill();
+};
+const CompassRose=({cogRef,size=70})=>{
+  const canvasRef=useRef(null);
+  useEffect(()=>{
+    const canvas=canvasRef.current;
+    if(!canvas)return;
+    let raf=null,last=-1;
+    const draw=()=>{
+      const cog=cogRef.current||0;
+      if(Math.abs(cog-last)>0.5){drawCompassRose(canvas,cog);last=cog;}
+      raf=requestAnimationFrame(draw);
+    };
+    raf=requestAnimationFrame(draw);
+    return()=>cancelAnimationFrame(raf);
+  },[]);
+  return <canvas ref={canvasRef} width={size} height={size} style={{display:'block'}}/>;
 };
 
 export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
@@ -94,6 +121,9 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
   const ownMmsiRef=useRef(null);
   // FIX 2: movable AIS popup drag ref
   const aisPopupDragRef=useRef(null);
+  const gpsThrottleRef=useRef(null);
+  const rotCanvasRef=useRef(null);
+  const cogCanvasRef=useRef(null);
   // Popup data stored in refs to avoid setAisPopup inside render loops (flicker fix)
   const aisPopupMmsiRef=useRef(null);
   const aisPopupDataRef=useRef(null);
@@ -299,7 +329,12 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
         const rot=calcROTSafePilot(cogVal,now);
         setRotValue(rot);
         const fix={lat:pos.lat,lon:pos.lon,sog:pos.sog||0,cog:cogVal,heading:pos.hdg||cogVal,acc:5,rot,fromSafePilot:true};
-        setLivePos(fix);livePosRef.current=fix;
+        livePosRef.current=fix;
+        const nowThrottle=Date.now();
+        if(!gpsThrottleRef.current||nowThrottle-gpsThrottleRef.current>500){
+          gpsThrottleRef.current=nowThrottle;
+          setLivePos(fix);
+        }
         try{aisService.setOwnShip(fix);}catch{}
         try{renderShip(fix);}catch(e){console.warn('[renderShip SP]',e);}
         pastTrackRef.current.push({lat:fix.lat,lon:fix.lon,t:now});
@@ -324,7 +359,13 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
         const rot=calcROT(cog,now); // FIX 4: shared helper
         setRotValue(rot);
         const fix={lat:la,lon:ln,sog,cog,heading:cog,acc,rot};
-        setLivePos(fix);livePosRef.current=fix;
+        livePosRef.current=fix;
+        // Throttle React state to max 1/2s — prevents cascading re-renders on fast GPS
+        const nowThrottle=Date.now();
+        if(!gpsThrottleRef.current||nowThrottle-gpsThrottleRef.current>500){
+          gpsThrottleRef.current=nowThrottle;
+          setLivePos(fix);
+        }
         pastTrackRef.current.push({lat:la,lon:ln,t:now});
         pastTrackRef.current=pastTrackRef.current.filter(p=>p.t>now-86400000);
         renderShip(fix);
@@ -537,9 +578,15 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
   },[activeRoute,mapReady,colors,xtdNM]);
 
   // ETA
+  // ETA — throttled, only recalculate when position meaningfully changes
+  const etaThrottleRef=useRef(0);
   useEffect(()=>{
     if(!livePos||!activeRoute?.waypoints?.length){setEtaResult(null);return;}
     if(livePos.sog<0.2){setEtaResult(null);return;}
+    // Only recalculate ETA every 5 seconds max
+    const now=Date.now();
+    if(now-etaThrottleRef.current<5000)return;
+    etaThrottleRef.current=now;
     const wps=activeRoute.waypoints,ti=Math.min(Math.max(selectedWpIdx,0),wps.length-1);
     const legSum=(a,b)=>{let d=0;for(let i=a;i<b;i++)d+=distNM(wps[i].lat,wps[i].lon,wps[i+1].lat,wps[i+1].lon);return d;};
     const totalRouteDist=legSum(0,wps.length-1);
@@ -565,9 +612,10 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
     const b=displayMode==='north'?0:displayMode==='course'?(livePos?.cog||0):(livePos?.heading||livePos?.cog||0);
     mapBearingRef.current=b;
     if(typeof leafRef.current.setBearing==='function'){try{leafRef.current.setBearing(b);return;}catch{}}
-    mapRef.current.style.transform=b!==0?`rotate(${b}deg)`:'';
+    // Only apply CSS rotation for non-north modes; north-up needs no transform
+    mapRef.current.style.transform=b!==0?`rotate(${b}deg)`:'none';
     mapRef.current.style.transformOrigin='center center';
-    setTimeout(()=>{try{leafRef.current?.invalidateSize({animate:false});}catch{}},100);
+    // Do NOT call invalidateSize here — it causes flicker on every GPS tick
   },[displayMode,livePos?.cog,livePos?.heading,mapReady]);
 
   useEffect(()=>{
@@ -610,8 +658,13 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
   useEffect(()=>{if(!mapReady||!leafRef.current||!window.L)return;const L=window.L,m=leafRef.current;if(layersRef.current.anchorCircle){try{m.removeLayer(layersRef.current.anchorCircle);}catch{}layersRef.current.anchorCircle=null;}if(anchorWatchOn&&anchorPos){layersRef.current.anchorCircle=L.circle([anchorPos.lat,anchorPos.lon],{radius:anchorRadius*1852,color:anchorAlarm?'#FF2020':'#FFD700',fillColor:anchorAlarm?'#FF2020':'#FFD700',fillOpacity:0.08,weight:2,dashArray:'6 4'}).addTo(m);}},[anchorWatchOn,anchorPos,anchorRadius,anchorAlarm,mapReady]);
   useEffect(()=>{if(!livePos||speedAlarmKn<=0)return;if(livePos.sog>speedAlarmKn){if(!speedAlarmTriggered){setSpeedAlarmTriggered(true);notify(`⚠ OVERSPEED — ${livePos.sog.toFixed(1)}kn / limit ${speedAlarmKn}kn`,'error');}}else{setSpeedAlarmTriggered(false);}},[livePos,speedAlarmKn]);
   useEffect(()=>{if(!livePos||!activeRoute?.waypoints?.length)return;const wps=activeRoute.waypoints,ti=Math.min(Math.max(selectedWpIdx,0),wps.length-1);const dist=distNM(livePos.lat,livePos.lon,wps[ti].lat,wps[ti].lon);if(dist<wpArrivalNM){const now=Date.now();if(now-wpAlarmCooldownRef.current>15000){wpAlarmCooldownRef.current=now;const wpName=wps[ti].name||`WP${String(ti+1).padStart(2,'0')}`;notify(`📍 Arriving at ${wpName} — ${dist.toFixed(2)}NM`,'error');if(ti<wps.length-1)setSelectedWpIdx(ti+1);else notify('🏁 Final waypoint reached!','error');}}},[livePos,activeRoute,selectedWpIdx,wpArrivalNM]);
+  const offTrackThrottleRef=useRef(0);
   useEffect(()=>{
     if(!livePos||!activeRoute?.waypoints?.length){setOffTrackAlarm(false);return;}
+    // Only check XTD every 3 seconds
+    const now=Date.now();
+    if(now-offTrackThrottleRef.current<3000)return;
+    offTrackThrottleRef.current=now;
     const wps=activeRoute.waypoints;let minXTD=Infinity;
     for(let i=0;i<wps.length-1;i++){const legBrg=brg(wps[i].lat,wps[i].lon,wps[i+1].lat,wps[i+1].lon);const shipBrg=brg(wps[i].lat,wps[i].lon,livePos.lat,livePos.lon);const shipDist=distNM(wps[i].lat,wps[i].lon,livePos.lat,livePos.lon);const angle=((legBrg-shipBrg)+540)%360-180;const along=shipDist*Math.cos(angle*Math.PI/180);const legLen=distNM(wps[i].lat,wps[i].lon,wps[i+1].lat,wps[i+1].lon);if(along>=0&&along<=legLen+0.5){const xtd=Math.abs(shipDist*Math.sin(angle*Math.PI/180));if(xtd<minXTD)minXTD=xtd;}}
     if(minXTD===Infinity)minXTD=distNM(livePos.lat,livePos.lon,wps[selectedWpIdx]?.lat||wps[0].lat,wps[selectedWpIdx]?.lon||wps[0].lon);
@@ -662,7 +715,7 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
 
       {/* Compass rose — bottom right, transparent, rotates with COG */}
       <div style={{position:'absolute',bottom:48,right:panelCollapsed?8:188,zIndex:490,pointerEvents:'none',opacity:0.88,transition:'right 0.2s'}}>
-        <CompassRose cog={livePos?.cog||0} size={70}/>
+        <CompassRose cogRef={livePosRef} size={70}/>
       </div>
 
       {/* Zoom */}
@@ -753,7 +806,7 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
         </div>
       )}
 
-      {/* COG panel */}
+      {/* COG panel — reads from livePosRef via canvas, not livePos state */}
       {cogPanelVisible&&livePos&&(
         <div style={{position:'absolute',left:cogPanelPos.x!==null?cogPanelPos.x:'50%',top:cogPanelPos.y,transform:cogPanelPos.x===null?'translateX(-50%)':'none',zIndex:601,touchAction:'none',cursor:'grab'}}
           onTouchStart={e=>{const t=e.touches[0];cogDragRef.current={dx:t.clientX-(cogPanelPos.x||window.innerWidth/2-120),dy:t.clientY-cogPanelPos.y};}}
