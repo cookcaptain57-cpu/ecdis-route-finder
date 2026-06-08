@@ -1,33 +1,9 @@
 /* eslint-disable */
-import { useState } from "react";
-
 export default function CrewWelfarePage() {
-  const [tab, setTab] = useState("finance");
-
   return (
-    <div style={{ minHeight: "100vh", background: "var(--bg)", color: "var(--text)", overflowY: "auto" }}>
-      <h2 style={{ fontFamily: "'Orbitron',monospace", color: "var(--cyan)", padding: "2rem 2rem 1rem" }}>
-        ⚓ CREW WELFARE
-      </h2>
-      <div style={{ display: "flex", gap: 10, padding: "0 2rem 1.5rem" }}>
-        {["finance", "planning", "wellbeing"].map(t => (
-          <button key={t} onClick={() => setTab(t)} style={{
-            padding: "8px 16px", borderRadius: 8, cursor: "pointer",
-            background: tab === t ? "rgba(0,180,216,0.2)" : "var(--card)",
-            border: "1px solid " + (tab === t ? "var(--cyan)" : "var(--border)"),
-            color: tab === t ? "var(--cyan)" : "var(--text2)",
-            fontFamily: "'Orbitron',monospace", fontSize: "0.72rem",
-          }}>{t.toUpperCase()}</button>
-        ))}
-      </div>
-      <div style={{ margin: "0 2rem", background: "var(--card)", border: "1px solid var(--border)", borderRadius: 12, padding: "1.5rem" }}>
-        <p style={{ color: "var(--text2)", fontSize: "0.85rem" }}>
-          Active tab: <strong style={{ color: "var(--cyan)" }}>{tab}</strong>
-        </p>
-        <p style={{ color: "var(--text3)", fontSize: "0.75rem", marginTop: 8 }}>
-          Page is loading correctly. Full tools will be added next.
-        </p>
-      </div>
+    <div style={{ padding: "40px", color: "#E2EBF8", minHeight: "100vh", background: "#040C1A" }}>
+      <h1 style={{ color: "#00B4D8", marginBottom: "20px" }}>CREW WELFARE</h1>
+      <p style={{ color: "#8A9BBF" }}>Page is working correctly.</p>
     </div>
   );
 }
