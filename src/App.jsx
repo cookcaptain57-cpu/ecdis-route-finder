@@ -33,6 +33,7 @@ import CertificateTrackerPage  from "./Pages/CertificateTrackerPage";
 import NoticesPage             from "./Pages/NoticesPage";
 import SeaTimeCalculatorPage   from "./Pages/SeaTimeCalculatorPage";
 import CompassErrorPage        from "./Pages/CompassErrorPage";
+import SightReductionPage      from "./Pages/SightReductionPage";
 import EmergencyPage           from "./Pages/EmergencyPage";
 import KnotsRopesMooringPage   from "./Pages/KnotsRopesMooringPage";
 import NavigationBridgePage    from "./Pages/NavigationBridgePage";
@@ -454,7 +455,8 @@ export default function App() {
     { k:'certs',       i:'📜', l:'Certificates' },
     { k:'seatime',     i:'⏱', l:'Sea Time' },
     { k:'notices',     i:'📢', l:'Port Notices' },
-    { k:'compass',     i:'🔭', l:'Compass Error' },
+    { k:'compass',     i:'🧭', l:'Compass Error' },
+    { k:'sights',      i:'🔭', l:'Celestial Nav' },
     { k:'library',     i:'📚', l:'Library' },
     { k:'knots',       i:'🪢', l:'Knots & Mooring' },
     { k:'emergency',   i:'🚨', l:'Emergency',      cls:'red' },
@@ -606,6 +608,7 @@ export default function App() {
                 <span className="si-icon">{t.i}</span>
                 {t.l}
                 {t.k==='navmode' && <span style={{ marginLeft:'auto', padding:'1px 5px', borderRadius:4, fontSize:'0.5rem', background:'rgba(0,200,100,0.15)', color:'var(--green)', border:'1px solid rgba(0,200,100,0.25)', fontWeight:700, flexShrink:0 }}>NEW</span>}
+                {t.k==='sights'  && <span style={{ marginLeft:'auto', padding:'1px 5px', borderRadius:4, fontSize:'0.5rem', background:'rgba(240,165,0,0.15)', color:'var(--gold)',  border:'1px solid rgba(240,165,0,0.25)',  fontWeight:700, flexShrink:0 }}>NEW</span>}
               </button>
             ))}
             {user && (
@@ -709,7 +712,8 @@ export default function App() {
             {tab==='certs'       && <CertificateTrackerPage user={user} notify={notify} />}
             {tab==='seatime'     && <SeaTimeCalculatorPage  user={user} notify={notify} />}
             {tab==='notices'     && <NoticesPage notify={notify} />}
-            {tab==='compass'     && <CompassErrorPage />}
+            {tab==='compass'     && <CompassErrorPage user={user} />}
+            {tab==='sights'      && <SightReductionPage />}
             {tab==='account'     && user && <AccountPage user={user} userProfile={userProfile} setUserProfile={setUserProfile} notify={notify} setTab={switchTab} />}
             {tab==='library'     && <MaritimeLibraryPage setTab={switchTab} />}
             {tab==='navmode'     && <NavModePage notify={notify} sheetRoutes={[...routes,...sheetRoutes]} portsDb={portsDb} setTab={switchTab} />}
