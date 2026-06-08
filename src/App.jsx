@@ -39,6 +39,7 @@ import KnotsRopesMooringPage   from "./Pages/KnotsRopesMooringPage";
 import NavigationBridgePage    from "./Pages/NavigationBridgePage";
 import CrewWelfarePage         from "./Pages/CrewWelfarePage";
 import CrewJourneyPage         from "./Pages/CrewJourneyPage";
+import PortShorePage           from "./Pages/PortShorePage";
 
 const S = `
   @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700;900&family=Exo+2:wght@300;400;500;600&display=swap');
@@ -443,6 +444,7 @@ export default function App() {
     localStorage.setItem('notif_read', JSON.stringify([...allIds]));
   };
 
+  // ── CHANGE 2: Added { k:'portshore' } entry to TABS ──
   const TABS = [
     { k:'home',        i:'🏠', l:'Dashboard' },
     { k:'routes',      i:'🚢', l:'Routes' },
@@ -463,6 +465,7 @@ export default function App() {
     { k:'navbridge',   i:'🗺', l:'Nav & Bridge' },
     { k:'welfare',     i:'⚓', l:'Crew Welfare' },
     { k:'crewjourney', i:'🧳', l:'Crew Journey' },
+    { k:'portshore',   i:'🏖', l:'Port & Shore' },
     ...(user ? [{ k:'account', i:'👤', l:'My Account' }] : []),
     ...(isAdmin ? [{ k:'admin', i:'🛡', l:'Admin' }] : []),
   ];
@@ -722,6 +725,7 @@ export default function App() {
             {tab==='navbridge'   && <NavigationBridgePage />}
             {tab==='welfare'     && <CrewWelfarePage />}
             {tab==='crewjourney' && <CrewJourneyPage user={user} userProfile={userProfile} notify={notify} />}
+            {tab==='portshore'   && <PortShorePage user={user} onNavigate={switchTab} />}
             {tab==='login'       && <LoginPage notify={notify} onLogin={(u, redirectTo, isNew, userName, userRank) => {
               setUser(u); setTab(redirectTo || 'home');
               if (!sessionStorage.getItem('welcome_shown')) {
