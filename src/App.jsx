@@ -486,8 +486,7 @@ export default function App() {
     }
   };
 
-  const isPlannerFull = tab === 'planner' || tab === 'navmode' || tab === 'welfare';
-
+  const isPlannerFull = tab === 'planner' || tab === 'navmode';
   return (
     <>
       <style>{S}</style>
