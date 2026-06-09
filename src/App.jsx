@@ -1,5 +1,5 @@
 /* eslint-disable */
-// src/App.jsx
+// src/App.jsx - LATEST VERSION with all new pages merged
 import { useState, useEffect } from "react";
 import { auth, db } from "./firebase";
 import { signOut, onAuthStateChanged, setPersistence, browserLocalPersistence } from "firebase/auth";
@@ -17,6 +17,7 @@ import {
 import Footer              from "./components/Footer";
 import Notif               from "./components/Notif";
 import WelcomePopup        from "./components/WelcomePopup";
+import ContactFloatingBtn  from "./components/ContactFloatingBtn";
 import HomePage            from "./Pages/HomePage";
 import RoutesPage          from "./Pages/RoutesPage";
 import ChartsPage          from "./Pages/ChartsPage";
@@ -40,6 +41,10 @@ import NavigationBridgePage    from "./Pages/NavigationBridgePage";
 import CrewWelfarePage         from "./Pages/CrewWelfarePage";
 import CrewJourneyPage         from "./Pages/CrewJourneyPage";
 import PortShorePage           from "./Pages/PortShorePage";
+import ContactPage             from "./Pages/ContactPage";
+import AboutPage               from "./Pages/AboutPage";
+import LegalPage               from "./Pages/LegalPage";
+import FAQPage                 from "./Pages/FAQPage";
 
 const S = `
   @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700;900&family=Exo+2:wght@300;400;500;600&display=swap');
@@ -280,6 +285,9 @@ export default function App() {
   const isAdmin = user?.email === ADMIN_EMAIL;
   const notify  = (msg, type = 'success') => setNotif({ msg, type, key: Date.now() });
 
+  // ADDED: tabs accessible without login
+  const PUBLIC_TABS = new Set(['home', 'login', 'contact', 'about', 'legal', 'faq']);
+
   const applyPortData = (d3) => {
     if (!Array.isArray(d3) || d3.length === 0) return;
     let normalized;
@@ -444,7 +452,6 @@ export default function App() {
     localStorage.setItem('notif_read', JSON.stringify([...allIds]));
   };
 
-  // ── CHANGE 2: Added { k:'portshore' } entry to TABS ──
   const TABS = [
     { k:'home',        i:'🏠', l:'Dashboard' },
     { k:'routes',      i:'🚢', l:'Routes' },
@@ -468,12 +475,18 @@ export default function App() {
     { k:'portshore',   i:'🏖', l:'Port & Shore' },
     ...(user ? [{ k:'account', i:'👤', l:'My Account' }] : []),
     ...(isAdmin ? [{ k:'admin', i:'🛡', l:'Admin' }] : []),
+    // ADDED: info pages
+    { k:'contact', i:'✉️', l:'Contact Us' },
+    { k:'about',   i:'🧭', l:'About' },
+    { k:'legal',   i:'⚖️', l:'Legal' },
+    { k:'faq',     i:'❓', l:'FAQ' },
   ];
 
   const handleSearch = (q) => { setSearchQ(q); setTab('routes'); setMenuOpen(false); };
 
+  // MODIFIED: respect PUBLIC_TABS
   const switchTab = k => {
-    if (!user && k !== 'home' && k !== 'login') {
+    if (!user && !PUBLIC_TABS.has(k) && k !== 'login') {
       setTab('login'); setMenuOpen(false);
       sessionStorage.setItem('intendedTab', k); return;
     }
@@ -487,6 +500,7 @@ export default function App() {
   };
 
   const isPlannerFull = tab === 'planner' || tab === 'navmode';
+
   return (
     <>
       <style>{S}</style>
@@ -742,7 +756,28 @@ export default function App() {
               : <div className="section"><div className="empty"><div className="empty-icon">🔒</div><div className="empty-t">Admin Access Only</div></div></div>
             )}
 
-            {authChecked && !user && tab!=='home' && tab!=='login' && (
+            {/* ADDED: new info pages */}
+            {tab==='contact' && user && <ContactPage notify={notify} user={user} />}
+            {tab==='about'   && user && <AboutPage setTab={switchTab} />}
+            {tab==='legal'   && user && <LegalPage setTab={switchTab} />}
+            {tab==='faq'     && user && <FAQPage setTab={switchTab} />}
+
+            {/* ADDED: login wall for new pages when not logged in */}
+            {authChecked && !user && ['contact','about','legal','faq'].includes(tab) && (
+              <div style={{ display:'flex', flex:1, alignItems:'center', justifyContent:'center', padding:'2rem' }}>
+                <div style={{ maxWidth:380, width:'100%', background:'var(--card)', border:'1px solid var(--border2)', borderRadius:16, padding:'2rem', textAlign:'center' }}>
+                  <div style={{ fontSize:'3rem', marginBottom:'1rem' }}>🔐</div>
+                  <div style={{ fontFamily:'Orbitron,monospace', fontSize:'0.9rem', fontWeight:700, marginBottom:'0.5rem' }}>Login Required</div>
+                  <div style={{ fontSize:'0.82rem', color:'var(--text2)', marginBottom:'1.4rem', lineHeight:1.6 }}>Please login to access this page.</div>
+                  <div style={{ display:'flex', gap:10, justifyContent:'center' }}>
+                    <button className="btn btn-primary" onClick={() => switchTab('login')}>🔐 Login</button>
+                    <button className="btn btn-secondary" onClick={() => switchTab('login')}>✅ Register Free</button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {authChecked && !user && tab!=='home' && tab!=='login' && !PUBLIC_TABS.has(tab) && (
               <div style={{ display:'flex', flex:1, alignItems:'center', justifyContent:'center', padding:'2rem' }}>
                 <div style={{ maxWidth:380, width:'100%', background:'var(--card)', border:'1px solid var(--border2)', borderRadius:16, padding:'2rem', textAlign:'center' }}>
                   <div style={{ fontSize:'3rem', marginBottom:'1rem' }}>🔐</div>
@@ -756,13 +791,17 @@ export default function App() {
               </div>
             )}
 
-            {!isPlannerFull && tab !== 'home' && <Footer />}
+            {/* ADDED: pass setTab to Footer for nav links */}
+            {!isPlannerFull && tab !== 'home' && <Footer setTab={switchTab} />}
 
           </div>
         </div>
 
         {notif && <Notif key={notif.key} msg={notif.msg} type={notif.type} onClose={() => setNotif(null)} />}
         {welcomePopup && <WelcomePopup type={welcomePopup.type} name={welcomePopup.name} rank={welcomePopup.rank} onClose={() => setWelcomePopup(null)} />}
+
+        {/* ADDED: Floating Contact Button */}
+        {authChecked && <ContactFloatingBtn setTab={switchTab} />}
 
         {showDisclaimer && (
           <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.75)', zIndex:9999, display:'flex', alignItems:'center', justifyContent:'center', padding:'1.5rem' }}>
