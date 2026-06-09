@@ -1459,16 +1459,7 @@ const TABS = [
 // ─────────────────────────────────────────────
 export default function EmergencyPage({ portsDb = [] }) {
   const [activeTab, setActiveTab] = useState("gps");
-  const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
   const sectionRefs = useRef({});
-
-  useEffect(() => {
-    const h = () => setIsMobile(window.innerWidth < 768);
-    window.addEventListener("resize", h);
-    return () => window.removeEventListener("resize", h);
-  }, []);
-
-  const scrollTo = (id) => { sectionRefs.current[id]?.scrollIntoView({ behavior:"smooth", block:"start" }); };
 
   const renderSection = (id) => {
     const tab = TABS.find(t => t.id === id);
@@ -1522,7 +1513,7 @@ export default function EmergencyPage({ portsDb = [] }) {
       {/* Tab bar — mobile only */}
       <div className="em-tab-bar" style={{ display:"flex", overflowX:"auto", background:"#111", borderBottom:"1px solid #222", scrollbarWidth:"none", padding:"0 4px" }}>
         {TABS.map(t => (
-          <button key={t.id} onClick={() => setActiveTab(t.id)} style={{ flexShrink:0, padding:"10px 13px", fontSize:10, fontWeight: activeTab===t.id?700:400, color: activeTab===t.id?"#ef4444":"#666", borderBottom: activeTab===t.id?"2px solid #ef4444":"2px solid transparent", cursor:"pointer", whiteSpace:"nowrap", background:"none", border:"none", borderBottom: activeTab===t.id?"2px solid #ef4444":"2px solid transparent", fontFamily:"'IBM Plex Mono',monospace", transition:"color 0.2s" }}>
+          <button key={t.id} onClick={() => setActiveTab(t.id)} style={{ flexShrink:0, padding:"10px 13px", fontSize:10, fontWeight: activeTab===t.id?700:400, color: activeTab===t.id?"#ef4444":"#666", borderTop:"none", borderLeft:"none", borderRight:"none", borderBottom: activeTab===t.id?"2px solid #ef4444":"2px solid transparent", cursor:"pointer", whiteSpace:"nowrap", background:"none", fontFamily:"'IBM Plex Mono',monospace", transition:"color 0.2s" }}>
             {t.label}
           </button>
         ))}
