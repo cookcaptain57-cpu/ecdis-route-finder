@@ -1,46 +1,34 @@
-// craco.config.js
+const webpack = require('webpack');
+
 module.exports = {
   webpack: {
-    configure: (webpackConfig, { env, paths }) => {
+    configure: (webpackConfig) => {
 
-      // Fix 1: Allow .mjs files from node_modules
-      webpackConfig.module.rules.unshift({
-        test: /\.mjs$/,
-        include: /node_modules/,
-        type: 'javascript/auto',
-        resolve: { fullySpecified: false },
-      });
+      // Force webpack to treat ALL files as javascript/auto (no module restrictions)
+      webpackConfig.module.rules.unshift(
+        {
+          test: /\.m?js$/,
+          resolve: { fullySpecified: false },
+          type: 'javascript/auto',
+        }
+      );
 
-      // Fix 2: Disable fullySpecified globally
-      webpackConfig.resolve = {
-        ...webpackConfig.resolve,
-        fullySpecified: false,
+      // Set target explicitly to web (not browserslist)
+      webpackConfig.target = 'web';
+
+      // Tell webpack output environment supports dynamic imports
+      webpackConfig.output = {
+        ...webpackConfig.output,
+        environment: {
+          arrowFunction: true,
+          bigIntLiteral: false,
+          const: true,
+          destructuring: true,
+          dynamicImport: true,
+          forOf: true,
+          module: false,
+        },
       };
-
-      // Fix 3: THE ACTUAL FIX
-      // webpack 5 throws this error when it encounters a package with
-      // "type":"module" and tries to treat it as an external of type 'module'
-      // Force all externals to use 'commonjs' type instead
-      const originalExternals = webpackConfig.externals;
-      webpackConfig.externals = originalExternals
-        ? (Array.isArray(originalExternals)
-            ? originalExternals.map(ext =>
-                typeof ext === 'string' ? { [ext]: `commonjs ${ext}` } : ext
-              )
-            : originalExternals)
-        : undefined;
-
-      // Fix 4: Explicitly set experiments to disable outputModule
-      webpackConfig.experiments = {
-        ...webpackConfig.experiments,
-        outputModule: false,
-      };
-
-      // Fix 5: Remove 'module' from output if set
-      if (webpackConfig.output) {
-        delete webpackConfig.output.module;
-        delete webpackConfig.output.library;
-      }
 
       return webpackConfig;
     },
