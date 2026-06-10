@@ -1,3 +1,4 @@
+// craco.config.js
 module.exports = {
   webpack: {
     configure: (webpackConfig) => {
@@ -35,16 +36,9 @@ module.exports = {
         fullySpecified: false,
       };
 
-      // Fix 4: Enable dynamic import in output
-      webpackConfig.output = {
-        ...webpackConfig.output,
-        environment: {
-          ...webpackConfig.output?.environment,
-          dynamicImport: true,
-          arrowFunction: true,
-          asyncFunction: true,
-        },
-      };
+      // NOTE: Fix 4 (dynamicImport: true) was removed — it caused
+      // "Cannot use import.meta outside a module" in production builds
+      // because browsers in the browserslist don't support native ESM output.
 
       return webpackConfig;
     },
