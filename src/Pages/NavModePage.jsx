@@ -47,6 +47,40 @@ const computeCPA=(own,tgt)=>{
   return{cpa:Math.sqrt(cLon*cLon+cLat*cLat),tcpa};
 };
 
+// ── ROT Gauge — canvas component, reads from ref at interval, no React re-renders ──
+const RotGauge=({rotRef,size=60})=>{
+  const cRef=useRef(null);
+  useEffect(()=>{
+    const canvas=cRef.current;if(!canvas)return;
+    const ctx=canvas.getContext('2d');
+    const draw=()=>{
+      const rot=Math.max(-30,Math.min(30,rotRef.current||0));
+      const W=canvas.width,H=canvas.height;
+      ctx.clearRect(0,0,W,H);
+      const cx=W/2,cy=H-1,r=H-3;
+      // Background arcs
+      ctx.beginPath();ctx.arc(cx,cy,r,Math.PI,0);ctx.strokeStyle='rgba(255,32,32,0.3)';ctx.lineWidth=5;ctx.stroke();
+      ctx.beginPath();ctx.arc(cx,cy,r,0,Math.PI);ctx.strokeStyle='rgba(0,255,136,0.3)';ctx.lineWidth=5;ctx.stroke();
+      // Labels
+      ctx.fillStyle='rgba(255,32,32,0.7)';ctx.font='bold 7px monospace';ctx.textAlign='left';ctx.fillText('P',3,H-2);
+      ctx.fillStyle='rgba(0,255,136,0.7)';ctx.textAlign='right';ctx.fillText('S',W-3,H-2);
+      // Needle
+      const ang=(rot/30)*Math.PI*0.9-Math.PI/2;
+      const nx=cx+(r-2)*Math.cos(ang),ny=cy+(r-2)*Math.sin(ang);
+      const col=rot<-2?'#FF2020':rot>2?'#00FF88':'#FFD700';
+      ctx.beginPath();ctx.moveTo(cx,cy);ctx.lineTo(nx,ny);ctx.strokeStyle=col;ctx.lineWidth=3;ctx.lineCap='round';ctx.stroke();
+      ctx.beginPath();ctx.arc(cx,cy,3,0,2*Math.PI);ctx.fillStyle='#00D4FF';ctx.fill();
+      // Value text
+      ctx.fillStyle=col;ctx.font='bold 7px monospace';ctx.textAlign='center';
+      ctx.fillText((rot>0.5?'⇒':rot<-0.5?'⇐':'·')+' '+Math.abs(rot).toFixed(1)+'°/m',cx,H-12);
+    };
+    draw();
+    const timer=setInterval(draw,500);
+    return()=>clearInterval(timer);
+  },[]);
+  return <canvas ref={cRef} width={size} height={Math.round(size*0.55)} style={{display:'block',margin:'0 auto'}}/>;
+};
+
 // ── Compass Rose — canvas-based, drawn imperatively to avoid React re-renders ──
 const drawCompassRose=(canvas,cog)=>{
   if(!canvas)return;
@@ -87,14 +121,13 @@ const CompassRose=({cogRef,size=70})=>{
   useEffect(()=>{
     const canvas=canvasRef.current;
     if(!canvas)return;
-    let raf=null,last=-1;
-    const draw=()=>{
-      const cog=cogRef.current||0;
-      if(Math.abs(cog-last)>0.5){drawCompassRose(canvas,cog);last=cog;}
-      raf=requestAnimationFrame(draw);
-    };
-    raf=requestAnimationFrame(draw);
-    return()=>cancelAnimationFrame(raf);
+    let last=-1;
+    // 2fps is plenty for compass — avoids 60fps repaints causing flicker
+    const timer=setInterval(()=>{
+      const cog=cogRef.current?.cog||0;
+      if(Math.abs(cog-last)>0.3){drawCompassRose(canvas,cog);last=cog;}
+    },500);
+    return()=>clearInterval(timer);
   },[]);
   return <canvas ref={canvasRef} width={size} height={size} style={{display:'block'}}/>;
 };
@@ -122,6 +155,7 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
   // FIX 2: movable AIS popup drag ref
   const aisPopupDragRef=useRef(null);
   const gpsThrottleRef=useRef(null);
+  const rotValueRef=useRef(0);
   const rotCanvasRef=useRef(null);
   const cogCanvasRef=useRef(null);
   // Popup data stored in refs to avoid setAisPopup inside render loops (flicker fix)
@@ -327,13 +361,14 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
         const now=Date.now();
         const cogVal=typeof pos.cog==='number'?pos.cog:(pos.hdg||0);
         const rot=calcROTSafePilot(cogVal,now);
-        setRotValue(rot);
+        rotValueRef.current=rot;
         const fix={lat:pos.lat,lon:pos.lon,sog:pos.sog||0,cog:cogVal,heading:pos.hdg||cogVal,acc:5,rot,fromSafePilot:true};
         livePosRef.current=fix;
         const nowThrottle=Date.now();
-        if(!gpsThrottleRef.current||nowThrottle-gpsThrottleRef.current>500){
+        if(!gpsThrottleRef.current||nowThrottle-gpsThrottleRef.current>1000){
           gpsThrottleRef.current=nowThrottle;
-          setLivePos(fix);
+          setRotValue(rot);
+          setLivePos({...fix});
         }
         try{aisService.setOwnShip(fix);}catch{}
         try{renderShip(fix);}catch(e){console.warn('[renderShip SP]',e);}
@@ -356,15 +391,16 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
         const la=pos.coords.latitude,ln=pos.coords.longitude;
         const sog=(pos.coords.speed||0)*1.94384,cog=pos.coords.heading||0,acc=pos.coords.accuracy||0;
         const now=Date.now();
-        const rot=calcROT(cog,now); // FIX 4: shared helper
-        setRotValue(rot);
+        const rot=calcROT(cog,now);
+        rotValueRef.current=rot;
         const fix={lat:la,lon:ln,sog,cog,heading:cog,acc,rot};
         livePosRef.current=fix;
-        // Throttle React state to max 1/2s — prevents cascading re-renders on fast GPS
+        // Throttle React state to 1/sec — map panning uses livePosRef directly
         const nowThrottle=Date.now();
-        if(!gpsThrottleRef.current||nowThrottle-gpsThrottleRef.current>500){
+        if(!gpsThrottleRef.current||nowThrottle-gpsThrottleRef.current>1000){
           gpsThrottleRef.current=nowThrottle;
-          setLivePos(fix);
+          setRotValue(rot);
+          setLivePos({...fix});
         }
         pastTrackRef.current.push({lat:la,lon:ln,t:now});
         pastTrackRef.current=pastTrackRef.current.filter(p=>p.t>now-86400000);
@@ -607,16 +643,28 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
     setEtaResult({remainNM:rem.toFixed(1),totalNM:totalRouteDist.toFixed(1),hrs:h,mins:mn,wpName:wps[ti].name||`WP${String(ti+1).padStart(2,'0')}`,arrivalStr:`${pd(arr.getDate())} ${mo} ${arr.getFullYear()} ${pd(arr.getHours())}:${pd(arr.getMinutes())} LT`});
   },[livePos,activeRoute,selectedWpIdx]);
 
+  // Map bearing — only needs to update when mode changes, not every GPS tick
+  // For course-up/head-up we update at most every 2s to avoid flicker
+  const bearingThrottleRef=useRef(0);
   useEffect(()=>{
     if(!mapReady||!mapRef.current||!leafRef.current)return;
-    const b=displayMode==='north'?0:displayMode==='course'?(livePos?.cog||0):(livePos?.heading||livePos?.cog||0);
-    mapBearingRef.current=b;
-    if(typeof leafRef.current.setBearing==='function'){try{leafRef.current.setBearing(b);return;}catch{}}
-    // Only apply CSS rotation for non-north modes; north-up needs no transform
-    mapRef.current.style.transform=b!==0?`rotate(${b}deg)`:'none';
-    mapRef.current.style.transformOrigin='center center';
-    // Do NOT call invalidateSize here — it causes flicker on every GPS tick
-  },[displayMode,livePos?.cog,livePos?.heading,mapReady]);
+    if(displayMode==='north'){
+      mapBearingRef.current=0;
+      if(typeof leafRef.current.setBearing==='function'){try{leafRef.current.setBearing(0);}catch{}}
+      mapRef.current.style.transform='none';
+      return;
+    }
+    const applyBearing=()=>{
+      const b=displayMode==='course'?(livePosRef.current?.cog||0):(livePosRef.current?.heading||livePosRef.current?.cog||0);
+      mapBearingRef.current=b;
+      if(typeof leafRef.current?.setBearing==='function'){try{leafRef.current.setBearing(b);return;}catch{}}
+      if(mapRef.current)mapRef.current.style.transform=`rotate(${b}deg)`;
+    };
+    applyBearing();
+    // For dynamic modes, poll from ref every 2s — no state dep needed
+    const timer=setInterval(applyBearing,2000);
+    return()=>clearInterval(timer);
+  },[displayMode,mapReady]);
 
   useEffect(()=>{
     if(leafRef.current)return;
@@ -820,16 +868,10 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
             <div style={{width:1,height:46,background:'rgba(0,212,255,0.2)',flexShrink:0}}/>
             <div style={{textAlign:'center',minWidth:52}}><div style={{color:'#5A7A90',fontSize:'0.55rem',letterSpacing:1,textTransform:'uppercase'}}>COG</div><div style={{color:'#00D4FF',fontFamily:'monospace',fontSize:'1.6rem',fontWeight:900,lineHeight:1.1}}>{livePos.cog.toFixed(0)}°</div><div style={{color:'#5A7A90',fontSize:'0.5rem'}}>true</div></div>
             <div style={{width:1,height:46,background:'rgba(0,212,255,0.2)',flexShrink:0}}/>
-            <div style={{textAlign:'center',minWidth:64}}>
+            <div style={{textAlign:'center',minWidth:80}}>
               <div style={{color:'#5A7A90',fontSize:'0.55rem',letterSpacing:1,textTransform:'uppercase',marginBottom:2}}>ROT</div>
-              <svg width="60" height="32" viewBox="0 0 60 32" style={{display:'block',margin:'0 auto'}}>
-                <path d="M 6,31 A 25,25 0 0,1 30,6" stroke="#FF2020" strokeWidth="5" fill="none" strokeLinecap="round" opacity="0.35"/>
-                <path d="M 30,6 A 25,25 0 0,1 54,31" stroke="#00FF88" strokeWidth="5" fill="none" strokeLinecap="round" opacity="0.35"/>
-                <text x="4" y="30" fill="#FF2020" fontSize="8" fontFamily="monospace" opacity="0.7">P</text>
-                <text x="50" y="30" fill="#00FF88" fontSize="8" fontFamily="monospace" opacity="0.7">S</text>
-                {(()=>{const rot=Math.max(-30,Math.min(30,rotValue||0));const ang=(rot/30)*82;const rad=(ang-90)*Math.PI/180;const x=30+23*Math.cos(rad);const y=31+23*Math.sin(rad);const col=rot<-2?'#FF2020':rot>2?'#00FF88':'#FFD700';return(<><line x1="30" y1="31" x2={x.toFixed(1)} y2={y.toFixed(1)} stroke={col} strokeWidth="3" strokeLinecap="round"/><circle cx="30" cy="31" r="3.5" fill="#00D4FF"/></>);})()}
-              </svg>
-              <div style={{color:Math.abs(rotValue||0)>10?'#FF2020':Math.abs(rotValue||0)>3?'#FFD700':'#00FF88',fontFamily:'monospace',fontSize:'0.65rem',fontWeight:700,marginTop:1}}>{(rotValue||0)>0.5?'⇒':(rotValue||0)<-0.5?'⇐':'·'} {Math.abs(rotValue||0).toFixed(1)}°/m</div>
+              <RotGauge rotRef={rotValueRef} size={70}/>
+            </div>
             </div>
           </div>
         </div>
@@ -860,7 +902,7 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
             <div style={{color:S.cy,fontFamily:'monospace',fontSize:'0.75rem',lineHeight:1.8}}>{toDMS(livePos.lat,true)}<br/>{toDMS(livePos.lon,false)}</div>
             <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'3px 8px',marginTop:4}}>{[['SOG',`${livePos.sog.toFixed(1)} kn`,S.gn],['COG',`${livePos.cog.toFixed(0)}°T`,S.gn]].map(([k,v,c])=>(<div key={k}><div style={{color:S.dm,fontSize:S.lb}}>{k}</div><div style={{color:c,fontFamily:'monospace',fontSize:'0.82rem',fontWeight:700}}>{v}</div></div>))}</div>
             <div style={{display:'flex',alignItems:'center',gap:6,marginTop:3}}>
-              <div><div style={{color:S.dm,fontSize:S.lb}}>ROT</div><div style={{color:Math.abs(rotValue||0)>10?S.rd:Math.abs(rotValue||0)>3?S.gd:S.gn,fontFamily:'monospace',fontSize:'0.78rem',fontWeight:700}}>{(rotValue||0)>0?'↻':'↺'} {Math.abs(rotValue||0).toFixed(1)}°/min</div></div>
+              <div><div style={{color:S.dm,fontSize:S.lb}}>ROT</div><RotGauge rotRef={rotValueRef} size={52}/></div>
               {offTrackAlarm&&<div style={{background:'rgba(255,71,87,0.2)',border:'1px solid #FF4757',borderRadius:4,padding:'2px 5px',fontSize:'0.56rem',color:S.rd,fontWeight:700}}>⚠ OFF TRACK</div>}
             </div>
             {!hudCollapsed&&(<div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'3px 8px',marginTop:3}}>{[['HDG',`${(livePos.heading||livePos.cog||0).toFixed(0)}°`,S.gd],['ACC',`${(livePos.acc||0).toFixed(0)}m`,S.gd]].map(([k,v,c])=>(<div key={k}><div style={{color:S.dm,fontSize:S.lb}}>{k}</div><div style={{color:c,fontFamily:'monospace',fontSize:'0.82rem',fontWeight:700}}>{v}</div></div>))}</div>)}
