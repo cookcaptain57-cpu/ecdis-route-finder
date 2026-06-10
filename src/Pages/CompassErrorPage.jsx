@@ -110,12 +110,20 @@ export default function CompassErrorPage({user}){
   useEffect(()=>{const t=setInterval(()=>setDisplayNow(new Date()),1000);return()=>clearInterval(t);},[]);
 
   const fetchAndLockGPS=useCallback(()=>{
-    if(!navigator.geolocation){setPosErr('GPS not available');setManualMode(true);return;}
-    setGpsLoading(true);setPosErr('');
+  const fetchAndLockGPS=useCallback(()=>{
+    if(!navigator.geolocation){
+      setPosErr('GPS not available');
+      setManualMode(true);
+      return;
+    }
+    setGpsLoading(true);
+    setPosErr('');
 
     const onSuccess=p=>{
       const pos={lat:p.coords.latitude,lon:p.coords.longitude};
-      setLockedPos(pos);setLockedTime(new Date());setGpsLoading(false);
+      setLockedPos(pos);
+      setLockedTime(new Date());
+      setGpsLoading(false);
       setManualLat(p.coords.latitude.toFixed(6));
       setManualLon(p.coords.longitude.toFixed(6));
       try{
@@ -124,36 +132,35 @@ export default function CompassErrorPage({user}){
         setVarDir(w.variation>=0?'E':'W');
         setVarDDdt(w.dDdt);
       }catch(e){}
+      // Stop watching after first fix
+      if(watchId) navigator.geolocation.clearWatch(watchId);
     };
 
-    const onErrorLow=e2=>{
+    const onError=e=>{
       setGpsLoading(false);
-      setPosErr(`GPS error code:${e2.code} — ${e2.message}`);
+      setPosErr(`GPS error code:${e.code} — ${e.message}`);
       setManualMode(true);
+      if(watchId) navigator.geolocation.clearWatch(watchId);
     };
 
-    const onErrorHigh=e=>{
-      if(e.code===1){
-        // Permission denied — no retry
-        setGpsLoading(false);
-        setPosErr('GPS permission denied — enable in settings');
-        setManualMode(true);
-      } else {
-        // Timeout or unavailable — retry with low accuracy
-        navigator.geolocation.getCurrentPosition(
-          onSuccess,
-          onErrorLow,
-          {enableHighAccuracy:false,timeout:60000,maximumAge:30000}
-        );
-      }
-    };
-
-    // First try high accuracy
-    navigator.geolocation.getCurrentPosition(
+    // Use watchPosition instead of getCurrentPosition
+    // watchPosition works more reliably in TWA
+    let watchId=navigator.geolocation.watchPosition(
       onSuccess,
-      onErrorHigh,
-      {enableHighAccuracy:true,timeout:60000,maximumAge:0}
+      onError,
+      {
+        enableHighAccuracy:true,
+        timeout:60000,
+        maximumAge:0
+      }
     );
+
+    // Auto-stop after 90 seconds if no fix
+    setTimeout(()=>{
+      if(watchId) navigator.geolocation.clearWatch(watchId);
+      setGpsLoading(false);
+    }, 90000);
+
   },[]);
   useEffect(()=>{fetchAndLockGPS();},[fetchAndLockGPS]);
 
