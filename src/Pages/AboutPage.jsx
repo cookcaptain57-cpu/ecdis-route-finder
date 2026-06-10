@@ -31,15 +31,8 @@ export default function AboutPage({ setTab }) {
   const [visibleCards, setVisibleCards] = useState(0);
 
   useEffect(() => {
-    // Try to read version from package.json via import.meta
-    try {
-      // Vite exposes package.json version via import.meta if configured,
-      // otherwise we show a sensible default
-      const v = import.meta?.env?.VITE_APP_VERSION || '2.0.0';
-      setAppVersion(v);
-    } catch {
-      setAppVersion('2.0.0');
-    }
+    // ── CHANGE: removed import.meta (Vite-only, not supported in CRA/webpack) ──
+    setAppVersion('2.0.0');
 
     // Stagger feature card reveal
     let i = 0;
@@ -61,7 +54,6 @@ export default function AboutPage({ setTab }) {
         padding: '2.5rem 2rem', textAlign: 'center',
         marginBottom: '1.8rem', position: 'relative', overflow: 'hidden',
       }}>
-        {/* Background decoration */}
         <div style={{ position: 'absolute', inset: 0, backgroundImage: 'linear-gradient(rgba(0,180,216,0.03) 1px,transparent 1px),linear-gradient(90deg,rgba(0,180,216,0.03) 1px,transparent 1px)', backgroundSize: '30px 30px', pointerEvents: 'none' }} />
 
         <div style={{ position: 'relative', zIndex: 1 }}>
