@@ -1,19 +1,10 @@
 /* eslint-disable */
 // src/Pages/ContactPage.jsx
-// ─── EmailJS Setup ────────────────────────────────────────────────────────────
-// 1. Go to https://www.emailjs.com and create a free account
-// 2. Create a Service (Gmail recommended) → copy your SERVICE_ID
-// 3. Create an Email Template → copy your TEMPLATE_ID
-//    Template variables to use: {{from_name}}, {{from_email}}, {{user_type}},
-//    {{category}}, {{priority}}, {{subject}}, {{message}}, {{rating}}, {{ref_id}}
-// 4. Go to Account → copy your PUBLIC_KEY
-// 5. Replace the three placeholders below with your real values
-// ─────────────────────────────────────────────────────────────────────────────
-const EMAILJS_SERVICE_ID  = 'service_mwrpzca';   // ← replace
-const EMAILJS_TEMPLATE_ID = 'template_s8975dd';  // ← replace
-const EMAILJS_PUBLIC_KEY  = 'lN0Fa22niddYawf1w';   // ← replace
+const EMAILJS_SERVICE_ID  = 'service_mwrpzca';
+const EMAILJS_TEMPLATE_ID = 'template_s8975dd';
+const EMAILJS_PUBLIC_KEY  = 'lN0Fa22niddYawf1w';
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { db } from "../firebase";
 import { collection, addDoc, serverTimestamp } from "firebase/firestore";
 
@@ -45,6 +36,18 @@ const PRIORITIES = [
   { value: 'medium', label: '🟡 Medium', color: 'var(--gold)' },
   { value: 'urgent', label: '🔴 Urgent', color: 'var(--red)' },
 ];
+
+// ── CHANGE: Load EmailJS via script tag (not dynamic import) ──
+function loadEmailJS() {
+  return new Promise((resolve, reject) => {
+    if (window.emailjs) { resolve(window.emailjs); return; }
+    const script = document.createElement('script');
+    script.src = 'https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js';
+    script.onload = () => resolve(window.emailjs);
+    script.onerror = () => reject(new Error('EmailJS failed to load'));
+    document.head.appendChild(script);
+  });
+}
 
 function StarRating({ value, onChange }) {
   const [hover, setHover] = useState(0);
@@ -119,7 +122,7 @@ export default function ContactPage({ notify, user }) {
     setRefId(ref);
 
     try {
-      // ── 1. Save to Firestore ──────────────────────────────────────────────
+      // ── 1. Save to Firestore ──
       await addDoc(collection(db, 'contactMessages'), {
         name:      form.name,
         email:     form.email,
@@ -135,30 +138,34 @@ export default function ContactPage({ notify, user }) {
         createdAt: serverTimestamp(),
       });
 
-      // ── 2. Send via EmailJS ───────────────────────────────────────────────
-      // Only attempt if real credentials are set
+      // ── 2. Send via EmailJS — CHANGE: use script tag loader, not dynamic import ──
       if (
         EMAILJS_SERVICE_ID !== 'YOUR_SERVICE_ID' &&
         EMAILJS_TEMPLATE_ID !== 'YOUR_TEMPLATE_ID' &&
         EMAILJS_PUBLIC_KEY !== 'YOUR_PUBLIC_KEY'
       ) {
-        const emailjs = await import('https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js');
-        await window.emailjs.send(
-          EMAILJS_SERVICE_ID,
-          EMAILJS_TEMPLATE_ID,
-          {
-            from_name:  form.name,
-            from_email: form.email,
-            user_type:  form.userType || 'Not specified',
-            category:   CATEGORIES.find(c => c.value === form.category)?.label || form.category,
-            priority:   form.priority.toUpperCase(),
-            subject:    form.subject,
-            message:    form.message,
-            rating:     form.rating > 0 ? `${form.rating}/5 stars` : 'Not rated',
-            ref_id:     ref,
-          },
-          EMAILJS_PUBLIC_KEY
-        );
+        try {
+          const ejs = await loadEmailJS();
+          await ejs.send(
+            EMAILJS_SERVICE_ID,
+            EMAILJS_TEMPLATE_ID,
+            {
+              from_name:  form.name,
+              from_email: form.email,
+              user_type:  form.userType || 'Not specified',
+              category:   CATEGORIES.find(c => c.value === form.category)?.label || form.category,
+              priority:   form.priority.toUpperCase(),
+              subject:    form.subject,
+              message:    form.message,
+              rating:     form.rating > 0 ? `${form.rating}/5 stars` : 'Not rated',
+              ref_id:     ref,
+            },
+            EMAILJS_PUBLIC_KEY
+          );
+        } catch (emailErr) {
+          // EmailJS failure is non-fatal — Firestore save already succeeded
+          console.warn('EmailJS send failed (non-fatal):', emailErr.message);
+        }
       }
 
       setSubmitted(true);
@@ -170,7 +177,7 @@ export default function ContactPage({ notify, user }) {
     setLoading(false);
   };
 
-  // ── Success Screen ──────────────────────────────────────────────────────────
+  // ── Success Screen ──
   if (submitted) return (
     <div className="section" style={{ maxWidth: 600, margin: '0 auto' }}>
       <div style={{
@@ -198,7 +205,12 @@ export default function ContactPage({ notify, user }) {
           Keep this reference number for follow-up queries.
         </div>
         <button className="btn btn-primary" style={{ justifyContent: 'center' }}
-          onClick={() => { setSubmitted(false); setForm({ name: user?.displayName || '', email: user?.email || '', userType: '', category: '', priority: 'medium', subject: '', message: '', rating: 0 }); setScreenshot(null); setScreenshotPreview(null); }}>
+          onClick={() => {
+            setSubmitted(false);
+            setForm({ name: user?.displayName || '', email: user?.email || '', userType: '', category: '', priority: 'medium', subject: '', message: '', rating: 0 });
+            setScreenshot(null);
+            setScreenshotPreview(null);
+          }}>
           ✉️ Send Another Message
         </button>
       </div>
@@ -208,7 +220,6 @@ export default function ContactPage({ notify, user }) {
   return (
     <div className="section" style={{ maxWidth: 900, margin: '0 auto' }}>
 
-      {/* ── Page Header ── */}
       <div style={{ marginBottom: '1.8rem', textAlign: 'center' }}>
         <div style={{ fontFamily: 'Orbitron,monospace', fontSize: '1.3rem', fontWeight: 900, marginBottom: 6, letterSpacing: '0.06em' }}>
           CONTACT <span style={{ color: 'var(--cyan)' }}>US</span>
@@ -224,10 +235,8 @@ export default function ContactPage({ notify, user }) {
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.6fr', gap: '1.4rem', alignItems: 'start' }}>
 
-        {/* ── LEFT: Contact Info ── */}
+        {/* LEFT: Contact Info */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.8rem' }}>
-
-          {/* Developer Card */}
           <div style={{
             background: 'linear-gradient(135deg,var(--card),var(--card2))',
             border: '1px solid var(--border2)', borderRadius: 16, padding: '1.4rem',
@@ -235,20 +244,16 @@ export default function ContactPage({ notify, user }) {
           }}>
             <div style={{ position: 'absolute', top: -20, right: -20, width: 100, height: 100, borderRadius: '50%', background: 'rgba(0,180,216,0.05)', pointerEvents: 'none' }} />
             <div style={{ fontSize: '2.5rem', marginBottom: 8 }}>🧭</div>
-            <div style={{ fontFamily: 'Orbitron,monospace', fontSize: '0.82rem', fontWeight: 700, color: 'var(--cyan)', marginBottom: 3 }}>
-              MANISH BHARTI
-            </div>
+            <div style={{ fontFamily: 'Orbitron,monospace', fontSize: '0.82rem', fontWeight: 700, color: 'var(--cyan)', marginBottom: 3 }}>MANISH BHARTI</div>
             <div style={{ fontSize: '0.72rem', color: 'var(--gold)', marginBottom: 2 }}>2nd Officer</div>
             <div style={{ fontSize: '0.68rem', color: 'var(--text3)', fontStyle: 'italic' }}>"Built at sea, for the sea"</div>
           </div>
 
-          {/* Contact Links */}
           {CONTACT_INFO.map(c => (
             <div key={c.label} style={{
               background: 'var(--card)', border: '1px solid var(--border)',
               borderRadius: 12, padding: '0.9rem 1rem',
               display: 'flex', alignItems: 'center', gap: 12,
-              transition: 'all 0.2s',
             }}>
               <div style={{ fontSize: '1.3rem', flexShrink: 0 }}>{c.icon}</div>
               <div style={{ flex: 1, minWidth: 0 }}>
@@ -261,37 +266,27 @@ export default function ContactPage({ notify, user }) {
             </div>
           ))}
 
-          {/* Response time note */}
           <div className="info-box" style={{ marginBottom: 0 }}>
             ⏱ <strong style={{ color: 'var(--cyan)' }}>Response Time</strong><br />
             <span style={{ fontSize: '0.74rem' }}>We aim to reply within <strong>48 hours</strong>. For urgent issues, WhatsApp is fastest.</span>
           </div>
         </div>
 
-        {/* ── RIGHT: Write to Us Form ── */}
-        <div style={{
-          background: 'var(--card)', border: '1px solid var(--border2)',
-          borderRadius: 16, padding: '1.4rem',
-        }}>
+        {/* RIGHT: Form */}
+        <div style={{ background: 'var(--card)', border: '1px solid var(--border2)', borderRadius: 16, padding: '1.4rem' }}>
           <div style={{ fontFamily: 'Orbitron,monospace', fontSize: '0.82rem', fontWeight: 700, color: 'var(--cyan)', marginBottom: '1.2rem', display: 'flex', alignItems: 'center', gap: 8 }}>
             ✍️ Write to Us
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.8rem' }}>
-
-            {/* Name */}
             <div className="ff" style={{ margin: 0 }}>
               <label className="fl">Your Name *</label>
               <input className="fi" placeholder="Full name" value={form.name} onChange={e => set('name', e.target.value)} />
             </div>
-
-            {/* Email */}
             <div className="ff" style={{ margin: 0 }}>
               <label className="fl">Email Address *</label>
               <input className="fi" type="email" placeholder="your@email.com" value={form.email} onChange={e => set('email', e.target.value)} />
             </div>
-
-            {/* User Type */}
             <div className="ff" style={{ margin: 0 }}>
               <label className="fl">You are a…</label>
               <select className="fi" value={form.userType} onChange={e => set('userType', e.target.value)}>
@@ -299,8 +294,6 @@ export default function ContactPage({ notify, user }) {
                 {USER_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
               </select>
             </div>
-
-            {/* Category */}
             <div className="ff" style={{ margin: 0 }}>
               <label className="fl">Category *</label>
               <select className="fi" value={form.category} onChange={e => set('category', e.target.value)}>
@@ -308,8 +301,6 @@ export default function ContactPage({ notify, user }) {
                 {CATEGORIES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
               </select>
             </div>
-
-            {/* Priority */}
             <div className="ff" style={{ gridColumn: '1/-1', margin: 0 }}>
               <label className="fl">Priority</label>
               <div style={{ display: 'flex', gap: 8 }}>
@@ -330,28 +321,20 @@ export default function ContactPage({ notify, user }) {
                 ))}
               </div>
             </div>
-
-            {/* Subject */}
             <div className="ff" style={{ gridColumn: '1/-1', margin: 0 }}>
               <label className="fl">Subject *</label>
               <input className="fi" placeholder="Brief subject line" value={form.subject} onChange={e => set('subject', e.target.value)} />
             </div>
-
-            {/* Message */}
             <div className="ff" style={{ gridColumn: '1/-1', margin: 0 }}>
               <label className="fl">Message *</label>
               <textarea className="fi" rows={4} style={{ resize: 'vertical' }}
                 placeholder="Describe your issue, suggestion, or query in detail…"
                 value={form.message} onChange={e => set('message', e.target.value)} />
             </div>
-
-            {/* App Rating */}
             <div className="ff" style={{ gridColumn: '1/-1', margin: 0 }}>
               <label className="fl">Rate the App (optional)</label>
               <StarRating value={form.rating} onChange={v => set('rating', v)} />
             </div>
-
-            {/* Screenshot Upload */}
             <div className="ff" style={{ gridColumn: '1/-1', margin: 0 }}>
               <label className="fl">Attach Screenshot (optional · max 5MB)</label>
               <div
@@ -359,7 +342,7 @@ export default function ContactPage({ notify, user }) {
                 style={{
                   border: '2px dashed var(--border2)', borderRadius: 10,
                   padding: '1rem', textAlign: 'center', cursor: 'pointer',
-                  background: 'var(--bg2)', transition: 'all 0.2s',
+                  background: 'var(--bg2)',
                 }}>
                 {screenshotPreview
                   ? <img src={screenshotPreview} alt="screenshot" style={{ maxHeight: 120, borderRadius: 8, objectFit: 'contain' }} />
@@ -384,14 +367,12 @@ export default function ContactPage({ notify, user }) {
                 : '📨 Send Message'}
             </button>
           </div>
-
           <div style={{ marginTop: '0.8rem', fontSize: '0.66rem', color: 'var(--text3)', lineHeight: 1.5 }}>
             🔒 Your data is saved securely to our database. We never share your information.
           </div>
         </div>
       </div>
 
-      {/* ── Mobile stacked layout fix ── */}
       <style>{`
         @media(max-width:700px){
           .contact-grid { grid-template-columns: 1fr !important; }
