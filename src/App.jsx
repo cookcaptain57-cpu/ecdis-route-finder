@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { auth, db } from "./firebase";
 import { signOut, onAuthStateChanged, setPersistence, browserLocalPersistence } from "firebase/auth";
-import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
+import { doc, getDoc, setDoc, serverTimestamp, collection, getDocs, query, orderBy } from "firebase/firestore";
 
 import { PORTS_DB, ADMIN_EMAIL, normalizePortRow } from "./constants";
 import {
@@ -285,7 +285,6 @@ export default function App() {
   const isAdmin = user?.email === ADMIN_EMAIL;
   const notify  = (msg, type = 'success') => setNotif({ msg, type, key: Date.now() });
 
-  // ADDED: tabs accessible without login
   const PUBLIC_TABS = new Set(['home', 'login', 'contact', 'about', 'legal', 'faq']);
 
   const applyPortData = (d3) => {
@@ -431,13 +430,12 @@ export default function App() {
     return () => clearInterval(t);
   }, [authChecked]);
 
+  // ── CHANGE: replaced dynamic import() with static import at top of file ──
   useEffect(() => {
     if (!user) return;
-    import('firebase/firestore').then(({ collection, getDocs, query, orderBy }) => {
-      getDocs(query(collection(db, 'notifications'), orderBy('createdAt', 'desc')))
-        .then(snap => setNotifications(snap.docs.map(d => ({ id: d.id, ...d.data() }))))
-        .catch(() => {});
-    });
+    getDocs(query(collection(db, 'notifications'), orderBy('createdAt', 'desc')))
+      .then(snap => setNotifications(snap.docs.map(d => ({ id: d.id, ...d.data() }))))
+      .catch(() => {});
   }, [user?.uid]);
 
   useEffect(() => {
@@ -475,7 +473,6 @@ export default function App() {
     { k:'portshore',   i:'🏖', l:'Port & Shore' },
     ...(user ? [{ k:'account', i:'👤', l:'My Account' }] : []),
     ...(isAdmin ? [{ k:'admin', i:'🛡', l:'Admin' }] : []),
-    // ADDED: info pages
     { k:'contact', i:'✉️', l:'Contact Us' },
     { k:'about',   i:'🧭', l:'About' },
     { k:'legal',   i:'⚖️', l:'Legal' },
@@ -484,7 +481,6 @@ export default function App() {
 
   const handleSearch = (q) => { setSearchQ(q); setTab('routes'); setMenuOpen(false); };
 
-  // MODIFIED: respect PUBLIC_TABS
   const switchTab = k => {
     if (!user && !PUBLIC_TABS.has(k) && k !== 'login') {
       setTab('login'); setMenuOpen(false);
@@ -717,7 +713,6 @@ export default function App() {
               </div>
             )}
 
-            {/* ── All Pages ── */}
             {tab==='home'        && <HomePage routes={routes} charts={charts} onSearch={handleSearch} setTab={switchTab} user={user} portsDb={portsDb} userProfile={userProfile} />}
             {tab==='routes'      && <RoutesPage searchQuery={searchQ} notify={notify} user={user} setTab={switchTab} sheetRoutes={sheetRoutes} sheetLoading={routesLoading} />}
             {tab==='charts'      && <ChartsPage notify={notify} user={user} setTab={switchTab} isAdmin={isAdmin} sheetCharts={sheetCharts} sheetLoading={chartsLoading} />}
@@ -733,7 +728,8 @@ export default function App() {
             {tab==='account'     && user && <AccountPage user={user} userProfile={userProfile} setUserProfile={setUserProfile} notify={notify} setTab={switchTab} />}
             {tab==='library'     && <MaritimeLibraryPage setTab={switchTab} />}
             {tab==='navmode'     && <NavModePage notify={notify} sheetRoutes={[...routes,...sheetRoutes]} portsDb={portsDb} setTab={switchTab} />}
-            {tab==='emergency'   && <EmergencyPage />}
+            {/* ── CHANGE: added portsDb prop to EmergencyPage ── */}
+            {tab==='emergency'   && <EmergencyPage portsDb={portsDb} />}
             {tab==='knots'       && <KnotsRopesMooringPage />}
             {tab==='navbridge'   && <NavigationBridgePage />}
             {tab==='welfare'     && <CrewWelfarePage />}
@@ -755,14 +751,11 @@ export default function App() {
                   chartsSyncProgress={chartsSyncProgress} portsSyncProgress={portsSyncProgress} />
               : <div className="section"><div className="empty"><div className="empty-icon">🔒</div><div className="empty-t">Admin Access Only</div></div></div>
             )}
-
-            {/* ADDED: new info pages */}
             {tab==='contact' && user && <ContactPage notify={notify} user={user} />}
             {tab==='about'   && user && <AboutPage setTab={switchTab} />}
             {tab==='legal'   && user && <LegalPage setTab={switchTab} />}
             {tab==='faq'     && user && <FAQPage setTab={switchTab} />}
 
-            {/* ADDED: login wall for new pages when not logged in */}
             {authChecked && !user && ['contact','about','legal','faq'].includes(tab) && (
               <div style={{ display:'flex', flex:1, alignItems:'center', justifyContent:'center', padding:'2rem' }}>
                 <div style={{ maxWidth:380, width:'100%', background:'var(--card)', border:'1px solid var(--border2)', borderRadius:16, padding:'2rem', textAlign:'center' }}>
@@ -791,7 +784,6 @@ export default function App() {
               </div>
             )}
 
-            {/* ADDED: pass setTab to Footer for nav links */}
             {!isPlannerFull && tab !== 'home' && <Footer setTab={switchTab} />}
 
           </div>
@@ -800,7 +792,6 @@ export default function App() {
         {notif && <Notif key={notif.key} msg={notif.msg} type={notif.type} onClose={() => setNotif(null)} />}
         {welcomePopup && <WelcomePopup type={welcomePopup.type} name={welcomePopup.name} rank={welcomePopup.rank} onClose={() => setWelcomePopup(null)} />}
 
-        {/* ADDED: Floating Contact Button */}
         {authChecked && <ContactFloatingBtn setTab={switchTab} />}
 
         {showDisclaimer && (
