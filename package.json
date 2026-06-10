@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "dependencies": {
+    "@craco/craco": "^7.1.0",
     "xlsx": "0.17.5",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
@@ -10,9 +11,9 @@
     "firebase": "^10.7.0"
   },
   "scripts": {
-    "start": "react-scripts start",
-    "build": "react-scripts build",
-    "test": "react-scripts test",
+    "start": "craco start",
+    "build": "craco build",
+    "test": "craco test",
     "eject": "react-scripts eject"
   },
   "eslintConfig": {
