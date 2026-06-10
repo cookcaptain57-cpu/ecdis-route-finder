@@ -9,9 +9,9 @@
 // 4. Go to Account → copy your PUBLIC_KEY
 // 5. Replace the three placeholders below with your real values
 // ─────────────────────────────────────────────────────────────────────────────
-const EMAILJS_SERVICE_ID  = 'YOUR_SERVICE_ID';   // ← replace
-const EMAILJS_TEMPLATE_ID = 'YOUR_TEMPLATE_ID';  // ← replace
-const EMAILJS_PUBLIC_KEY  = 'YOUR_PUBLIC_KEY';   // ← replace
+const EMAILJS_SERVICE_ID  = 'service_mwrpzca';   // ← replace
+const EMAILJS_TEMPLATE_ID = 'template_s8975dd';  // ← replace
+const EMAILJS_PUBLIC_KEY  = 'lN0Fa22niddYawf1w';   // ← replace
 
 import { useState, useRef } from "react";
 import { db } from "../firebase";
