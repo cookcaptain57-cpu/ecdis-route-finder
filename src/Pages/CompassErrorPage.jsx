@@ -112,12 +112,48 @@ export default function CompassErrorPage({user}){
   const fetchAndLockGPS=useCallback(()=>{
     if(!navigator.geolocation){setPosErr('GPS not available');setManualMode(true);return;}
     setGpsLoading(true);setPosErr('');
-    navigator.geolocation.getCurrentPosition(p=>{
+
+    const onSuccess=p=>{
       const pos={lat:p.coords.latitude,lon:p.coords.longitude};
       setLockedPos(pos);setLockedTime(new Date());setGpsLoading(false);
-      setManualLat(p.coords.latitude.toFixed(6));setManualLon(p.coords.longitude.toFixed(6));
-      try{const w=computeWMM2025(pos.lat,pos.lon,0,new Date());setVarMag(Math.abs(w.variation).toFixed(2));setVarDir(w.variation>=0?'E':'W');setVarDDdt(w.dDdt);}catch(e){}
-    },e=>{setGpsLoading(false);setPosErr(e.message||'GPS denied');setManualMode(true);},{enableHighAccuracy:true,timeout:15000});
+      setManualLat(p.coords.latitude.toFixed(6));
+      setManualLon(p.coords.longitude.toFixed(6));
+      try{
+        const w=computeWMM2025(pos.lat,pos.lon,0,new Date());
+        setVarMag(Math.abs(w.variation).toFixed(2));
+        setVarDir(w.variation>=0?'E':'W');
+        setVarDDdt(w.dDdt);
+      }catch(e){}
+    };
+
+    const onErrorLow=e2=>{
+      setGpsLoading(false);
+      setPosErr(`GPS error code:${e2.code} — ${e2.message}`);
+      setManualMode(true);
+    };
+
+    const onErrorHigh=e=>{
+      if(e.code===1){
+        // Permission denied — no retry
+        setGpsLoading(false);
+        setPosErr('GPS permission denied — enable in settings');
+        setManualMode(true);
+      } else {
+        // Timeout or unavailable — retry with low accuracy
+        navigator.geolocation.getCurrentPosition(
+          onSuccess,
+          onErrorLow,
+          {enableHighAccuracy:false,timeout:60000,maximumAge:30000}
+        );
+      }
+    };
+
+    // First try high accuracy
+    navigator.geolocation.getCurrentPosition(
+      onSuccess,
+      onErrorHigh,
+      {enableHighAccuracy:true,timeout:60000,maximumAge:0}
+    );
   },[]);
   useEffect(()=>{fetchAndLockGPS();},[fetchAndLockGPS]);
 
