@@ -2,10 +2,7 @@ module.exports = {
   webpack: {
     configure: (webpackConfig) => {
 
-      // Fix 1: Set target to support dynamic import()
-      webpackConfig.target = ['web', 'es5'];
-
-      // Fix 2: Allow .mjs files from node_modules
+      // Fix 1: Allow .mjs files from node_modules
       webpackConfig.module.rules.unshift({
         test: /\.mjs$/,
         include: /node_modules/,
@@ -15,7 +12,7 @@ module.exports = {
         },
       });
 
-      // Fix 3: Disable fullySpecified on all rules
+      // Fix 2: Disable fullySpecified on all rules
       webpackConfig.module.rules = webpackConfig.module.rules.map(rule => {
         if (rule.oneOf) {
           rule.oneOf = rule.oneOf.map(oneOfRule => {
@@ -32,21 +29,20 @@ module.exports = {
         return rule;
       });
 
-      // Fix 4: Tell webpack to handle ESM modules from node_modules
+      // Fix 3: Tell webpack to handle ESM modules from node_modules
       webpackConfig.resolve = {
         ...webpackConfig.resolve,
-        extensionAlias: {
-          '.js': ['.js', '.ts', '.tsx'],
-        },
         fullySpecified: false,
       };
 
-      // Fix 5: Exclude problematic node_modules from being transpiled as scripts
+      // Fix 4: Enable dynamic import in output
       webpackConfig.output = {
         ...webpackConfig.output,
         environment: {
           ...webpackConfig.output?.environment,
           dynamicImport: true,
+          arrowFunction: true,
+          asyncFunction: true,
         },
       };
 
