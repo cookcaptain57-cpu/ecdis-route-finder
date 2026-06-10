@@ -110,7 +110,6 @@ export default function CompassErrorPage({user}){
   useEffect(()=>{const t=setInterval(()=>setDisplayNow(new Date()),1000);return()=>clearInterval(t);},[]);
 
   const fetchAndLockGPS=useCallback(()=>{
-  const fetchAndLockGPS=useCallback(()=>{
     if(!navigator.geolocation){
       setPosErr('GPS not available');
       setManualMode(true);
@@ -118,6 +117,8 @@ export default function CompassErrorPage({user}){
     }
     setGpsLoading(true);
     setPosErr('');
+
+    let watchId=null;
 
     const onSuccess=p=>{
       const pos={lat:p.coords.latitude,lon:p.coords.longitude};
@@ -132,34 +133,35 @@ export default function CompassErrorPage({user}){
         setVarDir(w.variation>=0?'E':'W');
         setVarDDdt(w.dDdt);
       }catch(e){}
-      // Stop watching after first fix
-      if(watchId) navigator.geolocation.clearWatch(watchId);
+      if(watchId!==null){
+        navigator.geolocation.clearWatch(watchId);
+        watchId=null;
+      }
     };
 
     const onError=e=>{
       setGpsLoading(false);
       setPosErr(`GPS error code:${e.code} — ${e.message}`);
       setManualMode(true);
-      if(watchId) navigator.geolocation.clearWatch(watchId);
+      if(watchId!==null){
+        navigator.geolocation.clearWatch(watchId);
+        watchId=null;
+      }
     };
 
-    // Use watchPosition instead of getCurrentPosition
-    // watchPosition works more reliably in TWA
-    let watchId=navigator.geolocation.watchPosition(
+    watchId=navigator.geolocation.watchPosition(
       onSuccess,
       onError,
-      {
-        enableHighAccuracy:true,
-        timeout:60000,
-        maximumAge:0
-      }
+      {enableHighAccuracy:true,timeout:60000,maximumAge:0}
     );
 
-    // Auto-stop after 90 seconds if no fix
     setTimeout(()=>{
-      if(watchId) navigator.geolocation.clearWatch(watchId);
+      if(watchId!==null){
+        navigator.geolocation.clearWatch(watchId);
+        watchId=null;
+      }
       setGpsLoading(false);
-    }, 90000);
+    },90000);
 
   },[]);
   useEffect(()=>{fetchAndLockGPS();},[fetchAndLockGPS]);
