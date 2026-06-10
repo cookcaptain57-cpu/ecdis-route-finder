@@ -1,6 +1,4 @@
 // craco.config.js
-const path = require('path');
-
 module.exports = {
   webpack: {
     configure: (webpackConfig) => {
@@ -18,7 +16,10 @@ module.exports = {
         if (rule.oneOf) {
           rule.oneOf = rule.oneOf.map(oneOfRule => {
             if (oneOfRule.type === 'asset/resource') return oneOfRule;
-            return { ...oneOfRule, resolve: { ...oneOfRule.resolve, fullySpecified: false } };
+            return {
+              ...oneOfRule,
+              resolve: { ...oneOfRule.resolve, fullySpecified: false },
+            };
           });
         }
         return rule;
@@ -27,26 +28,16 @@ module.exports = {
       // Fix 3: Global resolve fullySpecified false
       webpackConfig.resolve = { ...webpackConfig.resolve, fullySpecified: false };
 
-      // Fix 5: Force webpack to NOT use native ESM output
-      // This is the critical fix — externalsType must not be 'module'
-      webpackConfig.externalsType = 'commonjs';
-
-      // Fix 6: Explicitly set output to IIFE/commonjs, not module
+      // Fix 4: Force non-ESM environment flags only — no chunk loading changes
       webpackConfig.output = {
         ...webpackConfig.output,
-        module: false,
-        chunkFormat: 'array-push',
-        chunkLoading: 'jsonp',
-        workerChunkLoading: 'importScripts',
-        wasmLoading: 'fetch',
-        library: undefined,
         environment: {
-          arrowFunction: false,
+          arrowFunction: true,
           bigIntLiteral: false,
-          const: false,
-          destructuring: false,
+          const: true,
+          destructuring: true,
           dynamicImport: false,
-          forOf: false,
+          forOf: true,
           module: false,
         },
       };
