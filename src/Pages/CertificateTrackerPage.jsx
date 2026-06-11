@@ -4,34 +4,6 @@ import { useState, useEffect } from "react";
 import { db } from "../firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-// ─── TEMPORARY DIAGNOSTIC — remove after AI confirmed working ────────────────
-function ScannerDiag() {
-  const [status, setStatus] = useState('idle');
-  const [detail, setDetail] = useState('');
-  const runTest = async () => {
-    const key = process.env.REACT_APP_GEMINI_API_KEY;
-    if (!key) { setStatus('fail'); setDetail('REACT_APP_GEMINI_API_KEY is EMPTY — check Vercel env vars and redeploy'); return; }
-    setStatus('testing'); setDetail('Key: ' + key.substring(0,14) + '… Calling API…');
-    try {
-      const res  = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${key}`,
-        { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ contents:[{parts:[{text:'Reply OK'}]}], generationConfig:{maxOutputTokens:5} }) });
-      const data = await res.json();
-      if (res.ok) { setStatus('ok'); setDetail('API WORKING ✅\nReply: "' + (data.candidates?.[0]?.content?.parts?.[0]?.text||'').trim() + '"'); }
-      else { setStatus('fail'); setDetail('HTTP ' + res.status + '\nCode: ' + (data.error?.code||'?') + '\nStatus: ' + (data.error?.status||'?') + '\nMessage: ' + (data.error?.message||JSON.stringify(data))); }
-    } catch(e) { setStatus('fail'); setDetail('NETWORK ERROR: ' + e.message); }
-  };
-  const col = {idle:'var(--cyan)',testing:'#ffa502',ok:'var(--green)',fail:'#ff4757'};
-  const lbl = {idle:'Run Scanner Test',testing:'Testing…',ok:'✅ Working',fail:'❌ Error — see details'};
-  return (
-    <div style={{background:'rgba(255,255,255,0.04)',border:'1px solid rgba(255,255,255,0.12)',borderRadius:10,padding:'0.9rem',marginBottom:'1rem'}}>
-      <div style={{fontSize:'0.68rem',color:'var(--text3)',fontFamily:'Orbitron,monospace',marginBottom:6}}>🔧 SCANNER DIAGNOSTIC (admin — remove after testing)</div>
-      <div style={{fontSize:'0.65rem',color:'var(--text3)',marginBottom:8}}>Key: <code style={{color:process.env.REACT_APP_GEMINI_API_KEY?'var(--green)':'#ff4757',background:'rgba(0,0,0,0.3)',padding:'1px 5px',borderRadius:4}}>{process.env.REACT_APP_GEMINI_API_KEY?process.env.REACT_APP_GEMINI_API_KEY.substring(0,14)+'…':'EMPTY'}</code></div>
-      <button onClick={runTest} disabled={status==='testing'} style={{padding:'6px 14px',borderRadius:7,cursor:'pointer',fontSize:'0.72rem',fontWeight:700,background:col[status]+'22',color:col[status],border:'1px solid '+col[status]+'55'}}>{lbl[status]}</button>
-      {detail&&<pre style={{fontSize:'0.63rem',color:status==='ok'?'var(--green)':'#ff6b35',marginTop:8,background:'rgba(0,0,0,0.35)',borderRadius:8,padding:'8px',whiteSpace:'pre-wrap',wordBreak:'break-all',fontFamily:'monospace',lineHeight:1.6}}>{detail}</pre>}
-    </div>
-  );
-}
-
 // ─── PREVIEW MODAL ────────────────────────────────────────────────────────────
 function PreviewModal({ file, onClose }) {
   if (!file) return null;
@@ -253,14 +225,46 @@ function CertificateTrackerPage({user,notify}) {
 
   useEffect(()=>{if(!user)return;loadCerts();initDrive();},[user?.uid]);
 
-  const isDriveTokenValid=()=>{const e=sessionStorage.getItem('nsx_drive_expiry');return e&&Date.now()<parseInt(e);};
+  const isDriveTokenValid=()=>{const e=localStorage.getItem('nsx_drive_expiry');return e&&Date.now()<parseInt(e);};
 
   const initDrive=()=>{
-    const token=sessionStorage.getItem('nsx_drive_token');
-    const expiry=sessionStorage.getItem('nsx_drive_expiry');
-    const email=sessionStorage.getItem('nsx_drive_email');
-    if(token&&expiry&&Date.now()<parseInt(expiry)){setDriveToken(token);setDriveConnected(true);setDriveEmail(email);setDriveExpired(false);}
-    else if(token){setDriveExpired(true);setDriveConnected(false);}
+    const token=localStorage.getItem('nsx_drive_token');
+    const expiry=localStorage.getItem('nsx_drive_expiry');
+    const email=localStorage.getItem('nsx_drive_email');
+    if(token&&expiry&&Date.now()<parseInt(expiry)){
+      setDriveToken(token);setDriveConnected(true);setDriveEmail(email);setDriveExpired(false);
+    } else if(token&&email){
+      // Token expired but we know the account — try silent refresh (no popup)
+      silentRefreshDrive(email);
+    }
+  };
+
+  // Silent token refresh — no popup shown to user. Falls back to Reconnect UI only if this fails.
+  const silentRefreshDrive=async(email)=>{
+    try{
+      await new Promise((resolve,reject)=>{
+        if(window.google?.accounts?.oauth2){resolve();return;}
+        const sc=document.createElement('script');sc.src='https://accounts.google.com/gsi/client';
+        sc.onload=resolve;sc.onerror=()=>reject(new Error('Network error'));document.head.appendChild(sc);
+      });
+      const token=await new Promise((resolve,reject)=>{
+        let settled=false;
+        const client=window.google.accounts.oauth2.initTokenClient({
+          client_id:DRIVE_CLIENT_ID,scope:DRIVE_SCOPE,login_hint:email,
+          callback:r=>{settled=true;if(r.error)reject(new Error(r.error_description||r.error));else resolve(r.access_token);}
+        });
+        // prompt:'none' attempts silent auth using existing Google session — no popup
+        client.requestAccessToken({prompt:'none'});
+        setTimeout(()=>{if(!settled)reject(new Error('timeout'));},4000);
+      });
+      localStorage.setItem('nsx_drive_token',token);
+      localStorage.setItem('nsx_drive_expiry',String(Date.now()+3300000));
+      setDriveToken(token);setDriveConnected(true);setDriveEmail(email);setDriveExpired(false);
+      console.info('[Drive] Silent refresh successful');
+    }catch(e){
+      console.info('[Drive] Silent refresh failed, manual reconnect needed:',e.message);
+      setDriveExpired(true);setDriveConnected(false);
+    }
   };
 
   const connectDrive=async()=>{
@@ -278,9 +282,9 @@ function CertificateTrackerPage({user,notify}) {
       });
       const info=await fetch('https://www.googleapis.com/oauth2/v3/userinfo',{headers:{Authorization:`Bearer ${token}`}}).then(r=>r.json());
       if(info.email&&user?.email&&info.email.toLowerCase()!==user.email.toLowerCase()){notify(`Please use ${user.email} to connect.`,'error');setConnectingDrive(false);return;}
-      sessionStorage.setItem('nsx_drive_token',token);
-      sessionStorage.setItem('nsx_drive_expiry',String(Date.now()+3300000));
-      sessionStorage.setItem('nsx_drive_email',info.email||'');
+      localStorage.setItem('nsx_drive_token',token);
+      localStorage.setItem('nsx_drive_expiry',String(Date.now()+3300000));
+      localStorage.setItem('nsx_drive_email',info.email||'');
       setDriveToken(token);setDriveConnected(true);setDriveEmail(info.email);setDriveExpired(false);
       notify('Storage connected','success');
     }catch(e){console.error('[Drive]',e);if(!e.message?.includes('popup_closed')&&!e.message?.includes('access_denied'))notify('Could not connect storage.','error');}
@@ -288,7 +292,7 @@ function CertificateTrackerPage({user,notify}) {
   };
 
   const disconnectDrive=()=>{
-    ['nsx_drive_token','nsx_drive_expiry','nsx_drive_email'].forEach(k=>sessionStorage.removeItem(k));
+    ['nsx_drive_token','nsx_drive_expiry','nsx_drive_email'].forEach(k=>localStorage.removeItem(k));
     setDriveToken(null);setDriveConnected(false);setDriveEmail(null);setDriveFolderId(null);setDriveExpired(false);
     notify('Storage disconnected','success');
   };
@@ -673,9 +677,6 @@ function CertificateTrackerPage({user,notify}) {
 
       {/* File preview modal */}
       {previewFile&&<PreviewModal file={previewFile} onClose={closePreview}/>}
-
-      {/* Diagnostic */}
-      <ScannerDiag/>
 
       {/* Session expired */}
       {driveExpired&&!driveConnected&&(
