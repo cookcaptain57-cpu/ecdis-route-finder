@@ -784,7 +784,7 @@ export default function App() {
               </div>
             )}
 
-            {!isPlannerFull && tab !== 'home' && <Footer setTab={switchTab} />}
+            {tab === 'home' && <Footer setTab={switchTab} />}
 
           </div>
         </div>
