@@ -1616,9 +1616,9 @@ function RoutePlannerPage({ notify, sheetRoutes=[], portsDb=[] }){
       </div>
 
       <div className="planner-layout">
-        <div className="planner-sidebar">
+        <div className="planner-sidebar" style={{minHeight:0, overflow:'hidden', display:'flex', flexDirection:'column'}}>
           {/* TABS — added 🔄 Converter as 6th tab */}
-          <div className="p-tabs" style={{ overflowX: 'auto' }}>
+          <div className="p-tabs" style={{ overflowX: 'auto', flexShrink: 0 }}>
             {[
               ['auto',      '🗺 Auto'],
               ['manual',    '✏️ Manual'],
@@ -1640,7 +1640,7 @@ function RoutePlannerPage({ notify, sheetRoutes=[], portsDb=[] }){
               </button>
             ))}
           </div>
-          <div className="p-panel" style={{overflowY:'auto', padding: panel === 'converter' ? 0 : undefined}}>
+          <div className="p-panel" style={{overflowY:'auto', flex:1, minHeight:0, padding: panel === 'converter' ? 0 : undefined}}>
 
             {/* ── AUTO PANEL (EXISTING — untouched) ── */}
             {panel==='auto'&&(<>
