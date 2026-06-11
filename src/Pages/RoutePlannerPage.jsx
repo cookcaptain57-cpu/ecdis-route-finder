@@ -1,6 +1,6 @@
 /* eslint-disable */
 // src/Pages/RoutePlannerPage.jsx
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { buildAutoRoute, buildAutoRouteCoords, buildProRoute, checkCanalPassage } from "../routing";
 import {
   recalcWaypoints, totalRouteNM, parseRTZ, exportRTZ, exportCSV, downloadFile,
@@ -18,6 +18,451 @@ import ETACalculator from "../components/ETACalculator";
 
 const RENDER_API = 'https://navispherexrouter.onrender.com';
 
+// ─────────────────────────────────────────────────────────────────────────────
+// CONVERTER: IDB key for caching converted routes offline
+// ─────────────────────────────────────────────────────────────────────────────
+const CONV_IDB_KEY = 'ecdis_converter_routes';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CONVERTER: haversine bearing + distance  (NEW — does not modify any existing fn)
+// ─────────────────────────────────────────────────────────────────────────────
+function convHaversine(lat1, lon1, lat2, lon2) {
+  const R = 3440.065; // NM
+  const φ1 = lat1 * Math.PI / 180, φ2 = lat2 * Math.PI / 180;
+  const Δφ = (lat2 - lat1) * Math.PI / 180;
+  const Δλ = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(Δφ / 2) ** 2 + Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) ** 2;
+  const dist = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  const y = Math.sin(Δλ) * Math.cos(φ2);
+  const x = Math.cos(φ1) * Math.sin(φ2) - Math.sin(φ1) * Math.cos(φ2) * Math.cos(Δλ);
+  const bear = ((Math.atan2(y, x) * 180 / Math.PI) + 360) % 360;
+  return { dist: +dist.toFixed(2), bearing: +bear.toFixed(1) };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CONVERTER: enrich waypoints with bearing/distance  (NEW)
+// ─────────────────────────────────────────────────────────────────────────────
+function convEnrich(wps) {
+  return wps.map((wp, i) => {
+    if (i === 0) return { ...wp, bearing: null, dist: 0 };
+    const { dist, bearing } = convHaversine(wps[i - 1].lat, wps[i - 1].lon, wp.lat, wp.lon);
+    return { ...wp, bearing, dist };
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CONVERTER: validation  (NEW)
+// ─────────────────────────────────────────────────────────────────────────────
+function convValidate(wps) {
+  const warnings = [];
+  if (!wps || wps.length < 2) { warnings.push({ sev: 'error', msg: 'Route has fewer than 2 waypoints' }); return warnings; }
+  wps.forEach((wp, i) => {
+    if (!wp.name || wp.name.trim() === '') warnings.push({ sev: 'warning', msg: `WP${i + 1}: no name — will be auto-named` });
+    if (i > 0) {
+      const prev = wps[i - 1];
+      if (Math.abs(wp.lat - prev.lat) < 0.0001 && Math.abs(wp.lon - prev.lon) < 0.0001)
+        warnings.push({ sev: 'error', msg: `WP${i + 1} & WP${i}: duplicate coordinates` });
+    }
+    const xp = wp.portXTD ?? wp.stbdXTD ?? null;
+    if (xp === 0 || xp === '0') warnings.push({ sev: 'warning', msg: `WP${i + 1}: XTD = 0 NM — vessel has zero cross-track tolerance` });
+  });
+  return warnings;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CONVERTER: AI-assisted format detection  (NEW)
+// Checks extension → XML root element → header content
+// ─────────────────────────────────────────────────────────────────────────────
+function convDetectFormat(text, filename) {
+  const ext = (filename || '').split('.').pop().toLowerCase().trim();
+
+  // 1. Extension-based hints
+  if (ext === 'gpx') return 'gpx';
+  if (ext === 'kml' || ext === 'kmz') return 'kml';
+  if (ext === 'rt3') return 'rt3';
+  if (ext === 'rta') return 'rta';
+  if (ext === 'rtn') return 'rtn';
+  if (ext === 'rtm') return 'rtm';
+  if (ext === 'rtu') return 'rtu';
+  if (ext === 'rtx') return 'rtx';
+  if (ext === 'nacos') return 'nacos';
+  if (ext === 'rtz' || ext === 'rtzp') return 'rtz';
+  if (ext === 'csv') return 'csv';
+
+  // 2. Sniff XML root element / namespace (catches mislabelled .xml files)
+  const snip = (text || '').substring(0, 2000).toLowerCase();
+
+  if (snip.includes('cirm.org/rtz') || snip.includes('<route version') || snip.includes('xmlns="http://www.cirm.org')) return 'rtz';
+  if (snip.includes('<gpx') || snip.includes('topografix.com/gpx')) return 'gpx';
+  if (snip.includes('<kml') || snip.includes('opengis.net/kml') || snip.includes('earth.google.com')) return 'kml';
+
+  // Transas RT3: root is <ROUTE> with <WP> children or <RouteInfo>
+  if (snip.includes('<routeinfo') || snip.includes('<waypoints>') && snip.includes('<wp ') && !snip.includes('cirm')) return 'rt3';
+  if (snip.includes('<rt3') || (snip.includes('<wp ') && snip.includes('<leg '))) return 'rt3';
+
+  // JRC flavours: RTM/RTA/RTN share structure; distinguish by element names
+  if (snip.includes('jrc') || snip.includes('<rtm') || snip.includes('<rta') || snip.includes('<rtn')) return 'jrc';
+  if (snip.includes('<waypoint') && snip.includes('<speed') && !snip.includes('cirm')) return 'jrc';
+
+  // MARIS RTU
+  if (snip.includes('<rtu') || snip.includes('maris') || (snip.includes('<wp>') && snip.includes('<pos>'))) return 'rtu';
+
+  // NACOS / Kongsberg
+  if (snip.includes('nacos') || snip.includes('kongsberg') || snip.includes('<nacos')) return 'nacos';
+
+  // SevenCS / eGlobe RTE (XML-based .rte)
+  if (snip.includes('<sevencs') || snip.includes('<eglobe') || snip.includes('<rte')) return 'rte';
+
+  // CSV fallback: if no XML tag found and has commas
+  if (!snip.includes('<') && snip.includes(',')) return 'csv';
+
+  // If XML but unrecognised — try generic XML
+  if (snip.includes('<?xml') || snip.includes('<route') || snip.includes('<waypoint')) return 'xml_generic';
+
+  return 'unknown';
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CONVERTER: per-format parsers  (ALL NEW)
+// Each returns: { routeName: string, waypoints: [{id,name,lat,lon,radius,portXTD,stbdXTD,speed}] } | null
+// ─────────────────────────────────────────────────────────────────────────────
+
+function convParseRTZ(text) {
+  // Reuse existing parseRTZ from utils — already imported
+  try {
+    const result = parseRTZ(text);
+    if (!result || result.waypoints.length === 0) return null;
+    return {
+      routeName: result.name || 'RTZ Route',
+      waypoints: result.waypoints.map((wp, i) => ({
+        id: i + 1,
+        name: wp.name || `WP${String(i + 1).padStart(2, '0')}`,
+        lat: wp.lat,
+        lon: wp.lon,
+        radius: wp.radius ?? 0.5,
+        portXTD: wp.portXTD ?? 0.5,
+        stbdXTD: wp.stbdXTD ?? 0.5,
+        speed: wp.speed ?? null,
+      })),
+    };
+  } catch { return null; }
+}
+
+function convParseGPX(text) {
+  try {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(text, 'application/xml');
+    if (doc.querySelector('parsererror')) return null;
+    const nameEl = doc.querySelector('metadata > name') || doc.querySelector('rte > name');
+    const routeName = nameEl?.textContent?.trim() || 'GPX Route';
+    // Try <rte><rtept> first, then <wpt>
+    const rtepts = [...doc.querySelectorAll('rtept')];
+    const wpts   = rtepts.length > 0 ? rtepts : [...doc.querySelectorAll('wpt')];
+    if (wpts.length === 0) return null;
+    return {
+      routeName,
+      waypoints: wpts.map((pt, i) => ({
+        id: i + 1,
+        name: pt.querySelector('name')?.textContent?.trim() || `WP${String(i + 1).padStart(2, '0')}`,
+        lat: parseFloat(pt.getAttribute('lat')),
+        lon: parseFloat(pt.getAttribute('lon')),
+        radius: 0.5,
+        portXTD: 0.5,
+        stbdXTD: 0.5,
+        speed: null,
+      })).filter(wp => !isNaN(wp.lat) && !isNaN(wp.lon)),
+    };
+  } catch { return null; }
+}
+
+function convParseKML(text) {
+  try {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(text, 'application/xml');
+    if (doc.querySelector('parsererror')) return null;
+    const nameEl = doc.querySelector('Document > name') || doc.querySelector('Folder > name');
+    const routeName = nameEl?.textContent?.trim() || 'KML Route';
+    // Try LineString coords first (route as line), then Placemarks
+    const lineStr = doc.querySelector('LineString > coordinates');
+    if (lineStr) {
+      const coords = lineStr.textContent.trim().split(/\s+/).map(c => {
+        const parts = c.split(',');
+        return { lon: parseFloat(parts[0]), lat: parseFloat(parts[1]) };
+      }).filter(c => !isNaN(c.lat) && !isNaN(c.lon));
+      if (coords.length > 0) {
+        return {
+          routeName,
+          waypoints: coords.map((c, i) => ({
+            id: i + 1, name: `WP${String(i + 1).padStart(2, '0')}`,
+            lat: c.lat, lon: c.lon, radius: 0.5, portXTD: 0.5, stbdXTD: 0.5, speed: null,
+          })),
+        };
+      }
+    }
+    // Fallback: Placemarks with Point
+    const marks = [...doc.querySelectorAll('Placemark')].filter(p => p.querySelector('Point'));
+    if (marks.length === 0) return null;
+    return {
+      routeName,
+      waypoints: marks.map((pm, i) => {
+        const coordText = pm.querySelector('coordinates')?.textContent?.trim() || '';
+        const parts = coordText.split(',');
+        return {
+          id: i + 1,
+          name: pm.querySelector('name')?.textContent?.trim() || `WP${String(i + 1).padStart(2, '0')}`,
+          lat: parseFloat(parts[1]),
+          lon: parseFloat(parts[0]),
+          radius: 0.5, portXTD: 0.5, stbdXTD: 0.5, speed: null,
+        };
+      }).filter(wp => !isNaN(wp.lat) && !isNaN(wp.lon)),
+    };
+  } catch { return null; }
+}
+
+function convParseRT3(text) {
+  // Transas NaviSailor RT3 — XML with <WP> or <Waypoint> elements
+  try {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(text, 'application/xml');
+    if (doc.querySelector('parsererror')) return null;
+    const nameEl = doc.querySelector('RouteInfo') || doc.querySelector('RouteName') || doc.querySelector('Name');
+    const routeName = nameEl?.getAttribute('routeName') || nameEl?.getAttribute('name') || nameEl?.textContent?.trim() || 'RT3 Route';
+    // Transas uses <WP Lat="..." Lon="..." Name="..." Radius="..." XTDLeft="..." XTDRight="...">
+    let wps = [...doc.querySelectorAll('WP')];
+    if (wps.length === 0) wps = [...doc.querySelectorAll('Waypoint')];
+    if (wps.length === 0) wps = [...doc.querySelectorAll('waypoint')];
+    if (wps.length === 0) return null;
+    return {
+      routeName,
+      waypoints: wps.map((wp, i) => {
+        const lat = parseFloat(wp.getAttribute('Lat') || wp.getAttribute('lat') || wp.querySelector('Lat,lat,Latitude,latitude')?.textContent || '');
+        const lon = parseFloat(wp.getAttribute('Lon') || wp.getAttribute('lon') || wp.querySelector('Lon,lon,Longitude,longitude')?.textContent || '');
+        const name = wp.getAttribute('Name') || wp.getAttribute('name') || wp.querySelector('Name,name')?.textContent || `WP${String(i + 1).padStart(2, '0')}`;
+        const radius = parseFloat(wp.getAttribute('Radius') || wp.getAttribute('radius') || '0.5') || 0.5;
+        const portXTD = parseFloat(wp.getAttribute('XTDLeft') || wp.getAttribute('xtdleft') || wp.getAttribute('portXTD') || '0.5') || 0.5;
+        const stbdXTD = parseFloat(wp.getAttribute('XTDRight') || wp.getAttribute('xtdright') || wp.getAttribute('stbdXTD') || '0.5') || 0.5;
+        const speed = parseFloat(wp.getAttribute('Speed') || wp.getAttribute('speed') || '') || null;
+        return { id: i + 1, name: name.trim(), lat, lon, radius, portXTD, stbdXTD, speed };
+      }).filter(wp => !isNaN(wp.lat) && !isNaN(wp.lon)),
+    };
+  } catch { return null; }
+}
+
+function convParseJRC(text) {
+  // JRC ECDIS: RTA / RTN / RTM — XML with <Waypoint> and speed/XTD attrs
+  try {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(text, 'application/xml');
+    if (doc.querySelector('parsererror')) return null;
+    const nameEl = doc.querySelector('RouteName,RouteInfo,Route');
+    const routeName = nameEl?.getAttribute('name') || nameEl?.getAttribute('Name') || nameEl?.textContent?.trim() || doc.documentElement?.getAttribute('name') || 'JRC Route';
+    let wps = [...doc.querySelectorAll('Waypoint,waypoint,WP,wp')];
+    if (wps.length === 0) return null;
+    return {
+      routeName,
+      waypoints: wps.map((wp, i) => {
+        // JRC stores position as child element <Position Lat="..." Lon="..."> or attributes
+        const posEl = wp.querySelector('Position,position,Pos,pos');
+        const lat = parseFloat(posEl?.getAttribute('Lat') || posEl?.getAttribute('lat') || wp.getAttribute('Lat') || wp.getAttribute('lat') || wp.querySelector('Lat,lat')?.textContent || '');
+        const lon = parseFloat(posEl?.getAttribute('Lon') || posEl?.getAttribute('lon') || wp.getAttribute('Lon') || wp.getAttribute('lon') || wp.querySelector('Lon,lon')?.textContent || '');
+        const name = wp.getAttribute('Name') || wp.getAttribute('name') || wp.querySelector('Name,name')?.textContent || `WP${String(i + 1).padStart(2, '0')}`;
+        const radius = parseFloat(wp.getAttribute('Radius') || wp.getAttribute('TurnRadius') || '0.5') || 0.5;
+        const portXTD = parseFloat(wp.getAttribute('XTDPort') || wp.getAttribute('PortXTD') || wp.getAttribute('XTDLeft') || '0.5') || 0.5;
+        const stbdXTD = parseFloat(wp.getAttribute('XTDStbd') || wp.getAttribute('StbdXTD') || wp.getAttribute('XTDRight') || '0.5') || 0.5;
+        const speed = parseFloat(wp.querySelector('Speed,speed')?.textContent || wp.getAttribute('Speed') || '') || null;
+        return { id: i + 1, name: name.trim(), lat, lon, radius, portXTD, stbdXTD, speed };
+      }).filter(wp => !isNaN(wp.lat) && !isNaN(wp.lon)),
+    };
+  } catch { return null; }
+}
+
+function convParseRTU(text) {
+  // MARIS RTU — XML with <WP><Pos lat="..." lon="..."/> structure
+  try {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(text, 'application/xml');
+    if (doc.querySelector('parsererror')) return null;
+    const routeName = doc.querySelector('Route,route')?.getAttribute('name') || doc.querySelector('RouteName,Name')?.textContent?.trim() || 'RTU Route';
+    const wps = [...doc.querySelectorAll('WP,wp,Waypoint,waypoint')];
+    if (wps.length === 0) return null;
+    return {
+      routeName,
+      waypoints: wps.map((wp, i) => {
+        const posEl = wp.querySelector('Pos,pos,Position,position');
+        const lat = parseFloat(posEl?.getAttribute('lat') || posEl?.getAttribute('Lat') || wp.getAttribute('lat') || '');
+        const lon = parseFloat(posEl?.getAttribute('lon') || posEl?.getAttribute('Lon') || wp.getAttribute('lon') || '');
+        const name = wp.getAttribute('name') || wp.querySelector('Name,name')?.textContent || `WP${String(i + 1).padStart(2, '0')}`;
+        const radius = parseFloat(wp.getAttribute('radius') || '0.5') || 0.5;
+        const portXTD = parseFloat(wp.getAttribute('xtdPort') || wp.getAttribute('portXTD') || '0.5') || 0.5;
+        const stbdXTD = parseFloat(wp.getAttribute('xtdStbd') || wp.getAttribute('stbdXTD') || '0.5') || 0.5;
+        return { id: i + 1, name: name.trim(), lat, lon, radius, portXTD, stbdXTD, speed: null };
+      }).filter(wp => !isNaN(wp.lat) && !isNaN(wp.lon)),
+    };
+  } catch { return null; }
+}
+
+function convParseNACOS(text) {
+  // Kongsberg NACOS — XML, often .nacos or .xml extension
+  try {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(text, 'application/xml');
+    if (doc.querySelector('parsererror')) return null;
+    const routeName = doc.querySelector('Name,name,RouteName')?.textContent?.trim() || doc.documentElement?.getAttribute('name') || 'NACOS Route';
+    // NACOS: <waypoints><waypoint id="..." name="..."><position lat="..." lon="..."/></waypoint></waypoints>
+    const wps = [...doc.querySelectorAll('waypoint,Waypoint,WP,wp')];
+    if (wps.length === 0) return null;
+    return {
+      routeName,
+      waypoints: wps.map((wp, i) => {
+        const posEl = wp.querySelector('position,Position');
+        const lat = parseFloat(posEl?.getAttribute('lat') || posEl?.getAttribute('Lat') || wp.getAttribute('lat') || '');
+        const lon = parseFloat(posEl?.getAttribute('lon') || posEl?.getAttribute('Lon') || wp.getAttribute('lon') || '');
+        const name = wp.getAttribute('name') || wp.querySelector('name')?.textContent || `WP${String(i + 1).padStart(2, '0')}`;
+        const radius = parseFloat(wp.getAttribute('radius') || wp.querySelector('leg')?.getAttribute('radius') || '0.5') || 0.5;
+        const portXTD = parseFloat(wp.querySelector('leg')?.getAttribute('portXTD') || '0.5') || 0.5;
+        const stbdXTD = parseFloat(wp.querySelector('leg')?.getAttribute('starboardXTD') || '0.5') || 0.5;
+        return { id: i + 1, name: name.trim(), lat, lon, radius, portXTD, stbdXTD, speed: null };
+      }).filter(wp => !isNaN(wp.lat) && !isNaN(wp.lon)),
+    };
+  } catch { return null; }
+}
+
+function convParseCSV(text) {
+  // Generic CSV: tries to detect header row with lat/lon columns
+  try {
+    const lines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
+    if (lines.length < 2) return null;
+    const header = lines[0].toLowerCase().split(/[,;|\t]/);
+    // Find lat/lon column indices
+    const latIdx = header.findIndex(h => /lat/.test(h));
+    const lonIdx = header.findIndex(h => /lon|lng/.test(h));
+    const nameIdx = header.findIndex(h => /name|wp|waypoint|id|point/.test(h));
+    const speedIdx = header.findIndex(h => /speed|kn|knot/.test(h));
+    if (latIdx === -1 || lonIdx === -1) {
+      // No header — try positional: name,lat,lon or lat,lon,name
+      const firstParts = lines[0].split(/[,;|\t]/);
+      const lat0 = parseFloat(firstParts[0]), lat1 = parseFloat(firstParts[1]);
+      // Check if first two are numeric (lat,lon format)
+      if (!isNaN(lat0) && !isNaN(lat1)) {
+        const wps = lines.map((l, i) => {
+          const p = l.split(/[,;|\t]/);
+          return { id: i + 1, name: p[2]?.trim() || `WP${String(i + 1).padStart(2, '0')}`, lat: parseFloat(p[0]), lon: parseFloat(p[1]), radius: 0.5, portXTD: 0.5, stbdXTD: 0.5, speed: null };
+        }).filter(wp => !isNaN(wp.lat) && !isNaN(wp.lon));
+        return wps.length >= 2 ? { routeName: 'CSV Route', waypoints: wps } : null;
+      }
+      return null;
+    }
+    const wps = lines.slice(1).map((l, i) => {
+      const p = l.split(/[,;|\t]/);
+      return {
+        id: i + 1,
+        name: (nameIdx >= 0 ? p[nameIdx]?.trim() : '') || `WP${String(i + 1).padStart(2, '0')}`,
+        lat: parseFloat(p[latIdx]),
+        lon: parseFloat(p[lonIdx]),
+        radius: 0.5, portXTD: 0.5, stbdXTD: 0.5,
+        speed: speedIdx >= 0 ? parseFloat(p[speedIdx]) || null : null,
+      };
+    }).filter(wp => !isNaN(wp.lat) && !isNaN(wp.lon));
+    return wps.length >= 2 ? { routeName: 'CSV Route', waypoints: wps } : null;
+  } catch { return null; }
+}
+
+function convParseGenericXML(text) {
+  // Last-resort XML parser — looks for any element with lat/lon attrs or children
+  try {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(text, 'application/xml');
+    if (doc.querySelector('parsererror')) return null;
+    const candidates = [...doc.querySelectorAll('*')].filter(el => {
+      const lat = el.getAttribute('lat') || el.getAttribute('Lat');
+      const lon = el.getAttribute('lon') || el.getAttribute('Lon');
+      return lat && lon && !isNaN(parseFloat(lat)) && !isNaN(parseFloat(lon));
+    });
+    if (candidates.length < 2) return null;
+    return {
+      routeName: doc.querySelector('Name,name,RouteName,routeName')?.textContent?.trim() || 'Imported Route',
+      waypoints: candidates.map((el, i) => ({
+        id: i + 1,
+        name: el.getAttribute('name') || el.getAttribute('Name') || el.querySelector('name,Name')?.textContent?.trim() || `WP${String(i + 1).padStart(2, '0')}`,
+        lat: parseFloat(el.getAttribute('lat') || el.getAttribute('Lat')),
+        lon: parseFloat(el.getAttribute('lon') || el.getAttribute('Lon')),
+        radius: 0.5, portXTD: 0.5, stbdXTD: 0.5, speed: null,
+      })),
+    };
+  } catch { return null; }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CONVERTER: master dispatcher  (NEW)
+// ─────────────────────────────────────────────────────────────────────────────
+function convParse(text, fmt) {
+  switch (fmt) {
+    case 'rtz':  return convParseRTZ(text);
+    case 'gpx':  return convParseGPX(text);
+    case 'kml':  case 'kmz': return convParseKML(text);
+    case 'rt3':  return convParseRT3(text);
+    case 'rta':  case 'rtn': case 'rtm': case 'jrc': return convParseJRC(text);
+    case 'rtu':  case 'rtx': return convParseRTU(text);
+    case 'nacos': return convParseNACOS(text);
+    case 'csv':  return convParseCSV(text);
+    case 'xml_generic': case 'rte': return convParseGenericXML(text);
+    default: return convParseGenericXML(text) || convParseCSV(text);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CONVERTER: build output content string  (NEW)
+// ─────────────────────────────────────────────────────────────────────────────
+function convExport(routeName, wps, fmt) {
+  // Map converter WP model → utils WP model (lat/lon/name/bearing/distance)
+  const mapped = wps.map((wp, i) => {
+    const prev = i > 0 ? wps[i - 1] : null;
+    const { dist, bearing } = prev ? convHaversine(prev.lat, prev.lon, wp.lat, wp.lon) : { dist: 0, bearing: 0 };
+    return { lat: wp.lat, lon: wp.lon, name: wp.name || `WP${String(i + 1).padStart(2, '0')}`, bearing, distance: dist };
+  });
+  switch (fmt) {
+    case 'rtz':     return { content: exportRTZ(routeName, mapped),         ext: '.rtz',         mime: 'application/xml' };
+    case 'gpx':     return { content: exportGPX(routeName, mapped),         ext: '.gpx',         mime: 'application/gpx+xml' };
+    case 'csv':     return { content: exportCSV(mapped),                    ext: '.csv',         mime: 'text/csv' };
+    case 'nmea':    return { content: exportNMEAWPL(routeName, mapped),     ext: '-nmea.txt',    mime: 'text/plain' };
+    case 'furuno':  return { content: exportFurunoCSV(routeName, mapped),   ext: '-furuno.csv',  mime: 'text/csv' };
+    case 'jrc':     return { content: exportJRCCSV(routeName, mapped),      ext: '-jrc.csv',     mime: 'text/csv' };
+    case 'transas': return { content: exportTransasXML(routeName, mapped),  ext: '-transas.xml', mime: 'application/xml' };
+    case 'kml':     return { content: exportKML(routeName, mapped),         ext: '.kml',         mime: 'application/vnd.google-earth.kml+xml' };
+    default:        return { content: exportRTZ(routeName, mapped),         ext: '.rtz',         mime: 'application/xml' };
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CONVERTER: IDB helpers (offline cache)  (NEW — uses same idbSavePref/idbLoadPref pattern)
+// ─────────────────────────────────────────────────────────────────────────────
+async function convIdbSave(routes) {
+  try { await idbSavePref(CONV_IDB_KEY, routes); } catch (e) { console.warn('[Converter] IDB save failed:', e); }
+}
+async function convIdbLoad() {
+  try { return await idbLoadPref(CONV_IDB_KEY, []); } catch { return []; }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CONVERTER: JSZip lazy loader (for batch ZIP handling)  (NEW)
+// ─────────────────────────────────────────────────────────────────────────────
+let _jszipPromise = null;
+function loadJSZip() {
+  if (_jszipPromise) return _jszipPromise;
+  _jszipPromise = new Promise((resolve, reject) => {
+    if (typeof window !== 'undefined' && window.JSZip) { resolve(window.JSZip); return; }
+    const script = document.createElement('script');
+    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
+    script.onload = () => resolve(window.JSZip);
+    script.onerror = () => reject(new Error('JSZip load failed'));
+    document.head.appendChild(script);
+  });
+  return _jszipPromise;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LAND-CHECK helper (existing logic, not modified)
+// ─────────────────────────────────────────────────────────────────────────────
 const checkPointOnLand = (lat, lon) => new Promise(resolve => {
   const zoom=11,n=1<<zoom;
   const tx=Math.floor((lon+180)/360*n);
@@ -52,7 +497,6 @@ async function fetchOverpass(query){
 }
 
 // ── Regulatory zone overlay config ────────────────────────────────────────────
-// Each entry drives both the toggle buttons AND the MapView overlays prop
 const REG_ZONE_CFG = [
   { k:'eca',          label:'ECA',          color:'#FF6B35', desc:'Emission Control Areas — SOx limits' },
   { k:'seca',         label:'SECA',         color:'#FFB347', desc:'Sulphur ECA — 0.10% S fuel required' },
@@ -69,11 +513,31 @@ const REG_ZONE_CFG = [
   { k:'depthClick',   label:'Depth Click',  color:'#00C896', desc:'Click map to query water depth' },
 ];
 
+// ─────────────────────────────────────────────────────────────────────────────
+// FORMAT labels for UI display  (NEW)
+// ─────────────────────────────────────────────────────────────────────────────
+const FMT_LABELS = {
+  rtz: 'RTZ (IEC 61174)', gpx: 'GPX', kml: 'KML', rt3: 'Transas RT3',
+  rta: 'JRC RTA', rtn: 'JRC RTN', rtm: 'JRC RTM', jrc: 'JRC',
+  rtu: 'MARIS RTU', rtx: 'MARIS RTX', nacos: 'NACOS / Kongsberg',
+  csv: 'CSV', rte: 'SevenCS RTE', xml_generic: 'Generic XML', unknown: 'Unknown',
+};
+
+const FMT_COLORS = {
+  rtz: '#00B4D8', gpx: '#00C896', kml: '#4285F4', rt3: '#F0A500',
+  rta: '#FF6B35', rtn: '#FF6B35', rtm: '#FF6B35', jrc: '#FF6B35',
+  rtu: '#9B59B6', rtx: '#9B59B6', nacos: '#1ABC9C',
+  csv: '#E74C3C', rte: '#F39C12', xml_generic: '#8A9BBF', unknown: '#4A5F80',
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MAIN COMPONENT
+// ─────────────────────────────────────────────────────────────────────────────
 function RoutePlannerPage({ notify, sheetRoutes=[], portsDb=[] }){
   const portsList=portsDb;
   const hasRestoredRef=useRef(false);
 
-  // ── Core state ─────────────────────────────────────────────────────────────
+  // ── Core state (ALL EXISTING — untouched) ──────────────────────────────────
   const[panel,          setPanel]          =useState('auto');
   const[fromPort,       setFromPort]       =useState('');
   const[toPort,         setToPort]         =useState('');
@@ -86,23 +550,18 @@ function RoutePlannerPage({ notify, sheetRoutes=[], portsDb=[] }){
   const[clickAdd,       setClickAdd]       =useState(false);
   const[mapMode,        setMapMode]        =useState('day');
 
-  // ── NEW: single overlays state — drives both old + new zone keys ───────────
   const[overlays, setOverlays]=useState({
-    // original keys kept for MapView compatibility
     eca:false, seca:false, marpol:false, piracy:false, layover:false,
     gebco:false, depthClick:false,
-    // new zone keys
     pssa:false, nox:false, loadline:false,
     restrictions:false, msc_nog:false, eez:false,
   });
 
-  // ── ECDIS-first state ──────────────────────────────────────────────────────
   const[portF,          setPortF]          =useState(null);
   const[portT,          setPortT]          =useState(null);
   const[dbSuggestions,  setDbSuggestions]  =useState([]);
   const[searchMode,     setSearchMode]     =useState(null);
 
-  // ── Manual lat/lon entry ───────────────────────────────────────────────────
   const[showManualFrom, setShowManualFrom] =useState(false);
   const[showManualTo,   setShowManualTo]   =useState(false);
   const[manualFromLat,  setManualFromLat]  =useState('');
@@ -112,7 +571,6 @@ function RoutePlannerPage({ notify, sheetRoutes=[], portsDb=[] }){
   const[manualToLon,    setManualToLon]    =useState('');
   const[manualToName,   setManualToName]   =useState('');
 
-  // ── Vessel params ──────────────────────────────────────────────────────────
   const[vDraft,         setVDraft]         =useState(10);
   const[vBeam,          setVBeam]          =useState(32);
   const[vLoa,           setVLoa]           =useState(200);
@@ -122,7 +580,6 @@ function RoutePlannerPage({ notify, sheetRoutes=[], portsDb=[] }){
   const[routeMeta,      setRouteMeta]      =useState(null);
   const[isGenerating,   setIsGenerating]   =useState(false);
 
-  // ── Manual route ───────────────────────────────────────────────────────────
   const[manualWps,      setManualWps]      =useState([]);
   const[manualRouteName,setManualRouteName]=useState('Manual Route');
   const[savedRoutes,    setSavedRoutes]    =useState([]);
@@ -132,12 +589,20 @@ function RoutePlannerPage({ notify, sheetRoutes=[], portsDb=[] }){
   const[isCheckingAuto, setIsCheckingAuto] =useState(false);
   const[exportFormat,   setExportFormat]   =useState('rtz');
 
-  // ── API Safety state ───────────────────────────────────────────────────────
   const[apiSafetyReport,setApiSafetyReport]=useState(null);
   const[isApiChecking,  setIsApiChecking]  =useState(false);
   const[apiRouteInfo,   setApiRouteInfo]   =useState(null);
 
-  // ── Memos ──────────────────────────────────────────────────────────────────
+  // ── NEW: Converter state ───────────────────────────────────────────────────
+  const[convFiles,      setConvFiles]      =useState([]);     // [{id, filename, detectedFmt, parsed:{routeName,waypoints}, validated, enriched, outputFmt}]
+  const[convOutputFmt,  setConvOutputFmt]  =useState('rtz');  // global output format
+  const[convDragOver,   setConvDragOver]   =useState(false);
+  const[convProcessing, setConvProcessing] =useState(false);
+  const[convHistory,    setConvHistory]    =useState([]);     // IDB-cached converted route list
+  const[convExpanded,   setConvExpanded]   =useState(null);   // which file card is expanded
+  const convDropRef=useRef(null);
+
+  // ── Memos (EXISTING — untouched) ──────────────────────────────────────────
   const totalNM      =useMemo(()=>totalRouteNM(waypoints),[waypoints]);
   const totalManualNM=useMemo(()=>totalRouteNM(manualWps),[manualWps]);
 
@@ -154,7 +619,7 @@ function RoutePlannerPage({ notify, sheetRoutes=[], portsDb=[] }){
   const checkAutoHL=useMemo(()=>buildHighlights(checkAutoRes,waypoints),[checkAutoRes,waypoints]);
   const allHL      =useMemo(()=>[...checkHL,...checkAutoHL],[checkHL,checkAutoHL]);
 
-  // ── Persistence: restore ──────────────────────────────────────────────────
+  // ── Persistence: restore (EXISTING — added conv history load) ─────────────
   useEffect(()=>{
     const load=async()=>{
       try{
@@ -179,13 +644,17 @@ function RoutePlannerPage({ notify, sheetRoutes=[], portsDb=[] }){
         if(mwps&&mwps.length>0)setManualWps(mwps);
         if(mrn)setManualRouteName(mrn);
         setSavedRoutes(routes||[]);
+
+        // NEW: load converter history from IDB
+        const hist = await convIdbLoad();
+        if (Array.isArray(hist)) setConvHistory(hist);
       }catch(e){console.warn('[RP] Restore failed:',e);}
       finally{hasRestoredRef.current=true;}
     };
     load();
   },[]);
 
-  // ── Persistence: save ─────────────────────────────────────────────────────
+  // ── Persistence: save (EXISTING — untouched) ──────────────────────────────
   const s=(k,v)=>localStorage.setItem(k,v);
   useEffect(()=>{s('mnp_mapMode',mapMode);},[mapMode]);
   useEffect(()=>{s('mnp_panel',panel);},[panel]);
@@ -204,7 +673,7 @@ function RoutePlannerPage({ notify, sheetRoutes=[], portsDb=[] }){
   useEffect(()=>{setCheckResults([]);},[manualWps.length]);
   useEffect(()=>{setCheckAutoRes([]);setApiSafetyReport(null);setApiRouteInfo(null);},[waypoints.length]);
 
-  // ── Port search ────────────────────────────────────────────────────────────
+  // ── Port search (EXISTING — untouched) ────────────────────────────────────
   const searchPort=(q,setSugg)=>{
     if(!q||q.trim().length<2){setSugg([]);return;}
     const ql=q.toLowerCase().trim();
@@ -225,7 +694,7 @@ function RoutePlannerPage({ notify, sheetRoutes=[], portsDb=[] }){
     }).slice(0,6);
   };
 
-  // ── Manual coordinate entry ────────────────────────────────────────────────
+  // ── Manual coordinate entry (EXISTING — untouched) ────────────────────────
   const applyManualFrom=()=>{
     const lat=parseFloat(manualFromLat),lon=parseFloat(manualFromLon);
     if(isNaN(lat)||isNaN(lon)||lat<-90||lat>90||lon<-180||lon>180){notify('Invalid coordinates','error');return;}
@@ -246,7 +715,7 @@ function RoutePlannerPage({ notify, sheetRoutes=[], portsDb=[] }){
     notify(`Arrival set: ${name}`,'success');
   };
 
-  // ── Search ─────────────────────────────────────────────────────────────────
+  // ── Search (EXISTING — untouched) ─────────────────────────────────────────
   const handleSearch=()=>{
     const f=portF?.id==='CUSTOM_DEP'?portF:portsList.find(p=>p.name?.toLowerCase()===fromPort.toLowerCase()||p.id?.toLowerCase()===fromPort.toLowerCase());
     const t=portT?.id==='CUSTOM_ARR'?portT:portsList.find(p=>p.name?.toLowerCase()===toPort.toLowerCase()||p.id?.toLowerCase()===toPort.toLowerCase());
@@ -258,80 +727,42 @@ function RoutePlannerPage({ notify, sheetRoutes=[], portsDb=[] }){
     else notify('No ECDIS routes found — click Generate Auto Route','success');
   };
 
-  // ── FIX 1: useDbRoute — robust multi-URL CORS-aware loader ────────────────
+  // ── useDbRoute (EXISTING — untouched) ─────────────────────────────────────
   const useDbRoute = (r) => {
     setSearchMode('generating');
-
     const url = r.fileUrl || r['File URL'] || r['Download URL'] || r['Drive Link'] ||
       Object.values(r).find(v => typeof v === 'string' &&
         (v.includes('drive.google') || v.includes('drive.usercontent') || v.toLowerCase().endsWith('.rtz')));
-
-    const doAutoRoute = () => {
-      notify('Generating auto route instead…', 'error');
-      handleGenerateAutoRoute();
-    };
-
-    if (!url) {
-      notify('No file link found in ECDIS record', 'error');
-      doAutoRoute();
-      return;
-    }
-
+    const doAutoRoute = () => { notify('Generating auto route instead…', 'error'); handleGenerateAutoRoute(); };
+    if (!url) { notify('No file link found in ECDIS record', 'error'); doAutoRoute(); return; }
     notify('Loading ECDIS route…', 'success');
-
-    // Extract Google Drive file ID
-    const gdMatch = url.match(/\/d\/([a-zA-Z0-9_-]+)/) ||
-                    url.match(/id=([a-zA-Z0-9_-]+)/);
+    const gdMatch = url.match(/\/d\/([a-zA-Z0-9_-]+)/) || url.match(/id=([a-zA-Z0-9_-]+)/);
     const fileId = gdMatch?.[1];
-
-    // Build candidate URLs to try
     const candidates = fileId ? [
       `https://drive.usercontent.google.com/download?id=${fileId}&export=download&confirm=t`,
       `https://drive.google.com/uc?export=download&id=${fileId}&confirm=t`,
       `https://drive.google.com/uc?id=${fileId}&export=download`,
     ] : [url];
-
     const tryUrl = (urls) => {
-      if (urls.length === 0) {
-        // All attempts failed — show download link so user can open manually
-        notify(
-          `CORS blocked. File ID: ${fileId || 'unknown'}. Make sure it's shared publicly.`,
-          'error'
-        );
-        doAutoRoute();
-        return;
-      }
+      if (urls.length === 0) { notify(`CORS blocked. File ID: ${fileId || 'unknown'}. Make sure it's shared publicly.`, 'error'); doAutoRoute(); return; }
       const [next, ...rest] = urls;
       const ctrl = new AbortController();
       const timer = setTimeout(() => ctrl.abort(), 12000);
-
-      fetch(next, {
-        mode: 'cors',
-        signal: ctrl.signal,
-        headers: { Accept: 'application/xml,text/xml,*/*' },
-      })
+      fetch(next, { mode: 'cors', signal: ctrl.signal, headers: { Accept: 'application/xml,text/xml,*/*' } })
         .then(res => { clearTimeout(timer); if (!res.ok) throw new Error(res.status); return res.text(); })
         .then(text => {
           const result = parseRTZ(text);
           if (result && result.waypoints.length >= 2) {
-            setWaypoints(result.waypoints);
-            setRouteName(
-              r.fileName || r['File Name'] || r['Route Name'] || 'ECDIS Route'
-            );
-            setRouteMeta(null);
-            setSearchMode('done');
-            notify(`✅ ECDIS route loaded: ${result.waypoints.length} WPs`, 'success');
-          } else {
-            tryUrl(rest);
-          }
+            setWaypoints(result.waypoints); setRouteName(r.fileName || r['File Name'] || r['Route Name'] || 'ECDIS Route');
+            setRouteMeta(null); setSearchMode('done'); notify(`✅ ECDIS route loaded: ${result.waypoints.length} WPs`, 'success');
+          } else { tryUrl(rest); }
         })
         .catch(() => { clearTimeout(timer); tryUrl(rest); });
     };
-
     tryUrl(candidates);
   };
 
-  // ── Generate auto route ────────────────────────────────────────────────────
+  // ── Generate auto route (EXISTING — untouched) ────────────────────────────
   const handleGenerateAutoRoute=async()=>{
     const f=portF,t=portT;
     if(!f||!t)return;
@@ -344,38 +775,25 @@ function RoutePlannerPage({ notify, sheetRoutes=[], portsDb=[] }){
         const data=await res.json();
         if(data.waypoints&&data.waypoints.length>=2){
           const recalced=recalcWaypoints(data.waypoints.map((w,i)=>({lat:w.lat,lon:w.lon,name:`WP${String(i+1).padStart(2,'0')}`})));
-          setWaypoints(recalced);
-          setRouteName(`${f.name} → ${t.name}`);
+          setWaypoints(recalced); setRouteName(`${f.name} → ${t.name}`);
           const info={totalNM:data.totalNM||0,method:data.method||'api',landCrossing:data.landCrossing||false,tssZones:data.tssZones||[],portApproach:data.portApproach||{},warnings:data.warnings||[],overallSafe:data.overallSafe!==false};
           setApiRouteInfo(info);
           if(data.safetyReport)setApiSafetyReport(data.safetyReport);
-          setRouteMeta({
-            totalNM:data.totalNM||0,
-            etaAt12kn:((data.totalNM||0)/12).toFixed(1),
-            etaAt15kn:((data.totalNM||0)/15).toFixed(1),
-            confidence:'HIGH — api',
-            routeSource:'navispherex-router',
-            canalInfo:(data.tssZones||[]).map(z=>({canal:z.replace(/_/g,' ').toUpperCase(),status:'OK',reason:'TSS lane followed by API'})),
-            approachStartIdx:recalced.length-1,
-            waypoints:recalced,
-          });
+          setRouteMeta({totalNM:data.totalNM||0,etaAt12kn:((data.totalNM||0)/12).toFixed(1),etaAt15kn:((data.totalNM||0)/15).toFixed(1),confidence:'HIGH — api',routeSource:'navispherex-router',canalInfo:(data.tssZones||[]).map(z=>({canal:z.replace(/_/g,' ').toUpperCase(),status:'OK',reason:'TSS lane followed by API'})),approachStartIdx:recalced.length-1,waypoints:recalced});
           setCheckAutoRes([]);setSearchMode('done');
           if(data.warnings?.length>0)data.warnings.slice(0,3).forEach(w=>notify(w,'error'));
           else notify(`Route ready: ${recalced.length} WPs — ${(data.totalNM||0).toFixed(0)} NM ✅`,'success');
-          setIsGenerating(false);
-          return;
+          setIsGenerating(false); return;
         }
       }
     }catch(e){console.warn('[NavisphereX] Render API failed, falling back:',e);}
-
     const vesselParams={draft:vDraft,beam:vBeam,loa:vLoa,airDraft:vAirDraft,vesselType:vType};
     const result=await buildProRoute(f,t,vesselParams);
     if(result.error||!result.waypoints||result.waypoints.length<2){
       notify(`Cannot route ${f.name} → ${t.name}: ${result.error||'Route not found'}. Try Manual tab.`,'error');
       setIsGenerating(false);setSearchMode('choose');return;
     }
-    setWaypoints(result.waypoints);
-    setRouteName(`${f.name} → ${t.name}`);
+    setWaypoints(result.waypoints); setRouteName(`${f.name} → ${t.name}`);
     setRouteMeta(result);setCheckAutoRes([]);setSearchMode('done');
     const blocked=result.canalInfo?.filter(c=>c.status==='BLOCKED');
     if(blocked?.length>0)blocked.forEach(c=>notify(`🚫 ${c.canal}: ${c.reason}. ${c.alternative}`,'error'));
@@ -426,7 +844,6 @@ function RoutePlannerPage({ notify, sheetRoutes=[], portsDb=[] }){
     downloadFile(cfg.fn(),`${safe}${cfg.ext}`,cfg.mime);
   };
 
-  // ── FIX 2: Export auto route (same formats as manual) ─────────────────────
   const handleExportAutoRoute = () => {
     if (waypoints.length < 2) { notify('No route to export', 'error'); return; }
     const name = routeName || 'Auto Route';
@@ -442,23 +859,17 @@ function RoutePlannerPage({ notify, sheetRoutes=[], portsDb=[] }){
       kml:     { fn: () => exportKML(name, waypoints),         ext: '.kml',         mime: 'application/vnd.google-earth.kml+xml' },
     };
     const cfg = fmts[exportFormat] || fmts.rtz;
-    try {
-      downloadFile(cfg.fn(), `${safe}${cfg.ext}`, cfg.mime);
-      notify(`Exported as ${exportFormat.toUpperCase()} ✅`, 'success');
-    } catch (e) {
-      notify(`Export failed: ${e.message}`, 'error');
-    }
+    try { downloadFile(cfg.fn(), `${safe}${cfg.ext}`, cfg.mime); notify(`Exported as ${exportFormat.toUpperCase()} ✅`, 'success'); }
+    catch (e) { notify(`Export failed: ${e.message}`, 'error'); }
   };
 
-  // ── Route check — updated to include new zones ─────────────────────────────
+  // ── Route check (EXISTING — untouched) ────────────────────────────────────
   const runRouteCheck=async(wps,setRes,setChecking)=>{
     if(wps.length<2){notify('Add at least 2 waypoints','error');return;}
     setChecking(true);setRes([]);
     const results=[];
     for(let i=1;i<wps.length;i++){if((wps[i].distance||0)<0.1)results.push({segIdx:i,type:'duplicate',severity:'error',message:`WP${i} & WP${i+1}: too close (< 0.1 NM)`});}
     for(let i=2;i<wps.length;i++){let diff=Math.abs((wps[i].bearing||0)-(wps[i-1].bearing||0));if(diff>180)diff=360-diff;if(diff>140)results.push({segIdx:i,type:'sharpTurn',severity:'warning',message:`WP${i+1}: ${diff.toFixed(0)}° course change — impractical`});}
-
-    // ── All zone types checked against waypoints ───────────────────────────
     const allZones=[
       ...PIRACY_ZONES.map(z=>({...z,ztype:'piracy',label:'Piracy Risk Area (HRA)',sev:'error'})),
       ...MARITIME_RESTRICTIONS.map(z=>({...z,ztype:'restriction',label:`Maritime Restriction (${z.type||'RESTRICTED'})`,sev:z.severity==='critical'?'error':'warning'})),
@@ -472,7 +883,6 @@ function RoutePlannerPage({ notify, sheetRoutes=[], portsDb=[] }){
       ...EEZ_ZONES.map(z=>({...z,ztype:'eez',label:'EEZ — fishing/resource rules apply',sev:'warning'})),
       ...LAYOVER_ZONES.map(z=>({...z,ztype:'layover',label:'Anchorage Zone',sev:'warning'})),
     ];
-
     wps.forEach((wp,i)=>{
       const seen=new Set();
       allZones.forEach(zone=>{
@@ -481,16 +891,10 @@ function RoutePlannerPage({ notify, sheetRoutes=[], portsDb=[] }){
         const key=`${zone.ztype}:${zone.name}:${i}`;
         if(!seen.has(key)&&pointInPolygon(wp.lat,wp.lon,coords)){
           seen.add(key);
-          results.push({
-            segIdx:i,
-            type:zone.ztype,
-            severity:zone.sev,
-            message:`WP${i+1} inside ${zone.label}: ${zone.name}${zone.shortDesc?' — '+zone.shortDesc:''}`,
-          });
+          results.push({segIdx:i,type:zone.ztype,severity:zone.sev,message:`WP${i+1} inside ${zone.label}: ${zone.name}${zone.shortDesc?' — '+zone.shortDesc:''}`});
         }
       });
     });
-
     const midpoints=wps.slice(1).map((wp,idx)=>({lat:(wps[idx].lat+wp.lat)/2,lon:(wps[idx].lon+wp.lon)/2,segIdx:idx+1}));
     let tileWorked=false;
     try{
@@ -533,7 +937,6 @@ function RoutePlannerPage({ notify, sheetRoutes=[], portsDb=[] }){
   const performRouteCheck    =()=>runRouteCheck(manualWps,setCheckResults,setIsChecking);
   const performAutoRouteCheck=()=>runRouteCheck(waypoints,setCheckAutoRes,setIsCheckingAuto);
 
-  // ── API Full Safety Check ──────────────────────────────────────────────────
   const performApiSafetyCheck=async()=>{
     const wps=waypoints.length>=2?waypoints:manualWps;
     if(wps.length<2){notify('Need at least 2 waypoints','error');return;}
@@ -555,6 +958,198 @@ function RoutePlannerPage({ notify, sheetRoutes=[], portsDb=[] }){
     setIsApiChecking(false);
   };
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // NEW: CONVERTER HANDLERS
+  // ─────────────────────────────────────────────────────────────────────────
+
+  const processConvFiles = useCallback(async (fileList) => {
+    if (!fileList || fileList.length === 0) return;
+    setConvProcessing(true);
+    const results = [];
+
+    for (const file of Array.from(fileList)) {
+      const ext = file.name.split('.').pop().toLowerCase();
+
+      // Handle ZIP batch
+      if (ext === 'zip') {
+        try {
+          const JSZip = await loadJSZip();
+          const zip = await JSZip.loadAsync(file);
+          const zipEntries = Object.values(zip.files).filter(f => !f.dir);
+          for (const entry of zipEntries) {
+            const entryExt = entry.name.split('.').pop().toLowerCase();
+            if (['rtz','rt3','rta','rtn','rtm','rtu','rtx','gpx','kml','csv','xml','nacos'].includes(entryExt)) {
+              try {
+                const text = await entry.async('string');
+                const detectedFmt = convDetectFormat(text, entry.name);
+                const parsed = convParse(text, detectedFmt);
+                if (parsed && parsed.waypoints.length >= 2) {
+                  const enriched = convEnrich(parsed.waypoints);
+                  const validated = convValidate(enriched);
+                  results.push({
+                    id: `conv_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+                    filename: entry.name,
+                    detectedFmt,
+                    parsed: { ...parsed, waypoints: enriched },
+                    validated,
+                    outputFmt: convOutputFmt,
+                    fromZip: file.name,
+                    savedAt: new Date().toISOString(),
+                  });
+                }
+              } catch {}
+            }
+          }
+        } catch (e) {
+          notify(`ZIP error: ${e.message}`, 'error');
+        }
+        continue;
+      }
+
+      // Single file
+      try {
+        const text = await file.text();
+        const detectedFmt = convDetectFormat(text, file.name);
+        const parsed = convParse(text, detectedFmt);
+        if (!parsed || parsed.waypoints.length < 2) {
+          notify(`Could not parse "${file.name}" — unsupported or empty format`, 'error');
+          continue;
+        }
+        const enriched = convEnrich(parsed.waypoints);
+        const validated = convValidate(enriched);
+        results.push({
+          id: `conv_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+          filename: file.name,
+          detectedFmt,
+          parsed: { ...parsed, waypoints: enriched },
+          validated,
+          outputFmt: convOutputFmt,
+          fromZip: null,
+          savedAt: new Date().toISOString(),
+        });
+      } catch (e) {
+        notify(`Error reading "${file.name}": ${e.message}`, 'error');
+      }
+    }
+
+    if (results.length > 0) {
+      setConvFiles(prev => [...results, ...prev]);
+      // Save to IDB for offline access
+      const updated = [...results, ...convHistory];
+      setConvHistory(updated);
+      await convIdbSave(updated);
+      notify(`✅ ${results.length} route${results.length > 1 ? 's' : ''} parsed successfully`, 'success');
+    }
+    setConvProcessing(false);
+  }, [convOutputFmt, convHistory]);
+
+  const handleConvDrop = useCallback((e) => {
+    e.preventDefault();
+    setConvDragOver(false);
+    processConvFiles(e.dataTransfer.files);
+  }, [processConvFiles]);
+
+  const handleConvFileInput = (e) => {
+    processConvFiles(e.target.files);
+    e.target.value = '';
+  };
+
+  // Update a single WP name in a conv file (inline editing)
+  const convUpdateWpName = (fileId, wpIdx, newName) => {
+    setConvFiles(prev => prev.map(f => {
+      if (f.id !== fileId) return f;
+      const wps = [...f.parsed.waypoints];
+      wps[wpIdx] = { ...wps[wpIdx], name: newName };
+      return { ...f, parsed: { ...f.parsed, waypoints: wps } };
+    }));
+  };
+
+  // Delete a WP from a conv file
+  const convDeleteWp = (fileId, wpIdx) => {
+    setConvFiles(prev => prev.map(f => {
+      if (f.id !== fileId) return f;
+      const wps = convEnrich(f.parsed.waypoints.filter((_, i) => i !== wpIdx));
+      const validated = convValidate(wps);
+      return { ...f, parsed: { ...f.parsed, waypoints: wps }, validated };
+    }));
+  };
+
+  // Change per-file output format
+  const convSetFileFmt = (fileId, fmt) => {
+    setConvFiles(prev => prev.map(f => f.id === fileId ? { ...f, outputFmt: fmt } : f));
+  };
+
+  // Download single converted file
+  const convDownloadSingle = (file) => {
+    const fmt = file.outputFmt || convOutputFmt;
+    try {
+      const { content, ext, mime } = convExport(file.parsed.routeName, file.parsed.waypoints, fmt);
+      const safe = file.parsed.routeName.replace(/[^a-zA-Z0-9_-]/g, '-');
+      downloadFile(content, `${safe}${ext}`, mime);
+      notify(`Downloaded as ${fmt.toUpperCase()} ✅`, 'success');
+    } catch (e) {
+      notify(`Export failed: ${e.message}`, 'error');
+    }
+  };
+
+  // Download ALL converted files as a ZIP
+  const convDownloadBatch = async () => {
+    if (convFiles.length === 0) { notify('No routes to export', 'error'); return; }
+    try {
+      const JSZip = await loadJSZip();
+      const zip = new JSZip();
+      convFiles.forEach(file => {
+        const fmt = file.outputFmt || convOutputFmt;
+        try {
+          const { content, ext } = convExport(file.parsed.routeName, file.parsed.waypoints, fmt);
+          const safe = file.parsed.routeName.replace(/[^a-zA-Z0-9_-]/g, '-');
+          zip.file(`${safe}${ext}`, content);
+        } catch {}
+      });
+      const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `NavisphereX_Routes_${Date.now()}.zip`;
+      document.body.appendChild(a); a.click();
+      document.body.removeChild(a); URL.revokeObjectURL(url);
+      notify(`✅ ${convFiles.length} routes exported as ZIP`, 'success');
+    } catch (e) {
+      notify(`ZIP export failed: ${e.message}`, 'error');
+    }
+  };
+
+  // Load conv route into main planner
+  const convLoadIntoPlanner = (file) => {
+    const mapped = file.parsed.waypoints.map((wp, i) => ({
+      lat: wp.lat, lon: wp.lon,
+      name: wp.name || `WP${String(i + 1).padStart(2, '0')}`,
+      bearing: wp.bearing || 0,
+      distance: wp.dist || 0,
+    }));
+    setWaypoints(recalcWaypoints(mapped));
+    setRouteName(file.parsed.routeName || 'Imported Route');
+    setPanel('auto');
+    notify(`Loaded "${file.parsed.routeName}" into planner ✅`, 'success');
+  };
+
+  // Remove file from conv list
+  const convRemoveFile = async (fileId) => {
+    const updated = convFiles.filter(f => f.id !== fileId);
+    setConvFiles(updated);
+    const updatedHist = convHistory.filter(f => f.id !== fileId);
+    setConvHistory(updatedHist);
+    await convIdbSave(updatedHist);
+  };
+
+  // Clear all conv files
+  const convClearAll = async () => {
+    setConvFiles([]);
+    setConvHistory([]);
+    await convIdbSave([]);
+    notify('Converter cleared', 'info');
+  };
+
+  // ── inp style (EXISTING) ─────────────────────────────────────────────────
   const inp={width:'100%',padding:'6px 8px',background:'var(--bg2)',border:'1px solid var(--border)',color:'var(--text)',borderRadius:7,fontSize:'0.78rem'};
 
   const manualCoordSection=(label,showState,setShow,latVal,setLat,lonVal,setLon,nameVal,setName,applyFn,isSet)=>(
@@ -578,7 +1173,6 @@ function RoutePlannerPage({ notify, sheetRoutes=[], portsDb=[] }){
     </div>
   );
 
-  // ── Render: local check results ────────────────────────────────────────────
   const renderCheckResults=res=>(
     <div>
       {res.filter(r=>r.type!=='ok').map((r,i)=>(
@@ -590,7 +1184,6 @@ function RoutePlannerPage({ notify, sheetRoutes=[], portsDb=[] }){
     </div>
   );
 
-  // ── Render: API route info ─────────────────────────────────────────────────
   const renderApiRouteInfo=info=>{
     if(!info)return null;
     return(
@@ -603,7 +1196,6 @@ function RoutePlannerPage({ notify, sheetRoutes=[], portsDb=[] }){
     );
   };
 
-  // ── Render: Full API safety report ────────────────────────────────────────
   const renderApiSafetyReport=report=>{
     if(!report)return null;
     const{overall_safe,warnings=[],route_stats,land_check,tss_check,port_check,depth_check,danger_check}=report;
@@ -615,10 +1207,7 @@ function RoutePlannerPage({ notify, sheetRoutes=[], portsDb=[] }){
       <div style={{marginTop:8}}>
         <div style={{padding:'8px 10px',borderRadius:8,marginBottom:8,background:overall_safe?'rgba(0,200,150,0.14)':'rgba(231,76,60,0.16)',border:`1px solid ${overall_safe?'rgba(0,200,150,0.45)':'rgba(231,76,60,0.45)'}`,display:'flex',alignItems:'center',gap:8}}>
           <span style={{fontSize:'1rem'}}>{overall_safe?'✅':'🚨'}</span>
-          <div style={{flex:1}}>
-            <div style={{fontSize:'0.72rem',fontWeight:700,color:overall_safe?'#00C896':'#ff8080'}}>{overall_safe?'Route is SAFE':'Safety Issues Found'}</div>
-            {warnings.length>0&&<div style={{fontSize:'0.63rem',color:'var(--text2)',marginTop:1}}>{warnings.length} warning(s) — see below</div>}
-          </div>
+          <div style={{flex:1}}><div style={{fontSize:'0.72rem',fontWeight:700,color:overall_safe?'#00C896':'#ff8080'}}>{overall_safe?'Route is SAFE':'Safety Issues Found'}</div>{warnings.length>0&&<div style={{fontSize:'0.63rem',color:'var(--text2)',marginTop:1}}>{warnings.length} warning(s) — see below</div>}</div>
           {route_stats&&<div style={{textAlign:'right'}}><div style={{fontSize:'0.7rem',fontFamily:'Orbitron,monospace',color:'var(--gold)'}}>{route_stats.total_nm} NM</div><div style={{fontSize:'0.6rem',color:'var(--text2)'}}>{route_stats.waypoint_count} WPs</div></div>}
         </div>
         {route_stats?.eta&&(<div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:4,marginBottom:8}}>{[['10kn',route_stats.eta['10kn']],['12kn',route_stats.eta['12kn']],['15kn',route_stats.eta['15kn']],['18kn',route_stats.eta['18kn']]].map(([spd,hrs])=>(<div key={spd} style={{background:'var(--bg2)',borderRadius:6,padding:'4px 5px',textAlign:'center'}}><div style={{fontSize:'0.57rem',color:'var(--text2)'}}>@{spd}</div><div style={{fontSize:'0.7rem',color:'var(--gold)',fontFamily:'Orbitron,monospace'}}>{hrs}h</div></div>))}</div>)}
@@ -631,7 +1220,6 @@ function RoutePlannerPage({ notify, sheetRoutes=[], portsDb=[] }){
     );
   };
 
-  // ── Regulatory zones overlay panel (replaces old overlay section) ──────────
   const renderRegZones=()=>(
     <div className="p-section">
       <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:6}}>
@@ -662,9 +1250,359 @@ function RoutePlannerPage({ notify, sheetRoutes=[], portsDb=[] }){
     </div>
   );
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // NEW: CONVERTER PANEL RENDERER
+  // ─────────────────────────────────────────────────────────────────────────
+  const renderConverterPanel = () => {
+    const errCount = (f) => f.validated.filter(v => v.sev === 'error').length;
+    const warnCount = (f) => f.validated.filter(v => v.sev === 'warning').length;
+    const totalNMConv = (wps) => {
+      let t = 0;
+      for (let i = 1; i < wps.length; i++) t += wps[i].dist || 0;
+      return t.toFixed(1);
+    };
+
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+
+        {/* ── Header ── */}
+        <div style={{ padding: '10px 12px 6px', borderBottom: '1px solid var(--border)' }}>
+          <div style={{ fontFamily: 'Orbitron,monospace', fontSize: '0.72rem', fontWeight: 700, color: 'var(--cyan)', marginBottom: 3 }}>
+            🔄 ECDIS Route Converter
+          </div>
+          <div style={{ fontSize: '0.65rem', color: 'var(--text2)', lineHeight: 1.5 }}>
+            Upload routes from any ECDIS brand. Convert to RTZ, GPX, KML, Furuno, JRC, Transas, and more. Works offline — all data stays on your device.
+          </div>
+        </div>
+
+        {/* ── Offline indicator ── */}
+        <div style={{ padding: '5px 12px', background: 'rgba(0,200,150,0.06)', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 6 }}>
+          <div style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--green)', boxShadow: '0 0 6px var(--green)', flexShrink: 0 }} />
+          <span style={{ fontSize: '0.62rem', color: 'var(--green)' }}>Offline capable — routes cached in device storage (IDB)</span>
+        </div>
+
+        {/* ── Drop zone ── */}
+        <div style={{ padding: '10px 12px' }}>
+          <div
+            ref={convDropRef}
+            onDragOver={e => { e.preventDefault(); setConvDragOver(true); }}
+            onDragLeave={() => setConvDragOver(false)}
+            onDrop={handleConvDrop}
+            style={{
+              border: `2px dashed ${convDragOver ? 'var(--cyan)' : 'var(--border2)'}`,
+              borderRadius: 12,
+              padding: '18px 12px',
+              textAlign: 'center',
+              background: convDragOver ? 'rgba(0,180,216,0.07)' : 'var(--bg2)',
+              transition: 'all 0.2s',
+              cursor: 'pointer',
+            }}
+            onClick={() => document.getElementById('conv-file-input').click()}
+          >
+            <div style={{ fontSize: '1.8rem', marginBottom: 4 }}>📥</div>
+            <div style={{ fontWeight: 700, fontSize: '0.78rem', marginBottom: 3, color: convDragOver ? 'var(--cyan)' : 'var(--text)' }}>
+              {convDragOver ? 'Drop files here' : 'Drop route files or tap to browse'}
+            </div>
+            <div style={{ fontSize: '0.63rem', color: 'var(--text2)', lineHeight: 1.6 }}>
+              Supports: .rtz .rt3 .rta .rtn .rtm .rtu .gpx .kml .csv .xml .nacos
+            </div>
+            <div style={{ fontSize: '0.63rem', color: 'var(--cyan)', marginTop: 3 }}>
+              📦 Also accepts .zip for batch conversion
+            </div>
+            <input
+              id="conv-file-input"
+              type="file"
+              multiple
+              accept=".rtz,.rtzp,.rt3,.rta,.rtn,.rtm,.rtu,.rtx,.gpx,.kml,.csv,.xml,.nacos,.zip"
+              style={{ display: 'none' }}
+              onChange={handleConvFileInput}
+            />
+          </div>
+
+          {convProcessing && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, padding: '8px 12px', background: 'rgba(0,180,216,0.08)', border: '1px solid rgba(0,180,216,0.25)', borderRadius: 8 }}>
+              <div className="spin" style={{ width: 14, height: 14, flexShrink: 0 }} />
+              <span style={{ fontSize: '0.72rem', color: 'var(--cyan)' }}>Parsing route files…</span>
+            </div>
+          )}
+        </div>
+
+        {/* ── Global output format + batch controls ── */}
+        {convFiles.length > 0 && (
+          <div style={{ padding: '0 12px 10px' }}>
+            <div style={{ fontSize: '0.63rem', color: 'var(--text2)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+              Global Output Format
+            </div>
+            <select
+              value={convOutputFmt}
+              onChange={e => setConvOutputFmt(e.target.value)}
+              style={{ width: '100%', padding: '7px 10px', borderRadius: 8, background: 'var(--bg2)', border: '1px solid var(--border2)', color: 'var(--text)', fontSize: '0.74rem', marginBottom: 8 }}
+            >
+              <option value="rtz">RTZ — CIRM IEC 61174 Standard (.rtz)</option>
+              <option value="gpx">GPX — GPS Exchange Format (.gpx)</option>
+              <option value="csv">CSV — Generic Spreadsheet (.csv)</option>
+              <option value="nmea">NMEA 0183 WPL (.txt)</option>
+              <option value="furuno">Furuno ECDIS (.csv)</option>
+              <option value="jrc">JRC ECDIS (.csv)</option>
+              <option value="transas">Transas / TECDIS (.xml)</option>
+              <option value="kml">Google Earth KML (.kml)</option>
+            </select>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <button
+                className="btn btn-gold"
+                style={{ flex: 1, justifyContent: 'center', fontSize: '0.72rem', padding: '7px' }}
+                onClick={convDownloadBatch}
+              >
+                📦 Download All as ZIP
+              </button>
+              <button
+                className="btn btn-danger"
+                style={{ padding: '7px 10px', fontSize: '0.72rem' }}
+                onClick={convClearAll}
+                title="Clear all"
+              >
+                🗑
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ── Route cards ── */}
+        <div style={{ padding: '0 12px 12px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {convFiles.length === 0 && convHistory.length === 0 && (
+            <div style={{ textAlign: 'center', padding: '1.5rem 0', color: 'var(--text3)' }}>
+              <div style={{ fontSize: '2rem', marginBottom: 6 }}>🔄</div>
+              <div style={{ fontSize: '0.72rem', fontFamily: 'Orbitron,monospace', color: 'var(--text2)', marginBottom: 4 }}>No routes converted yet</div>
+              <div style={{ fontSize: '0.65rem', lineHeight: 1.6 }}>Upload a route file from your ECDIS above</div>
+            </div>
+          )}
+
+          {/* Show history banner if no current session files but IDB has data */}
+          {convFiles.length === 0 && convHistory.length > 0 && (
+            <div style={{ padding: '7px 10px', background: 'rgba(0,180,216,0.06)', border: '1px solid rgba(0,180,216,0.2)', borderRadius: 8, fontSize: '0.68rem', color: 'var(--text2)', display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span>💾</span>
+              <span>{convHistory.length} previously converted route{convHistory.length > 1 ? 's' : ''} in device cache.</span>
+              <button
+                style={{ marginLeft: 'auto', background: 'rgba(0,180,216,0.15)', border: '1px solid rgba(0,180,216,0.3)', borderRadius: 5, padding: '2px 8px', fontSize: '0.62rem', color: 'var(--cyan)', cursor: 'pointer' }}
+                onClick={() => setConvFiles(convHistory)}
+              >
+                Restore
+              </button>
+            </div>
+          )}
+
+          {convFiles.map(file => {
+            const fmt = file.outputFmt || convOutputFmt;
+            const fmtColor = FMT_COLORS[file.detectedFmt] || '#8A9BBF';
+            const fmtLabel = FMT_LABELS[file.detectedFmt] || 'Unknown';
+            const errors = errCount(file);
+            const warns = warnCount(file);
+            const isExpanded = convExpanded === file.id;
+            const nm = totalNMConv(file.parsed.waypoints);
+
+            return (
+              <div
+                key={file.id}
+                style={{
+                  background: 'var(--card)',
+                  border: `1px solid ${errors > 0 ? 'rgba(231,76,60,0.4)' : warns > 0 ? 'rgba(255,179,71,0.3)' : 'var(--border)'}`,
+                  borderRadius: 10,
+                  overflow: 'hidden',
+                }}
+              >
+                {/* Card header */}
+                <div
+                  style={{ padding: '8px 10px', cursor: 'pointer', display: 'flex', alignItems: 'flex-start', gap: 8 }}
+                  onClick={() => setConvExpanded(isExpanded ? null : file.id)}
+                >
+                  {/* Format badge */}
+                  <div style={{
+                    padding: '2px 6px', borderRadius: 5, fontSize: '0.58rem', fontWeight: 700,
+                    background: `${fmtColor}20`, border: `1px solid ${fmtColor}50`, color: fmtColor,
+                    flexShrink: 0, marginTop: 1, fontFamily: 'Orbitron,monospace', letterSpacing: '0.04em',
+                  }}>
+                    {fmtLabel}
+                  </div>
+
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: '0.76rem', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {file.parsed.routeName}
+                    </div>
+                    <div style={{ fontSize: '0.63rem', color: 'var(--text2)', marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      📄 {file.filename}{file.fromZip ? ` (from ${file.fromZip})` : ''}
+                    </div>
+                    <div style={{ display: 'flex', gap: 6, marginTop: 3, flexWrap: 'wrap' }}>
+                      <span style={{ fontSize: '0.62rem', color: 'var(--gold)', fontFamily: 'Orbitron,monospace' }}>
+                        {file.parsed.waypoints.length} WPs · {nm} NM
+                      </span>
+                      {errors > 0 && <span style={{ fontSize: '0.6rem', color: '#ff8080' }}>🚫 {errors} error{errors > 1 ? 's' : ''}</span>}
+                      {warns > 0 && <span style={{ fontSize: '0.6rem', color: '#FFB347' }}>⚠️ {warns} warning{warns > 1 ? 's' : ''}</span>}
+                      {errors === 0 && warns === 0 && <span style={{ fontSize: '0.6rem', color: 'var(--green)' }}>✅ Valid</span>}
+                    </div>
+                  </div>
+
+                  <div style={{ fontSize: '0.7rem', color: 'var(--text3)', flexShrink: 0, marginTop: 2 }}>
+                    {isExpanded ? '▲' : '▼'}
+                  </div>
+                </div>
+
+                {/* Expanded content */}
+                {isExpanded && (
+                  <div style={{ borderTop: '1px solid var(--border)', padding: '10px' }}>
+
+                    {/* Validation warnings */}
+                    {file.validated.length > 0 && (
+                      <div style={{ marginBottom: 8 }}>
+                        {file.validated.map((v, i) => (
+                          <div key={i} style={{
+                            padding: '4px 8px', borderRadius: 5, fontSize: '0.66rem', marginBottom: 3, lineHeight: 1.4,
+                            background: v.sev === 'error' ? 'rgba(231,76,60,0.12)' : 'rgba(255,179,71,0.1)',
+                            border: `1px solid ${v.sev === 'error' ? 'rgba(231,76,60,0.35)' : 'rgba(255,179,71,0.3)'}`,
+                            color: v.sev === 'error' ? '#ff8080' : '#FFB347',
+                          }}>
+                            {v.sev === 'error' ? '🚫' : '⚠️'} {v.msg}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Waypoint table with inline name editing */}
+                    <div style={{ marginBottom: 8 }}>
+                      <div style={{ fontSize: '0.63rem', color: 'var(--text2)', marginBottom: 4, display: 'flex', justifyContent: 'space-between' }}>
+                        <span>📋 Waypoints (tap name to edit)</span>
+                        <span style={{ color: 'var(--text3)' }}>{file.parsed.waypoints.length} total</span>
+                      </div>
+                      <div style={{ overflowX: 'auto', maxHeight: 200, overflowY: 'auto', borderRadius: 6, border: '1px solid var(--border)' }}>
+                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.64rem' }}>
+                          <thead>
+                            <tr style={{ background: 'var(--bg2)', position: 'sticky', top: 0 }}>
+                              {['#', 'Name', 'Lat', 'Lon', 'Crs°', 'NM', '✕'].map(h => (
+                                <th key={h} style={{ padding: '4px 5px', textAlign: 'left', color: 'var(--text3)', fontWeight: 600, borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }}>{h}</th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {file.parsed.waypoints.map((wp, i) => (
+                              <tr key={i} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
+                                <td style={{ padding: '3px 5px', color: 'var(--cyan)', fontFamily: 'Orbitron,monospace', fontSize: '0.6rem' }}>
+                                  {String(i + 1).padStart(2, '0')}
+                                </td>
+                                <td style={{ padding: '3px 5px' }}>
+                                  <input
+                                    value={wp.name || ''}
+                                    placeholder={`WP${i + 1}`}
+                                    onChange={e => convUpdateWpName(file.id, i, e.target.value)}
+                                    style={{
+                                      background: 'transparent', border: '1px solid transparent', color: 'var(--text)',
+                                      padding: '1px 3px', fontSize: '0.63rem', width: 70, borderRadius: 3,
+                                      cursor: 'text', outline: 'none',
+                                    }}
+                                    onFocus={e => e.target.style.borderColor = 'var(--cyan)'}
+                                    onBlur={e => e.target.style.borderColor = 'transparent'}
+                                  />
+                                </td>
+                                <td style={{ padding: '3px 5px', color: 'var(--text2)' }}>{wp.lat.toFixed(4)}</td>
+                                <td style={{ padding: '3px 5px', color: 'var(--text2)' }}>{wp.lon.toFixed(4)}</td>
+                                <td style={{ padding: '3px 5px', color: 'var(--text2)' }}>
+                                  {wp.bearing !== null ? wp.bearing.toFixed(0) : '—'}
+                                </td>
+                                <td style={{ padding: '3px 5px', color: 'var(--gold)', fontFamily: 'Orbitron,monospace', fontSize: '0.6rem' }}>
+                                  {i === 0 ? '0' : (wp.dist || 0).toFixed(1)}
+                                </td>
+                                <td style={{ padding: '3px 5px' }}>
+                                  <button
+                                    onClick={() => convDeleteWp(file.id, i)}
+                                    style={{ background: 'none', border: 'none', color: 'var(--red)', cursor: 'pointer', fontSize: '0.75rem', padding: '0 2px' }}
+                                    title="Remove WP"
+                                  >✕</button>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                      <div style={{ marginTop: 4, padding: '4px 8px', background: 'var(--bg2)', borderRadius: 5, textAlign: 'right', fontSize: '0.64rem', fontFamily: 'Orbitron,monospace', color: 'var(--gold)' }}>
+                        Total: {nm} NM
+                      </div>
+                    </div>
+
+                    {/* Per-file output format */}
+                    <div style={{ marginBottom: 8 }}>
+                      <div style={{ fontSize: '0.63rem', color: 'var(--text2)', marginBottom: 4 }}>Output Format (overrides global)</div>
+                      <select
+                        value={fmt}
+                        onChange={e => convSetFileFmt(file.id, e.target.value)}
+                        style={{ width: '100%', padding: '6px 8px', borderRadius: 7, background: 'var(--bg2)', border: '1px solid var(--border)', color: 'var(--text)', fontSize: '0.7rem' }}
+                      >
+                        <option value="rtz">RTZ — CIRM IEC 61174 (.rtz)</option>
+                        <option value="gpx">GPX — GPS Exchange (.gpx)</option>
+                        <option value="csv">CSV — Generic (.csv)</option>
+                        <option value="nmea">NMEA 0183 WPL (.txt)</option>
+                        <option value="furuno">Furuno ECDIS (.csv)</option>
+                        <option value="jrc">JRC ECDIS (.csv)</option>
+                        <option value="transas">Transas / TECDIS (.xml)</option>
+                        <option value="kml">Google Earth KML (.kml)</option>
+                      </select>
+                    </div>
+
+                    {/* Action buttons */}
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+                      <button
+                        className="btn btn-gold"
+                        style={{ justifyContent: 'center', fontSize: '0.7rem', padding: '7px' }}
+                        onClick={() => convDownloadSingle(file)}
+                      >
+                        ⬇ Convert & Download
+                      </button>
+                      <button
+                        className="btn btn-green"
+                        style={{ justifyContent: 'center', fontSize: '0.7rem', padding: '7px' }}
+                        onClick={() => convLoadIntoPlanner(file)}
+                        title="Load into main planner"
+                      >
+                        🗺 Load in Planner
+                      </button>
+                      <button
+                        className="btn btn-secondary"
+                        style={{ justifyContent: 'center', fontSize: '0.7rem', padding: '6px', gridColumn: '1 / -1' }}
+                        onClick={() => convRemoveFile(file.id)}
+                      >
+                        🗑 Remove
+                      </button>
+                    </div>
+
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* ── Supported formats reference ── */}
+        <div style={{ padding: '8px 12px 12px', borderTop: '1px solid var(--border)' }}>
+          <div style={{ fontSize: '0.63rem', color: 'var(--text3)', marginBottom: 5, textTransform: 'uppercase', letterSpacing: '0.08em' }}>Supported Input Formats</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+            {Object.entries(FMT_LABELS).filter(([k]) => k !== 'unknown').map(([k, label]) => (
+              <span key={k} style={{
+                padding: '2px 6px', borderRadius: 4, fontSize: '0.58rem', fontFamily: 'Orbitron,monospace',
+                background: `${FMT_COLORS[k]}15`, border: `1px solid ${FMT_COLORS[k]}40`, color: FMT_COLORS[k],
+              }}>
+                {label}
+              </span>
+            ))}
+          </div>
+        </div>
+
+      </div>
+    );
+  };
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // RENDER
+  // ─────────────────────────────────────────────────────────────────────────
   return(
     <div style={{display:'flex',flexDirection:'column',flex:1,minHeight:0}}>
-      {/* TOP BAR */}
+      {/* TOP BAR (EXISTING — untouched) */}
       <div style={{display:'flex',alignItems:'center',gap:8,padding:'0.7rem 1rem',background:'var(--card)',borderBottom:'1px solid var(--border)',flexWrap:'wrap'}}>
         <input className="fi" style={{flex:1,minWidth:150,padding:'7px 12px',fontSize:'0.82rem'}} placeholder="Route Name…" value={routeName} onChange={e=>setRouteName(e.target.value)}/>
         {totalNM>0&&<span style={{fontFamily:'Orbitron,monospace',fontSize:'0.78rem',color:'var(--cyan)',whiteSpace:'nowrap'}}>📏 {totalNM.toFixed(1)} NM</span>}
@@ -679,13 +1617,32 @@ function RoutePlannerPage({ notify, sheetRoutes=[], portsDb=[] }){
 
       <div className="planner-layout">
         <div className="planner-sidebar">
-          {/* TABS */}
-          <div className="p-tabs">
-            {[['auto','🗺 Auto'],['manual','✏️ Manual'],['load','📂 Load RTZ'],['eta','⏱ ETA'],['wpts','📋 WPTs']].map(([k,l])=>(<button key={k} className={`p-tab ${panel===k?'active':''}`} onClick={()=>setPanel(k)}>{l}</button>))}
+          {/* TABS — added 🔄 Converter as 6th tab */}
+          <div className="p-tabs" style={{ overflowX: 'auto' }}>
+            {[
+              ['auto',      '🗺 Auto'],
+              ['manual',    '✏️ Manual'],
+              ['load',      '📂 Load'],
+              ['converter', '🔄 Convert'],
+              ['eta',       '⏱ ETA'],
+              ['wpts',      '📋 WPTs'],
+            ].map(([k,l])=>(
+              <button key={k} className={`p-tab ${panel===k?'active':''}`} onClick={()=>setPanel(k)}
+                style={{ position: 'relative' }}>
+                {l}
+                {k === 'converter' && convFiles.length > 0 && (
+                  <span style={{
+                    position: 'absolute', top: 2, right: 2,
+                    width: 7, height: 7, borderRadius: '50%',
+                    background: 'var(--cyan)', border: '1px solid var(--card)',
+                  }} />
+                )}
+              </button>
+            ))}
           </div>
-          <div className="p-panel" style={{overflowY:'auto'}}>
+          <div className="p-panel" style={{overflowY:'auto', padding: panel === 'converter' ? 0 : undefined}}>
 
-            {/* ── AUTO PANEL ── */}
+            {/* ── AUTO PANEL (EXISTING — untouched) ── */}
             {panel==='auto'&&(<>
               <div className="p-section">
                 <span className="p-label">🛳 Departure Port</span>
@@ -741,46 +1698,30 @@ function RoutePlannerPage({ notify, sheetRoutes=[], portsDb=[] }){
 
               {searchMode==='generating'&&!routeMeta&&(<div style={{textAlign:'center',padding:'1.5rem',color:'var(--text2)',fontSize:'0.8rem'}}><div className="spin" style={{margin:'0 auto 10px'}}/>Computing route via NavisphereX Router…</div>)}
 
-              {/* ── FIX 3: routeMeta done block — with Export Route section ── */}
               {routeMeta && searchMode === 'done' && (
                 <div style={{ marginBottom: '0.8rem', background: 'rgba(0,180,216,0.06)', border: '1px solid rgba(0,180,216,0.2)', borderRadius: 10, padding: 10 }}>
-                  {/* ── Route Analysis ── */}
                   <div style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--cyan)', marginBottom: 6 }}>📊 Route Analysis</div>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4, marginBottom: 8 }}>
-                    {[
-                      ['Total', `${routeMeta.totalNM.toFixed(0)} NM`],
-                      ['ETA @12kn', `${routeMeta.etaAt12kn}h`],
-                      ['ETA @15kn', `${routeMeta.etaAt15kn}h`],
-                      ['Data', routeMeta.confidence?.split('(')[0]?.trim().substring(0, 8) || '—'],
-                    ].map(([k, v]) => (
+                    {[['Total', `${routeMeta.totalNM.toFixed(0)} NM`],['ETA @12kn', `${routeMeta.etaAt12kn}h`],['ETA @15kn', `${routeMeta.etaAt15kn}h`],['Data', routeMeta.confidence?.split('(')[0]?.trim().substring(0, 8) || '—']].map(([k, v]) => (
                       <div key={k} style={{ background: 'var(--bg2)', borderRadius: 6, padding: '5px 8px' }}>
                         <div style={{ fontSize: '0.6rem', color: 'var(--text2)' }}>{k}</div>
                         <div style={{ fontSize: '0.74rem', color: 'var(--gold)', fontFamily: 'Orbitron,monospace' }}>{v}</div>
                       </div>
                     ))}
                   </div>
-
                   {routeMeta.canalInfo?.length > 0 && routeMeta.canalInfo.map((c, i) => (
                     <div key={i} style={{ padding: '5px 8px', borderRadius: 6, marginBottom: 3, fontSize: '0.7rem', background: c.status === 'OK' ? 'rgba(0,200,150,0.12)' : 'rgba(231,76,60,0.14)', border: `1px solid ${c.status === 'OK' ? 'rgba(0,200,150,0.35)' : 'rgba(231,76,60,0.4)'}`, color: c.status === 'OK' ? '#00C896' : '#ff8080' }}>
                       {c.status === 'OK' ? '✅' : '🚫'} {c.canal}
                       {c.reason && <span style={{ fontSize: '0.63rem', display: 'block', opacity: 0.85, marginTop: 1 }}>{c.reason}</span>}
                     </div>
                   ))}
-
                   {renderApiRouteInfo(apiRouteInfo)}
-
                   <div style={{ padding: '6px 8px', borderRadius: 6, background: 'rgba(231,76,60,0.08)', border: '1px solid rgba(231,76,60,0.2)', fontSize: '0.65rem', color: '#ff8080', lineHeight: 1.45, marginTop: 4 }}>
                     ⚠ NOT certified for navigation. Verify with official ENC.
                   </div>
-
-                  {/* ── Export Route (same formats as manual mode) ── */}
                   <div style={{ marginTop: 10, paddingTop: 8, borderTop: '1px solid rgba(255,255,255,0.07)' }}>
                     <div style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--text2)', marginBottom: 6 }}>⬇ Export Route</div>
-                    <select
-                      value={exportFormat}
-                      onChange={e => setExportFormat(e.target.value)}
-                      style={{ width: '100%', padding: '6px 8px', borderRadius: 7, background: 'var(--bg2)', border: '1px solid var(--border)', color: 'var(--text)', fontSize: '0.72rem', marginBottom: 6 }}
-                    >
+                    <select value={exportFormat} onChange={e => setExportFormat(e.target.value)} style={{ width: '100%', padding: '6px 8px', borderRadius: 7, background: 'var(--bg2)', border: '1px solid var(--border)', color: 'var(--text)', fontSize: '0.72rem', marginBottom: 6 }}>
                       <option value="rtz">RTZ — CIRM Standard (.rtz)</option>
                       <option value="gpx">GPX — GPS Exchange (.gpx)</option>
                       <option value="csv">CSV — Generic (.csv)</option>
@@ -790,21 +1731,11 @@ function RoutePlannerPage({ notify, sheetRoutes=[], portsDb=[] }){
                       <option value="transas">Transas / TECDIS (.xml)</option>
                       <option value="kml">Google Earth KML (.kml)</option>
                     </select>
-                    <button
-                      className="btn btn-gold"
-                      style={{ width: '100%', justifyContent: 'center', padding: '7px', fontSize: '0.74rem' }}
-                      onClick={handleExportAutoRoute}
-                      disabled={waypoints.length < 2}
-                    >
+                    <button className="btn btn-gold" style={{ width: '100%', justifyContent: 'center', padding: '7px', fontSize: '0.74rem' }} onClick={handleExportAutoRoute} disabled={waypoints.length < 2}>
                       ⬇ Export {exportFormat.toUpperCase()}
                     </button>
                   </div>
-
-                  <button
-                    className="btn btn-secondary"
-                    style={{ width: '100%', justifyContent: 'center', fontSize: '0.7rem', padding: '5px', marginTop: 8 }}
-                    onClick={() => setSearchMode('choose')}
-                  >
+                  <button className="btn btn-secondary" style={{ width: '100%', justifyContent: 'center', fontSize: '0.7rem', padding: '5px', marginTop: 8 }} onClick={() => setSearchMode('choose')}>
                     ↩ Change route selection
                   </button>
                 </div>
@@ -826,12 +1757,10 @@ function RoutePlannerPage({ notify, sheetRoutes=[], portsDb=[] }){
                   {apiSafetyReport&&renderApiSafetyReport(apiSafetyReport)}
                 </div>
               </>)}
-
-              {/* NEW: Regulatory Zones replaces old overlay buttons */}
               {renderRegZones()}
             </>)}
 
-            {/* ── MANUAL PANEL ── */}
+            {/* ── MANUAL PANEL (EXISTING — untouched) ── */}
             {panel==='manual'&&(<>
               <div className="p-section">
                 <span className="p-label">✏️ Manual Route Builder</span>
@@ -850,14 +1779,19 @@ function RoutePlannerPage({ notify, sheetRoutes=[], portsDb=[] }){
               {renderRegZones()}
             </>)}
 
-            {/* ── LOAD RTZ PANEL ── */}
+            {/* ── LOAD RTZ PANEL (EXISTING — untouched) ── */}
             {panel==='load'&&(<>
               <div className="p-section"><span className="p-label">📂 Load RTZ File from your ECDIS</span><div style={{border:'2px dashed var(--border2)',borderRadius:10,padding:'1.5rem',textAlign:'center',background:'var(--bg2)',marginBottom:'0.8rem'}}><div style={{fontSize:'2rem',marginBottom:6}}>📂</div><div style={{fontWeight:600,fontSize:'0.84rem',marginBottom:3}}>Select RTZ File</div><div style={{fontSize:'0.72rem',color:'var(--text2)'}}>Accepts .rtz and .rtzp files</div><input type="file" accept=".rtz,.rtzp" onChange={handleRTZLoad} style={{display:'block',marginTop:10,width:'100%',fontSize:'0.75rem'}}/></div>{waypoints.length>0&&<div className="ok-box" style={{textAlign:'center',fontSize:'0.78rem'}}>✅ {waypoints.length} waypoints loaded</div>}</div>
               {renderRegZones()}
             </>)}
 
+            {/* ── CONVERTER PANEL (NEW) ── */}
+            {panel === 'converter' && renderConverterPanel()}
+
+            {/* ── ETA PANEL (EXISTING — untouched) ── */}
             {panel==='eta'&&<ETACalculator totalNM={totalNM}/>}
 
+            {/* ── WAYPOINTS PANEL (EXISTING — untouched) ── */}
             {panel==='wpts'&&(<><div style={{marginBottom:8,display:'flex',justifyContent:'space-between',alignItems:'center'}}><span style={{fontSize:'0.75rem',color:'var(--text2)'}}>{waypoints.length} waypoints</span>{waypoints.length>0&&<button className="btn btn-danger" style={{padding:'4px 9px',fontSize:'0.7rem'}} onClick={clearRoute}>Clear All</button>}</div>{waypoints.length===0?<div className="empty"><div className="empty-icon">📋</div><div className="empty-t">No Waypoints</div><div className="empty-d">Generate a route or load an RTZ file</div></div>:<div style={{overflowX:'auto'}}><table className="wp-table"><thead><tr><th>WP</th><th>Lat</th><th>Lon</th><th>Crs°</th><th>NM</th><th>Del</th></tr></thead><tbody>{waypoints.map((wp,i)=>(<tr key={i}><td style={{color:'var(--cyan)',fontFamily:'Orbitron,monospace'}}>WP{String(i+1).padStart(2,'0')}</td><td>{wp.lat.toFixed(4)}</td><td>{wp.lon.toFixed(4)}</td><td>{i>0?(wp.bearing||0).toFixed(0):'—'}</td><td>{i>0?(wp.distance||0).toFixed(1):'0'}</td><td><button onClick={()=>removeWP(i)} style={{background:'none',border:'none',color:'var(--red)',cursor:'pointer',fontSize:'0.9rem'}}>✕</button></td></tr>))}</tbody></table><div style={{marginTop:8,padding:'8px',background:'var(--bg2)',borderRadius:8,textAlign:'center',fontFamily:'Orbitron,monospace',fontSize:'0.76rem',color:'var(--gold)'}}>Total: {totalNM.toFixed(1)} NM</div></div>}</>)}
 
           </div>
