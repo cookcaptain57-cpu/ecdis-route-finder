@@ -1,4 +1,5 @@
 /* eslint-disable */
+
 // src/pages/HomePage.jsx — Reference design: hero + sidebar + cards + widgets
 import { useState, useEffect, useRef } from "react";
 import { db } from "../firebase";
@@ -49,6 +50,393 @@ const fmt = (d) => {
   const y=Math.floor(d/365),m=Math.floor((d%365)/30),r=d%30;
   return [y>0?`${y}y`:'',m>0?`${m}m`:'',`${r}d`].filter(Boolean).join(' ');
 };
+
+// ─── MARITIME AI SYSTEM PROMPT ───────────────────────────────────────────────
+const AI_SYSTEM_PROMPT = `You are a Maritime Regulatory AI Assistant — an expert in all international maritime regulations and shipboard procedures. You provide accurate, concise, and practical answers.
+
+You are an expert in:
+- SOLAS (Safety of Life at Sea) — all chapters and amendments
+- MARPOL (Marine Pollution) — all Annexes I through VI
+- STCW (Standards of Training, Certification and Watchkeeping) — including Manila Amendments
+- MLC 2006 (Maritime Labour Convention) — all titles and regulations
+- COLREGS (International Regulations for Preventing Collisions at Sea) — all rules
+- ISM Code (International Safety Management)
+- ISPS Code (International Ship and Port Facility Security)
+- Medical First Aid Guide / Ship Captain's Medical Guide
+- IMDG Code (International Maritime Dangerous Goods)
+- General shipboard safety, firefighting, lifesaving appliances, navigation
+
+Response format:
+- Be direct and practical — mariners need fast, accurate answers
+- Always cite the specific regulation, chapter, rule, or annex (e.g. "SOLAS Ch.III Reg.7")
+- Use bullet points for lists of requirements
+- Keep answers focused and under 300 words
+- If a question involves safety-critical info, add a brief note to verify against official publications
+- If unsure, say so clearly rather than guessing`;
+
+const AI_EXAMPLES = [
+  "Spare cartridges for foam extinguisher?",
+  "VHF distress channel?",
+  "Lifeboat ration requirements?",
+  "MLC overtime regulations?",
+  "COLREG Rule 16 give-way action?",
+  "MARPOL Annex I discharge criteria?",
+  "STCW rest hour requirements?",
+  "ISM Master's overriding authority?",
+];
+
+// ─── MARITIME AI WIDGET COMPONENT ────────────────────────────────────────────
+function MaritimeAIWidget() {
+  const [isOpen,      setIsOpen]      = useState(false);
+  const [messages,    setMessages]    = useState([]);
+  const [input,       setInput]       = useState('');
+  const [loading,     setLoading]     = useState(false);
+  const [streamText,  setStreamText]  = useState('');
+  const [copied,      setCopied]      = useState(null);
+  const bottomRef = useRef(null);
+  const inputRef  = useRef(null);
+
+  useEffect(() => {
+    if (isOpen) bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, streamText, isOpen]);
+
+  useEffect(() => {
+    if (isOpen) setTimeout(() => inputRef.current?.focus(), 100);
+  }, [isOpen]);
+
+  const sendMessage = async (text) => {
+    const question = (text || input).trim();
+    if (!question || loading) return;
+    setInput('');
+
+    const userMsg   = { role: 'user', content: question };
+    const newHistory = [...messages, userMsg];
+    setMessages(newHistory);
+    setLoading(true);
+    setStreamText('');
+
+    try {
+      const response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-20250514',
+          max_tokens: 1000,
+          system: AI_SYSTEM_PROMPT,
+          messages: newHistory.map(m => ({ role: m.role, content: m.content })),
+          stream: true,
+        }),
+      });
+
+      const reader  = response.body.getReader();
+      const decoder = new TextDecoder();
+      let fullText  = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const chunk = decoder.decode(value);
+        const lines = chunk.split('\n').filter(l => l.startsWith('data: '));
+        for (const line of lines) {
+          try {
+            const json = JSON.parse(line.replace('data: ', ''));
+            if (json.type === 'content_block_delta' && json.delta?.text) {
+              fullText += json.delta.text;
+              setStreamText(fullText);
+            }
+          } catch {}
+        }
+      }
+
+      setMessages(prev => [...prev, { role: 'assistant', content: fullText }]);
+      setStreamText('');
+    } catch {
+      setMessages(prev => [...prev, { role: 'assistant', content: '⚠️ Connection error. Please try again.' }]);
+      setStreamText('');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleKey = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+  };
+
+  const clearChat = () => { setMessages([]); setStreamText(''); setInput(''); };
+
+  const copyText = (text, idx) => {
+    navigator.clipboard.writeText(text);
+    setCopied(idx);
+    setTimeout(() => setCopied(null), 1800);
+  };
+
+  // Format AI response — bold, bullets
+  const formatMsg = (text) => text.split('\n').map((line, i) => {
+    if (line.startsWith('- ') || line.startsWith('• ')) {
+      return (
+        <div key={i} style={{ display:'flex', gap:7, marginBottom:3 }}>
+          <span style={{ color:'var(--cyan)', flexShrink:0, marginTop:1 }}>▸</span>
+          <span>{line.replace(/^[-•]\s/, '')}</span>
+        </div>
+      );
+    }
+    if (line.trim() === '') return <div key={i} style={{ height:5 }} />;
+    const parts = line.split(/\*\*(.+?)\*\*/);
+    return (
+      <div key={i} style={{ marginBottom:2 }}>
+        {parts.map((p, j) => j % 2 === 1
+          ? <strong key={j} style={{ color:'var(--cyan)' }}>{p}</strong>
+          : p
+        )}
+      </div>
+    );
+  });
+
+  return (
+    <div style={{ marginBottom:'1.4rem' }}>
+
+      {/* ── Section header ── */}
+      <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:'0.8rem' }}>
+        <div style={{ width:4, height:22, background:'linear-gradient(180deg,#00C896,#00a87a)', borderRadius:2 }} />
+        <div style={{ fontFamily:'Orbitron,monospace', fontSize:'0.78rem', fontWeight:700, letterSpacing:'0.06em', flex:1 }}>
+          Maritime AI Assistant
+        </div>
+        <span style={{ padding:'2px 8px', borderRadius:6, fontSize:'0.56rem', fontWeight:700,
+          background:'rgba(0,200,150,0.15)', color:'var(--green)', border:'1px solid rgba(0,200,150,0.3)' }}>
+          FREE · AI
+        </span>
+      </div>
+
+      {/* ── Collapsed preview card ── */}
+      {!isOpen && (
+        <div onClick={() => setIsOpen(true)}
+          style={{ background:'var(--card)', border:'1px solid rgba(0,200,150,0.25)', borderRadius:16,
+            padding:'1rem 1.2rem', cursor:'pointer', transition:'all 0.2s',
+            display:'flex', alignItems:'center', gap:14 }}
+          onMouseEnter={e => { e.currentTarget.style.borderColor='rgba(0,200,150,0.5)'; e.currentTarget.style.transform='translateY(-2px)'; e.currentTarget.style.boxShadow='0 8px 28px rgba(0,0,0,0.4)'; }}
+          onMouseLeave={e => { e.currentTarget.style.borderColor='rgba(0,200,150,0.25)'; e.currentTarget.style.transform='translateY(0)'; e.currentTarget.style.boxShadow='none'; }}>
+
+          {/* Icon */}
+          <div style={{ width:50, height:50, borderRadius:14, flexShrink:0,
+            background:'linear-gradient(135deg,#00C896,#00a87a)',
+            display:'flex', alignItems:'center', justifyContent:'center',
+            fontSize:'1.6rem', boxShadow:'0 6px 20px rgba(0,200,150,0.35)' }}>⚓</div>
+
+          {/* Text */}
+          <div style={{ flex:1, minWidth:0 }}>
+            <div style={{ fontFamily:'Orbitron,monospace', fontSize:'0.72rem', fontWeight:700,
+              color:'var(--green)', marginBottom:4, letterSpacing:'0.04em' }}>
+              Ask Anything Maritime
+            </div>
+            <div style={{ fontSize:'0.72rem', color:'var(--text2)', lineHeight:1.5 }}>
+              SOLAS · MARPOL · STCW · MLC · COLREG · ISM · Medical
+            </div>
+            {/* Example chips preview */}
+            <div style={{ display:'flex', gap:5, flexWrap:'wrap', marginTop:7 }}>
+              {AI_EXAMPLES.slice(0,3).map((q,i) => (
+                <span key={i} style={{ padding:'2px 8px', borderRadius:20,
+                  background:'rgba(0,200,150,0.08)', border:'1px solid rgba(0,200,150,0.2)',
+                  color:'var(--text3)', fontSize:'0.62rem' }}>{q}</span>
+              ))}
+              <span style={{ padding:'2px 8px', borderRadius:20, fontSize:'0.62rem', color:'var(--text3)' }}>+more</span>
+            </div>
+          </div>
+
+          {/* Arrow */}
+          <div style={{ fontSize:'1.2rem', color:'var(--green)', flexShrink:0 }}>→</div>
+        </div>
+      )}
+
+      {/* ── Expanded chat panel ── */}
+      {isOpen && (
+        <div style={{ background:'var(--card)', border:'1px solid rgba(0,200,150,0.3)',
+          borderRadius:16, overflow:'hidden',
+          boxShadow:'0 12px 40px rgba(0,0,0,0.5), 0 0 0 1px rgba(0,200,150,0.1)' }}>
+
+          {/* Chat header */}
+          <div style={{ display:'flex', alignItems:'center', gap:10, padding:'12px 14px',
+            background:'linear-gradient(135deg,rgba(0,200,150,0.08),rgba(0,168,122,0.05))',
+            borderBottom:'1px solid rgba(0,200,150,0.15)' }}>
+            <div style={{ width:34, height:34, borderRadius:9, flexShrink:0,
+              background:'linear-gradient(135deg,#00C896,#00a87a)',
+              display:'flex', alignItems:'center', justifyContent:'center', fontSize:'1.1rem',
+              boxShadow:'0 4px 12px rgba(0,200,150,0.4)' }}>⚓</div>
+            <div style={{ flex:1 }}>
+              <div style={{ fontFamily:'Orbitron,monospace', fontSize:'0.72rem', fontWeight:700, color:'var(--green)' }}>
+                Maritime AI Assistant
+              </div>
+              <div style={{ fontSize:'0.6rem', color:'var(--text3)' }}>
+                SOLAS · MARPOL · STCW · MLC · COLREG · ISM · IMDG · Medical
+              </div>
+            </div>
+            <div style={{ display:'flex', gap:6 }}>
+              {messages.length > 0 && (
+                <button onClick={clearChat}
+                  style={{ background:'rgba(255,71,87,0.1)', border:'1px solid rgba(255,71,87,0.25)',
+                    color:'#ff4757', borderRadius:7, padding:'4px 9px', fontSize:'0.66rem',
+                    cursor:'pointer', fontFamily:'Exo 2,sans-serif' }}>
+                  Clear
+                </button>
+              )}
+              <button onClick={() => setIsOpen(false)}
+                style={{ background:'rgba(255,255,255,0.06)', border:'1px solid var(--border)',
+                  color:'var(--text2)', borderRadius:7, padding:'4px 9px', fontSize:'0.8rem',
+                  cursor:'pointer' }}>✕</button>
+            </div>
+          </div>
+
+          {/* Messages area */}
+          <div style={{ height:320, overflowY:'auto', padding:'12px 14px',
+            scrollbarWidth:'thin', scrollbarColor:'var(--border2) transparent' }}>
+
+            {/* Empty state — example chips */}
+            {messages.length === 0 && !loading && (
+              <div style={{ textAlign:'center', paddingTop:20, paddingBottom:10 }}>
+                <div style={{ fontSize:'2.2rem', marginBottom:8 }}>🧭</div>
+                <div style={{ color:'var(--text2)', fontSize:'0.78rem', marginBottom:4 }}>
+                  Ask any maritime regulation question
+                </div>
+                <div style={{ color:'var(--text3)', fontSize:'0.68rem', marginBottom:18 }}>
+                  Powered by AI · Covers all IMO regulations
+                </div>
+                <div style={{ display:'flex', flexWrap:'wrap', gap:7, justifyContent:'center' }}>
+                  {AI_EXAMPLES.map((q,i) => (
+                    <button key={i} onClick={() => sendMessage(q)}
+                      style={{ background:'rgba(0,200,150,0.06)', border:'1px solid rgba(0,200,150,0.2)',
+                        color:'var(--text2)', borderRadius:9, padding:'6px 11px', fontSize:'0.7rem',
+                        cursor:'pointer', fontFamily:'Exo 2,sans-serif', transition:'all 0.15s',
+                        textAlign:'left', lineHeight:1.4, maxWidth:200 }}
+                      onMouseEnter={e => { e.currentTarget.style.background='rgba(0,200,150,0.14)'; e.currentTarget.style.color='var(--green)'; e.currentTarget.style.borderColor='rgba(0,200,150,0.4)'; }}
+                      onMouseLeave={e => { e.currentTarget.style.background='rgba(0,200,150,0.06)'; e.currentTarget.style.color='var(--text2)'; e.currentTarget.style.borderColor='rgba(0,200,150,0.2)'; }}>
+                      {q}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Message bubbles */}
+            {messages.map((msg, idx) => (
+              <div key={idx} style={{ marginBottom:14, display:'flex',
+                flexDirection:'column',
+                alignItems: msg.role === 'user' ? 'flex-end' : 'flex-start' }}>
+
+                {/* Role label */}
+                <div style={{ fontSize:'0.58rem', fontWeight:700, letterSpacing:'0.1em',
+                  color: msg.role === 'user' ? 'var(--cyan)' : 'var(--green)',
+                  marginBottom:4,
+                  paddingRight: msg.role === 'user' ? 2 : 0,
+                  paddingLeft:  msg.role === 'assistant' ? 2 : 0 }}>
+                  {msg.role === 'user' ? 'YOU' : '⚓ MARITIME AI'}
+                </div>
+
+                <div style={{ maxWidth:'88%', position:'relative',
+                  background: msg.role === 'user'
+                    ? 'linear-gradient(135deg,rgba(0,100,180,0.35),rgba(21,101,192,0.3))'
+                    : 'rgba(255,255,255,0.04)',
+                  border: msg.role === 'user'
+                    ? '1px solid rgba(0,180,216,0.3)'
+                    : '1px solid rgba(0,200,150,0.15)',
+                  borderRadius: msg.role === 'user' ? '13px 13px 3px 13px' : '13px 13px 13px 3px',
+                  padding:'9px 12px', fontSize:'0.78rem', lineHeight:1.65, color:'var(--text)' }}>
+
+                  {msg.role === 'assistant' ? formatMsg(msg.content) : msg.content}
+
+                  {/* Copy button for AI messages */}
+                  {msg.role === 'assistant' && (
+                    <button onClick={() => copyText(msg.content, idx)}
+                      style={{ position:'absolute', top:6, right:6, background:'rgba(255,255,255,0.06)',
+                        border:'1px solid rgba(255,255,255,0.1)', borderRadius:5,
+                        padding:'2px 6px', fontSize:'0.58rem', cursor:'pointer',
+                        color: copied === idx ? 'var(--green)' : 'var(--text3)',
+                        fontFamily:'Exo 2,sans-serif', transition:'color 0.2s' }}>
+                      {copied === idx ? '✓ copied' : 'copy'}
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+
+            {/* Streaming / loading bubble */}
+            {loading && (
+              <div style={{ marginBottom:14, display:'flex', flexDirection:'column', alignItems:'flex-start' }}>
+                <div style={{ fontSize:'0.58rem', fontWeight:700, letterSpacing:'0.1em',
+                  color:'var(--green)', marginBottom:4, paddingLeft:2 }}>⚓ MARITIME AI</div>
+                <div style={{ maxWidth:'88%', background:'rgba(255,255,255,0.04)',
+                  border:'1px solid rgba(0,200,150,0.15)', borderRadius:'13px 13px 13px 3px',
+                  padding:'9px 12px', fontSize:'0.78rem', lineHeight:1.65, color:'var(--text)' }}>
+                  {streamText
+                    ? <>{formatMsg(streamText)}<span style={{ color:'var(--cyan)', animation:'ai-blink 0.8s infinite' }}>▌</span></>
+                    : (
+                      <span style={{ display:'flex', gap:5, alignItems:'center' }}>
+                        <span style={{ width:6, height:6, borderRadius:'50%', background:'var(--green)', animation:'ai-dot 1s infinite 0s',   display:'inline-block' }} />
+                        <span style={{ width:6, height:6, borderRadius:'50%', background:'var(--green)', animation:'ai-dot 1s infinite 0.2s', display:'inline-block' }} />
+                        <span style={{ width:6, height:6, borderRadius:'50%', background:'var(--green)', animation:'ai-dot 1s infinite 0.4s', display:'inline-block' }} />
+                      </span>
+                    )
+                  }
+                </div>
+              </div>
+            )}
+
+            <div ref={bottomRef} />
+          </div>
+
+          {/* Input area */}
+          <div style={{ borderTop:'1px solid rgba(0,200,150,0.12)', padding:'10px 12px',
+            background:'rgba(0,0,0,0.15)' }}>
+            <div style={{ display:'flex', gap:8, alignItems:'flex-end',
+              background:'var(--bg2)', border:'1px solid var(--border2)',
+              borderRadius:11, padding:'8px 10px', transition:'border-color 0.2s' }}
+              onFocusCapture={e => e.currentTarget.style.borderColor='rgba(0,200,150,0.4)'}
+              onBlurCapture={e  => e.currentTarget.style.borderColor='var(--border2)'}>
+              <textarea
+                ref={inputRef}
+                value={input}
+                onChange={e => setInput(e.target.value)}
+                onKeyDown={handleKey}
+                disabled={loading}
+                placeholder="Ask about SOLAS, MARPOL, STCW, COLREG, MLC, ISM, Medical..."
+                rows={1}
+                style={{ flex:1, background:'transparent', border:'none', outline:'none',
+                  color:'var(--text)', fontSize:'0.8rem', lineHeight:1.5, resize:'none',
+                  fontFamily:'Exo 2,sans-serif', maxHeight:80, overflowY:'auto',
+                  scrollbarWidth:'none' }}
+                onInput={e => { e.target.style.height='auto'; e.target.style.height = Math.min(e.target.scrollHeight,80)+'px'; }}
+              />
+              <button
+                onClick={() => sendMessage()}
+                disabled={!input.trim() || loading}
+                style={{ width:34, height:34, flexShrink:0, borderRadius:9, border:'none',
+                  background: input.trim() && !loading
+                    ? 'linear-gradient(135deg,#00C896,#00a87a)'
+                    : 'rgba(255,255,255,0.06)',
+                  cursor: input.trim() && !loading ? 'pointer' : 'not-allowed',
+                  display:'flex', alignItems:'center', justifyContent:'center',
+                  fontSize:'0.9rem', transition:'all 0.2s',
+                  boxShadow: input.trim() && !loading ? '0 4px 14px rgba(0,200,150,0.4)' : 'none' }}>
+                {loading
+                  ? <span style={{ fontSize:'0.6rem', color:'var(--green)' }}>…</span>
+                  : <span style={{ color: input.trim() ? '#fff' : 'var(--text3)' }}>➤</span>
+                }
+              </button>
+            </div>
+            <div style={{ textAlign:'center', marginTop:6, fontSize:'0.6rem', color:'var(--text3)' }}>
+              ⚠️ Always verify against official IMO publications and company SMS
+            </div>
+          </div>
+        </div>
+      )}
+
+      <style>{`
+        @keyframes ai-blink { 0%,100%{opacity:1} 50%{opacity:0} }
+        @keyframes ai-dot   { 0%,100%{opacity:0.3;transform:scale(0.85)} 50%{opacity:1;transform:scale(1.15)} }
+      `}</style>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 export default function HomePage({ routes, charts, onSearch, setTab, user, portsDb=[], userProfile=null }) {
   const [q,           setQ]           = useState('');
@@ -149,7 +537,6 @@ export default function HomePage({ routes, charts, onSearch, setTab, user, ports
     { icon:'🗺', label:'NAV & BRIDGE',    desc:'Navigation and bridge procedures.',                   tab:'navbridge', color:'#00B4D8', bg:'linear-gradient(135deg,#00B4D8,#1565C0)' },
   ];
 
-  // Only show the pinned tabs as feature cards
   const FEATURES = ALL_FEATURES.filter(f => pinnedTabs.includes(f.tab));
 
   const savePinnedTabs = (tabs) => {
@@ -161,7 +548,7 @@ export default function HomePage({ routes, charts, onSearch, setTab, user, ports
     if (pinnedTabs.includes(tabKey)) {
       savePinnedTabs(pinnedTabs.filter(k => k !== tabKey));
     } else {
-      if (pinnedTabs.length >= 6) return; // max 6
+      if (pinnedTabs.length >= 6) return;
       savePinnedTabs([...pinnedTabs, tabKey]);
     }
   };
@@ -181,19 +568,16 @@ export default function HomePage({ routes, charts, onSearch, setTab, user, ports
       <div style={{ position:'relative', background:'linear-gradient(135deg,#020810 0%,#040C1A 40%,#071428 70%,#0a1e3a 100%)',
         overflow:'hidden', padding:'2rem 1.5rem 2.5rem', borderBottom:'1px solid var(--border)' }}>
 
-        {/* Animated grid overlay */}
         <div style={{ position:'absolute', inset:0, opacity:0.15,
           backgroundImage:'linear-gradient(rgba(0,180,216,0.3) 1px,transparent 1px),linear-gradient(90deg,rgba(0,180,216,0.3) 1px,transparent 1px)',
           backgroundSize:'40px 40px', pointerEvents:'none' }} />
 
-        {/* Live Data badge */}
         <div style={{ position:'absolute', top:16, right:16, display:'flex', alignItems:'center', gap:6,
           fontSize:'0.7rem', color:'var(--green)' }}>
           <span style={{ width:8, height:8, borderRadius:'50%', background:'var(--green)', boxShadow:'0 0 8px var(--green)', animation:'pulse 2s infinite', display:'inline-block' }} />
           Live Data
         </div>
 
-        {/* Port notice */}
         {portNotice && (
           <div onClick={() => setTab('notices')} style={{ background:'rgba(255,107,53,0.1)', border:'1px solid rgba(255,107,53,0.3)',
             borderRadius:8, padding:'8px 12px', marginBottom:'1rem', cursor:'pointer',
@@ -208,7 +592,6 @@ export default function HomePage({ routes, charts, onSearch, setTab, user, ports
 
         <div style={{ display:'flex', alignItems:'flex-start', gap:'1.5rem', flexWrap:'wrap' }}>
           <div style={{ flex:1, minWidth:240 }}>
-            {/* Tagline */}
             <div style={{ fontSize:'0.6rem', color:'var(--text3)', letterSpacing:'0.18em', marginBottom:'0.5rem',
               textTransform:'uppercase', display:'flex', gap:6, flexWrap:'wrap' }}>
               {'SMART NAVIGATION · ROUTES · CHARTS · PORTS · MARITIME LIBRARY'.split('·').map((t,i) => (
@@ -216,19 +599,16 @@ export default function HomePage({ routes, charts, onSearch, setTab, user, ports
               ))}
             </div>
 
-            {/* Main heading */}
             <h1 style={{ fontFamily:'Orbitron,monospace', fontSize:'clamp(1.4rem,4vw,2.2rem)', fontWeight:900,
               letterSpacing:'0.04em', margin:'0 0 0.6rem', lineHeight:1.15 }}>
               NAVISPHERE<span style={{ color:'var(--cyan)' }}>X</span> MARINE
             </h1>
 
-            {/* Welcome message */}
             <p style={{ fontSize:'0.86rem', color:'var(--text2)', lineHeight:1.6, marginBottom:'1.2rem', maxWidth:480 }}>
               Your all-in-one maritime platform for planning, navigation and knowledge.
               {user && <span style={{ color:'var(--cyan)' }}> Welcome{userProfile?.rank ? `, ${userProfile.rank} ` : ', '}{userProfile?.name?.split(' ')[0] || user.email.split('@')[0]}!</span>}
             </p>
 
-            {/* ── Single unified search bar (CTA buttons removed) ── */}
             <div ref={wRef} style={{ position:'relative', maxWidth:500 }}>
               <div style={{ display:'flex', gap:8 }}>
                 <div className="siw" style={{ flex:1 }}>
@@ -269,7 +649,6 @@ export default function HomePage({ routes, charts, onSearch, setTab, user, ports
             </div>
           </div>
 
-          {/* Ship visual */}
           <div style={{ flexShrink:0, width:160, display:'flex', flexDirection:'column', alignItems:'center',
             justifyContent:'center', paddingTop:'0.5rem' }}>
             <div style={{ position:'relative', width:140, height:140, display:'flex', alignItems:'center', justifyContent:'center' }}>
@@ -286,7 +665,7 @@ export default function HomePage({ routes, charts, onSearch, setTab, user, ports
 
       <div style={{ padding:'1.4rem 1.2rem', maxWidth:1100, margin:'0 auto' }}>
 
-        {/* ── Personal widgets (logged-in users) ── */}
+        {/* ── Personal widgets ── */}
         {user && (seaTimeDays !== null || expCerts.length > 0 || isOffline) && (
           <div style={{ display:'flex', gap:10, flexWrap:'wrap', marginBottom:'1.4rem' }}>
             {seaTimeDays !== null && (
@@ -318,7 +697,6 @@ export default function HomePage({ routes, charts, onSearch, setTab, user, ports
           <div style={{ width:4, height:22, background:'linear-gradient(180deg,var(--cyan),var(--blue))', borderRadius:2 }} />
           <div style={{ fontFamily:'Orbitron,monospace', fontSize:'0.78rem', fontWeight:700, letterSpacing:'0.06em', flex:1 }}>Explore NavisphereX Marine</div>
           <button onClick={() => setShowTabSettings(true)}
-            title="Customise which tabs show here"
             style={{ background:'rgba(0,180,216,0.08)', border:'1px solid rgba(0,180,216,0.25)', borderRadius:7,
               padding:'4px 9px', cursor:'pointer', fontSize:'0.72rem', color:'var(--cyan)',
               display:'flex', alignItems:'center', gap:5, fontFamily:'Exo 2,sans-serif' }}>
@@ -382,7 +760,7 @@ export default function HomePage({ routes, charts, onSearch, setTab, user, ports
           </div>
         )}
 
-        {/* ── Feature cards: 2-per-row mobile, 3-per-row desktop ── */}
+        {/* ── Feature cards ── */}
         <div className="hp-features-grid" style={{ marginBottom:'1.4rem' }}>
           {FEATURES.map((f,i) => (
             <div key={i} onClick={()=>setTab(f.tab)}
@@ -479,7 +857,10 @@ export default function HomePage({ routes, charts, onSearch, setTab, user, ports
           ))}
         </div>
 
-        {/* Tip of the Day + Weather side by side */}
+        {/* ── ✅ MARITIME AI ASSISTANT WIDGET (NEW) ── */}
+        <MaritimeAIWidget />
+
+        {/* Tip of the Day + Weather */}
         <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(260px,1fr))', gap:'1rem', marginBottom:'1.4rem' }}>
 
           {/* Tip */}
@@ -536,13 +917,10 @@ export default function HomePage({ routes, charts, onSearch, setTab, user, ports
           </div>
         </div>
 
-        {/* ── Bottom search and footer info REMOVED ── */}
-
       </div>
 
       <style>{`
         @keyframes float { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-10px)} }
-        /* 2-per-row on mobile, 3-per-row on desktop */
         .hp-features-grid {
           display: grid;
           grid-template-columns: repeat(2, 1fr);
