@@ -872,7 +872,6 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
               <div style={{color:'#5A7A90',fontSize:'0.55rem',letterSpacing:1,textTransform:'uppercase',marginBottom:2}}>ROT</div>
               <RotGauge rotRef={rotValueRef} size={70}/>
             </div>
-            </div>
           </div>
         </div>
       )}
