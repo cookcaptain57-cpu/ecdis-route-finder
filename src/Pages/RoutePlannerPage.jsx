@@ -70,39 +70,69 @@ function convValidate(wps) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// CONVERTER: AI-assisted format detection  (NEW)
-// Checks extension → XML root element → header content
+// CONVERTER: binary format detector
+// Returns true if buffer looks like binary (non-printable bytes in first 512)
+// ─────────────────────────────────────────────────────────────────────────────
+function convIsBinary(text) {
+  const sample = text.substring(0, 512);
+  let nonPrint = 0;
+  for (let i = 0; i < sample.length; i++) {
+    const c = sample.charCodeAt(i);
+    if (c < 9 || (c > 13 && c < 32)) nonPrint++;
+  }
+  return nonPrint > 8;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CONVERTER: AI-assisted format detection
+// Checks extension → binary sniff → XML root element → header content
 // ─────────────────────────────────────────────────────────────────────────────
 function convDetectFormat(text, filename) {
   const ext = (filename || '').split('.').pop().toLowerCase().trim();
 
-  // 1. Extension-based hints
+  // 1. Known opaque binary-only formats — detect by extension immediately
+  if (ext === 'uch' || ext === 'uchm') return 'binary_furuno';
+  if (ext === 'aiz') return 'binary_anschutz';
+  if (ext === 'sam' || ext === 'dat') return 'binary_sam';
+
+  // 2. Binary sniff — if bytes are non-printable, classify by ext
+  if (convIsBinary(text)) {
+    if (ext === 'rta' || ext === 'rtn' || ext === 'rtm') return 'jrc_binary';
+    if (ext === 'rt3') return 'rt3_binary';
+    return 'binary_unknown';
+  }
+
+  // 3. Extension-based hints for text formats
   if (ext === 'gpx') return 'gpx';
   if (ext === 'kml' || ext === 'kmz') return 'kml';
   if (ext === 'rt3') return 'rt3';
-  if (ext === 'rta') return 'rta';
-  if (ext === 'rtn') return 'rtn';
-  if (ext === 'rtm') return 'rtm';
+  if (ext === 'rta' || ext === 'rtn' || ext === 'rtm') return 'jrc_text';
   if (ext === 'rtu') return 'rtu';
   if (ext === 'rtx') return 'rtx';
   if (ext === 'nacos') return 'nacos';
   if (ext === 'rtz' || ext === 'rtzp') return 'rtz';
+  if (ext === 'rte') return 'rte';
   if (ext === 'csv') return 'csv';
+  if (ext === 'txt') return 'nmea_txt';
 
-  // 2. Sniff XML root element / namespace (catches mislabelled .xml files)
-  const snip = (text || '').substring(0, 2000).toLowerCase();
+  // 4. Sniff XML root element / namespace (catches mislabelled .xml files)
+  const snip = (text || '').substring(0, 3000).toLowerCase();
 
   if (snip.includes('cirm.org/rtz') || snip.includes('<route version') || snip.includes('xmlns="http://www.cirm.org')) return 'rtz';
   if (snip.includes('<gpx') || snip.includes('topografix.com/gpx')) return 'gpx';
   if (snip.includes('<kml') || snip.includes('opengis.net/kml') || snip.includes('earth.google.com')) return 'kml';
 
-  // Transas RT3: root is <ROUTE> with <WP> children or <RouteInfo>
-  if (snip.includes('<routeinfo') || snip.includes('<waypoints>') && snip.includes('<wp ') && !snip.includes('cirm')) return 'rt3';
-  if (snip.includes('<rt3') || (snip.includes('<wp ') && snip.includes('<leg '))) return 'rt3';
+  // Transas RT3: <RouteInfo> + <WP> children with Lat/Lon attrs
+  if (snip.includes('<routeinfo') && (snip.includes('<wp ') || snip.includes('<waypoints'))) return 'rt3';
+  if (snip.includes('<rt3') || (snip.includes('<wp ') && snip.includes('<leg ') && !snip.includes('cirm'))) return 'rt3';
 
-  // JRC flavours: RTM/RTA/RTN share structure; distinguish by element names
-  if (snip.includes('jrc') || snip.includes('<rtm') || snip.includes('<rta') || snip.includes('<rtn')) return 'jrc';
-  if (snip.includes('<waypoint') && snip.includes('<speed') && !snip.includes('cirm')) return 'jrc';
+  // SevenCS eGlobe RTE
+  if (snip.includes('<sevencs') || snip.includes('<eglobe')) return 'rte';
+  if (snip.includes('<rte ') || snip.includes('<rte>')) return 'rte';
+
+  // JRC text XML variants
+  if (snip.includes('jrc') || snip.includes('<rtm') || snip.includes('<rta') || snip.includes('<rtn')) return 'jrc_text';
+  if (snip.includes('<waypoint') && snip.includes('<speed') && !snip.includes('cirm')) return 'jrc_text';
 
   // MARIS RTU
   if (snip.includes('<rtu') || snip.includes('maris') || (snip.includes('<wp>') && snip.includes('<pos>'))) return 'rtu';
@@ -110,13 +140,13 @@ function convDetectFormat(text, filename) {
   // NACOS / Kongsberg
   if (snip.includes('nacos') || snip.includes('kongsberg') || snip.includes('<nacos')) return 'nacos';
 
-  // SevenCS / eGlobe RTE (XML-based .rte)
-  if (snip.includes('<sevencs') || snip.includes('<eglobe') || snip.includes('<rte')) return 'rte';
+  // NMEA WPL text sentences
+  if (/\$[A-Z]{2}WPL|\$GPWPL|\$IIWPL/.test(text.substring(0, 2000))) return 'nmea_txt';
 
-  // CSV fallback: if no XML tag found and has commas
-  if (!snip.includes('<') && snip.includes(',')) return 'csv';
+  // CSV fallback
+  if (!snip.includes('<') && (snip.includes(',') || snip.includes(';'))) return 'csv';
 
-  // If XML but unrecognised — try generic XML
+  // Generic XML fallback
   if (snip.includes('<?xml') || snip.includes('<route') || snip.includes('<waypoint')) return 'xml_generic';
 
   return 'unknown';
@@ -248,32 +278,172 @@ function convParseRT3(text) {
   } catch { return null; }
 }
 
-function convParseJRC(text) {
-  // JRC ECDIS: RTA / RTN / RTM — XML with <Waypoint> and speed/XTD attrs
+function convParseJRCText(text) {
+  // JRC ECDIS text/XML: RTA/RTN/RTM when exported as XML from newer JRC units
+  try {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(text, 'application/xml');
+    if (!doc.querySelector('parsererror')) {
+      const nameEl = doc.querySelector('RouteName,RouteInfo,Route');
+      const routeName = nameEl?.getAttribute('name') || nameEl?.getAttribute('Name') ||
+        nameEl?.textContent?.trim() || doc.documentElement?.getAttribute('name') || 'JRC Route';
+      let wps = [...doc.querySelectorAll('Waypoint,waypoint,WP,wp')];
+      if (wps.length > 0) {
+        const mapped = wps.map((wp, i) => {
+          const posEl = wp.querySelector('Position,position,Pos,pos');
+          const lat = parseFloat(posEl?.getAttribute('Lat') || posEl?.getAttribute('lat') ||
+            wp.getAttribute('Lat') || wp.getAttribute('lat') ||
+            wp.querySelector('Lat')?.textContent || '');
+          const lon = parseFloat(posEl?.getAttribute('Lon') || posEl?.getAttribute('lon') ||
+            wp.getAttribute('Lon') || wp.getAttribute('lon') ||
+            wp.querySelector('Lon')?.textContent || '');
+          const name = wp.getAttribute('Name') || wp.getAttribute('name') ||
+            wp.querySelector('Name')?.textContent || `WP${String(i + 1).padStart(2, '0')}`;
+          const radius = parseFloat(wp.getAttribute('Radius') || wp.getAttribute('TurnRadius') || '0.5') || 0.5;
+          const portXTD = parseFloat(wp.getAttribute('XTDPort') || wp.getAttribute('PortXTD') || wp.getAttribute('XTDLeft') || '0.5') || 0.5;
+          const stbdXTD = parseFloat(wp.getAttribute('XTDStbd') || wp.getAttribute('StbdXTD') || wp.getAttribute('XTDRight') || '0.5') || 0.5;
+          const speed = parseFloat(wp.querySelector('Speed')?.textContent || wp.getAttribute('Speed') || '') || null;
+          return { id: i + 1, name: name.trim(), lat, lon, radius, portXTD, stbdXTD, speed };
+        }).filter(wp => !isNaN(wp.lat) && !isNaN(wp.lon));
+        if (mapped.length >= 2) return { routeName, waypoints: mapped };
+      }
+    }
+    return convParseJRCCSVText(text);
+  } catch { return null; }
+}
+
+function convParseJRCCSVText(text) {
+  // JRC CSV degree+minute export: No,Name,Lat_deg,Lat_min,N/S,Lon_deg,Lon_min,E/W,...
+  try {
+    const lines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
+    if (lines.length < 2) return null;
+    const delim = lines[0].includes(';') ? ';' : ',';
+    const cols = lines[0].split(delim).map(c => c.toLowerCase().trim());
+    const latDegIdx = cols.findIndex(c => c.includes('lat') && (c.includes('deg') || c.includes('d')));
+    const latMinIdx = cols.findIndex(c => c.includes('lat') && (c.includes('min') || c.includes('m')));
+    const latNSIdx  = cols.findIndex(c => c === 'n/s' || c === 'ns' || c === 'n_s');
+    const lonDegIdx = cols.findIndex(c => c.includes('lon') && (c.includes('deg') || c.includes('d')));
+    const lonMinIdx = cols.findIndex(c => c.includes('lon') && (c.includes('min') || c.includes('m')));
+    const lonEWIdx  = cols.findIndex(c => c === 'e/w' || c === 'ew' || c === 'e_w');
+    const nameIdx   = cols.findIndex(c => c === 'name' || c === 'wp' || c === 'waypoint' || c === 'wpt');
+    if (latDegIdx >= 0 && latMinIdx >= 0 && lonDegIdx >= 0 && lonMinIdx >= 0) {
+      const wps = lines.slice(1).map((l, i) => {
+        const p = l.split(delim).map(v => v.trim());
+        const latDeg = parseFloat(p[latDegIdx]) || 0;
+        const latMin = parseFloat(p[latMinIdx]) || 0;
+        const latNS  = (p[latNSIdx] || 'N').toUpperCase();
+        const lonDeg = parseFloat(p[lonDegIdx]) || 0;
+        const lonMin = parseFloat(p[lonMinIdx]) || 0;
+        const lonEW  = (p[lonEWIdx] || 'E').toUpperCase();
+        let lat = latDeg + latMin / 60;
+        let lon = lonDeg + lonMin / 60;
+        if (latNS === 'S') lat = -lat;
+        if (lonEW === 'W') lon = -lon;
+        const name = (nameIdx >= 0 ? p[nameIdx] : '') || `WP${String(i + 1).padStart(2, '0')}`;
+        return { id: i + 1, name: name.trim(), lat, lon, radius: 0.5, portXTD: 0.5, stbdXTD: 0.5, speed: null };
+      }).filter(wp => !isNaN(wp.lat) && !isNaN(wp.lon) && (wp.lat !== 0 || wp.lon !== 0));
+      if (wps.length >= 2) return { routeName: 'JRC Route', waypoints: wps };
+    }
+    return null;
+  } catch { return null; }
+}
+
+function convParseJRCBinary(buffer) {
+  // JRC binary RTA/RTN/RTM — scan for embedded ASCII lat/lon pattern
+  // Pattern: DD,MM.mmm,N,DDD,MM.mmm,E embedded in binary records
+  try {
+    const wps = [];
+    const pat = /(\d{1,3}),(\d{1,2}\.\d+),([NS]),(\d{1,3}),(\d{1,2}\.\d+),([EW])/g;
+    let m;
+    while ((m = pat.exec(buffer)) !== null) {
+      const lat = parseInt(m[1]) + parseFloat(m[2]) / 60;
+      const lon = parseInt(m[4]) + parseFloat(m[5]) / 60;
+      const finalLat = m[3] === 'S' ? -lat : lat;
+      const finalLon = m[6] === 'W' ? -lon : lon;
+      if (Math.abs(finalLat) <= 90 && Math.abs(finalLon) <= 180 && finalLat !== 0) {
+        wps.push({ id: wps.length + 1, name: `WP${String(wps.length + 1).padStart(2, '0')}`, lat: finalLat, lon: finalLon, radius: 0.5, portXTD: 0.5, stbdXTD: 0.5, speed: null });
+      }
+    }
+    if (wps.length >= 2) return { routeName: 'JRC Binary Route', waypoints: wps };
+    return null;
+  } catch { return null; }
+}
+
+function convParseRTE(text) {
+  // SevenCS eGlobe RTE — XML <WP id lat lon name radius xtdL xtdR>
   try {
     const parser = new DOMParser();
     const doc = parser.parseFromString(text, 'application/xml');
     if (doc.querySelector('parsererror')) return null;
-    const nameEl = doc.querySelector('RouteName,RouteInfo,Route');
-    const routeName = nameEl?.getAttribute('name') || nameEl?.getAttribute('Name') || nameEl?.textContent?.trim() || doc.documentElement?.getAttribute('name') || 'JRC Route';
-    let wps = [...doc.querySelectorAll('Waypoint,waypoint,WP,wp')];
+    const routeName = doc.querySelector('Route,RTE,rte')?.getAttribute('name') ||
+      doc.querySelector('RouteName,Name,name')?.textContent?.trim() || 'RTE Route';
+    let wps = [...doc.querySelectorAll('WP,wp,Wp,WPT,wpt,Waypoint,waypoint')];
     if (wps.length === 0) return null;
-    return {
-      routeName,
-      waypoints: wps.map((wp, i) => {
-        // JRC stores position as child element <Position Lat="..." Lon="..."> or attributes
-        const posEl = wp.querySelector('Position,position,Pos,pos');
-        const lat = parseFloat(posEl?.getAttribute('Lat') || posEl?.getAttribute('lat') || wp.getAttribute('Lat') || wp.getAttribute('lat') || wp.querySelector('Lat,lat')?.textContent || '');
-        const lon = parseFloat(posEl?.getAttribute('Lon') || posEl?.getAttribute('lon') || wp.getAttribute('Lon') || wp.getAttribute('lon') || wp.querySelector('Lon,lon')?.textContent || '');
-        const name = wp.getAttribute('Name') || wp.getAttribute('name') || wp.querySelector('Name,name')?.textContent || `WP${String(i + 1).padStart(2, '0')}`;
-        const radius = parseFloat(wp.getAttribute('Radius') || wp.getAttribute('TurnRadius') || '0.5') || 0.5;
-        const portXTD = parseFloat(wp.getAttribute('XTDPort') || wp.getAttribute('PortXTD') || wp.getAttribute('XTDLeft') || '0.5') || 0.5;
-        const stbdXTD = parseFloat(wp.getAttribute('XTDStbd') || wp.getAttribute('StbdXTD') || wp.getAttribute('XTDRight') || '0.5') || 0.5;
-        const speed = parseFloat(wp.querySelector('Speed,speed')?.textContent || wp.getAttribute('Speed') || '') || null;
-        return { id: i + 1, name: name.trim(), lat, lon, radius, portXTD, stbdXTD, speed };
-      }).filter(wp => !isNaN(wp.lat) && !isNaN(wp.lon)),
-    };
+    const mapped = wps.map((wp, i) => {
+      const lat = parseFloat(wp.getAttribute('lat') || wp.getAttribute('Lat') ||
+        wp.querySelector('lat,Lat,Latitude')?.textContent || '');
+      const lon = parseFloat(wp.getAttribute('lon') || wp.getAttribute('Lon') ||
+        wp.querySelector('lon,Lon,Longitude')?.textContent || '');
+      const name = wp.getAttribute('name') || wp.getAttribute('Name') ||
+        wp.querySelector('name,Name')?.textContent?.trim() || `WP${String(i + 1).padStart(2, '0')}`;
+      const radius = parseFloat(wp.getAttribute('radius') || wp.getAttribute('Radius') || '0.5') || 0.5;
+      const portXTD = parseFloat(wp.getAttribute('xtdL') || wp.getAttribute('XTDLeft') || wp.getAttribute('portXTD') || '0.5') || 0.5;
+      const stbdXTD = parseFloat(wp.getAttribute('xtdR') || wp.getAttribute('XTDRight') || wp.getAttribute('stbdXTD') || '0.5') || 0.5;
+      return { id: i + 1, name: name.trim(), lat, lon, radius, portXTD, stbdXTD, speed: null };
+    }).filter(wp => !isNaN(wp.lat) && !isNaN(wp.lon));
+    return mapped.length >= 2 ? { routeName, waypoints: mapped } : null;
   } catch { return null; }
+}
+
+function convParseNMEATxt(text) {
+  // NMEA 0183 WPL: $IIWPL,DDMM.mmm,N,DDDMM.mmm,E,WPNAME*XX
+  // Also handles plain lat lon name TXT tables
+  try {
+    const lines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
+    const wps = [];
+    const wplPat = /^\$[A-Z]{2}WPL,(\d{2,4})\.(\d+),([NS]),(\d{3,5})\.(\d+),([EW]),([^*,]+)/i;
+    for (const line of lines) {
+      const m = line.match(wplPat);
+      if (m) {
+        const latRaw = m[1] + '.' + m[2];
+        const lonRaw = m[3] + '.' + m[4];
+        const latDeg = Math.floor(parseFloat(latRaw) / 100);
+        const latMin = parseFloat(latRaw) - latDeg * 100;
+        const lonDeg = Math.floor(parseFloat(lonRaw) / 100);
+        const lonMin = parseFloat(lonRaw) - lonDeg * 100;
+        let lat = latDeg + latMin / 60;
+        let lon = lonDeg + lonMin / 60;
+        if (m[3].toUpperCase() === 'S') lat = -lat;
+        if (m[5].toUpperCase() === 'W') lon = -lon;
+        if (!isNaN(lat) && !isNaN(lon))
+          wps.push({ id: wps.length + 1, name: m[7]?.trim() || `WP${String(wps.length + 1).padStart(2, '0')}`, lat, lon, radius: 0.5, portXTD: 0.5, stbdXTD: 0.5, speed: null });
+        continue;
+      }
+      if (!line.startsWith('$') && !line.startsWith('//') && !line.startsWith('#')) {
+        const parts = line.split(/[\s,;]+/);
+        if (parts.length >= 2) {
+          const lat = parseFloat(parts[0]);
+          const lon = parseFloat(parts[1]);
+          if (!isNaN(lat) && !isNaN(lon) && Math.abs(lat) <= 90 && Math.abs(lon) <= 180) {
+            wps.push({ id: wps.length + 1, name: parts[2]?.trim() || `WP${String(wps.length + 1).padStart(2, '0')}`, lat, lon, radius: 0.5, portXTD: 0.5, stbdXTD: 0.5, speed: null });
+          }
+        }
+      }
+    }
+    return wps.length >= 2 ? { routeName: 'NMEA Route', waypoints: wps } : null;
+  } catch { return null; }
+}
+
+function convBinaryRejection(fmt) {
+  const messages = {
+    binary_furuno:   { label: 'Furuno UCH/UCHM',      tip: 'Export as RTZ or CSV from your Furuno ECDIS:\nRoute Planning → Export → File Type: RTZ\nThen upload the .rtz file here.' },
+    binary_anschutz: { label: 'Anschütz AIZ',          tip: 'Export as RTZ from your Anschütz ECDIS:\nRoute Manager → Export Route → RTZ format\nThen upload the .rtz file here.' },
+    binary_sam:      { label: 'SAM Electronics',       tip: 'Export as RTZ or GPX from your SAM ECDIS, then upload here.' },
+    rt3_binary:      { label: 'Transas RT3 (binary)',  tip: 'This RT3 is binary. Open in NaviSailor and re-export as RTZ, then upload here.' },
+    binary_unknown:  { label: 'Binary format',         tip: 'Binary format cannot be parsed in browser.\nExport as RTZ or GPX from your ECDIS, then upload that file.' },
+    jrc_binary:      { label: 'JRC Binary RTA/RTN/RTM', tip: 'This JRC file is binary. Some JRC units export both binary and text versions.\nFrom JRC ECDIS:\nRoute → Export → File Type: CSV or RTZ\nThen upload here.' },
+  };
+  return messages[fmt] || messages.binary_unknown;
 }
 
 function convParseRTU(text) {
@@ -302,13 +472,11 @@ function convParseRTU(text) {
 }
 
 function convParseNACOS(text) {
-  // Kongsberg NACOS — XML, often .nacos or .xml extension
   try {
     const parser = new DOMParser();
     const doc = parser.parseFromString(text, 'application/xml');
     if (doc.querySelector('parsererror')) return null;
     const routeName = doc.querySelector('Name,name,RouteName')?.textContent?.trim() || doc.documentElement?.getAttribute('name') || 'NACOS Route';
-    // NACOS: <waypoints><waypoint id="..." name="..."><position lat="..." lon="..."/></waypoint></waypoints>
     const wps = [...doc.querySelectorAll('waypoint,Waypoint,WP,wp')];
     if (wps.length === 0) return null;
     return {
@@ -328,21 +496,17 @@ function convParseNACOS(text) {
 }
 
 function convParseCSV(text) {
-  // Generic CSV: tries to detect header row with lat/lon columns
   try {
     const lines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
     if (lines.length < 2) return null;
     const header = lines[0].toLowerCase().split(/[,;|\t]/);
-    // Find lat/lon column indices
     const latIdx = header.findIndex(h => /lat/.test(h));
     const lonIdx = header.findIndex(h => /lon|lng/.test(h));
     const nameIdx = header.findIndex(h => /name|wp|waypoint|id|point/.test(h));
     const speedIdx = header.findIndex(h => /speed|kn|knot/.test(h));
     if (latIdx === -1 || lonIdx === -1) {
-      // No header — try positional: name,lat,lon or lat,lon,name
       const firstParts = lines[0].split(/[,;|\t]/);
       const lat0 = parseFloat(firstParts[0]), lat1 = parseFloat(firstParts[1]);
-      // Check if first two are numeric (lat,lon format)
       if (!isNaN(lat0) && !isNaN(lat1)) {
         const wps = lines.map((l, i) => {
           const p = l.split(/[,;|\t]/);
@@ -368,7 +532,6 @@ function convParseCSV(text) {
 }
 
 function convParseGenericXML(text) {
-  // Last-resort XML parser — looks for any element with lat/lon attrs or children
   try {
     const parser = new DOMParser();
     const doc = parser.parseFromString(text, 'application/xml');
@@ -393,20 +556,31 @@ function convParseGenericXML(text) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// CONVERTER: master dispatcher  (NEW)
+// CONVERTER: master dispatcher — updated with all new format handlers
 // ─────────────────────────────────────────────────────────────────────────────
 function convParse(text, fmt) {
   switch (fmt) {
-    case 'rtz':  return convParseRTZ(text);
-    case 'gpx':  return convParseGPX(text);
-    case 'kml':  case 'kmz': return convParseKML(text);
-    case 'rt3':  return convParseRT3(text);
-    case 'rta':  case 'rtn': case 'rtm': case 'jrc': return convParseJRC(text);
-    case 'rtu':  case 'rtx': return convParseRTU(text);
-    case 'nacos': return convParseNACOS(text);
-    case 'csv':  return convParseCSV(text);
-    case 'xml_generic': case 'rte': return convParseGenericXML(text);
-    default: return convParseGenericXML(text) || convParseCSV(text);
+    case 'rtz':         return convParseRTZ(text);
+    case 'gpx':         return convParseGPX(text);
+    case 'kml': case 'kmz': return convParseKML(text);
+    case 'rt3':         return convParseRT3(text) || convParseGenericXML(text);
+    case 'jrc_text':    return convParseJRCText(text) || convParseCSV(text);
+    case 'jrc_binary':  return convParseJRCBinary(text);
+    case 'rtu': case 'rtx': return convParseRTU(text);
+    case 'nacos':       return convParseNACOS(text);
+    case 'rte':         return convParseRTE(text) || convParseGenericXML(text);
+    case 'csv':         return convParseCSV(text) || convParseJRCCSVText(text);
+    case 'nmea_txt':    return convParseNMEATxt(text) || convParseCSV(text);
+    case 'xml_generic': return convParseGenericXML(text);
+    // Binary formats return null — caller checks convBinaryRejection
+    case 'binary_furuno': case 'binary_anschutz': case 'binary_sam':
+    case 'rt3_binary': case 'binary_unknown':
+      return null;
+    default:
+      return convParseRTZ(text) || convParseRT3(text) || convParseRTE(text) ||
+             convParseJRCText(text) || convParseGPX(text) || convParseKML(text) ||
+             convParseRTU(text) || convParseNACOS(text) ||
+             convParseNMEATxt(text) || convParseCSV(text) || convParseGenericXML(text);
   }
 }
 
@@ -517,17 +691,32 @@ const REG_ZONE_CFG = [
 // FORMAT labels for UI display  (NEW)
 // ─────────────────────────────────────────────────────────────────────────────
 const FMT_LABELS = {
-  rtz: 'RTZ (IEC 61174)', gpx: 'GPX', kml: 'KML', rt3: 'Transas RT3',
-  rta: 'JRC RTA', rtn: 'JRC RTN', rtm: 'JRC RTM', jrc: 'JRC',
-  rtu: 'MARIS RTU', rtx: 'MARIS RTX', nacos: 'NACOS / Kongsberg',
-  csv: 'CSV', rte: 'SevenCS RTE', xml_generic: 'Generic XML', unknown: 'Unknown',
+  rtz: 'RTZ (IEC 61174)', gpx: 'GPX', kml: 'KML',
+  rt3: 'Transas RT3', rt3_binary: 'Transas RT3 (binary)',
+  jrc_text: 'JRC (XML)', jrc_binary: 'JRC (binary)',
+  rtu: 'MARIS RTU', rtx: 'MARIS RTX',
+  nacos: 'NACOS/Kongsberg', rte: 'SevenCS/eGlobe',
+  nmea_txt: 'NMEA WPL TXT',
+  csv: 'CSV',
+  binary_furuno: 'Furuno UCH/UCHM',
+  binary_anschutz: 'Anschütz AIZ',
+  binary_sam: 'SAM Electronics',
+  binary_unknown: 'Binary (unknown)',
+  xml_generic: 'Generic XML',
+  unknown: 'Unknown',
 };
 
 const FMT_COLORS = {
-  rtz: '#00B4D8', gpx: '#00C896', kml: '#4285F4', rt3: '#F0A500',
-  rta: '#FF6B35', rtn: '#FF6B35', rtm: '#FF6B35', jrc: '#FF6B35',
-  rtu: '#9B59B6', rtx: '#9B59B6', nacos: '#1ABC9C',
-  csv: '#E74C3C', rte: '#F39C12', xml_generic: '#8A9BBF', unknown: '#4A5F80',
+  rtz: '#00B4D8', gpx: '#00C896', kml: '#4285F4',
+  rt3: '#F0A500', rt3_binary: '#7a5200',
+  jrc_text: '#FF6B35', jrc_binary: '#8B3A00',
+  rtu: '#9B59B6', rtx: '#9B59B6',
+  nacos: '#1ABC9C', rte: '#F39C12',
+  nmea_txt: '#2ECC71',
+  csv: '#E74C3C',
+  binary_furuno: '#FF4757', binary_anschutz: '#FF4757',
+  binary_sam: '#FF4757', binary_unknown: '#FF4757',
+  xml_generic: '#8A9BBF', unknown: '#4A5F80',
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1010,9 +1199,29 @@ function RoutePlannerPage({ notify, sheetRoutes=[], portsDb=[] }){
       try {
         const text = await file.text();
         const detectedFmt = convDetectFormat(text, file.name);
+
+        // Binary formats — show rejection card with export instructions
+        const binaryFmts = ['binary_furuno','binary_anschutz','binary_sam','rt3_binary','binary_unknown','jrc_binary'];
+        if (binaryFmts.includes(detectedFmt)) {
+          const info = convBinaryRejection(detectedFmt);
+          results.push({
+            id: `conv_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+            filename: file.name,
+            detectedFmt,
+            parsed: null,
+            isBinaryRejection: true,
+            binaryInfo: info,
+            validated: [],
+            outputFmt: convOutputFmt,
+            fromZip: null,
+            savedAt: new Date().toISOString(),
+          });
+          continue;
+        }
+
         const parsed = convParse(text, detectedFmt);
         if (!parsed || parsed.waypoints.length < 2) {
-          notify(`Could not parse "${file.name}" — unsupported or empty format`, 'error');
+          notify(`Could not parse "${file.name}" — try renaming to .csv or .xml`, 'error');
           continue;
         }
         const enriched = convEnrich(parsed.waypoints);
@@ -1022,6 +1231,7 @@ function RoutePlannerPage({ notify, sheetRoutes=[], portsDb=[] }){
           filename: file.name,
           detectedFmt,
           parsed: { ...parsed, waypoints: enriched },
+          isBinaryRejection: false,
           validated,
           outputFmt: convOutputFmt,
           fromZip: null,
@@ -1304,7 +1514,10 @@ function RoutePlannerPage({ notify, sheetRoutes=[], portsDb=[] }){
               {convDragOver ? 'Drop files here' : 'Drop route files or tap to browse'}
             </div>
             <div style={{ fontSize: '0.63rem', color: 'var(--text2)', lineHeight: 1.6 }}>
-              Supports: .rtz .rt3 .rta .rtn .rtm .rtu .gpx .kml .csv .xml .nacos
+              Supports: .rtz .rt3 .rta .rtn .rtm .rtu .rte .gpx .kml .csv .xml .nacos .txt
+            </div>
+            <div style={{ fontSize: '0.63rem', color: 'var(--text3)', marginTop: 2 }}>
+              ⚠️ Furuno .uch/.uchm and Anschütz .aiz — see export instructions
             </div>
             <div style={{ fontSize: '0.63rem', color: 'var(--cyan)', marginTop: 3 }}>
               📦 Also accepts .zip for batch conversion
@@ -1313,7 +1526,7 @@ function RoutePlannerPage({ notify, sheetRoutes=[], portsDb=[] }){
               id="conv-file-input"
               type="file"
               multiple
-              accept=".rtz,.rtzp,.rt3,.rta,.rtn,.rtm,.rtu,.rtx,.gpx,.kml,.csv,.xml,.nacos,.zip"
+              accept=".rtz,.rtzp,.rt3,.rta,.rtn,.rtm,.rtu,.rtx,.gpx,.kml,.csv,.xml,.nacos,.rte,.txt,.uch,.uchm,.aiz,.sam,.dat,.zip"
               style={{ display: 'none' }}
               onChange={handleConvFileInput}
             />
@@ -1395,6 +1608,29 @@ function RoutePlannerPage({ notify, sheetRoutes=[], portsDb=[] }){
             const fmt = file.outputFmt || convOutputFmt;
             const fmtColor = FMT_COLORS[file.detectedFmt] || '#8A9BBF';
             const fmtLabel = FMT_LABELS[file.detectedFmt] || 'Unknown';
+
+            // Binary rejection card
+            if (file.isBinaryRejection) {
+              return (
+                <div key={file.id} style={{ background: 'rgba(255,71,87,0.06)', border: '1px solid rgba(255,71,87,0.35)', borderRadius: 10, padding: '10px 12px', marginBottom: 4 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                    <span style={{ fontSize: '1.1rem' }}>🔒</span>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: '0.74rem', fontWeight: 700, color: '#ff8080', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{file.filename}</div>
+                      <div style={{ fontSize: '0.64rem', color: 'var(--text2)', marginTop: 1 }}>{file.binaryInfo?.label || 'Binary format'} — cannot parse in browser</div>
+                    </div>
+                    <button onClick={() => convRemoveFile(file.id)} style={{ background: 'none', border: 'none', color: 'var(--text3)', cursor: 'pointer', fontSize: '1rem', flexShrink: 0 }}>✕</button>
+                  </div>
+                  <div style={{ background: 'rgba(0,0,0,0.25)', borderRadius: 7, padding: '8px 10px', fontSize: '0.66rem', color: 'var(--text2)', lineHeight: 1.8 }}>
+                    <div style={{ fontWeight: 700, color: '#FFB347', marginBottom: 4 }}>📋 How to export from your ECDIS:</div>
+                    {(file.binaryInfo?.tip || '').split('\n').map((line, i) => (
+                      <div key={i} style={{ color: line.startsWith('Route') || line.startsWith('File') ? 'var(--cyan)' : 'var(--text2)' }}>{line}</div>
+                    ))}
+                  </div>
+                </div>
+              );
+            }
+
             const errors = errCount(file);
             const warns = warnCount(file);
             const isExpanded = convExpanded === file.id;
