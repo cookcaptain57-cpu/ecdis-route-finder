@@ -1,5 +1,5 @@
 /* eslint-disable */
-// src/App.jsx - LATEST VERSION with all new pages merged
+// src/App.jsx
 import { useState, useEffect } from "react";
 import { auth, db } from "./firebase";
 import { signOut, onAuthStateChanged, setPersistence, browserLocalPersistence } from "firebase/auth";
@@ -41,10 +41,7 @@ import NavigationBridgePage    from "./Pages/NavigationBridgePage";
 import CrewWelfarePage         from "./Pages/CrewWelfarePage";
 import CrewJourneyPage         from "./Pages/CrewJourneyPage";
 import PortShorePage           from "./Pages/PortShorePage";
-import ContactPage             from "./Pages/ContactPage";
-import AboutPage               from "./Pages/AboutPage";
-import LegalPage               from "./Pages/LegalPage";
-import FAQPage                 from "./Pages/FAQPage";
+import InfoPage                from "./Pages/InfoPage";
 
 const S = `
   @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700;900&family=Exo+2:wght@300;400;500;600&display=swap');
@@ -66,8 +63,6 @@ const S = `
     border-bottom:1px solid var(--border);padding:0 1.2rem;
     box-shadow:0 4px 30px rgba(0,0,0,0.5);flex-shrink:0;}
   .nav-row1{display:flex;align-items:center;justify-content:space-between;height:56px;}
-  .nav-row2{display:flex;align-items:center;gap:2px;flex-wrap:wrap;padding-bottom:6px;
-    border-top:1px solid rgba(26,58,92,0.5);}
   .nav-brand{display:flex;align-items:center;gap:9px;}
   .nav-logo{width:34px;height:34px;background:linear-gradient(135deg,var(--cyan),var(--blue));
     border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:17px;
@@ -80,16 +75,12 @@ const S = `
     display:inline-flex;align-items:center;gap:4px;text-transform:uppercase;letter-spacing:0.04em;white-space:nowrap;}
   .ntab:hover{color:var(--text);background:rgba(255,255,255,0.05);}
   .ntab.active{color:var(--cyan);background:rgba(0,180,216,0.1);border:1px solid rgba(0,180,216,0.2);}
-  .ntab.gold.active{color:var(--gold);background:rgba(240,165,0,0.1);border:1px solid rgba(240,165,0,0.2);}
-  .ntab.green.active{color:var(--green);background:rgba(0,200,150,0.1);border:1px solid rgba(0,200,150,0.2);}
-  .uc{padding:6px 10px;border:1px solid var(--border2);border-radius:8px;cursor:pointer;font-size:0.7rem;color:var(--text2);transition:all 0.2s;white-space:nowrap;}
-  .uc:hover{border-color:var(--red);color:var(--red);}
   .sd{width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 7px var(--green);animation:pulse 2s infinite;}
   @keyframes pulse{0%,100%{opacity:1;}50%{opacity:0.4;}}
   .burger{display:none;flex-direction:column;gap:4px;cursor:pointer;padding:8px;background:none;border:none;}
   .burger span{width:20px;height:2px;background:var(--text);border-radius:2px;}
-  @media(max-width:900px){.nav-row2{display:none;}.burger{display:flex;}.app-sidebar{display:none !important;}}
-  @media(min-width:901px){.burger{display:none;}.nav-row2{display:none;}}
+  @media(max-width:900px){.burger{display:flex;}.app-sidebar{display:none !important;}}
+  @media(min-width:901px){.burger{display:none;}}
   .app-body{display:flex;flex:1;min-height:0;overflow:hidden;}
   .app-sidebar{width:220px;flex-shrink:0;background:rgba(4,12,26,0.97);border-right:1px solid var(--border);
     display:flex;flex-direction:column;overflow-y:auto;padding:0.6rem 0.5rem 1rem;}
@@ -103,11 +94,18 @@ const S = `
   .si-btn.green.active{background:rgba(0,200,150,0.1);color:var(--green);}
   .si-btn.red.active{background:rgba(255,71,87,0.12);color:var(--red);}
   .si-icon{font-size:1.05rem;width:22px;text-align:center;flex-shrink:0;}
-  .mob-menu{display:none;position:fixed;top:56px;left:0;right:0;background:rgba(4,12,26,0.98);
-    backdrop-filter:blur(20px);border-bottom:1px solid var(--border);z-index:99;padding:0.7rem;
-    max-height:calc(100vh - 56px);overflow-y:auto;
-    overscroll-behavior:contain;-webkit-overflow-scrolling:touch;}
-  .mob-menu.open{display:grid;grid-template-columns:1fr 1fr;gap:6px;overflow-y:auto;}
+  /* ── MOBILE MENU — fixed scrollable ── */
+  .mob-menu{
+    display:none;
+    position:fixed;top:56px;left:0;right:0;
+    background:rgba(4,12,26,0.98);backdrop-filter:blur(20px);
+    border-bottom:1px solid var(--border);z-index:99;padding:0.7rem;
+    height:calc(100vh - 56px);
+    overflow-y:scroll;
+    -webkit-overflow-scrolling:touch;
+    overscroll-behavior:contain;
+  }
+  .mob-menu.open{display:grid;grid-template-columns:1fr 1fr;gap:6px;align-content:start;}
   .mtab{padding:10px 12px;border:1px solid var(--border);background:rgba(255,255,255,0.04);color:var(--text2);
     font-family:'Exo 2',sans-serif;font-size:0.8rem;cursor:pointer;border-radius:9px;
     text-align:left;transition:all 0.2s;display:flex;align-items:center;gap:8px;}
@@ -190,10 +188,9 @@ const S = `
   [data-theme="light"] .nav{background:rgba(240,245,250,0.97);border-color:rgba(0,0,0,0.12);}
   [data-theme="light"] .app-sidebar{background:rgba(240,245,250,0.97);border-color:rgba(0,0,0,0.12);}
   [data-theme="light"] .burger span{background:#0a1628 !important;}
-  [data-theme="light"] .nav-title,[data-theme="light"] .ntab,[data-theme="light"] .uc,[data-theme="light"] .si-btn{color:#0a1628 !important;}
+  [data-theme="light"] .nav-title,[data-theme="light"] .ntab,[data-theme="light"] .si-btn{color:#0a1628 !important;}
   [data-theme="light"] .ntab.active,[data-theme="light"] .si-btn.active{color:var(--cyan) !important;}
   [data-theme="light"] .file-card,[data-theme="light"] .auth-card{background:#ffffff;}
-  [data-theme="light"] .footer{background:#e4ecf4;}
   .empty{text-align:center;padding:3rem 1rem;color:var(--text3);}
   .empty-icon{font-size:2.8rem;margin-bottom:1rem;}
   .empty-t{font-family:'Orbitron',monospace;font-size:0.82rem;margin-bottom:6px;color:var(--text2);}
@@ -218,11 +215,7 @@ const S = `
   .notif-error{background:rgba(255,71,87,0.15);border:1px solid rgba(255,71,87,0.4);color:#FF4757;}
   .notif-info{background:rgba(0,180,216,0.15);border:1px solid rgba(0,180,216,0.4);color:var(--cyan);}
   @keyframes slideUp{from{opacity:0;transform:translateX(-50%) translateY(20px);}to{opacity:1;transform:translateX(-50%) translateY(0);}}
-  .footer{padding:1.2rem 1.4rem;border-top:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;background:rgba(4,12,26,0.7);}
-  .footer-brand{font-family:'Orbitron',monospace;font-size:0.72rem;color:var(--text2);}
-  .footer-brand span{color:var(--cyan);}
-  .ig-btn{display:flex;align-items:center;gap:8px;padding:7px 14px;background:linear-gradient(135deg,#833ab4,#fd1d1d,#fcb045);border:none;border-radius:100px;color:white;font-family:'Exo 2',sans-serif;font-size:0.78rem;font-weight:600;cursor:pointer;transition:all 0.2s;text-decoration:none;}
-  .footer-copy{font-size:0.66rem;color:var(--text3);}
+  .footer{padding:0.6rem 1.2rem;border-top:1px solid var(--border);display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:2px 4px;background:rgba(4,12,26,0.7);}
   .tw{overflow-x:auto;}.tbl{width:100%;border-collapse:collapse;font-size:0.76rem;}
   .tbl th{padding:8px 10px;text-align:left;font-size:0.65rem;color:var(--text3);text-transform:uppercase;letter-spacing:0.08em;border-bottom:1px solid var(--border);white-space:nowrap;}
   .tbl td{padding:8px 10px;border-bottom:1px solid rgba(255,255,255,0.04);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
@@ -285,7 +278,8 @@ export default function App() {
   const isAdmin = user?.email === ADMIN_EMAIL;
   const notify  = (msg, type = 'success') => setNotif({ msg, type, key: Date.now() });
 
-  const PUBLIC_TABS = new Set(['home', 'login', 'contact', 'about', 'legal', 'faq']);
+  // Tabs that don't require login
+  const PUBLIC_TABS = new Set(['home', 'login', 'info']);
 
   const applyPortData = (d3) => {
     if (!Array.isArray(d3) || d3.length === 0) return;
@@ -430,7 +424,6 @@ export default function App() {
     return () => clearInterval(t);
   }, [authChecked]);
 
-  // ── CHANGE: replaced dynamic import() with static import at top of file ──
   useEffect(() => {
     if (!user) return;
     getDocs(query(collection(db, 'notifications'), orderBy('createdAt', 'desc')))
@@ -450,6 +443,7 @@ export default function App() {
     localStorage.setItem('notif_read', JSON.stringify([...allIds]));
   };
 
+  // ── Removed contact/about/legal/faq — replaced with single 'info' tab ──
   const TABS = [
     { k:'home',        i:'🏠', l:'Dashboard' },
     { k:'routes',      i:'🚢', l:'Routes' },
@@ -473,10 +467,7 @@ export default function App() {
     { k:'portshore',   i:'🏖', l:'Port & Shore' },
     ...(user ? [{ k:'account', i:'👤', l:'My Account' }] : []),
     ...(isAdmin ? [{ k:'admin', i:'🛡', l:'Admin' }] : []),
-    { k:'contact', i:'✉️', l:'Contact Us' },
-    { k:'about',   i:'🧭', l:'About' },
-    { k:'legal',   i:'⚖️', l:'Legal' },
-    { k:'faq',     i:'❓', l:'FAQ' },
+    { k:'info', i:'ℹ️', l:'Help & Info' },
   ];
 
   const handleSearch = (q) => { setSearchQ(q); setTab('routes'); setMenuOpen(false); };
@@ -577,6 +568,7 @@ export default function App() {
           </div>
         </nav>
 
+        {/* ── Mobile menu — scrollable ── */}
         <div className={`mob-menu ${menuOpen ? 'open' : ''}`}>
           {TABS.map(t => (
             <button key={t.k} className={`mtab ${tab===t.k?'active':''}`} onClick={() => switchTab(t.k)}>
@@ -620,7 +612,7 @@ export default function App() {
                 <span className="si-icon">{t.i}</span>
                 {t.l}
                 {t.k==='navmode' && <span style={{ marginLeft:'auto', padding:'1px 5px', borderRadius:4, fontSize:'0.5rem', background:'rgba(0,200,100,0.15)', color:'var(--green)', border:'1px solid rgba(0,200,100,0.25)', fontWeight:700, flexShrink:0 }}>NEW</span>}
-                {t.k==='sights'  && <span style={{ marginLeft:'auto', padding:'1px 5px', borderRadius:4, fontSize:'0.5rem', background:'rgba(240,165,0,0.15)', color:'var(--gold)',  border:'1px solid rgba(240,165,0,0.25)',  fontWeight:700, flexShrink:0 }}>NEW</span>}
+                {t.k==='sights'  && <span style={{ marginLeft:'auto', padding:'1px 5px', borderRadius:4, fontSize:'0.5rem', background:'rgba(240,165,0,0.15)', color:'var(--gold)', border:'1px solid rgba(240,165,0,0.25)', fontWeight:700, flexShrink:0 }}>NEW</span>}
               </button>
             ))}
             {user && (
@@ -713,6 +705,7 @@ export default function App() {
               </div>
             )}
 
+            {/* ── All Pages ── */}
             {tab==='home'        && <HomePage routes={routes} charts={charts} onSearch={handleSearch} setTab={switchTab} user={user} portsDb={portsDb} userProfile={userProfile} />}
             {tab==='routes'      && <RoutesPage searchQuery={searchQ} notify={notify} user={user} setTab={switchTab} sheetRoutes={sheetRoutes} sheetLoading={routesLoading} />}
             {tab==='charts'      && <ChartsPage notify={notify} user={user} setTab={switchTab} isAdmin={isAdmin} sheetCharts={sheetCharts} sheetLoading={chartsLoading} />}
@@ -728,7 +721,6 @@ export default function App() {
             {tab==='account'     && user && <AccountPage user={user} userProfile={userProfile} setUserProfile={setUserProfile} notify={notify} setTab={switchTab} />}
             {tab==='library'     && <MaritimeLibraryPage setTab={switchTab} />}
             {tab==='navmode'     && <NavModePage notify={notify} sheetRoutes={[...routes,...sheetRoutes]} portsDb={portsDb} setTab={switchTab} />}
-            {/* ── CHANGE: added portsDb prop to EmergencyPage ── */}
             {tab==='emergency'   && <EmergencyPage portsDb={portsDb} />}
             {tab==='knots'       && <KnotsRopesMooringPage />}
             {tab==='navbridge'   && <NavigationBridgePage />}
@@ -751,17 +743,15 @@ export default function App() {
                   chartsSyncProgress={chartsSyncProgress} portsSyncProgress={portsSyncProgress} />
               : <div className="section"><div className="empty"><div className="empty-icon">🔒</div><div className="empty-t">Admin Access Only</div></div></div>
             )}
-            {tab==='contact' && user && <ContactPage notify={notify} user={user} />}
-            {tab==='about'   && user && <AboutPage setTab={switchTab} />}
-            {tab==='legal'   && user && <LegalPage setTab={switchTab} />}
-            {tab==='faq'     && user && <FAQPage setTab={switchTab} />}
 
-            {authChecked && !user && ['contact','about','legal','faq'].includes(tab) && (
+            {/* ── Help & Info (combined) ── */}
+            {tab==='info' && user && <InfoPage notify={notify} user={user} setTab={switchTab} />}
+            {tab==='info' && !user && authChecked && (
               <div style={{ display:'flex', flex:1, alignItems:'center', justifyContent:'center', padding:'2rem' }}>
                 <div style={{ maxWidth:380, width:'100%', background:'var(--card)', border:'1px solid var(--border2)', borderRadius:16, padding:'2rem', textAlign:'center' }}>
                   <div style={{ fontSize:'3rem', marginBottom:'1rem' }}>🔐</div>
                   <div style={{ fontFamily:'Orbitron,monospace', fontSize:'0.9rem', fontWeight:700, marginBottom:'0.5rem' }}>Login Required</div>
-                  <div style={{ fontSize:'0.82rem', color:'var(--text2)', marginBottom:'1.4rem', lineHeight:1.6 }}>Please login to access this page.</div>
+                  <div style={{ fontSize:'0.82rem', color:'var(--text2)', marginBottom:'1.4rem', lineHeight:1.6 }}>Please login to access Help & Info.</div>
                   <div style={{ display:'flex', gap:10, justifyContent:'center' }}>
                     <button className="btn btn-primary" onClick={() => switchTab('login')}>🔐 Login</button>
                     <button className="btn btn-secondary" onClick={() => switchTab('login')}>✅ Register Free</button>
@@ -784,6 +774,7 @@ export default function App() {
               </div>
             )}
 
+            {/* ── Footer only on homepage ── */}
             {tab === 'home' && <Footer setTab={switchTab} />}
 
           </div>
