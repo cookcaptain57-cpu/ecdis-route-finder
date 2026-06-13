@@ -1,10 +1,10 @@
 /* eslint-disable */
 
 const FOOTER_LINKS = [
-  { label: 'Contact Us', tab: 'contact' },
-  { label: 'About',      tab: 'about'   },
-  { label: 'Legal',      tab: 'legal'   },
-  { label: 'FAQ',        tab: 'faq'     },
+  { label: 'Contact Us', tab: 'info' },
+  { label: 'About',      tab: 'info' },
+  { label: 'Legal',      tab: 'info' },
+  { label: 'FAQ',        tab: 'info' },
 ];
 
 export default function Footer({ setTab }) {
@@ -18,9 +18,10 @@ export default function Footer({ setTab }) {
       flexWrap: 'wrap',
       gap: '2px 4px',
       background: 'rgba(4,12,26,0.7)',
+      marginTop: 'auto',
     }}>
       {FOOTER_LINKS.map((link, i) => (
-        <span key={link.tab} style={{ display: 'flex', alignItems: 'center' }}>
+        <span key={link.label} style={{ display: 'flex', alignItems: 'center' }}>
           {i > 0 && (
             <span style={{ color: '#2a3a52', fontSize: '0.6rem', margin: '0 3px' }}>·</span>
           )}
