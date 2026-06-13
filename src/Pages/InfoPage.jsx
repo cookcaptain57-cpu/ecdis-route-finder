@@ -9,12 +9,9 @@ function ContactSection({ notify, user }) {
     name: user?.displayName || '', email: user?.email || '',
     userType: '', category: '', priority: 'medium', subject: '', message: '', rating: 0,
   });
-  const [screenshot, setScreenshot]     = useState(null);
-  const [screenshotPreview, setPreview] = useState(null);
-  const [loading, setLoading]           = useState(false);
-  const [submitted, setSubmitted]       = useState(false);
-  const [refId, setRefId]               = useState('');
-  const fileRef = { current: null };
+  const [loading, setLoading]   = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+  const [refId, setRefId]       = useState('');
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
@@ -152,7 +149,7 @@ function ContactSection({ notify, user }) {
   );
 }
 
-function AboutSection({ setActiveSection }) {
+function AboutSection() {
   const FEATURES = [
     {icon:'🗺',title:'Route Planner'},{icon:'⚓',title:'Port Database'},{icon:'📡',title:'ECDIS Charts'},
     {icon:'🛳',title:'Vessel Search'},{icon:'⏱',title:'Sea Time Calc'},{icon:'📜',title:'Certificates'},
@@ -275,8 +272,8 @@ function LegalSection() {
 }
 
 function FAQSection() {
-  const [search, setSearch]           = useState('');
-  const [openItem, setOpenItem]       = useState(null);
+  const [search, setSearch]     = useState('');
+  const [openItem, setOpenItem] = useState(null);
   const FAQ_ITEMS = [
     {q:'What is NavisphereX Marine?',a:'A free, professional-grade maritime web application built by a serving 2nd Officer. It provides tools for route planning, port search, sea time, certificates, vessel search, and more.'},
     {q:'Is it free to use?',a:'Yes! NavisphereX Marine is completely free. There is a Free tier (default) and a Paid tier with extended download limits. Core tools are always free.'},
@@ -323,78 +320,115 @@ export default function InfoPage({ notify, user, setTab }) {
   const [activeSection, setActiveSection] = useState(null);
 
   const CARDS = [
-    { id:'contact', icon:'✉️', label:'Contact Us',   sub:'Get in touch · Write to us · Report issues', color:'var(--cyan)',   bg:'linear-gradient(135deg,rgba(0,180,216,0.12),rgba(21,101,192,0.08))' },
-    { id:'about',   icon:'🧭', label:'About',         sub:'About NavisphereX · Developer · Features',  color:'var(--gold)',   bg:'linear-gradient(135deg,rgba(240,165,0,0.1),rgba(212,144,10,0.06))' },
-    { id:'legal',   icon:'⚖️', label:'Legal',         sub:'Disclaimer · Terms & Conditions · Privacy', color:'var(--purple)', bg:'linear-gradient(135deg,rgba(124,58,237,0.1),rgba(124,58,237,0.06))' },
-    { id:'faq',     icon:'❓', label:'FAQ',            sub:'Frequently asked questions · Help',         color:'var(--green)',  bg:'linear-gradient(135deg,rgba(0,200,150,0.1),rgba(0,168,122,0.06))' },
+    { id:'contact', icon:'✉️', label:'Contact Us',  sub:'Get in touch · Write to us · Report issues', color:'var(--cyan)',   bg:'linear-gradient(135deg,rgba(0,180,216,0.15),rgba(21,101,192,0.1))',  accent:'rgba(0,180,216,0.4)' },
+    { id:'about',   icon:'🧭', label:'About',        sub:'About NavisphereX · Developer · Features',  color:'var(--gold)',   bg:'linear-gradient(135deg,rgba(240,165,0,0.15),rgba(212,144,10,0.08))', accent:'rgba(240,165,0,0.4)' },
+    { id:'legal',   icon:'⚖️', label:'Legal',        sub:'Disclaimer · Terms & Conditions · Privacy', color:'#A78BFA',      bg:'linear-gradient(135deg,rgba(124,58,237,0.15),rgba(124,58,237,0.08))', accent:'rgba(124,58,237,0.4)' },
+    { id:'faq',     icon:'❓', label:'FAQ',           sub:'Frequently asked questions · Help',         color:'var(--green)', bg:'linear-gradient(135deg,rgba(0,200,150,0.15),rgba(0,168,122,0.08))',  accent:'rgba(0,200,150,0.4)' },
   ];
 
+  const activeCard = CARDS.find(c => c.id === activeSection);
+
+  // ── Sub-page view ──
+  if (activeSection) {
+    return (
+      <div style={{ maxWidth:900, margin:'0 auto', padding:'1.2rem' }}>
+        {/* Sub-page header with back button */}
+        <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:'1.4rem' }}>
+          <button
+            onClick={() => setActiveSection(null)}
+            style={{ background:'rgba(255,255,255,0.06)', border:'1px solid var(--border)', borderRadius:9, padding:'7px 13px', cursor:'pointer', color:'var(--text2)', fontFamily:'Exo 2,sans-serif', fontSize:'0.78rem', display:'flex', alignItems:'center', gap:6, transition:'all 0.2s', flexShrink:0 }}
+            onMouseEnter={e => { e.currentTarget.style.borderColor='var(--cyan)'; e.currentTarget.style.color='var(--cyan)'; }}
+            onMouseLeave={e => { e.currentTarget.style.borderColor='var(--border)'; e.currentTarget.style.color='var(--text2)'; }}>
+            ← Back
+          </button>
+          <div style={{ display:'flex', alignItems:'center', gap:10, flex:1 }}>
+            <div style={{ width:36, height:36, borderRadius:10, background:activeCard?.bg, border:`1px solid ${activeCard?.accent}`, display:'flex', alignItems:'center', justifyContent:'center', fontSize:'1.3rem', flexShrink:0 }}>
+              {activeCard?.icon}
+            </div>
+            <div>
+              <div style={{ fontFamily:'Orbitron,monospace', fontSize:'0.88rem', fontWeight:700, color:activeCard?.color }}>
+                {activeCard?.label}
+              </div>
+              <div style={{ fontSize:'0.64rem', color:'var(--text3)', marginTop:1 }}>Help &amp; Info</div>
+            </div>
+          </div>
+        </div>
+
+        {/* Divider */}
+        <div style={{ height:1, background:`linear-gradient(90deg,${activeCard?.accent||'var(--border)'},transparent)`, marginBottom:'1.4rem' }} />
+
+        {/* Section content */}
+        {activeSection === 'contact' && <ContactSection notify={notify} user={user} />}
+        {activeSection === 'about'   && <AboutSection />}
+        {activeSection === 'legal'   && <LegalSection />}
+        {activeSection === 'faq'     && <FAQSection />}
+      </div>
+    );
+  }
+
+  // ── Cards grid view (default) ──
   return (
     <div style={{ maxWidth:900, margin:'0 auto', padding:'1.2rem' }}>
       {/* Header */}
-      <div style={{ marginBottom:'1.4rem', textAlign:'center' }}>
+      <div style={{ marginBottom:'1.8rem', textAlign:'center' }}>
         <div style={{ fontFamily:'Orbitron,monospace', fontSize:'1.2rem', fontWeight:900, marginBottom:6, letterSpacing:'0.06em' }}>
           HELP <span style={{ color:'var(--cyan)' }}>&amp; INFO</span>
         </div>
         <div style={{ fontSize:'0.78rem', color:'var(--text2)' }}>Contact us, learn about the app, or find quick answers</div>
       </div>
 
-      {/* Top cards */}
-      <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(190px,1fr))', gap:'0.8rem', marginBottom:'1.6rem' }}>
+      {/* 2×2 Cards grid */}
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(200px,1fr))', gap:'1rem' }}>
         {CARDS.map(card => (
-          <div key={card.id}
-            onClick={() => setActiveSection(activeSection === card.id ? null : card.id)}
+          <div
+            key={card.id}
+            onClick={() => setActiveSection(card.id)}
             style={{
-              background: activeSection === card.id ? card.bg : 'var(--card)',
-              border: `1px solid ${activeSection === card.id ? card.color + '55' : 'var(--border)'}`,
-              borderRadius:14, padding:'1.1rem', cursor:'pointer',
-              transition:'all 0.2s', textAlign:'center',
+              background: card.bg,
+              border: `1px solid ${card.accent}`,
+              borderRadius: 16,
+              padding: '1.6rem 1.2rem',
+              cursor: 'pointer',
+              transition: 'all 0.22s',
+              textAlign: 'center',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              gap: 10,
+              position: 'relative',
+              overflow: 'hidden',
             }}
-            onMouseEnter={e => { e.currentTarget.style.borderColor = card.color+'66'; e.currentTarget.style.transform='translateY(-2px)'; }}
-            onMouseLeave={e => { e.currentTarget.style.borderColor = activeSection===card.id ? card.color+'55' : 'var(--border)'; e.currentTarget.style.transform='translateY(0)'; }}>
-            <div style={{ fontSize:'2rem', marginBottom:8 }}>{card.icon}</div>
-            <div style={{ fontFamily:'Orbitron,monospace', fontSize:'0.72rem', fontWeight:700, color: activeSection===card.id ? card.color : 'var(--text)', marginBottom:5 }}>{card.label}</div>
-            <div style={{ fontSize:'0.64rem', color:'var(--text3)', lineHeight:1.5 }}>{card.sub}</div>
-            <div style={{ marginTop:8, fontSize:'0.64rem', color: card.color }}>
-              {activeSection === card.id ? '▲ Close' : '▼ Open'}
+            onMouseEnter={e => {
+              e.currentTarget.style.transform = 'translateY(-4px)';
+              e.currentTarget.style.boxShadow = `0 12px 32px rgba(0,0,0,0.5), 0 0 20px ${card.accent}44`;
+            }}
+            onMouseLeave={e => {
+              e.currentTarget.style.transform = 'translateY(0)';
+              e.currentTarget.style.boxShadow = 'none';
+            }}>
+            {/* Top accent line */}
+            <div style={{ position:'absolute', top:0, left:0, right:0, height:2, background:`linear-gradient(90deg,transparent,${card.color},transparent)` }} />
+
+            <div style={{ fontSize:'2.4rem', lineHeight:1 }}>{card.icon}</div>
+            <div style={{ fontFamily:'Orbitron,monospace', fontSize:'0.76rem', fontWeight:700, color:card.color }}>{card.label}</div>
+            <div style={{ fontSize:'0.66rem', color:'var(--text3)', lineHeight:1.6 }}>{card.sub}</div>
+
+            {/* Arrow */}
+            <div style={{ marginTop:4, width:32, height:32, borderRadius:'50%', background:`${card.color}18`, border:`1px solid ${card.color}44`, display:'flex', alignItems:'center', justifyContent:'center', fontSize:'0.9rem', color:card.color }}>
+              →
             </div>
           </div>
         ))}
       </div>
 
-      {/* Active section content */}
-      {activeSection === 'contact' && (
-        <div style={{ marginBottom:'1.2rem' }}>
-          <div style={{ fontFamily:'Orbitron,monospace', fontSize:'0.82rem', color:'var(--cyan)', marginBottom:'1rem', display:'flex', alignItems:'center', gap:8 }}>
-            ✉️ Contact Us & Write to Us
-          </div>
-          <ContactSection notify={notify} user={user} />
+      {/* Bottom brand note */}
+      <div style={{ marginTop:'2rem', padding:'1rem', background:'var(--card)', border:'1px solid var(--border)', borderRadius:12, display:'flex', alignItems:'center', gap:12 }}>
+        <div style={{ fontSize:'1.6rem', flexShrink:0 }}>🧭</div>
+        <div>
+          <div style={{ fontFamily:'Orbitron,monospace', fontSize:'0.66rem', color:'var(--cyan)', marginBottom:2 }}>NAVISPHERE<span style={{color:'var(--text3)'}}>X</span> MARINE</div>
+          <div style={{ fontSize:'0.68rem', color:'var(--text3)', lineHeight:1.5 }}>Built by <strong style={{color:'var(--text2)'}}>Manish Bharti · 2nd Officer</strong> · For any help, reach us via Contact Us above.</div>
         </div>
-      )}
-      {activeSection === 'about' && (
-        <div style={{ marginBottom:'1.2rem' }}>
-          <div style={{ fontFamily:'Orbitron,monospace', fontSize:'0.82rem', color:'var(--gold)', marginBottom:'1rem', display:'flex', alignItems:'center', gap:8 }}>
-            🧭 About NavisphereX Marine
-          </div>
-          <AboutSection setActiveSection={setActiveSection} />
-        </div>
-      )}
-      {activeSection === 'legal' && (
-        <div style={{ marginBottom:'1.2rem' }}>
-          <div style={{ fontFamily:'Orbitron,monospace', fontSize:'0.82rem', color:'var(--purple)', marginBottom:'1rem', display:'flex', alignItems:'center', gap:8 }}>
-            ⚖️ Legal & Terms
-          </div>
-          <LegalSection />
-        </div>
-      )}
-      {activeSection === 'faq' && (
-        <div style={{ marginBottom:'1.2rem' }}>
-          <div style={{ fontFamily:'Orbitron,monospace', fontSize:'0.82rem', color:'var(--green)', marginBottom:'1rem', display:'flex', alignItems:'center', gap:8 }}>
-            ❓ Frequently Asked Questions
-          </div>
-          <FAQSection />
-        </div>
-      )}
+      </div>
     </div>
   );
 }
