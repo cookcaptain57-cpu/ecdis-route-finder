@@ -324,7 +324,6 @@ export default function HomePage({ routes, charts, onSearch, setTab, user, ports
     await fetchWeatherByCoords(port.lat, port.lon, port.name);
   };
 
-  // ── ADDED: GPS current weather ─────────────────────────────────────────────
   const fetchGPSWeather = () => {
     if (!navigator.geolocation) { return; }
     setGpsLoading(true);
@@ -364,7 +363,6 @@ export default function HomePage({ routes, charts, onSearch, setTab, user, ports
     { icon:'🪢', label:'KNOTS & MOORING', desc:'Reference guide for knots and mooring.',       tab:'knots',     color:'#00C896', bg:'linear-gradient(135deg,#00C896,#00a87a)' },
     { icon:'🚨', label:'EMERGENCY',       desc:'Emergency procedures & contacts.',             tab:'emergency', color:'#FF4757', bg:'linear-gradient(135deg,#FF4757,#cc2233)' },
     { icon:'🗺', label:'NAV & BRIDGE',    desc:'Navigation and bridge procedures.',            tab:'navbridge', color:'#00B4D8', bg:'linear-gradient(135deg,#00B4D8,#1565C0)' },
-    { icon:'⏱', label:'SEA TIME',        desc:'Log sea service time across all ships.',       tab:'seatime',   color:'#00B4D8', bg:'linear-gradient(135deg,#00B4D8,#1565C0)' },
     { icon:'🧳', label:'CREW JOURNEY',    desc:'Track your career voyage.',                    tab:'crewjourney',color:'#A78BFA',bg:'linear-gradient(135deg,#7C3AED,#A78BFA)' },
     { icon:'🏖', label:'PORT & SHORE',    desc:'Port info, shore leave & services.',           tab:'portshore', color:'#00C896', bg:'linear-gradient(135deg,#00C896,#00a87a)' },
     { icon:'🔭', label:'CELESTIAL NAV',   desc:'Sight reduction & celestial navigation.',      tab:'sights',    color:'#F0A500', bg:'linear-gradient(135deg,#F0A500,#b07000)', badge:'NEW' },
@@ -405,68 +403,97 @@ export default function HomePage({ routes, charts, onSearch, setTab, user, ports
           </div>
         )}
 
-        {/* ── Hero layout: text + weather widget ── */}
-        <div style={{ display:'flex', alignItems:'flex-start', gap:'1.5rem', flexWrap:'wrap' }}>
-          <div style={{ flex:1, minWidth:240 }}>
-            <div style={{ fontSize:'0.6rem', color:'var(--text3)', letterSpacing:'0.18em', marginBottom:'0.5rem', textTransform:'uppercase', display:'flex', gap:6, flexWrap:'wrap' }}>
-              {'SMART NAVIGATION · ROUTES · CHARTS · PORTS · MARITIME LIBRARY'.split('·').map((t,i)=>(<span key={i}>{t.trim()}{i<4?' ·':''}</span>))}
-            </div>
-            <h1 style={{ fontFamily:'Orbitron,monospace', fontSize:'clamp(1.4rem,4vw,2.2rem)', fontWeight:900, letterSpacing:'0.04em', margin:'0 0 0.6rem', lineHeight:1.15 }}>
-              NAVISPHERE<span style={{color:'var(--cyan)'}}>X</span> MARINE
-            </h1>
-            <p style={{ fontSize:'0.86rem', color:'var(--text2)', lineHeight:1.6, marginBottom:'1.2rem', maxWidth:480 }}>
-              Your all-in-one maritime platform for planning, navigation and knowledge.
-              {user && <span style={{color:'var(--cyan)'}}> Welcome{userProfile?.rank?`, ${userProfile.rank} `:', '}{userProfile?.name?.split(' ')[0]||user.email.split('@')[0]}!</span>}
-            </p>
-            <div ref={wRef} style={{ position:'relative', maxWidth:500 }}>
-              <div style={{ display:'flex', gap:8 }}>
-                <div className="siw" style={{flex:1}}>
-                  <span className="si-ic">🔍</span>
-                  <input className="si" style={{paddingLeft:40,fontSize:'0.86rem'}} placeholder="Search routes, charts, ports… type anything" value={q} onChange={e=>{setQ(e.target.value);doSearch(e.target.value);}} onKeyDown={e=>e.key==='Enter'&&q.trim()&&onSearch(q)}/>
-                </div>
-                <button className="btn btn-primary" style={{padding:'0 16px',fontSize:'0.8rem',flexShrink:0}} onClick={()=>{if(q.trim())onSearch(q);}}>Search</button>
+        {/* ── Hero layout: text + search + weather bar ── */}
+        <div ref={wRef} style={{ maxWidth:600 }}>
+          <div style={{ fontSize:'0.6rem', color:'var(--text3)', letterSpacing:'0.18em', marginBottom:'0.5rem', textTransform:'uppercase', display:'flex', gap:6, flexWrap:'wrap' }}>
+            {'SMART NAVIGATION · ROUTES · CHARTS · PORTS · MARITIME LIBRARY'.split('·').map((t,i)=>(<span key={i}>{t.trim()}{i<4?' ·':''}</span>))}
+          </div>
+          <h1 style={{ fontFamily:'Orbitron,monospace', fontSize:'clamp(1.4rem,4vw,2.2rem)', fontWeight:900, letterSpacing:'0.04em', margin:'0 0 0.6rem', lineHeight:1.15 }}>
+            NAVISPHERE<span style={{color:'var(--cyan)'}}>X</span> MARINE
+          </h1>
+          <p style={{ fontSize:'0.86rem', color:'var(--text2)', lineHeight:1.6, marginBottom:'1.2rem', maxWidth:480 }}>
+            Your all-in-one maritime platform for planning, navigation and knowledge.
+            {user && <span style={{color:'var(--cyan)'}}> Welcome{userProfile?.rank?`, ${userProfile.rank} `:', '}{userProfile?.name?.split(' ')[0]||user.email.split('@')[0]}!</span>}
+          </p>
+
+          {/* ── Main search bar ── */}
+          <div style={{ position:'relative', maxWidth:500 }}>
+            <div style={{ display:'flex', gap:8 }}>
+              <div className="siw" style={{flex:1}}>
+                <span className="si-ic">🔍</span>
+                <input className="si" style={{paddingLeft:40,fontSize:'0.86rem'}} placeholder="Search routes, charts, ports… type anything" value={q} onChange={e=>{setQ(e.target.value);doSearch(e.target.value);}} onKeyDown={e=>e.key==='Enter'&&q.trim()&&onSearch(q)}/>
               </div>
-              {qResults.length>0 && (
-                <div style={{ position:'absolute', top:'calc(100% + 6px)', left:0, right:0, zIndex:300, background:'var(--card)', border:'1px solid var(--border)', borderRadius:12, boxShadow:'0 12px 40px rgba(0,0,0,0.6)', overflow:'hidden' }}>
-                  {['route','chart','port'].map(type=>{
-                    const items=qResults.filter(r=>r.type===type); if(!items.length)return null;
-                    const cols={route:'var(--cyan)',chart:'var(--gold)',port:'var(--green)'};
-                    const lbls={route:'Routes',chart:'Charts',port:'Ports'};
-                    return (<div key={type}>
-                      <div style={{padding:'5px 12px',fontSize:'0.58rem',color:'var(--text3)',textTransform:'uppercase',letterSpacing:'0.1em',borderBottom:'1px solid var(--border)',background:'rgba(255,255,255,0.02)'}}>{lbls[type]}</div>
-                      {items.map((r,i)=>(
-                        <div key={i} onMouseDown={()=>{setQ('');setQResults([]);onSearch(r.label);}} style={{padding:'8px 12px',cursor:'pointer',display:'flex',gap:8,alignItems:'center',borderBottom:'1px solid rgba(255,255,255,0.03)'}}
-                          onMouseEnter={e=>e.currentTarget.style.background='rgba(0,180,216,0.07)'}
-                          onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
-                          <span style={{width:7,height:7,borderRadius:'50%',background:cols[type],flexShrink:0}}/>
-                          <div><div style={{fontSize:'0.8rem'}}>{r.label}</div>{r.sub&&<div style={{fontSize:'0.66rem',color:'var(--text3)'}}>{r.sub}</div>}</div>
-                        </div>
-                      ))}
-                    </div>);
-                  })}
-                </div>
-              )}
+              <button className="btn btn-primary" style={{padding:'0 16px',fontSize:'0.8rem',flexShrink:0}} onClick={()=>{if(q.trim())onSearch(q);}}>Search</button>
             </div>
+            {qResults.length>0 && (
+              <div style={{ position:'absolute', top:'calc(100% + 6px)', left:0, right:0, zIndex:300, background:'var(--card)', border:'1px solid var(--border)', borderRadius:12, boxShadow:'0 12px 40px rgba(0,0,0,0.6)', overflow:'hidden' }}>
+                {['route','chart','port'].map(type=>{
+                  const items=qResults.filter(r=>r.type===type); if(!items.length)return null;
+                  const cols={route:'var(--cyan)',chart:'var(--gold)',port:'var(--green)'};
+                  const lbls={route:'Routes',chart:'Charts',port:'Ports'};
+                  return (<div key={type}>
+                    <div style={{padding:'5px 12px',fontSize:'0.58rem',color:'var(--text3)',textTransform:'uppercase',letterSpacing:'0.1em',borderBottom:'1px solid var(--border)',background:'rgba(255,255,255,0.02)'}}>{lbls[type]}</div>
+                    {items.map((r,i)=>(
+                      <div key={i} onMouseDown={()=>{setQ('');setQResults([]);onSearch(r.label);}} style={{padding:'8px 12px',cursor:'pointer',display:'flex',gap:8,alignItems:'center',borderBottom:'1px solid rgba(255,255,255,0.03)'}}
+                        onMouseEnter={e=>e.currentTarget.style.background='rgba(0,180,216,0.07)'}
+                        onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
+                        <span style={{width:7,height:7,borderRadius:'50%',background:cols[type],flexShrink:0}}/>
+                        <div><div style={{fontSize:'0.8rem'}}>{r.label}</div>{r.sub&&<div style={{fontSize:'0.66rem',color:'var(--text3)'}}>{r.sub}</div>}</div>
+                      </div>
+                    ))}
+                  </div>);
+                })}
+              </div>
+            )}
           </div>
 
-          {/* ── WEATHER WIDGET in hero (replaces ship) ── */}
-          <div style={{ flexShrink:0, width:180, background:'rgba(7,20,40,0.7)', border:'1px solid rgba(0,180,216,0.2)', borderRadius:14, padding:'0.9rem', backdropFilter:'blur(10px)' }}>
-            <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:'0.6rem' }}>
+          {/* ── WEATHER WIDGET: elongated rectangle below search ── */}
+          <div style={{
+            marginTop:'0.9rem',
+            background:'rgba(7,20,40,0.75)',
+            border:'1px solid rgba(0,180,216,0.22)',
+            borderRadius:12,
+            padding:'0.6rem 1rem',
+            backdropFilter:'blur(10px)',
+            display:'flex',
+            alignItems:'center',
+            gap:'0.75rem',
+            flexWrap:'wrap',
+            maxWidth:500,
+          }}>
+            {/* Label */}
+            <div style={{ display:'flex', alignItems:'center', gap:6, flexShrink:0 }}>
               <div style={{ width:22, height:22, borderRadius:6, background:'linear-gradient(135deg,var(--cyan),var(--blue))', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'0.8rem' }}>🌊</div>
-              <div style={{ fontFamily:'Orbitron,monospace', fontSize:'0.58rem', color:'var(--cyan)', letterSpacing:'0.08em' }}>WEATHER</div>
+              <div style={{ fontFamily:'Orbitron,monospace', fontSize:'0.56rem', color:'var(--cyan)', letterSpacing:'0.08em', whiteSpace:'nowrap' }}>PORT WEATHER</div>
             </div>
+
+            {/* Divider */}
+            <div style={{ width:1, height:20, background:'rgba(0,180,216,0.2)', flexShrink:0 }} />
+
             {/* GPS button */}
-            <button onClick={fetchGPSWeather} disabled={gpsLoading}
-              style={{ width:'100%', padding:'6px 8px', borderRadius:7, border:'1px solid rgba(0,200,150,0.3)', background:'rgba(0,200,150,0.08)', color:'var(--green)', fontFamily:'Exo 2,sans-serif', fontSize:'0.68rem', cursor:'pointer', marginBottom:'0.5rem', display:'flex', alignItems:'center', justifyContent:'center', gap:5, transition:'all 0.2s' }}
-              onMouseEnter={e=>e.currentTarget.style.background='rgba(0,200,150,0.16)'}
+            <button
+              onClick={fetchGPSWeather}
+              disabled={gpsLoading}
+              style={{ padding:'5px 10px', borderRadius:7, border:'1px solid rgba(0,200,150,0.3)', background:'rgba(0,200,150,0.08)', color:'var(--green)', fontFamily:'Exo 2,sans-serif', fontSize:'0.68rem', cursor:'pointer', display:'flex', alignItems:'center', gap:5, transition:'all 0.2s', flexShrink:0, whiteSpace:'nowrap' }}
+              onMouseEnter={e=>e.currentTarget.style.background='rgba(0,200,150,0.18)'}
               onMouseLeave={e=>e.currentTarget.style.background='rgba(0,200,150,0.08)'}>
-              {gpsLoading?<><div className="spin" style={{width:10,height:10}}/>Locating…</>:<>📍 Use My Location</>}
+              {gpsLoading
+                ? <><div className="spin" style={{width:10,height:10}}/>Locating…</>
+                : <>📍 Use My Location</>
+              }
             </button>
+
             {/* Port search */}
-            <div style={{position:'relative',marginBottom:'0.5rem'}}>
+            <div style={{ position:'relative', flex:1, minWidth:110 }}>
               <div className="siw">
                 <span className="si-ic" style={{fontSize:'0.7rem'}}>⚓</span>
-                <input className="si" style={{paddingLeft:26,fontSize:'0.72rem',padding:'6px 6px 6px 24px'}} placeholder="Search port…" value={weatherQ} onChange={e=>setWeatherQ(e.target.value)}/>
+                <input
+                  className="si"
+                  style={{ paddingLeft:26, fontSize:'0.72rem', padding:'6px 6px 6px 26px' }}
+                  placeholder="Search port…"
+                  value={weatherQ}
+                  onChange={e=>setWeatherQ(e.target.value)}
+                />
               </div>
               {weatherSugg.length>0 && (
                 <div style={{position:'absolute',top:'calc(100% + 3px)',left:0,right:0,zIndex:200,background:'var(--card)',border:'1px solid var(--border)',borderRadius:8,boxShadow:'0 8px 24px rgba(0,0,0,0.5)',overflow:'hidden',maxHeight:140,overflowY:'auto'}}>
@@ -480,19 +507,23 @@ export default function HomePage({ routes, charts, onSearch, setTab, user, ports
                 </div>
               )}
             </div>
-            {/* Weather display */}
-            {weatherLoading && <div style={{textAlign:'center',fontSize:'0.68rem',color:'var(--text3)',padding:'0.4rem 0'}}><div className="spin" style={{width:14,height:14,margin:'0 auto'}}/></div>}
+
+            {/* Weather result inline */}
+            {weatherLoading && (
+              <div className="spin" style={{width:14,height:14,flexShrink:0}}/>
+            )}
             {weather && !weatherLoading && (
-              <div style={{display:'flex',alignItems:'center',gap:8}}>
-                <div style={{fontSize:'1.8rem'}}>{wc?.icon}</div>
+              <div style={{display:'flex',alignItems:'center',gap:6,flexShrink:0}}>
+                <span style={{fontSize:'1.3rem',lineHeight:1}}>{wc?.icon}</span>
                 <div>
-                  <div style={{fontFamily:'Orbitron,monospace',fontSize:'1rem',fontWeight:700,color:'var(--cyan)'}}>{weather.temp}°C</div>
-                  <div style={{fontSize:'0.64rem',color:'var(--text2)'}}>💨 {weather.wind} kts</div>
-                  <div style={{fontSize:'0.6rem',color:'var(--text3)',marginTop:1}}>{weather.port}</div>
+                  <div style={{fontFamily:'Orbitron,monospace',fontSize:'0.86rem',fontWeight:700,color:'var(--cyan)',lineHeight:1}}>{weather.temp}°C</div>
+                  <div style={{fontSize:'0.58rem',color:'var(--text2)',marginTop:1}}>💨 {weather.wind} kts · {weather.port}</div>
                 </div>
               </div>
             )}
-            {!weather && !weatherLoading && <div style={{fontSize:'0.66rem',color:'var(--text3)',textAlign:'center',padding:'0.3rem 0'}}>📍 or search a port</div>}
+            {!weather && !weatherLoading && (
+              <div style={{fontSize:'0.62rem',color:'var(--text3)',flexShrink:0}}>or search a port →</div>
+            )}
           </div>
         </div>
       </div>
@@ -532,7 +563,7 @@ export default function HomePage({ routes, charts, onSearch, setTab, user, ports
           </button>
         </div>
 
-        {/* Tab Customisation Modal — now uses ALL_FEATURES which includes all tabs */}
+        {/* Tab Customisation Modal */}
         {showTabSettings && (
           <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.65)',zIndex:9990,display:'flex',alignItems:'flex-end',justifyContent:'center'}} onClick={e=>e.target===e.currentTarget&&setShowTabSettings(false)}>
             <div style={{background:'var(--card)',border:'1px solid var(--border)',borderRadius:'18px 18px 0 0',padding:'1.4rem',width:'100%',maxWidth:600,maxHeight:'80vh',overflowY:'auto'}}>
@@ -661,7 +692,6 @@ export default function HomePage({ routes, charts, onSearch, setTab, user, ports
         @keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-10px)}}
         .hp-features-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:0.8rem;}
         @media(min-width:640px){.hp-features-grid{grid-template-columns:repeat(3,1fr);}}
-        @media(max-width:480px){.hero-weather{display:none;}}
       `}</style>
     </div>
   );
