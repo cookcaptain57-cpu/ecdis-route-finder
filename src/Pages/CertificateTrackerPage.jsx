@@ -134,37 +134,70 @@ const _key = () => process.env.REACT_APP_GEMINI_API_KEY||'';
 const fileToBase64 = file => new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(r.result.split(',')[1]);r.onerror=reject;r.readAsDataURL(file);});
 
 async function extractCertData(file) {
-  const key=_key();
-  if (!key) throw new Error('NOT_CONFIGURED');
-  const base64=await fileToBase64(file);
-  const mime=file.type==='image/jpg'?'image/jpeg':file.type;
-  // Using gemini-1.5-flash-latest — update to gemini-2.0-flash if quota allows
-  const url=`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${key}`;
-  const res=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
-    contents:[{parts:[{inline_data:{mime_type:mime,data:base64}},{text:`You are a maritime certificate parser. Extract all readable information.
-Return ONLY valid JSON, no markdown:
-{"name":"certificate title","certNo":"number or null","issueDate":"YYYY-MM-DD or null","expiryDate":"YYYY-MM-DD or null","isUnlimited":false,"issuingAuthority":"org or null","holderName":"name or null","category":"Competency/Safety/Medical/Navigation/Engineering/Tanker/Personal/Others","notes":"info or null"}
-Set isUnlimited true if no expiry shown. Return ONLY the JSON.`}]}],
-    generationConfig:{temperature:0.1,maxOutputTokens:1000}
-  })});
+  const token = process.env.REACT_APP_HF_TOKEN || '';
+  if (!token) throw new Error('NOT_CONFIGURED');
+
+  // PDFs cannot be processed by the OCR model directly
+  if (file.type === 'application/pdf') throw new Error('PDF_NOT_SUPPORTED');
+
+  const res = await fetch(
+    'https://api-inference.huggingface.co/models/microsoft/trocr-base-printed',
+    {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': file.type },
+      body: file
+    }
+  );
+
   if (!res.ok) {
-    const e=await res.json();console.error('[Scanner]',e);
-    const msg=e.error?.message||'';
-    if (msg.includes('API_KEY_INVALID')||msg.includes('API key')) throw new Error('INVALID_KEY');
-    if (msg.includes('quota')||msg.includes('QUOTA')||msg.includes('RESOURCE_EXHAUSTED')) throw new Error('QUOTA_EXCEEDED');
-    throw new Error(msg||`HTTP_${res.status}`);
+    const e = await res.json().catch(()=>({}));
+    console.error('[Scanner] HF error:', res.status, e);
+    if (res.status === 503) throw new Error('QUOTA_EXCEEDED'); // model cold-starting, retry shortly
+    if (res.status === 429) throw new Error('QUOTA_EXCEEDED');
+    if (res.status === 401 || res.status === 403) throw new Error('INVALID_KEY');
+    throw new Error(`HTTP_${res.status}`);
   }
-  const data=await res.json();
-  const text=data.candidates?.[0]?.content?.parts?.[0]?.text||'{}';
-  return JSON.parse(text.replace(/```json|```/g,'').trim());
+
+  const data = await res.json();
+  const text = Array.isArray(data) ? (data[0]?.generated_text || '') : (data.generated_text || '');
+  if (!text) throw new Error('NO_TEXT_DETECTED');
+
+  // Basic pattern matching from raw OCR text — OCR returns plain text, not structured data
+  const dateRegex = /(\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4})|(\d{4}[\/\-\.]\d{1,2}[\/\-\.]\d{1,2})/g;
+  const dates = text.match(dateRegex) || [];
+  const certNoMatch = text.match(/[A-Z]{2,}[\-\/]?\d{4,}/);
+
+  const toISO = (d) => {
+    const parts = d.split(/[\/\-\.]/);
+    if (parts.length !== 3) return null;
+    let [a,b,c] = parts;
+    if (a.length === 4) return `${a}-${b.padStart(2,'0')}-${c.padStart(2,'0')}`;
+    if (c.length === 4) return `${c}-${b.padStart(2,'0')}-${a.padStart(2,'0')}`;
+    return null;
+  };
+
+  return {
+    name: null,           // OCR cannot reliably identify certificate type — user selects manually
+    certNo: certNoMatch ? certNoMatch[0] : null,
+    issueDate: dates[0] ? toISO(dates[0]) : null,
+    expiryDate: dates[1] ? toISO(dates[1]) : null,
+    isUnlimited: false,
+    issuingAuthority: null,
+    holderName: null,
+    category: null,
+    notes: text.slice(0, 200) || null
+  };
 }
 
+
 function scanErrorMessage(code) {
-  if (code==='NOT_CONFIGURED') return 'Auto-fill is not available right now.';
-  if (code==='INVALID_KEY')    return 'Auto-fill is not available right now.';
-  if (code==='QUOTA_EXCEEDED') return 'QUOTA_EXCEEDED';
+  if (code==='NOT_CONFIGURED')     return 'Auto-fill is not available right now.';
+  if (code==='INVALID_KEY')        return 'Auto-fill is not available right now.';
+  if (code==='QUOTA_EXCEEDED')     return 'QUOTA_EXCEEDED';
+  if (code==='PDF_NOT_SUPPORTED')  return 'Auto-fill works for photos only — please fill in details for PDF files.';
+  if (code==='NO_TEXT_DETECTED')   return 'Could not detect text — please fill in details manually.';
   if (code?.includes('NetworkError')||code?.includes('fetch')) return 'No internet connection.';
-  return 'Could not read this file automatically.';
+  return 'Could not read this file automatically — please fill in details manually.';
 }
 
 // ─── COMPONENT ────────────────────────────────────────────────────────────────
@@ -795,7 +828,7 @@ function CertificateTrackerPage({user,notify}) {
           <div style={{fontFamily:'Orbitron,monospace',fontSize:'0.78rem',color:'var(--cyan)',marginBottom:'0.8rem'}}>+ Add New Certificate / Document</div>
           <div style={{background:'rgba(0,180,216,0.05)',border:'1px dashed rgba(0,180,216,0.35)',borderRadius:10,padding:'0.9rem',marginBottom:'1rem'}}>
             <div style={{fontSize:'0.76rem',color:'var(--cyan)',fontWeight:700,marginBottom:3}}>✦ Smart Auto-Fill</div>
-            <div style={{fontSize:'0.68rem',color:'var(--text3)',marginBottom:10,lineHeight:1.5}}>Upload a photo or PDF — all details are filled in automatically. You can edit anything after.</div>
+            <div style={{fontSize:'0.68rem',color:'var(--text3)',marginBottom:10,lineHeight:1.5}}>Upload a clear photo of your certificate — we'll try to detect dates and certificate number. Please select the certificate name and category, and verify all details.</div>
             <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
               <input id="add-scan-input" type="file" accept=".pdf,.jpg,.jpeg,.png" style={{display:'none'}} onChange={e=>{if(e.target.files?.[0])handleAddFormScan(e.target.files[0]);e.target.value='';}}/>
               <label htmlFor="add-scan-input" style={{display:'inline-flex',alignItems:'center',gap:6,padding:'7px 14px',borderRadius:8,cursor:scanningAdd?'default':'pointer',fontSize:'0.72rem',fontWeight:700,background:'rgba(0,180,216,0.15)',color:'var(--cyan)',border:'1px solid rgba(0,180,216,0.45)',pointerEvents:scanningAdd?'none':'auto',opacity:scanningAdd?0.7:1}}>
