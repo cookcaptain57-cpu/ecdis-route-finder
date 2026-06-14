@@ -5,30 +5,29 @@ import { useState } from "react";
 export default function ContactFloatingBtn({ setTab }) {
   const [open, setOpen] = useState(false);
 
-  // All options now navigate to 'info' tab (Help & Info combined page)
   const options = [
-    { icon:'✉️', label:'Contact Us',  sub:'Get in touch',       section:'contact' },
-    { icon:'💡', label:'Write to Us', sub:'Suggestions & bugs',  section:'contact' },
-    { icon:'❓', label:'FAQ',          sub:'Quick answers',       section:'faq'     },
-    { icon:'🧭', label:'About',        sub:'About the app',       section:'about'   },
-    { icon:'⚖️', label:'Legal',        sub:'Terms & disclaimer',  section:'legal'   },
+    { icon:'✉️', label:'Contact Us',  sub:'Get in touch',        section:'contact' },
+    { icon:'💡', label:'Write to Us', sub:'Suggestions & bugs',   section:'contact' },
+    { icon:'❓', label:'FAQ',          sub:'Quick answers',        section:'faq'     },
+    { icon:'🧭', label:'About',        sub:'About the app',        section:'about'   },
+    { icon:'⚖️', label:'Legal',        sub:'Terms & disclaimer',   section:'legal'   },
   ];
 
-  const handleNav = () => {
+  const handleNav = (section) => {
     setOpen(false);
+    // Store which section to auto-open in InfoPage
+    sessionStorage.setItem('info_section', section);
     setTab('info');
   };
 
   return (
     <>
-      {/* Backdrop */}
       {open && (
         <div onClick={() => setOpen(false)}
           style={{ position:'fixed', inset:0, zIndex:9997, background:'rgba(0,0,0,0.35)', backdropFilter:'blur(2px)' }}
         />
       )}
 
-      {/* Mini Menu */}
       {open && (
         <div style={{
           position:'fixed', bottom:90, right:20, zIndex:9998,
@@ -42,7 +41,7 @@ export default function ContactFloatingBtn({ setTab }) {
           </div>
           {options.map(opt => (
             <button key={opt.section + opt.label}
-              onClick={handleNav}
+              onClick={() => handleNav(opt.section)}
               style={{ width:'100%', padding:'9px 10px', background:'transparent', border:'none', borderRadius:10, cursor:'pointer', display:'flex', alignItems:'center', gap:10, transition:'background 0.15s', textAlign:'left' }}
               onMouseEnter={e => e.currentTarget.style.background = 'rgba(0,180,216,0.07)'}
               onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
@@ -51,7 +50,6 @@ export default function ContactFloatingBtn({ setTab }) {
                 <div style={{ fontSize:'0.78rem', fontWeight:600, color:'var(--text)' }}>{opt.label}</div>
                 <div style={{ fontSize:'0.62rem', color:'var(--text3)' }}>{opt.sub}</div>
               </div>
-              <span style={{ marginLeft:'auto', fontSize:'0.62rem', color:'var(--text3)' }}>→</span>
             </button>
           ))}
           <div style={{ marginTop:6, borderTop:'1px solid var(--border)', padding:'8px 10px 4px' }}>
@@ -63,7 +61,6 @@ export default function ContactFloatingBtn({ setTab }) {
         </div>
       )}
 
-      {/* Floating Button */}
       <button onClick={() => setOpen(o => !o)} title="Contact / Help"
         style={{
           position:'fixed', bottom:24, right:20, zIndex:9999,
@@ -71,10 +68,10 @@ export default function ContactFloatingBtn({ setTab }) {
           background:open ? 'linear-gradient(135deg,var(--red),#cc2233)' : 'linear-gradient(135deg,var(--cyan),var(--blue))',
           border:'none', cursor:'pointer',
           display:'flex', alignItems:'center', justifyContent:'center',
-          fontSize:open?'1.2rem':'1.4rem',
-          boxShadow:open?'0 6px 24px rgba(255,71,87,0.5)':'0 6px 24px rgba(0,180,216,0.5)',
+          fontSize:open ? '1.2rem' : '1.4rem',
+          boxShadow:open ? '0 6px 24px rgba(255,71,87,0.5)' : '0 6px 24px rgba(0,180,216,0.5)',
           transition:'all 0.25s ease',
-          transform:open?'rotate(45deg) scale(1.05)':'rotate(0deg) scale(1)',
+          transform:open ? 'rotate(45deg) scale(1.05)' : 'rotate(0deg) scale(1)',
         }}>
         {open ? '✕' : '💬'}
       </button>
