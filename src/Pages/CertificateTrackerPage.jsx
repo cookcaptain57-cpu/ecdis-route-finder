@@ -191,13 +191,14 @@ async function extractCertData(file) {
 
 
 function scanErrorMessage(code) {
-  if (code==='NOT_CONFIGURED')     return 'Auto-fill is not available right now.';
-  if (code==='INVALID_KEY')        return 'Auto-fill is not available right now.';
+  // TEMP DEBUG: show raw error code to diagnose. Revert after fixed.
+  if (code==='NOT_CONFIGURED')     return 'DEBUG: Token not configured (env var missing/empty)';
+  if (code==='INVALID_KEY')        return 'DEBUG: Token rejected (401/403 - check permissions)';
   if (code==='QUOTA_EXCEEDED')     return 'QUOTA_EXCEEDED';
   if (code==='PDF_NOT_SUPPORTED')  return 'Auto-fill works for photos only — please fill in details for PDF files.';
-  if (code==='NO_TEXT_DETECTED')   return 'Could not detect text — please fill in details manually.';
+  if (code==='NO_TEXT_DETECTED')   return 'DEBUG: No text detected in image';
   if (code?.includes('NetworkError')||code?.includes('fetch')) return 'No internet connection.';
-  return 'Could not read this file automatically — please fill in details manually.';
+  return 'DEBUG: ' + code;
 }
 
 // ─── COMPONENT ────────────────────────────────────────────────────────────────
