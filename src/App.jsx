@@ -42,6 +42,8 @@ import CrewWelfarePage         from "./Pages/CrewWelfarePage";
 import CrewJourneyPage         from "./Pages/CrewJourneyPage";
 import PortShorePage           from "./Pages/PortShorePage";
 import InfoPage                from "./Pages/InfoPage";
+// ── CHANGE 1: SeaDiaryPage import ──
+import SeaDiaryPage            from "./Pages/SeaDiaryPage";
 
 const S = `
   @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700;900&family=Exo+2:wght@300;400;500;600&display=swap');
@@ -443,7 +445,7 @@ export default function App() {
     localStorage.setItem('notif_read', JSON.stringify([...allIds]));
   };
 
-  // ── Removed contact/about/legal/faq — replaced with single 'info' tab ──
+  // ── CHANGE 2: Added seadiary to TABS (after portshore, before account/admin/info) ──
   const TABS = [
     { k:'home',        i:'🏠', l:'Dashboard' },
     { k:'routes',      i:'🚢', l:'Routes' },
@@ -465,6 +467,7 @@ export default function App() {
     { k:'welfare',     i:'⚓', l:'Crew Welfare' },
     { k:'crewjourney', i:'🧳', l:'Crew Journey' },
     { k:'portshore',   i:'🏖', l:'Port & Shore' },
+    { k:'seadiary',    i:'📔', l:'Sea Diary' },
     ...(user ? [{ k:'account', i:'👤', l:'My Account' }] : []),
     ...(isAdmin ? [{ k:'admin', i:'🛡', l:'Admin' }] : []),
     { k:'info', i:'ℹ️', l:'Help & Info' },
@@ -611,8 +614,9 @@ export default function App() {
               <button key={t.k} className={`si-btn ${t.cls||''} ${tab===t.k?'active':''}`} onClick={() => switchTab(t.k)}>
                 <span className="si-icon">{t.i}</span>
                 {t.l}
-                {t.k==='navmode' && <span style={{ marginLeft:'auto', padding:'1px 5px', borderRadius:4, fontSize:'0.5rem', background:'rgba(0,200,100,0.15)', color:'var(--green)', border:'1px solid rgba(0,200,100,0.25)', fontWeight:700, flexShrink:0 }}>NEW</span>}
-                {t.k==='sights'  && <span style={{ marginLeft:'auto', padding:'1px 5px', borderRadius:4, fontSize:'0.5rem', background:'rgba(240,165,0,0.15)', color:'var(--gold)', border:'1px solid rgba(240,165,0,0.25)', fontWeight:700, flexShrink:0 }}>NEW</span>}
+                {t.k==='navmode'  && <span style={{ marginLeft:'auto', padding:'1px 5px', borderRadius:4, fontSize:'0.5rem', background:'rgba(0,200,100,0.15)', color:'var(--green)', border:'1px solid rgba(0,200,100,0.25)', fontWeight:700, flexShrink:0 }}>NEW</span>}
+                {t.k==='sights'   && <span style={{ marginLeft:'auto', padding:'1px 5px', borderRadius:4, fontSize:'0.5rem', background:'rgba(240,165,0,0.15)', color:'var(--gold)', border:'1px solid rgba(240,165,0,0.25)', fontWeight:700, flexShrink:0 }}>NEW</span>}
+                {t.k==='seadiary' && <span style={{ marginLeft:'auto', padding:'1px 5px', borderRadius:4, fontSize:'0.5rem', background:'rgba(0,180,216,0.15)', color:'var(--cyan)', border:'1px solid rgba(0,180,216,0.25)', fontWeight:700, flexShrink:0 }}>NEW</span>}
               </button>
             ))}
             {user && (
@@ -727,6 +731,8 @@ export default function App() {
             {tab==='welfare'     && <CrewWelfarePage />}
             {tab==='crewjourney' && <CrewJourneyPage user={user} userProfile={userProfile} notify={notify} />}
             {tab==='portshore'   && <PortShorePage user={user} onNavigate={switchTab} />}
+            {/* ── CHANGE 3: SeaDiaryPage render (login-required) ── */}
+            {tab==='seadiary'    && user && <SeaDiaryPage user={user} notify={notify} />}
             {tab==='login'       && <LoginPage notify={notify} onLogin={(u, redirectTo, isNew, userName, userRank) => {
               setUser(u); setTab(redirectTo || 'home');
               if (!sessionStorage.getItem('welcome_shown')) {
