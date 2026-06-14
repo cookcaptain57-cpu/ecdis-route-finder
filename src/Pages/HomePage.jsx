@@ -386,7 +386,7 @@ export default function HomePage({ routes, charts, onSearch, setTab, user, ports
   ];
 
   return (
-    <div style={{ background:'var(--bg)', minHeight:'calc(100vh - 56px)' }}>
+    <div style={{ background:'var(--bg)', minHeight:'calc(100vh - 56px)', display:'flex', flexDirection:'column' }}>
 
       {/* ── Hero Section ── */}
       <div style={{ position:'relative', background:'linear-gradient(135deg,#020810 0%,#040C1A 40%,#071428 70%,#0a1e3a 100%)', overflow:'hidden', padding:'2rem 1.5rem 2.5rem', borderBottom:'1px solid var(--border)' }}>
