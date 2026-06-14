@@ -594,7 +594,12 @@ function FAQSection({ setActiveSection }) {
 
 // ─── MAIN INFO PAGE ───────────────────────────────────────────────────────────
 export default function InfoPage({ notify, user, setTab }) {
-  const [activeSection, setActiveSection] = useState(null);
+  const [activeSection, setActiveSection] = useState(() => {
+    // Auto-open section if navigated from floating button
+    const s = sessionStorage.getItem('info_section');
+    if (s) { sessionStorage.removeItem('info_section'); return s; }
+    return null;
+  });
 
   const CARDS = [
     { id:'contact', icon:'✉️', label:'Contact Us',  sub:'Get in touch · Write to us · Report issues', color:'var(--cyan)',   bg:'linear-gradient(135deg,rgba(0,180,216,0.15),rgba(21,101,192,0.1))',  accent:'rgba(0,180,216,0.4)' },
