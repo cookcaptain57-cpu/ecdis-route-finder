@@ -466,7 +466,7 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
         if(!layersRef.current.ais[v.mmsi])layersRef.current.ais[v.mmsi]={};
         layersRef.current.ais[v.mmsi].mk=mk;
         layersRef.current.ais[v.mmsi].data=liveData;
-        if(cpaTcpa.cpa<1.5&&cpaTcpa.tcpa>0&&cpaTcpa.tcpa<3)notify(`⚠ CPA: ${v.name||v.mmsi} ${cpaTcpa.cpa.toFixed(2)}NM T+${cpaTcpa.tcpa.toFixed(1)}h`,'error');
+        if(cpaTcpa.cpa<1.5&&cpaTcpa.tcpa>0&&cpaTcpa.tcpa<3){playAlarm('collision');notify(`⚠ CPA: ${v.name||v.mmsi} ${cpaTcpa.cpa.toFixed(2)}NM T+${cpaTcpa.tcpa.toFixed(1)}h`,'error');}
       }
 
       const showVec=showAllAisVectors||(selectedAisMmsi===String(v.mmsi));
@@ -480,7 +480,7 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
       if(guardZoneOn&&ownPos&&rangNM!=null&&rangNM<=guardZoneRadiusNM){
         guardBreachers.push(v.name||`MMSI ${v.mmsi}`);
         const key=String(v.mmsi),now2=Date.now();
-        if(!guardZoneAlarmCooldown.current[key]||now2-guardZoneAlarmCooldown.current[key]>30000){guardZoneAlarmCooldown.current[key]=now2;notify(`🔴 GUARD ZONE: ${v.name||v.mmsi} — ${rangNM.toFixed(1)}NM / ${brgDeg?.toFixed(0)}°T`,'error');}
+        if(!guardZoneAlarmCooldown.current[key]||now2-guardZoneAlarmCooldown.current[key]>30000){guardZoneAlarmCooldown.current[key]=now2;playAlarm('guard');notify(`🔴 GUARD ZONE: ${v.name||v.mmsi} — ${rangNM.toFixed(1)}NM / ${brgDeg?.toFixed(0)}°T`,'error');}
       }
     });
 
@@ -514,7 +514,7 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
     const ds=depthSources,hasAny=ds.size>0;
     if(ds.has('usa')){esriBaseRef.current=L.tileLayer('https://server.arcgisonline.com/arcgis/rest/services/Ocean/World_Ocean_Base/MapServer/tile/{z}/{y}/{x}',{maxZoom:13,opacity:0.7,zIndex:2,attribution:'© Esri'}).addTo(m);try{encTileRef.current=L.tileLayer.wms('https://gis.charttools.noaa.gov/arcgis/rest/services/MCS/ENCOnline/MapServer/exts/MaritimeChartService/WMSServer',{layers:'0,1,2,3,4,5,6,7',format:'image/png',transparent:true,version:'1.3.0',opacity:0.9,zIndex:6,attribution:'© NOAA'}).addTo(m);}catch{}}
     if(ds.has('europe')){try{emodnetTileRef.current=L.tileLayer.wms('https://ows.emodnet-bathymetry.eu/wms',{layers:'emodnet:mean_atlas_land,emodnet:mean_rainbowcolour',format:'image/png',transparent:true,version:'1.3.0',opacity:0.6,zIndex:3,attribution:'© EMODnet'}).addTo(m);}catch{}}
-    if(ds.has('global')){try{gebcoWmsRef.current=L.tileLayer.wms('https://wms.gebco.net/mapserv',{layers:'GEBCO_LATEST_2',format:'image/png',transparent:true,version:'1.3.0',opacity:0.45,zIndex:4,attribution:'© GEBCO'}).addTo(m);}catch{}}
+    if(ds.has('global')){try{gebcoWmsRef.current=L.tileLayer.wms('https://wms.gebco.net/mapserv',{layers:'GEBCO_LATEST_2',format:'image/png',transparent:false,version:'1.3.0',opacity:0.5,zIndex:4,attribution:'© GEBCO 2024'}).addTo(m);}catch{}}
     if(ds.has('soundings')){gebcoRefTile.current=L.tileLayer('https://server.arcgisonline.com/arcgis/rest/services/Ocean/World_Ocean_Reference/MapServer/tile/{z}/{y}/{x}',{maxZoom:18,opacity:1.0,zIndex:5,attribution:'© Esri'}).addTo(m);}
     if(ds.has('norway')){try{L.tileLayer.wms('https://wms.geonorge.no/skwms1/wms.dybdedata2',{layers:'dybdedata2,dybdedata2_25m',format:'image/png',transparent:true,version:'1.3.0',opacity:0.65,zIndex:7,attribution:'© Kartverket'}).addTo(m);}catch{}}
     if(ds.has('australia')){try{L.tileLayer.wms('https://www.ga.gov.au/geoserver/marine/wms',{layers:'marine:bathymetry',format:'image/png',transparent:true,version:'1.3.0',opacity:0.6,zIndex:7,attribution:'© Geoscience Australia'}).addTo(m);}catch{}}
@@ -524,6 +524,8 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
     if(ds.has('ireland')){try{L.tileLayer.wms('https://atlas.marine.ie/arcgis/services/Bathymetry/MapServer/WMSServer',{layers:'0',format:'image/png',transparent:true,version:'1.3.0',opacity:0.6,zIndex:7,attribution:'© INFOMAR'}).addTo(m);}catch{}}
     if(ds.has('osm_depth')){try{L.tileLayer('https://tiles.openseamap.org/depth/{z}/{x}/{y}.png',{maxZoom:18,opacity:0.8,zIndex:8,attribution:'© OpenSeaMap'}).addTo(m);}catch{}}
     if(ds.has('china')||ds.has('indonesia')){loadIndonesiaEnc();}else{removeIndonesiaEnc();}
+    // Additional regional ENC overlays using OpenSeaMap tiles (work globally)
+    if(ds.has('japan')){try{L.tileLayer('https://map.openseamap.org/chart/seamark/{z}/{x}/{y}.png',{maxZoom:17,opacity:0.7,zIndex:8,attribution:'© OpenSeaMap'}).addTo(m);}catch{}}
     seamarkRef.current=L.tileLayer('https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png',{opacity:hasAny?0.9:0.55,maxZoom:18,zIndex:10,attribution:'© OpenSeaMap'}).addTo(m);
   },[depthSources,mapMode,mapReady]);
 
@@ -621,7 +623,7 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
     if(livePos.sog<0.2){setEtaResult(null);return;}
     // Only recalculate ETA every 5 seconds max
     const now=Date.now();
-    if(now-etaThrottleRef.current<5000)return;
+    if(now-etaThrottleRef.current<2000)return;
     etaThrottleRef.current=now;
     const wps=activeRoute.waypoints,ti=Math.min(Math.max(selectedWpIdx,0),wps.length-1);
     const legSum=(a,b)=>{let d=0;for(let i=a;i<b;i++)d+=distNM(wps[i].lat,wps[i].lon,wps[i+1].lat,wps[i+1].lon);return d;};
@@ -702,10 +704,10 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
     Object.entries(zoneData).forEach(([k,cfg])=>{if(!zoneOverlays[k])return;const lg=L.layerGroup();(cfg.zones||[]).forEach(z=>{const zColor=(cfg.useZoneColor&&z.color)?z.color:cfg.color;const coords=(z.coords||[]).map(p=>Array.isArray(p)?p:[p[0],p[1]]);if(coords.length<3)return;L.polygon(coords,{color:zColor,fillColor:zColor,fillOpacity:cfg.fill,weight:cfg.useZoneColor?2:1.5,opacity:0.85,dashArray:cfg.dashed?'8 5':null,pane:'zonePane'}).bindPopup(`<div style="font-size:12px"><b style="color:${zColor}">${z.name||k}</b><br/><small>${z.shortDesc||''}</small></div>`,{maxWidth:260}).addTo(lg);try{const center=L.polygon(coords).getBounds().getCenter();L.marker([center.lat,center.lng],{icon:L.divIcon({html:`<div style="background:rgba(0,0,0,0.75);color:${zColor};border:1px solid ${zColor}55;border-radius:3px;padding:2px 5px;font-size:9px;font-weight:700;white-space:nowrap;font-family:monospace;pointer-events:none;">${z.name||k}</div>`,className:'',iconSize:[0,0],iconAnchor:[0,0]}),interactive:false,pane:'zonePane'}).addTo(lg);}catch{}});lg.addTo(m);lrs.zones[k]=lg;});
   },[zoneOverlays,mapReady]);
 
-  useEffect(()=>{if(!anchorWatchOn||!anchorPos||!livePos)return;const dist=distNM(livePos.lat,livePos.lon,anchorPos.lat,anchorPos.lon);if(dist>anchorRadius){const now=Date.now();if(now-anchorAlarmCooldownRef.current>20000){anchorAlarmCooldownRef.current=now;setAnchorAlarm(true);notify(`⚓ ANCHOR DRAGGING — ${dist.toFixed(2)}NM!`,'error');setTimeout(()=>setAnchorAlarm(false),10000);}}else{setAnchorAlarm(false);}},[livePos,anchorPos,anchorRadius,anchorWatchOn]);
+  useEffect(()=>{if(!anchorWatchOn||!anchorPos||!livePos)return;const dist=distNM(livePos.lat,livePos.lon,anchorPos.lat,anchorPos.lon);if(dist>anchorRadius){const now=Date.now();if(now-anchorAlarmCooldownRef.current>20000){anchorAlarmCooldownRef.current=now;setAnchorAlarm(true);playAlarm('anchor');notify(`⚓ ANCHOR DRAGGING — ${dist.toFixed(2)}NM!`,'error');setTimeout(()=>setAnchorAlarm(false),10000);}}else{setAnchorAlarm(false);}},[livePos,anchorPos,anchorRadius,anchorWatchOn]);
   useEffect(()=>{if(!mapReady||!leafRef.current||!window.L)return;const L=window.L,m=leafRef.current;if(layersRef.current.anchorCircle){try{m.removeLayer(layersRef.current.anchorCircle);}catch{}layersRef.current.anchorCircle=null;}if(anchorWatchOn&&anchorPos){layersRef.current.anchorCircle=L.circle([anchorPos.lat,anchorPos.lon],{radius:anchorRadius*1852,color:anchorAlarm?'#FF2020':'#FFD700',fillColor:anchorAlarm?'#FF2020':'#FFD700',fillOpacity:0.08,weight:2,dashArray:'6 4'}).addTo(m);}},[anchorWatchOn,anchorPos,anchorRadius,anchorAlarm,mapReady]);
-  useEffect(()=>{if(!livePos||speedAlarmKn<=0)return;if(livePos.sog>speedAlarmKn){if(!speedAlarmTriggered){setSpeedAlarmTriggered(true);notify(`⚠ OVERSPEED — ${livePos.sog.toFixed(1)}kn / limit ${speedAlarmKn}kn`,'error');}}else{setSpeedAlarmTriggered(false);}},[livePos,speedAlarmKn]);
-  useEffect(()=>{if(!livePos||!activeRoute?.waypoints?.length)return;const wps=activeRoute.waypoints,ti=Math.min(Math.max(selectedWpIdx,0),wps.length-1);const dist=distNM(livePos.lat,livePos.lon,wps[ti].lat,wps[ti].lon);if(dist<wpArrivalNM){const now=Date.now();if(now-wpAlarmCooldownRef.current>15000){wpAlarmCooldownRef.current=now;const wpName=wps[ti].name||`WP${String(ti+1).padStart(2,'0')}`;notify(`📍 Arriving at ${wpName} — ${dist.toFixed(2)}NM`,'error');if(ti<wps.length-1)setSelectedWpIdx(ti+1);else notify('🏁 Final waypoint reached!','error');}}},[livePos,activeRoute,selectedWpIdx,wpArrivalNM]);
+  useEffect(()=>{if(!livePos||speedAlarmKn<=0)return;if(livePos.sog>speedAlarmKn){if(!speedAlarmTriggered){setSpeedAlarmTriggered(true);playAlarm('speed');notify(`⚠ OVERSPEED — ${livePos.sog.toFixed(1)}kn / limit ${speedAlarmKn}kn`,'error');}}else{setSpeedAlarmTriggered(false);}},[livePos,speedAlarmKn]);
+  useEffect(()=>{if(!livePos||!activeRoute?.waypoints?.length)return;const wps=activeRoute.waypoints,ti=Math.min(Math.max(selectedWpIdx,0),wps.length-1);const dist=distNM(livePos.lat,livePos.lon,wps[ti].lat,wps[ti].lon);if(dist<wpArrivalNM){const now=Date.now();if(now-wpAlarmCooldownRef.current>15000){wpAlarmCooldownRef.current=now;const wpName=wps[ti].name||`WP${String(ti+1).padStart(2,'0')}`;playAlarm('wp');notify(`📍 Arriving at ${wpName} — ${dist.toFixed(2)}NM`,'error');if(ti<wps.length-1)setSelectedWpIdx(ti+1);else notify('🏁 Final waypoint reached!','error');}}},[livePos,activeRoute,selectedWpIdx,wpArrivalNM]);
   const offTrackThrottleRef=useRef(0);
   useEffect(()=>{
     if(!livePos||!activeRoute?.waypoints?.length){setOffTrackAlarm(false);return;}
@@ -716,8 +718,8 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
     const wps=activeRoute.waypoints;let minXTD=Infinity;
     for(let i=0;i<wps.length-1;i++){const legBrg=brg(wps[i].lat,wps[i].lon,wps[i+1].lat,wps[i+1].lon);const shipBrg=brg(wps[i].lat,wps[i].lon,livePos.lat,livePos.lon);const shipDist=distNM(wps[i].lat,wps[i].lon,livePos.lat,livePos.lon);const angle=((legBrg-shipBrg)+540)%360-180;const along=shipDist*Math.cos(angle*Math.PI/180);const legLen=distNM(wps[i].lat,wps[i].lon,wps[i+1].lat,wps[i+1].lon);if(along>=0&&along<=legLen+0.5){const xtd=Math.abs(shipDist*Math.sin(angle*Math.PI/180));if(xtd<minXTD)minXTD=xtd;}}
     if(minXTD===Infinity)minXTD=distNM(livePos.lat,livePos.lon,wps[selectedWpIdx]?.lat||wps[0].lat,wps[selectedWpIdx]?.lon||wps[0].lon);
-    const threshold=offTrackNM||xtdNM;
-    if(minXTD>threshold){setOffTrackAlarm(true);const now=Date.now();if(!alarmCooldownRef.current.offtrack||now-alarmCooldownRef.current.offtrack>30000){alarmCooldownRef.current.offtrack=now;notify(`⚠ OFF TRACK — ${minXTD.toFixed(2)}NM (limit ${threshold}NM)`,'error');}}
+    const threshold=xtdNM; // Off-track alarm uses XTD corridor width
+    if(minXTD>threshold){setOffTrackAlarm(true);const now=Date.now();if(!alarmCooldownRef.current.offtrack||now-alarmCooldownRef.current.offtrack>30000){alarmCooldownRef.current.offtrack=now;playAlarm('offtrack');notify(`⚠ OFF TRACK — ${minXTD.toFixed(2)}NM (limit ${threshold}NM)`,'error');}}
     else setOffTrackAlarm(false);
   },[livePos,activeRoute,offTrackNM,xtdNM,selectedWpIdx]);
   useEffect(()=>{
@@ -740,6 +742,34 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
   const onTM=e=>{if(!hudDragRef.current)return;e.stopPropagation();const t=e.touches[0];setHudPos({x:Math.max(0,Math.min(window.innerWidth-185,t.clientX-hudDragRef.current.dx)),y:Math.max(50,Math.min(window.innerHeight-200,t.clientY-hudDragRef.current.dy))});};
   const onTE=()=>{hudDragRef.current=null;};
   const toggleDepth=id=>{setDepthSources(prev=>{const next=new Set(prev);if(next.has(id))next.delete(id);else next.add(id);return next;});};
+
+  // ── Audible alarms — Web Audio API, no external files needed ──
+  const playAlarm=useCallback((type='alert')=>{
+    try{
+      const ctx=new(window.AudioContext||window.webkitAudioContext)();
+      const patterns={
+        collision:[[880,0.15],[0,0.05],[880,0.15],[0,0.05],[880,0.3]],
+        offtrack:[[440,0.3],[0,0.1],[440,0.3]],
+        anchor:[[330,0.2],[550,0.2],[330,0.2],[550,0.4]],
+        guard:[[660,0.1],[0,0.05],[660,0.1],[0,0.05],[660,0.1],[0,0.05],[660,0.4]],
+        speed:[[220,0.5]],
+        wp:[[880,0.1],[0,0.05],[1100,0.2]],
+        alert:[[440,0.3]],
+      };
+      const seq=patterns[type]||patterns.alert;
+      let t=ctx.currentTime+0.05;
+      seq.forEach(([freq,dur])=>{
+        if(freq>0){
+          const o=ctx.createOscillator(),g=ctx.createGain();
+          o.connect(g);g.connect(ctx.destination);
+          o.frequency.value=freq;o.type='sine';
+          g.gain.setValueAtTime(0.4,t);g.gain.exponentialRampToValueAtTime(0.001,t+dur);
+          o.start(t);o.stop(t+dur+0.01);
+        }
+        t+=dur+0.01;
+      });
+    }catch(e){console.warn('[alarm]',e);}
+  },[]);
   const S={bg:'rgba(4,12,26,0.97)',bd:'rgba(0,212,255,0.28)',tx:'#D0E8F8',dm:'#5A7A90',vd:'#243850',cy:'#00D4FF',gn:'#00FF88',gd:'#FFD700',rd:'#FF4757',sm:'0.78rem',xs:'0.68rem',lb:'0.58rem'};
   // Read popup data from ref at render time — updated by AIS loop without setState
   const aisPopupData=aisPopup?aisPopupDataRef.current:null;
@@ -970,23 +1000,11 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
 
           {activePanel==='ais_src'&&(<div style={{display:'flex',flexDirection:'column',gap:6}}>
             <div style={{color:S.dm,fontSize:S.lb,marginBottom:2}}>AIS SOURCE</div>
-            {[['safepilot','🛡 SafePilot P3','#00FF88'],['bridge','🖥 Local Bridge','#00D4FF'],['internet','🌐 Internet','#FFD700'],['off','⭕ Off','#4A6080']].map(([id,lb,col])=>(<label key={id} style={{display:'flex',alignItems:'center',gap:6,cursor:'pointer',fontSize:'0.72rem',color:aisSource===id?col:S.dm,background:aisSource===id?`${col}18`:'transparent',border:`1px solid ${aisSource===id?col+'50':'transparent'}`,borderRadius:5,padding:'4px 8px',minHeight:26}}><input type="radio" name="aisSrc" value={id} checked={aisSource===id} onChange={()=>setAisSource(id)} style={{accentColor:col}}/><span style={{flex:1}}>{lb}</span>{aisSource===id&&id!=='off'&&<span style={{fontSize:'0.6rem',color:(aisSource==='internet'?aisStatus:localAisStatus)==='connected'?'#00FF88':'#FFD700'}}>{(aisSource==='internet'?aisStatus:localAisStatus)==='connected'?`✅${aisSource==='internet'?Object.keys(aisTargets).length:localAisCount}`:'⏳'}</span>}</label>))}
+            {[['bridge','📡 AIS PILOT (WiFi)','#00FF88'],['internet','🌐 Internet','#FFD700'],['off','⭕ Off','#4A6080']].map(([id,lb,col])=>(<label key={id} style={{display:'flex',alignItems:'center',gap:6,cursor:'pointer',fontSize:'0.72rem',color:aisSource===id?col:S.dm,background:aisSource===id?`${col}18`:'transparent',border:`1px solid ${aisSource===id?col+'50':'transparent'}`,borderRadius:5,padding:'4px 8px',minHeight:26}}><input type="radio" name="aisSrc" value={id} checked={aisSource===id} onChange={()=>setAisSource(id)} style={{accentColor:col}}/><span style={{flex:1}}>{lb}</span>{aisSource===id&&id!=='off'&&<span style={{fontSize:'0.6rem',color:(aisSource==='internet'?aisStatus:localAisStatus)==='connected'?'#00FF88':'#FFD700'}}>{(aisSource==='internet'?aisStatus:localAisStatus)==='connected'?`✅${aisSource==='internet'?Object.keys(aisTargets).length:localAisCount}`:'⏳'}</span>}</label>))}
             {aisSource==='bridge'&&(
               <div style={{display:'flex',flexDirection:'column',gap:4}}>
                 <input value={localAisHost} onChange={e=>setLocalAisHost(e.target.value)} placeholder="ws://192.168.x.x:4002" style={{width:'100%',boxSizing:'border-box',background:'#06101C',color:S.cy,border:'1px solid #1A3050',borderRadius:4,padding:'5px 7px',fontSize:'0.63rem',outline:'none'}}/>
-                <div style={{background:'rgba(0,212,255,0.05)',border:'1px solid rgba(0,212,255,0.18)',borderRadius:6,padding:'7px 9px'}}>
-                  <div style={{color:S.gd,fontSize:'0.6rem',fontWeight:700,marginBottom:4}}>📱 One Termux is enough</div>
-                  <div style={{color:S.dm,fontSize:'0.55rem',lineHeight:1.7}}>
-                    Only the phone with AIS WiFi needs Termux running.<br/>
-                    All other devices on the same WiFi connect to its IP.<br/><br/>
-                    <span style={{color:S.cy}}>On Termux phone:</span><br/>
-                    1. Connect to SafePilot/AIS WiFi<br/>
-                    2. Start bridge on port 4002<br/>
-                    3. Get IP: <span style={{color:S.gn,fontFamily:'monospace'}}>ip addr show wlan0</span><br/><br/>
-                    <span style={{color:S.cy}}>On this phone:</span><br/>
-                    Enter <span style={{color:S.gn,fontFamily:'monospace'}}>ws://THAT_IP:4002</span> above
-                  </div>
-                </div>
+
               </div>
             )}
             <div style={{borderTop:'1px solid rgba(0,212,255,0.1)',paddingTop:5}}>
