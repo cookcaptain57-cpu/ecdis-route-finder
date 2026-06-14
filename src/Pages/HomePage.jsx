@@ -403,8 +403,9 @@ export default function HomePage({ routes, charts, onSearch, setTab, user, ports
           </div>
         )}
 
-        {/* ── Hero layout: text + search + weather bar ── */}
-        <div ref={wRef} style={{ maxWidth:600 }}>
+        {/* ── Hero layout: left=text+search, right=weather ── */}
+        <div style={{ display:'flex', alignItems:'flex-start', gap:'1.5rem', flexWrap:'wrap' }}>
+        <div ref={wRef} style={{ flex:1, minWidth:240 }}>
           <div style={{ fontSize:'0.6rem', color:'var(--text3)', letterSpacing:'0.18em', marginBottom:'0.5rem', textTransform:'uppercase', display:'flex', gap:6, flexWrap:'wrap' }}>
             {'SMART NAVIGATION · ROUTES · CHARTS · PORTS · MARITIME LIBRARY'.split('·').map((t,i)=>(<span key={i}>{t.trim()}{i<4?' ·':''}</span>))}
           </div>
@@ -525,6 +526,7 @@ export default function HomePage({ routes, charts, onSearch, setTab, user, ports
               <div style={{fontSize:'0.62rem',color:'var(--text3)',flexShrink:0}}>or search a port →</div>
             )}
           </div>
+        </div>
         </div>
       </div>
 
