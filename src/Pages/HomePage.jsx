@@ -5,7 +5,7 @@ import { collection, getDocs, query, orderBy, limit, getDoc, doc } from "firebas
 import { idbGet } from "../sheets";
 
 // ─── OpenRouter config — never shown in UI ────────────────────────────────────
-const _K = "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";
+const _K = process.env.REACT_APP_OR_KEY;
 const _U = "https://openrouter.ai/api/v1/chat/completions";
 const _M = "meta-llama/llama-3.1-8b-instruct:free";
 
