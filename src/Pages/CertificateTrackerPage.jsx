@@ -134,71 +134,75 @@ const _key = () => process.env.REACT_APP_GEMINI_API_KEY||'';
 const fileToBase64 = file => new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(r.result.split(',')[1]);r.onerror=reject;r.readAsDataURL(file);});
 
 async function extractCertData(file) {
-  const token = process.env.REACT_APP_HF_TOKEN || '';
-  if (!token) throw new Error('NOT_CONFIGURED');
-
-  // PDFs cannot be processed by the OCR model directly
+  // Calls our own Vercel serverless function /api/scan
+  // Token never touches the browser - handled server-side only
   if (file.type === 'application/pdf') throw new Error('PDF_NOT_SUPPORTED');
 
-  const res = await fetch(
-    'https://api-inference.huggingface.co/models/microsoft/trocr-base-printed',
-    {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': file.type },
-      body: file
-    }
-  );
+  const base64 = await fileToBase64(file);
 
-  if (!res.ok) {
-    const e = await res.json().catch(()=>({}));
-    console.error('[Scanner] HF error:', res.status, e);
-    if (res.status === 503) throw new Error('QUOTA_EXCEEDED'); // model cold-starting, retry shortly
-    if (res.status === 429) throw new Error('QUOTA_EXCEEDED');
-    if (res.status === 401 || res.status === 403) throw new Error('INVALID_KEY');
-    throw new Error(`HTTP_${res.status}`);
+  const res = await fetch('/api/scan', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ image: base64, mimeType: file.type === 'image/jpg' ? 'image/jpeg' : file.type }),
+  });
+
+  if (!res.ok) throw new Error(`HTTP_${res.status}`);
+
+  const json = await res.json();
+
+  // Server returned a known error code
+  if (json.error) {
+    console.error('[Scanner] Server error:', json.error, json.status, json.detail || json.message || '');
+    if (json.error === 'NOT_CONFIGURED')   throw new Error('NOT_CONFIGURED');
+    if (json.status === 401 || json.status === 403) throw new Error('INVALID_KEY');
+    if (json.status === 503 || json.status === 429) throw new Error('QUOTA_EXCEEDED');
+    throw new Error(json.error || 'SERVER_ERROR');
   }
 
-  const data = await res.json();
-  const text = Array.isArray(data) ? (data[0]?.generated_text || '') : (data.generated_text || '');
+  const data = json.data;
+  const text = Array.isArray(data)
+    ? (data[0]?.generated_text || '')
+    : (data?.generated_text || '');
+
   if (!text) throw new Error('NO_TEXT_DETECTED');
 
-  // Basic pattern matching from raw OCR text — OCR returns plain text, not structured data
-  const dateRegex = /(\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4})|(\d{4}[\/\-\.]\d{1,2}[\/\-\.]\d{1,2})/g;
-  const dates = text.match(dateRegex) || [];
+  // Pattern-match dates and cert number from raw OCR text
+  const dateRegex = /(\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4})|(\d{4}[\-\/]\d{1,2}[\-\/]\d{1,2})/g;
+  const dates     = text.match(dateRegex) || [];
   const certNoMatch = text.match(/[A-Z]{2,}[\-\/]?\d{4,}/);
 
   const toISO = (d) => {
     const parts = d.split(/[\/\-\.]/);
     if (parts.length !== 3) return null;
-    let [a,b,c] = parts;
+    let [a, b, c] = parts;
     if (a.length === 4) return `${a}-${b.padStart(2,'0')}-${c.padStart(2,'0')}`;
     if (c.length === 4) return `${c}-${b.padStart(2,'0')}-${a.padStart(2,'0')}`;
     return null;
   };
 
   return {
-    name: null,           // OCR cannot reliably identify certificate type — user selects manually
-    certNo: certNoMatch ? certNoMatch[0] : null,
-    issueDate: dates[0] ? toISO(dates[0]) : null,
-    expiryDate: dates[1] ? toISO(dates[1]) : null,
-    isUnlimited: false,
+    name:             null,
+    certNo:           certNoMatch ? certNoMatch[0] : null,
+    issueDate:        dates[0] ? toISO(dates[0]) : null,
+    expiryDate:       dates[1] ? toISO(dates[1]) : null,
+    isUnlimited:      false,
     issuingAuthority: null,
-    holderName: null,
-    category: null,
-    notes: text.slice(0, 200) || null
+    holderName:       null,
+    category:         null,
+    notes:            text.slice(0, 200) || null,
   };
 }
 
 
+
 function scanErrorMessage(code) {
-  // TEMP DEBUG: show raw error code to diagnose. Revert after fixed.
-  if (code==='NOT_CONFIGURED')     return 'DEBUG: Token not configured (env var missing/empty)';
-  if (code==='INVALID_KEY')        return 'DEBUG: Token rejected (401/403 - check permissions)';
+  if (code==='NOT_CONFIGURED')     return 'Auto-fill is not available right now.';
+  if (code==='INVALID_KEY')        return 'Auto-fill is not available right now.';
   if (code==='QUOTA_EXCEEDED')     return 'QUOTA_EXCEEDED';
-  if (code==='PDF_NOT_SUPPORTED')  return 'Auto-fill works for photos only — please fill in details for PDF files.';
-  if (code==='NO_TEXT_DETECTED')   return 'DEBUG: No text detected in image';
-  if (code?.includes('NetworkError')||code?.includes('fetch')) return 'No internet connection.';
-  return 'DEBUG: ' + code;
+  if (code==='PDF_NOT_SUPPORTED')  return 'Auto-fill works for photos only — please fill in the details manually for PDF files.';
+  if (code==='NO_TEXT_DETECTED')   return 'Could not detect text in this image — please fill in details manually.';
+  if (code?.includes('NetworkError')||code?.includes('fetch')||code?.includes('HTTP_')) return 'Connection error — please check your internet and try again.';
+  return 'Could not read this file automatically — please fill in details manually.';
 }
 
 // ─── COMPONENT ────────────────────────────────────────────────────────────────
