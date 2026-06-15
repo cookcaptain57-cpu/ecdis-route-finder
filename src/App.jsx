@@ -732,7 +732,7 @@ export default function App() {
             {tab==='crewjourney' && <CrewJourneyPage user={user} userProfile={userProfile} notify={notify} />}
             {tab==='portshore'   && <PortShorePage user={user} onNavigate={switchTab} />}
             {/* ── CHANGE 3: SeaDiaryPage render (login-required) ── */}
-            {tab==='seadiary'    && user && <SeaDiaryPage user={user} notify={notify} />}
+            {tab==='seadiary'    && user && <SeaDiaryPage user={user} notify={notify} portsDb={portsDb} />}
             {tab==='login'       && <LoginPage notify={notify} onLogin={(u, redirectTo, isNew, userName, userRank) => {
               setUser(u); setTab(redirectTo || 'home');
               if (!sessionStorage.getItem('welcome_shown')) {
