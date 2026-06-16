@@ -54,8 +54,6 @@ function greatCircle(lat1,lon1,lat2,lon2,n){
 
 // ══════════════════════════════════════════════════════════════════════════════
 // PRIMARY ROUTING: /api/route Vercel serverless function
-// Backed by: Render.com Python searoute service OR Searoutes.com API
-// Both give land-validated, TSS-aware, proper shipping lane routes.
 // ══════════════════════════════════════════════════════════════════════════════
 
 async function _routeViaAPI(fromLat,fromLon,toLat,toLon){
@@ -77,14 +75,13 @@ async function _routeViaAPI(fromLat,fromLon,toLat,toLon){
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// FALLBACK: worldroutens.json A* (used when API not configured)
-// Has known land-crossing issues near complex coastlines — use API for production
+// MARNET FALLBACK: worldroutens.json A*
 // ══════════════════════════════════════════════════════════════════════════════
 
 let _ready=false,_loading=null,_nodes={},_adj={},_grid={};
-const GRID_DEG=0.25; // FIX 2: tight grid
+const GRID_DEG=0.25;
 
-function _nk(lat,lon){ return `${lat.toFixed(5)},${lon.toFixed(5)}`; } // FIX 3: 1m precision
+function _nk(lat,lon){ return `${lat.toFixed(5)},${lon.toFixed(5)}`; }
 
 function _addNode(lon,lat){
   const k=_nk(lat,lon);
@@ -96,24 +93,25 @@ function _addNode(lon,lat){
   }
   return k;
 }
-function _addEdge(k1,k2,dist){
+function _addEdge(k1,k2,dist,passTag){
   if(!_adj[k1])_adj[k1]=[];if(!_adj[k2])_adj[k2]=[];
-  if(!_adj[k1].some(e=>e.to===k2))_adj[k1].push({to:k2,dist});
-  if(!_adj[k2].some(e=>e.to===k1))_adj[k2].push({to:k1,dist});
+  if(!_adj[k1].some(e=>e.to===k2))_adj[k1].push({to:k2,dist,pass:passTag});
+  if(!_adj[k2].some(e=>e.to===k1))_adj[k2].push({to:k1,dist,pass:passTag});
 }
 function _parseNetwork(data){
   _nodes={};_adj={};_grid={};
   if(data.type==='FeatureCollection'&&Array.isArray(data.features)){
     data.features.forEach(f=>{
       const geom=f.geometry;if(!geom)return;
+      const passTag=f.properties?.pass||null;
       const process=(coords)=>{
         for(let i=0;i<coords.length-1;i++){
           const[lon1,lat1]=coords[i],[lon2,lat2]=coords[i+1];
           if(isNaN(lat1)||isNaN(lon1)||isNaN(lat2)||isNaN(lon2))return;
           const dist=haversine(lat1,lon1,lat2,lon2);
-          if(dist>300)return; // FIX 5: reject impossible edges
+          if(dist>300)return;
           const k1=_addNode(lon1,lat1),k2=_addNode(lon2,lat2);
-          _addEdge(k1,k2,dist);
+          _addEdge(k1,k2,dist,passTag);
         }
       };
       if(geom.type==='LineString')process(geom.coordinates);
@@ -128,9 +126,9 @@ function _ensureNetwork(){
     _parseNetwork(data);
     const nc=Object.keys(_nodes).length;
     if(nc<10)throw new Error('Too few nodes');
-    console.log(`[Router] Fallback network: ${nc.toLocaleString()} nodes`);
+    console.log(`[Router] MARNET network: ${nc.toLocaleString()} nodes`);
     _ready=true;return true;
-  }).catch(e=>{console.warn('[Router] Network load failed:',e.message);_loading=null;return false;});
+  }).catch(e=>{console.warn('[Router] MARNET load failed:',e.message);_loading=null;return false;});
   return _loading;
 }
 function _nearestNodesMulti(lat,lon,count=10){
@@ -143,24 +141,382 @@ function _nearestNodesMulti(lat,lon,count=10){
     }
     if(found.length>=count&&found.some(n=>n._d<20))break;
   }
-  return found.filter(n=>n._d<=20).sort((a,b)=>a._d-b._d).slice(0,count); // FIX 1: 20 NM max
+  return found.filter(n=>n._d<=20).sort((a,b)=>a._d-b._d).slice(0,count);
 }
+
+// ── MARNET canal-aware A* ─────────────────────────────────────────────────────
+// canalPref: 'suez'|'panama'|'cape'|'auto'
+// Applies a cost penalty to canal edges the user wants to avoid
+const CANAL_AVOID_COST = 99999;
+
 class _MinHeap{constructor(){this.h=[];}push(p,k){this.h.push([p,k]);this._up(this.h.length-1);}pop(){const t=this.h[0],l=this.h.pop();if(this.h.length>0){this.h[0]=l;this._dn(0);}return t;}get size(){return this.h.length;}_up(i){while(i>0){const p=(i-1)>>1;if(this.h[p][0]<=this.h[i][0])break;[this.h[p],this.h[i]]=[this.h[i],this.h[p]];i=p;}}_dn(i){const n=this.h.length;for(;;){let m=i,l=2*i+1,r=2*i+2;if(l<n&&this.h[l][0]<this.h[m][0])m=l;if(r<n&&this.h[r][0]<this.h[m][0])m=r;if(m===i)break;[this.h[m],this.h[i]]=[this.h[i],this.h[m]];i=m;}}}
-function _aStar(startK,endK,endLat,endLon){
+
+function _edgeCost(edge, canalPref){
+  const pass = edge.pass;
+  if(!pass || canalPref === 'auto') return edge.dist;
+  // User wants Suez → penalise Panama/Cape edges
+  if(canalPref === 'suez'){
+    if(pass === 'panama' || pass === 'magellan') return edge.dist + CANAL_AVOID_COST;
+    return edge.dist;
+  }
+  // User wants Panama → penalise Suez edges
+  if(canalPref === 'panama'){
+    if(pass === 'suez' || pass === 'babelmandeb') return edge.dist + CANAL_AVOID_COST;
+    return edge.dist;
+  }
+  // User wants Cape → penalise both Suez and Panama
+  if(canalPref === 'cape'){
+    if(pass === 'suez' || pass === 'babelmandeb' || pass === 'panama' || pass === 'magellan') return edge.dist + CANAL_AVOID_COST;
+    return edge.dist;
+  }
+  return edge.dist;
+}
+
+function _aStarMarnet(startK,endK,endLat,endLon,canalPref='auto'){
   const dist={[startK]:0},prev={};
   const pq=new _MinHeap();const vis=new Set();pq.push(0,startK);let iter=0;
-  while(pq.size>0){if(iter++>500000)break;const[,curr]=pq.pop();if(curr===endK)break;if(vis.has(curr))continue;vis.add(curr);
-    for(const{to,dist:d} of (_adj[curr]||[])){if(vis.has(to))continue;const nd=(dist[curr]??Infinity)+d;if(nd<(dist[to]??Infinity)){dist[to]=nd;prev[to]=curr;const n=_nodes[to];const h=n?haversine(n.lat,n.lon,endLat,endLon):0;pq.push(nd+h,to);}}}
-  const path=[];let c=endK,safety=0;while(c&&safety++<200000){path.unshift(_nodes[c]);c=prev[c];}
+  while(pq.size>0){
+    if(iter++>500000)break;
+    const[,curr]=pq.pop();
+    if(curr===endK)break;
+    if(vis.has(curr))continue;
+    vis.add(curr);
+    for(const edge of (_adj[curr]||[])){
+      if(vis.has(edge.to))continue;
+      const cost = _edgeCost(edge, canalPref);
+      const nd=(dist[curr]??Infinity)+cost;
+      if(nd<(dist[edge.to]??Infinity)){
+        dist[edge.to]=nd;prev[edge.to]=curr;
+        const n=_nodes[edge.to];
+        const h=n?haversine(n.lat,n.lon,endLat,endLon):0;
+        pq.push(nd+h,edge.to);
+      }
+    }
+  }
+  const path=[];let c=endK,safety=0;
+  while(c&&safety++<200000){path.unshift(_nodes[c]);c=prev[c];}
   return path.length>1&&path[0]?.k===startK?path:[];
 }
-async function _routeViaNetwork(fromLat,fromLon,toLat,toLon){
+
+async function _routeViaNetwork(fromLat,fromLon,toLat,toLon,canalPref='auto'){
   const ok=await _ensureNetwork();if(!ok||Object.keys(_nodes).length<10)return null;
   const sc=_nearestNodesMulti(fromLat,fromLon,5);const ec=_nearestNodesMulti(toLat,toLon,5);
   if(!sc.length||!ec.length)return null;
-  const path=_aStar(sc[0].k,ec[0].k,toLat,toLon);if(path.length<2)return null;
+  const path=_aStarMarnet(sc[0].k,ec[0].k,toLat,toLon,canalPref);if(path.length<2)return null;
   const simplified=simplifyRoute(recalcWaypoints(path.map(n=>({lat:n.lat,lon:n.lon}))),8);
-  return{waypoints:simplified,totalNM:simplified[simplified.length-1]?.totalNM||0,passages:[],source:'worldroutens-astar'};
+  return{waypoints:simplified,totalNM:simplified[simplified.length-1]?.totalNM||0,passages:[],source:'marnet-astar'};
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// NEW: world_graph_v2.json — Real Ship Route Graph with TSS-compliant waypoints
+// Format: { nodes:[id,name,lat,lon], edges:[from,to,nm,routeId], routes:[{id,name,from_ll,to_ll,nodes:[]}] }
+// from_ll / to_ll = [lon, lat]
+// ══════════════════════════════════════════════════════════════════════════════
+
+let _v2Ready=false,_v2Loading=null;
+let _v2Nodes=[];       // array of [id, name, lat, lon]
+let _v2NodeMap={};     // id → [id, name, lat, lon]
+let _v2Routes=[];      // array of route objects
+let _v2Grid={};        // spatial grid of route endpoint indices
+
+const V2_GRID_DEG = 2.0; // coarser grid for route endpoint lookup
+
+function _v2GridKey(lat, lon){
+  return `${Math.floor(lon/V2_GRID_DEG)},${Math.floor(lat/V2_GRID_DEG)}`;
+}
+
+function _v2BuildIndex(){
+  _v2Grid = {};
+  _v2Routes.forEach((r, idx) => {
+    // from_ll = [lon, lat]
+    const [flon, flat] = r.from_ll;
+    const [tlon, tlat] = r.to_ll;
+    const fk = _v2GridKey(flat, flon);
+    const tk = _v2GridKey(tlat, tlon);
+    if(!_v2Grid[fk]) _v2Grid[fk] = [];
+    if(!_v2Grid[tk]) _v2Grid[tk] = [];
+    // Store: { idx, end:'from'|'to', lat, lon }
+    _v2Grid[fk].push({ idx, end:'from', lat:flat, lon:flon });
+    _v2Grid[tk].push({ idx, end:'to',   lat:tlat, lon:tlon });
+  });
+}
+
+function _ensureGraphV2(){
+  if(_v2Ready) return Promise.resolve(true);
+  if(_v2Loading) return _v2Loading;
+  _v2Loading = fetch('/world_graph_v2.json')
+    .then(r => { if(!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
+    .then(data => {
+      _v2Nodes   = data.nodes  || [];
+      _v2Routes  = data.routes || [];
+      _v2NodeMap = {};
+      _v2Nodes.forEach(n => { _v2NodeMap[n[0]] = n; });
+      _v2BuildIndex();
+      console.log(`[Router] V2 graph: ${_v2Nodes.length.toLocaleString()} nodes, ${_v2Routes.length.toLocaleString()} routes`);
+      _v2Ready = true;
+      return true;
+    })
+    .catch(e => {
+      console.warn('[Router] V2 graph load failed:', e.message);
+      _v2Loading = null;
+      return false;
+    });
+  return _v2Loading;
+}
+
+// ── Detect which canal/passage a route uses ───────────────────────────────────
+function _detectRouteVia(routeNodeIds){
+  const pts = routeNodeIds.map(id => {
+    const n = _v2NodeMap[id];
+    return n ? { lat: n[2], lon: n[3] } : null;
+  }).filter(Boolean);
+
+  const hasSuez   = pts.some(p => p.lon > 28 && p.lon < 36  && p.lat > 25 && p.lat < 33);
+  const hasCape   = pts.some(p => p.lat < -30);
+  const hasPanama = pts.some(p => p.lon > -82 && p.lon < -76 && p.lat > 7  && p.lat < 11);
+  const hasMalacca= pts.some(p => p.lon > 98  && p.lon < 105 && p.lat > 0  && p.lat < 7);
+
+  if(hasSuez)    return 'suez';
+  if(hasPanama)  return 'panama';
+  if(hasCape)    return 'cape';
+  if(hasMalacca) return 'malacca';
+  return 'direct';
+}
+
+// ── Find N nearest route endpoints to a position ─────────────────────────────
+function _v2NearestEndpoints(lat, lon, maxDistNM=300, maxResults=20){
+  const gx = Math.floor(lon/V2_GRID_DEG);
+  const gy = Math.floor(lat/V2_GRID_DEG);
+  const found = [];
+
+  for(let r=0; r<=6; r++){
+    for(let dx=-r; dx<=r; dx++){
+      for(let dy=-r; dy<=r; dy++){
+        if(Math.abs(dx)!==r && Math.abs(dy)!==r) continue;
+        const key = `${gx+dx},${gy+dy}`;
+        (_v2Grid[key]||[]).forEach(ep => {
+          const d = haversine(lat, lon, ep.lat, ep.lon);
+          if(d <= maxDistNM) found.push({ ...ep, dist: d });
+        });
+      }
+    }
+    if(found.length >= maxResults) break;
+  }
+  found.sort((a,b) => a.dist - b.dist);
+  return found.slice(0, maxResults);
+}
+
+// ── Resolve route node IDs to lat/lon waypoints ───────────────────────────────
+function _v2ResolveRoute(route, reversed=false){
+  let nodeIds = [...route.nodes];
+  if(reversed) nodeIds = nodeIds.reverse();
+  return nodeIds.map(id => {
+    const n = _v2NodeMap[id];
+    if(!n) return null;
+    return { lat: n[2], lon: n[3], name: n[1] || '' };
+  }).filter(Boolean);
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// CORE: buildGraphRoute — TSS-aware routing using real RTZ ship routes
+// Strategy:
+//   1. Find best matching real route from departure area
+//   2. Find best matching real route to arrival area
+//   3. Check if one single route covers both ends → use it directly
+//   4. Otherwise stitch via MARNET backbone between route endpoints
+//   5. Canal preference filters which routes are eligible
+// ══════════════════════════════════════════════════════════════════════════════
+
+export async function buildGraphRoute(fromObj, toObj, canalPref='auto'){
+  const fromLat = fromObj.lat, fromLon = fromObj.lon;
+  const toLat   = toObj.lat,   toLon   = toObj.lon;
+
+  // Ensure both graphs loaded
+  const [v2ok, marnetOk] = await Promise.all([_ensureGraphV2(), _ensureNetwork()]);
+  if(!v2ok && !marnetOk) return null;
+
+  // ── Step 1: Find candidate routes near departure and arrival ──────────────
+  const SNAP_RADIUS = 250; // NM — how far to search for matching routes
+
+  const fromEndpoints = _v2NearestEndpoints(fromLat, fromLon, SNAP_RADIUS, 30);
+  const toEndpoints   = _v2NearestEndpoints(toLat,   toLon,   SNAP_RADIUS, 30);
+
+  if(!fromEndpoints.length || !toEndpoints.length){
+    console.warn('[V2] No endpoints found near ports — falling back to MARNET');
+    return null;
+  }
+
+  // ── Step 2: Check for a SINGLE route that covers both ends ───────────────
+  // Score = dist_from_departure_to_route_start + dist_from_route_end_to_arrival
+  // Lower = better
+  const fromIdxSet = new Map(); // routeIdx → best {dist, end, reversed}
+  fromEndpoints.forEach(ep => {
+    const existing = fromIdxSet.get(ep.idx);
+    if(!existing || ep.dist < existing.dist){
+      fromIdxSet.set(ep.idx, { dist: ep.dist, end: ep.end });
+    }
+  });
+
+  const toIdxSet = new Map();
+  toEndpoints.forEach(ep => {
+    const existing = toIdxSet.get(ep.idx);
+    if(!existing || ep.dist < existing.dist){
+      toIdxSet.set(ep.idx, { dist: ep.dist, end: ep.end });
+    }
+  });
+
+  // Find routes that appear in BOTH sets (covers start AND end)
+  const directCandidates = [];
+  fromIdxSet.forEach((fromInfo, idx) => {
+    if(toIdxSet.has(idx)){
+      const toInfo = toIdxSet.get(idx);
+      const route  = _v2Routes[idx];
+      const via    = _detectRouteVia(route.nodes);
+
+      // Check canal preference compatibility
+      if(!_canalPrefAllows(via, canalPref)) return;
+
+      // Determine direction: fromEnd should differ from toEnd
+      // fromEnd='from' + toEnd='to' → forward
+      // fromEnd='to'   + toEnd='from' → reversed
+      const [flon, flat] = route.from_ll;
+      const [tlon, tlat] = route.to_ll;
+      const dFromFwd = haversine(fromLat, fromLon, flat, flon);
+      const dToFwd   = haversine(toLat,   toLon,   tlat, tlon);
+      const dFromRev = haversine(fromLat, fromLon, tlat, tlon);
+      const dToRev   = haversine(toLat,   toLon,   flat, flon);
+      const scoreFwd = dFromFwd + dToFwd;
+      const scoreRev = dFromRev + dToRev;
+      const reversed = scoreRev < scoreFwd;
+      const score    = Math.min(scoreFwd, scoreRev);
+
+      directCandidates.push({ idx, route, via, reversed, score,
+        snapFrom: reversed ? dFromRev : dFromFwd,
+        snapTo:   reversed ? dToRev   : dToFwd });
+    }
+  });
+
+  directCandidates.sort((a,b) => a.score - b.score);
+
+  // ── Step 3: Use best direct route if score is acceptable ─────────────────
+  // Accept if both endpoints snap within 150 NM (reasonable for open ocean)
+  const bestDirect = directCandidates.find(c => c.snapFrom < 150 && c.snapTo < 150);
+
+  if(bestDirect){
+    const rawWps = _v2ResolveRoute(bestDirect.route, bestDirect.reversed);
+    if(rawWps.length >= 2){
+      // Prepend exact departure, append exact arrival
+      const allWps = [
+        { lat: fromLat, lon: fromLon, name: fromObj.name },
+        ...rawWps,
+        { lat: toLat,   lon: toLon,   name: toObj.name   },
+      ];
+      const result = simplifyRoute(recalcWaypoints(allWps), 3);
+      console.log(`[V2] Direct route: ${bestDirect.route.name} (${bestDirect.via}) → ${result.length} WPs`);
+      return {
+        waypoints: result,
+        totalNM:   result[result.length-1]?.totalNM || 0,
+        source:    'v2-direct',
+        routeName: bestDirect.route.name,
+        via:       bestDirect.via,
+      };
+    }
+  }
+
+  // ── Step 4: Two-segment stitch ───────────────────────────────────────────
+  // Find best route FROM departure, find best route TO arrival,
+  // then bridge their far endpoints via MARNET A*
+
+  // Best route FROM departure (prioritise routes going in correct general direction)
+  const fromCandidates = fromEndpoints
+    .map(ep => {
+      const route = _v2Routes[ep.idx];
+      const via   = _detectRouteVia(route.nodes);
+      if(!_canalPrefAllows(via, canalPref)) return null;
+      // Determine which end of route is near departure
+      const reversed = (ep.end === 'to'); // if near 'to' end, we enter reversed
+      const farEnd   = reversed ? route.from_ll : route.to_ll;
+      return { ep, route, via, reversed,
+               farLat: farEnd[1], farLon: farEnd[0], snapDist: ep.dist };
+    })
+    .filter(Boolean)
+    .sort((a,b) => a.snapDist - b.snapDist)
+    .slice(0, 8);
+
+  const toCandidates = toEndpoints
+    .map(ep => {
+      const route = _v2Routes[ep.idx];
+      const via   = _detectRouteVia(route.nodes);
+      if(!_canalPrefAllows(via, canalPref)) return null;
+      // Determine which end of route is near arrival
+      const reversed = (ep.end === 'from'); // if near 'from' end, we enter reversed
+      const farEnd   = reversed ? route.to_ll : route.from_ll;
+      return { ep, route, via, reversed,
+               farLat: farEnd[1], farLon: farEnd[0], snapDist: ep.dist };
+    })
+    .filter(Boolean)
+    .sort((a,b) => a.snapDist - b.snapDist)
+    .slice(0, 8);
+
+  // Try best combination (from-route far end → marnet → to-route far end)
+  if(fromCandidates.length && toCandidates.length && marnetOk){
+    const fromC = fromCandidates[0];
+    const toC   = toCandidates[0];
+
+    // Get MARNET bridge between far ends
+    const bridge = await _routeViaNetwork(
+      fromC.farLat, fromC.farLon,
+      toC.farLat,   toC.farLon,
+      canalPref
+    );
+
+    // Build from-segment (departure → route far end)
+    const fromWps = _v2ResolveRoute(fromC.route, fromC.reversed);
+    // Build to-segment (to-route far end → arrival)
+    const toWps   = _v2ResolveRoute(toC.route, !toC.reversed);
+
+    const bridgeWps = bridge?.waypoints || [];
+
+    if(fromWps.length >= 1 && toWps.length >= 1){
+      const allWps = [
+        { lat: fromLat, lon: fromLon, name: fromObj.name },
+        ...fromWps,
+        ...bridgeWps,
+        ...toWps,
+        { lat: toLat, lon: toLon, name: toObj.name },
+      ];
+      const result = simplifyRoute(recalcWaypoints(allWps), 5);
+      const via = [fromC.via, toC.via].filter(v => v !== 'direct').join('+') || 'direct';
+      console.log(`[V2] Stitched: ${fromC.route.name} + bridge + ${toC.route.name} → ${result.length} WPs`);
+      return {
+        waypoints: result,
+        totalNM:   result[result.length-1]?.totalNM || 0,
+        source:    'v2-stitched',
+        routeName: `${fromObj.name} → ${toObj.name}`,
+        via,
+      };
+    }
+  }
+
+  // ── Step 5: Pure MARNET fallback ─────────────────────────────────────────
+  if(marnetOk){
+    console.warn('[V2] No matching routes — using MARNET A*');
+    return _routeViaNetwork(fromLat, fromLon, toLat, toLon, canalPref);
+  }
+
+  return null;
+}
+
+// ── Canal preference compatibility check ──────────────────────────────────────
+function _canalPrefAllows(via, canalPref){
+  if(canalPref === 'auto') return true;
+  if(canalPref === 'suez'   && via === 'cape')   return false;
+  if(canalPref === 'suez'   && via === 'panama') return false;
+  if(canalPref === 'panama' && via === 'suez')   return false;
+  if(canalPref === 'panama' && via === 'cape')   return false;
+  if(canalPref === 'cape'   && via === 'suez')   return false;
+  if(canalPref === 'cape'   && via === 'panama') return false;
+  return true;
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -177,11 +533,12 @@ export function checkCanalPassage(from,to,vp={}){
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// FALLBACK WAYPOINT GRAPH
+// FALLBACK WAYPOINT GRAPH (existing — untouched)
 // ══════════════════════════════════════════════════════════════════════════════
 export const SEA_WP={SUEZ_N:{lat:31.27,lon:32.33},SUEZ_S:{lat:29.92,lon:32.55},RED_N:{lat:29.77,lon:32.55},RED_N2:{lat:28.0,lon:33.5},RED_C:{lat:24.0,lon:37.0},RED_S:{lat:15.0,lon:41.5},BAB:{lat:12.58,lon:43.38},ADEN_G:{lat:11.8,lon:45.5},ADEN_E:{lat:11.5,lon:50.0},SOCOTRA:{lat:12.0,lon:54.0},HORMUZ:{lat:26.58,lon:56.35},HORMUZ_E:{lat:23.5,lon:59.0},ARAB_NW:{lat:22.0,lon:60.0},ARAB_W:{lat:18.0,lon:60.0},IND_W:{lat:12.0,lon:62.0},IND_W2:{lat:8.0,lon:64.0},IND_W_COAST:{lat:14.0,lon:73.0},IND_SW:{lat:10.0,lon:74.8},IND_TIP_W:{lat:7.5,lon:76.5},IND_TIP:{lat:6.0,lon:77.5},PALK_W:{lat:7.5,lon:78.8},LANKA_SW:{lat:5.8,lon:79.8},LANKA_S:{lat:5.4,lon:80.6},LANKA_SE:{lat:6.0,lon:82.0},IND_NE:{lat:8.5,lon:84.5},IND_E_COAST:{lat:12.0,lon:81.5},BAY_SW:{lat:10.0,lon:83.0},BAY_C:{lat:13.5,lon:87.0},BAY_N:{lat:18.0,lon:90.0},BAY_E:{lat:12.0,lon:93.0},ANDAMAN_W:{lat:11.0,lon:92.0},ANDAMAN:{lat:10.5,lon:94.0},ANDAMAN_S:{lat:6.5,lon:95.0},MALACCA_NW:{lat:6.5,lon:98.8},MALACCA_N:{lat:3.09,lon:101.02},MALACCA_C1:{lat:2.9,lon:100.67},MALACCA_C:{lat:2.33,lon:101.35},MALACCA_S1:{lat:1.83,lon:101.8},MALACCA_S2:{lat:1.56,lon:102.39},MALACCA_S3:{lat:1.15,lon:103.41},MALACCA_S:{lat:1.18,lon:103.82},SCS_W:{lat:3.0,lon:108.0},SCS_C:{lat:8.0,lon:110.0},SCS_N:{lat:14.0,lon:112.0},PHILIP:{lat:10.0,lon:122.0},EAST_CHINA2:{lat:31.0,lon:124.0},EAST_CHINA:{lat:27.0,lon:124.0},KOREA_STR:{lat:34.5,lon:129.0},JAPAN_SEA:{lat:37.0,lon:132.0},EAST_CHINA_N:{lat:37.57,lon:122.61},TSUGARU:{lat:41.5,lon:140.8},PAC_NW:{lat:48.0,lon:-160.0},PAC_NE:{lat:40.0,lon:-150.0},PAC_C:{lat:5.0,lon:-140.0},PAC_SW:{lat:-20.0,lon:170.0},PAC_SE:{lat:-20.0,lon:-90.0},LOMBOK:{lat:-8.5,lon:115.8},SUNDA:{lat:-6.1,lon:105.7},TIMOR:{lat:-9.5,lon:127.0},ARAFURA:{lat:-12.0,lon:136.0},TORRES:{lat:-10.5,lon:142.5},AUS_N:{lat:-12.0,lon:127.0},AUS_W:{lat:-25.0,lon:108.0},AUS_SE:{lat:-38.5,lon:148.2},CORAL:{lat:-18.0,lon:152.0},TASMAN:{lat:-38.0,lon:157.0},NZ_N:{lat:-38.52,lon:174.63},GIBRALTAR:{lat:35.98,lon:-5.5},MED_W:{lat:37.5,lon:5.0},MED_W2:{lat:37.0,lon:10.0},MED_C:{lat:37.0,lon:15.0},MED_E:{lat:34.5,lon:24.0},MED_E2:{lat:33.5,lon:28.0},BLACK_W:{lat:43.0,lon:29.0},BASC:{lat:47.0,lon:-5.0},DOVER:{lat:51.05,lon:1.5},NORTH_SEA:{lat:56.0,lon:3.0},SKAGEN:{lat:57.72,lon:10.6},BALTIC_E:{lat:59.0,lon:21.5},ATLANTIC_N:{lat:45.0,lon:-30.0},ATLANTIC_C:{lat:20.0,lon:-35.0},ATLANTIC_S:{lat:-15.0,lon:-20.0},ATLANTIC_SW:{lat:-40.0,lon:-40.0},ATL_NW:{lat:50.0,lon:-20.0},ATL_MID:{lat:35.0,lon:-38.0},ATL_W_AFR:{lat:5.0,lon:-15.0},ATL_SA:{lat:-10.0,lon:-20.0},CAPE_GH:{lat:-34.5,lon:19.5},IND_S:{lat:-35.0,lon:50.0},IND_SW2:{lat:-25.0,lon:90.0},CAPE_HORN:{lat:-55.9,lon:-67.3},AFR_E:{lat:-10.0,lon:50.0},AFR_E2:{lat:-25.0,lon:40.0},PANAMA_P:{lat:8.9,lon:-79.5},PANAMA_A:{lat:9.38,lon:-79.9},CARIB:{lat:15.0,lon:-75.0},CARIB_E:{lat:12.0,lon:-63.0},EAST_US:{lat:35.0,lon:-71.0},EAST_US_N:{lat:40.0,lon:-70.0},WEST_US:{lat:35.0,lon:-121.0},WEST_US_N:{lat:48.0,lon:-125.0},SA_E:{lat:-23.5,lon:-43.5},SA_W:{lat:-33.0,lon:-71.5}};
 const PORT_EXIT={MUM:['IND_W_COAST'],KAN:['IND_W_COAST'],KOC:['IND_SW','IND_TIP_W'],CHE:['IND_E_COAST'],CTG:['BAY_N','BAY_C'],SIN:['MALACCA_S'],PKL:['MALACCA_S3','MALACCA_S'],DXB:['HORMUZ'],FUJ:['HORMUZ'],KWI:['HORMUZ'],BAH:['HORMUZ'],DOH:['HORMUZ'],MCT:['HORMUZ_E'],JED:['RED_S','BAB'],ADE:['BAB','ADEN_G'],PSD:['SUEZ_S','RED_N'],ROT:['DOVER','BASC'],HAM:['NORTH_SEA','DOVER'],ANT:['DOVER','BASC'],NYK:['EAST_CHINA_N','KOREA_STR'],BUS:['KOREA_STR'],YOK:['EAST_CHINA'],SHA:['EAST_CHINA2'],HKG:['SCS_N'],MAN:['PHILIP'],SYD:['CORAL'],JAK:['SUNDA']};
 const ROUTE_TABLE={"MUM-SIN":[[18.93,72.83],[14.0,73.0],[10.0,74.8],[7.5,76.5],[6.0,77.5],[5.4,80.6],[6.0,82.0],[8.5,84.5],[6.5,95.0],[5.0,99.2],[3.09,101.02],[2.33,101.35],[1.15,103.41],[1.29,103.85]],"MUM-DXB":[[18.93,72.83],[20.0,67.0],[23.5,59.0],[26.58,56.35],[25.05,55.13]],"MUM-ROT":[[18.93,72.83],[14.0,73.0],[10.0,71.0],[12.0,62.0],[12.58,43.38],[15.0,41.5],[22.0,38.0],[29.77,32.55],[31.27,32.33],[34.5,24.0],[37.5,5.0],[35.98,-5.5],[45.0,-5.0],[51.05,1.5],[51.92,4.48]],"SIN-MUM":[[1.29,103.85],[1.15,103.41],[2.33,101.35],[3.09,101.02],[5.0,99.2],[6.5,95.0],[8.5,84.5],[6.0,82.0],[5.4,80.6],[6.0,77.5],[7.5,76.5],[10.0,74.8],[14.0,73.0],[18.93,72.83]],"SIN-DXB":[[1.29,103.85],[6.5,95.0],[8.5,84.5],[8.5,75.0],[12.0,62.0],[23.5,59.0],[26.58,56.35],[25.05,55.13]],"SIN-ROT":[[1.29,103.85],[6.5,95.0],[8.5,84.5],[8.5,75.0],[12.0,62.0],[12.58,43.38],[15.0,41.5],[22.0,38.0],[29.77,32.55],[31.27,32.33],[34.5,24.0],[37.5,5.0],[35.98,-5.5],[45.0,-5.0],[51.92,4.48]],"DXB-SIN":[[25.05,55.13],[26.58,56.35],[23.5,59.0],[12.0,62.0],[8.5,75.0],[8.5,84.5],[6.5,95.0],[5.0,99.2],[3.09,101.02],[2.33,101.35],[1.15,103.41],[1.29,103.85]],"DXB-MUM":[[25.05,55.13],[26.58,56.35],[23.5,59.0],[20.0,67.0],[18.93,72.83]],"ROT-SIN":[[51.92,4.48],[51.05,1.5],[45.0,-5.0],[35.98,-5.5],[37.5,5.0],[34.5,24.0],[31.27,32.33],[29.77,32.55],[22.0,38.0],[15.0,41.5],[12.58,43.38],[12.0,62.0],[8.5,75.0],[8.5,84.5],[6.5,95.0],[5.0,99.2],[3.09,101.02],[1.29,103.85]],"ROT-MUM":[[51.92,4.48],[45.0,-5.0],[35.98,-5.5],[37.5,5.0],[34.5,24.0],[31.27,32.33],[29.77,32.55],[22.0,38.0],[15.0,41.5],[12.58,43.38],[12.0,62.0],[14.0,67.0],[18.93,72.83]],"SHA-SIN":[[31.23,121.47],[27.0,122.0],[14.0,112.0],[8.0,110.0],[5.0,108.0],[3.0,108.0],[1.15,103.41],[1.29,103.85]],"SHA-ROT":[[31.23,121.47],[27.0,122.0],[14.0,112.0],[8.0,110.0],[5.0,108.0],[1.15,103.41],[6.5,95.0],[8.5,84.5],[12.0,62.0],[12.58,43.38],[15.0,41.5],[22.0,38.0],[29.77,32.55],[31.27,32.33],[34.5,24.0],[37.5,5.0],[35.98,-5.5],[45.0,-5.0],[51.92,4.48]],"HKG-SIN":[[22.29,114.16],[18.0,115.0],[14.0,112.0],[8.0,110.0],[3.0,108.0],[1.29,103.85]],"BUS-SIN":[[35.1,129.04],[34.0,127.0],[27.0,122.0],[14.0,112.0],[8.0,110.0],[3.0,108.0],[1.29,103.85]],"YOK-SIN":[[35.45,139.65],[34.0,132.0],[27.0,122.0],[14.0,112.0],[8.0,110.0],[3.0,108.0],[1.29,103.85]],"YOK-LAX":[[35.45,139.65],[40.0,150.0],[48.0,170.0],[45.0,-160.0],[40.0,-145.0],[33.74,-118.27]],"NYK-ROT":[[40.65,-74.07],[40.0,-68.0],[45.0,-40.0],[47.0,-25.0],[50.0,-10.0],[51.92,4.48]],"ROT-NYK":[[51.92,4.48],[50.0,-10.0],[47.0,-25.0],[45.0,-40.0],[40.0,-68.0],[40.65,-74.07]],"CHE-SIN":[[13.08,80.29],[10.0,81.5],[8.5,84.5],[6.5,95.0],[5.0,99.2],[3.09,101.02],[2.33,101.35],[1.29,103.85]],"JAK-SIN":[[-6.11,106.88],[-6.1,105.7],[1.15,103.41],[1.29,103.85]],"SYD-SIN":[[-33.86,151.21],[-30.0,135.0],[-18.0,120.0],[-8.5,115.8],[3.0,108.0],[1.29,103.85]],"PSD-DXB":[[31.26,32.31],[29.77,32.55],[22.0,38.0],[15.0,41.5],[12.58,43.38],[11.8,45.5],[12.0,50.0],[23.5,59.0],[26.58,56.35],[25.05,55.13]],"PSD-MUM":[[31.26,32.31],[29.77,32.55],[22.0,38.0],[15.0,41.5],[12.58,43.38],[12.0,54.0],[12.0,62.0],[14.0,67.0],[18.93,72.83]],"PSD-SIN":[[31.26,32.31],[29.77,32.55],[22.0,38.0],[15.0,41.5],[12.58,43.38],[12.0,62.0],[8.5,75.0],[8.5,84.5],[6.5,95.0],[5.0,99.2],[3.09,101.02],[1.29,103.85]],"KAR-SIN":[[24.86,67.01],[20.0,65.0],[12.0,62.0],[8.5,75.0],[8.5,84.5],[6.5,95.0],[5.0,99.2],[3.09,101.02],[2.33,101.35],[1.15,103.41],[1.29,103.85]],"KAR-DXB":[[24.86,67.01],[26.0,61.0],[26.58,56.35],[25.05,55.13]],"COL-SIN":[[6.94,79.85],[6.0,80.5],[5.4,80.6],[6.0,82.0],[8.5,84.5],[6.5,95.0],[5.0,99.2],[3.09,101.02],[1.56,102.39],[1.29,103.85]],"COL-MUM":[[6.94,79.85],[7.5,78.8],[7.5,76.5],[10.0,74.8],[14.0,73.0],[18.93,72.83]],"MOM-MUM":[[-4.05,39.67],[-7.0,42.0],[-5.0,45.0],[0.0,50.0],[8.0,58.0],[12.0,62.0],[14.0,67.0],[18.93,72.83]]};
+
 function _doRoute(from,to){
   const key=`${from.id}-${to.id}`,keyR=`${to.id}-${from.id}`;
   if(ROUTE_TABLE[key]){const pts=ROUTE_TABLE[key].map(([lat,lon],i,arr)=>({lat,lon,name:i===0?from.name:i===arr.length-1?to.name:undefined}));pts[0]={lat:from.lat,lon:from.lon,name:from.name};pts[pts.length-1]={lat:to.lat,lon:to.lon,name:to.name};return recalcWaypoints(pts);}
@@ -214,7 +571,7 @@ function _doRoute(from,to){
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// PUBLIC EXPORTS
+// PUBLIC EXPORTS (existing — untouched)
 // ══════════════════════════════════════════════════════════════════════════════
 export function buildAutoRoute(fromPort,toPort){
   const from=PORTS_DB.find(p=>p.id===fromPort),to=PORTS_DB.find(p=>p.id===toPort);
@@ -227,7 +584,11 @@ export function buildAutoRouteCoords(from,to){
   if(!lat1||!lon1||!lat2||!lon2)return[];
   return _doRoute({id:from.id||'DEP',lat:lat1,lon:lon1,name:from.name||'Departure'},{id:to.id||'ARR',lat:lat2,lon:lon2,name:to.name||'Arrival'});
 }
-export async function buildProRoute(from,to,vesselParams={}){
+
+// ══════════════════════════════════════════════════════════════════════════════
+// buildProRoute — updated priority order (NEW V2 graph first)
+// ══════════════════════════════════════════════════════════════════════════════
+export async function buildProRoute(from,to,vesselParams={},canalPref='auto'){
   const{draft=10,beam=32,loa=200,airDraft=50,vesselType='cargo'}=vesselParams;
   const fromObj={id:from.id||'DEP',lat:Number(from.lat??from.latitude??0),lon:Number(from.lon??from.longitude??from.lng??0),name:from.name||'Departure'};
   const toObj  ={id:to.id  ||'ARR',lat:Number(to.lat??to.latitude??0),  lon:Number(to.lon??to.longitude??to.lng??0),  name:to.name  ||'Arrival'  };
@@ -236,21 +597,26 @@ export async function buildProRoute(from,to,vesselParams={}){
 
   const canalInfo=checkCanalPassage(fromObj,toObj,{draft,beam,loa,airDraft});
 
-  // 1. Try /api/route (Render Python service or Searoutes.com) — PROPER ROUTING
-  let result=await _routeViaAPI(fromObj.lat,fromObj.lon,toObj.lat,toObj.lon);
+  // ── 1. NEW PRIMARY: V2 real ship route graph (TSS-compliant, bidirectional) ──
+  let result = await buildGraphRoute(fromObj, toObj, canalPref);
 
-  // 2. Fallback: worldroutens.json A* (land crossings possible)
+  // ── 2. MARNET A* with canal preference ──────────────────────────────────────
   if(!result||!result.waypoints||result.waypoints.length<2){
-    result=await _routeViaNetwork(fromObj.lat,fromObj.lon,toObj.lat,toObj.lon);
+    result = await _routeViaNetwork(fromObj.lat,fromObj.lon,toObj.lat,toObj.lon,canalPref);
   }
 
-  // 3. Fallback: hardcoded route table
+  // ── 3. Render API fallback ───────────────────────────────────────────────────
+  if(!result||!result.waypoints||result.waypoints.length<2){
+    result=await _routeViaAPI(fromObj.lat,fromObj.lon,toObj.lat,toObj.lon);
+  }
+
+  // ── 4. Hardcoded route table ─────────────────────────────────────────────────
   if(!result||!result.waypoints||result.waypoints.length<2){
     const wps=buildAutoRoute(fromObj.id,toObj.id);
     if(wps&&wps.length>1)result={waypoints:wps,totalNM:wps[wps.length-1]?.totalNM||0,passages:[],source:'route-table'};
   }
 
-  // 4. Last resort: waypoint graph
+  // ── 5. Last resort: waypoint graph ───────────────────────────────────────────
   if(!result||!result.waypoints||result.waypoints.length<2){
     const wps=_doRoute(fromObj,toObj);
     if(wps&&wps.length>1)result={waypoints:wps,totalNM:wps[wps.length-1]?.totalNM||0,passages:[],source:'waypoint-graph'};
@@ -270,10 +636,16 @@ export async function buildProRoute(from,to,vesselParams={}){
   for(let i=waypoints.length-1;i>0;i--){cumNM+=(waypoints[i].distance||0);if(cumNM>=20){approachStartIdx=i;break;}}
 
   const src=result.source||'unknown';
-  const isProper=['render-python','searoutes-com'].includes(src);
-  const confidence=isProper
-    ?'HIGH — proper shipping lanes, TSS-compliant, no land crossings'
-    :src==='worldroutens-astar'?'MEDIUM — SeaRoute A* (may have land crossings near complex coasts)'
+  const isV2 = src==='v2-direct'||src==='v2-stitched';
+  const isProper=isV2||['render-python','searoutes-com','marnet-astar'].includes(src);
+
+  const viaLabel = result.via
+    ? `via ${result.via.toUpperCase().replace('+',' + ')}`
+    : canalPref !== 'auto' ? `via ${canalPref.toUpperCase()}` : '';
+
+  const confidence=isV2
+    ?`HIGH — real ship RTZ routes (TSS-compliant) ${viaLabel}`
+    :src==='marnet-astar'?`HIGH — MARNET sea graph (land-free) ${viaLabel}`
     :src==='route-table'?'MEDIUM — validated route table'
     :'LOW — waypoint graph fallback';
 
@@ -286,15 +658,16 @@ export async function buildProRoute(from,to,vesselParams={}){
     '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
     ...canalMsgs,
     `📊 Confidence: ${confidence}`,
-    ...(!isProper?['⚠ For TSS-compliant routing: deploy the Render.com Python service (see README)']:['✅ Route via '+src+' — TSS-aware, land-validated']),
   ];
 
   return{
     waypoints,totalNM,canalInfo,confidence,routeSource:src,approachStartIdx,warnings,
+    via: result.via || canalPref,
     safeDepthM:draft*4,safeDepthCoastalM:draft*6,
     vesselParams:{draft,beam,loa,airDraft,vesselType},
     etaAt12kn:(totalNM/12).toFixed(1),etaAt15kn:(totalNM/15).toFixed(1),
   };
 }
 
-_ensureNetwork().catch(()=>{});
+// Warm up both graphs on module load
+Promise.all([_ensureGraphV2(), _ensureNetwork()]).catch(()=>{});
