@@ -1,1002 +1,587 @@
 /* eslint-disable */
 import { useState, useEffect } from "react";
 
-// ─── DATA ─────────────────────────────────────────────────────────────────────
+export default function CrewWelfarePage() {
+  const [tab, setTab] = useState("currency");
 
-const CURRENCIES = [
-  { code:"USD", name:"US Dollar",         symbol:"$",   flag:"🇺🇸" },
-  { code:"EUR", name:"Euro",              symbol:"€",   flag:"🇪🇺" },
-  { code:"GBP", name:"British Pound",     symbol:"£",   flag:"🇬🇧" },
-  { code:"PHP", name:"Philippine Peso",   symbol:"₱",   flag:"🇵🇭" },
-  { code:"INR", name:"Indian Rupee",      symbol:"₹",   flag:"🇮🇳" },
-  { code:"IDR", name:"Indonesian Rupiah", symbol:"Rp",  flag:"🇮🇩" },
-  { code:"MYR", name:"Malaysian Ringgit", symbol:"RM",  flag:"🇲🇾" },
-  { code:"SGD", name:"Singapore Dollar",  symbol:"S$",  flag:"🇸🇬" },
-  { code:"CNY", name:"Chinese Yuan",      symbol:"¥",   flag:"🇨🇳" },
-  { code:"JPY", name:"Japanese Yen",      symbol:"¥",   flag:"🇯🇵" },
-  { code:"KRW", name:"South Korean Won",  symbol:"₩",   flag:"🇰🇷" },
-  { code:"AUD", name:"Australian Dollar", symbol:"A$",  flag:"🇦🇺" },
-  { code:"CAD", name:"Canadian Dollar",   symbol:"C$",  flag:"🇨🇦" },
-  { code:"AED", name:"UAE Dirham",        symbol:"AED", flag:"🇦🇪" },
-  { code:"NGN", name:"Nigerian Naira",    symbol:"NGN", flag:"🇳🇬" },
-  { code:"BRL", name:"Brazilian Real",    symbol:"R$",  flag:"🇧🇷" },
-  { code:"ZAR", name:"South African Rand",symbol:"R",   flag:"🇿🇦" },
-  { code:"SEK", name:"Swedish Krona",     symbol:"kr",  flag:"🇸🇪" },
-  { code:"NOK", name:"Norwegian Krone",   symbol:"kr",  flag:"🇳🇴" },
-  { code:"CHF", name:"Swiss Franc",       symbol:"Fr",  flag:"🇨🇭" },
-  { code:"HKD", name:"Hong Kong Dollar",  symbol:"HK$", flag:"🇭🇰" },
-  { code:"TRY", name:"Turkish Lira",      symbol:"TRY", flag:"🇹🇷" },
-  { code:"PLN", name:"Polish Zloty",      symbol:"zl",  flag:"🇵🇱" },
-  { code:"UAH", name:"Ukrainian Hryvnia", symbol:"UAH", flag:"🇺🇦" },
-];
+  const TABS = [
+    "currency","wage","overtime","allotment","savings",
+    "leave","relief","contracts","mental","fatigue","iswan"
+  ];
 
-const ISWAN = [
-  { org:"ISWAN / SeafarerHelp", service:"24/7 Helpline", phone:"+44 20 7323 2737", email:"help@seafarerhelp.org", website:"seafarerhelp.org", hours:"24/7 Free & Confidential", lang:"English, Filipino, Hindi, Russian, Arabic and more", desc:"Free confidential helpline for seafarers and families. Emotional support, welfare advice, financial guidance.", icon:"🌊", color:"#00B4D8" },
-  { org:"Mission to Seafarers", service:"Port Chaplaincy", phone:"+44 20 7248 5202", email:"contactus@missiontoseafarers.org", website:"missiontoseafarers.org", hours:"Office hours plus port chaplains worldwide", lang:"Multiple via port chaplains", desc:"Practical and emotional support through port chaplains globally.", icon:"⚓", color:"#F0A500" },
-  { org:"Sailors Society", service:"Wellness at Sea", phone:"+44 23 8051 5950", email:"info@sailors-society.org", website:"sailors-society.org", hours:"Office hours plus port chaplains", lang:"English and local languages", desc:"Wellness at Sea training, crisis counseling and port welfare.", icon:"🧭", color:"#00C896" },
-  { org:"ITF Seafarers Trust", service:"Seafarer Rights", phone:"+44 20 7403 2733", email:"seafarers@itf.org.uk", website:"itfseafarers.org", hours:"Office hours", lang:"Multiple languages", desc:"Advocacy, welfare grants and support for seafarers facing hardship.", icon:"🏛", color:"#7C3AED" },
-  { org:"Apostleship of the Sea", service:"Maritime Welfare", phone:"+44 20 7901 1950", email:"aos@cbcew.org.uk", website:"apostleshipofthesea.org.uk", hours:"Port chaplains globally", lang:"Multiple languages", desc:"Pastoral and practical support for seafarers of all faiths.", icon:"✝", color:"#1565C0" },
-];
-
-const MH_QUESTIONS = [
-  { id:"mh1", text:"Felt down, hopeless or had little interest in activities" },
-  { id:"mh2", text:"Felt anxious, nervous or on edge" },
-  { id:"mh3", text:"Had trouble sleeping or sleeping too much" },
-  { id:"mh4", text:"Felt isolated or disconnected from family and friends" },
-  { id:"mh5", text:"Been irritable, angry or easily frustrated" },
-  { id:"mh6", text:"Had difficulty concentrating on tasks" },
-  { id:"mh7", text:"Been consuming alcohol more than usual" },
-  { id:"mh8", text:"Had thoughts of harming yourself", crisis:true },
-];
-
-const FATIGUE_QUESTIONS = [
-  { id:"f1", text:"Hours slept in last 24 hours",      opts:["Less than 4","4 to 5","5 to 6","6 to 7","7 to 8","More than 8"], w:[5,4,3,2,1,0] },
-  { id:"f2", text:"Hours on duty in last 24 hours",    opts:["8 or less","9 to 10","11 to 12","13 to 14","More than 14"],     w:[0,1,2,3,5] },
-  { id:"f3", text:"Days since last proper rest day",   opts:["0 to 1","2 to 3","4 to 5","6 to 7","More than 7"],             w:[0,1,2,3,5] },
-  { id:"f4", text:"Sea conditions affecting your rest",opts:["Calm","Moderate","Rough","Very rough","Extreme"],               w:[0,1,2,3,4] },
-  { id:"f5", text:"Times woken during last sleep",     opts:["None","1 to 2","3 to 4","More than 4"],                        w:[0,1,2,3] },
-];
-
-// ─── SHARED UI ────────────────────────────────────────────────────────────────
-
-function Card({ children, style }) {
-  return (
-    <div style={{ background:"#111", border:"1px solid #1f1f1f", borderRadius:8, padding:"14px 16px", marginBottom:10, ...(style||{}) }}>
-      {children}
-    </div>
-  );
-}
-
-function SectionHeader({ icon, title, subtitle }) {
-  return (
-    <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:20, paddingBottom:10, borderBottom:"1px solid #1f1f1f" }}>
-      <span style={{ fontSize:22 }}>{icon}</span>
-      <div>
-        <div style={{ fontSize:15, fontWeight:700, color:"#fff", letterSpacing:2, textTransform:"uppercase" }}>{title}</div>
-        {subtitle && <div style={{ fontSize:11, color:"#555", marginTop:2 }}>{subtitle}</div>}
-      </div>
-    </div>
-  );
-}
-
-function Lbl({ children }) {
-  return <div style={{ fontSize:10, color:"#666", letterSpacing:1, marginBottom:4, marginTop:8 }}>{children}</div>;
-}
-
-function Inp({ value, onChange, placeholder, type, style }) {
-  return (
-    <input
-      type={type||"text"}
-      value={value}
-      onChange={onChange}
-      placeholder={placeholder}
-      style={{ width:"100%", background:"#0d0d0d", border:"1px solid #2a2a2a", borderRadius:6, padding:"8px 12px", color:"#e5e5e5", fontFamily:"'IBM Plex Mono',monospace", fontSize:12, boxSizing:"border-box", outline:"none", ...(style||{}) }}
-    />
-  );
-}
-
-function Sel({ value, onChange, children, style }) {
-  return (
-    <select
-      value={value}
-      onChange={onChange}
-      style={{ width:"100%", background:"#0d0d0d", border:"1px solid #2a2a2a", borderRadius:6, padding:"8px 12px", color:"#e5e5e5", fontFamily:"'IBM Plex Mono',monospace", fontSize:12, outline:"none", cursor:"pointer", ...(style||{}) }}
-    >
-      {children}
-    </select>
-  );
-}
-
-function Btn({ children, onClick, color, style }) {
-  var c = color || "#dc2626";
-  return (
-    <button
-      onClick={onClick}
-      style={{ background:c, color:"#fff", border:"none", borderRadius:6, padding:"8px 16px", fontFamily:"'IBM Plex Mono',monospace", fontSize:11, fontWeight:700, letterSpacing:1, cursor:"pointer", ...(style||{}) }}
-    >
-      {children}
-    </button>
-  );
-}
-
-function Row({ label, value, color }) {
-  return (
-    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"6px 0", borderBottom:"1px solid #161616" }}>
-      <span style={{ fontSize:11, color:"#666" }}>{label}</span>
-      <span style={{ fontSize:13, fontWeight:700, color:color||"#e5e5e5", fontFamily:"'IBM Plex Mono',monospace" }}>{value}</span>
-    </div>
-  );
-}
-
-function Tag({ children, color }) {
-  var c = color || "#dc2626";
-  return (
-    <span style={{ display:"inline-block", background:c+"22", border:"1px solid "+c+"66", color:c, borderRadius:4, padding:"1px 7px", fontSize:10, fontWeight:700, marginRight:6, marginBottom:4 }}>
-      {children}
-    </span>
-  );
-}
-
-var fmt = function(n, d) {
-  var dec = (d === undefined) ? 2 : d;
-  if (n === null || n === undefined || isNaN(Number(n))) return "--";
-  return Number(n).toLocaleString("en-US", { minimumFractionDigits:dec, maximumFractionDigits:dec });
-};
-
-// ─── TOOL: CURRENCY CONVERTER ─────────────────────────────────────────────────
-
-function CurrencyConverter() {
-  var [amount, setAmount] = useState("1000");
-  var [from, setFrom] = useState("USD");
-  var [to, setTo] = useState("PHP");
-  var [rate, setRate] = useState(null);
-  var [loading, setLoading] = useState(false);
-  var [manual, setManual] = useState("");
-  var [useManual, setUseManual] = useState(false);
-  var [updated, setUpdated] = useState("");
-
-  var fetchRate = function(f, t) {
-    setLoading(true);
-    fetch("https://api.exchangerate-api.com/v4/latest/" + f)
-      .then(function(r) { return r.json(); })
-      .then(function(data) {
-        if (data && data.rates && data.rates[t]) {
-          setRate(data.rates[t]);
-          setUpdated(new Date().toLocaleTimeString());
-        }
-        setLoading(false);
-      })
-      .catch(function() { setLoading(false); });
+  const LABELS = {
+    currency:"💱 Currency", wage:"💵 Wage", overtime:"⏱ Overtime",
+    allotment:"📤 Allotment", savings:"🏦 Savings", leave:"🗓 Leave",
+    relief:"🔄 Relief", contracts:"📋 Contracts",
+    mental:"🧠 Mental Health", fatigue:"😴 Fatigue", iswan:"📞 ISWAN"
   };
 
-  useEffect(function() {
-    if (!useManual) fetchRate(from, to);
-  }, [from, to, useManual]);
+  return (
+    <div style={{ minHeight:"100vh", background:"#0a0a0a", color:"#e5e5e5" }}>
 
-  var activeRate = useManual ? parseFloat(manual) : rate;
-  var amt = parseFloat(amount);
-  var converted = (activeRate && !isNaN(amt)) ? amt * activeRate : null;
-  var fromC = CURRENCIES.find(function(c) { return c.code === from; }) || {};
-  var toC   = CURRENCIES.find(function(c) { return c.code === to; })   || {};
+      {/* Header */}
+      <div style={{ background:"#060f1c", borderBottom:"2px solid #1e3a5c", padding:"14px 20px", position:"sticky", top:0, zIndex:100 }}>
+        <div style={{ fontSize:16, fontWeight:700, color:"#00b4d8", letterSpacing:2 }}>⚓ CREW WELFARE</div>
+        <div style={{ fontSize:10, color:"#555", marginTop:2 }}>FINANCIAL · PLANNING · WELLBEING</div>
+      </div>
+
+      {/* Tab bar */}
+      <div style={{ display:"flex", overflowX:"auto", background:"#111", borderBottom:"1px solid #1f1f1f", padding:"0 4px" }}>
+        {TABS.map(t => (
+          <button key={t} onClick={() => setTab(t)} style={{
+            flexShrink:0, padding:"10px 12px", fontSize:10,
+            fontWeight:tab===t?700:400, color:tab===t?"#60a5fa":"#555",
+            borderTop:"none", borderLeft:"none", borderRight:"none",
+            borderBottom:tab===t?"2px solid #2563eb":"2px solid transparent",
+            cursor:"pointer", whiteSpace:"nowrap", background:"none",
+          }}>
+            {LABELS[t]}
+          </button>
+        ))}
+      </div>
+
+      {/* Content */}
+      <div style={{ padding:"24px 20px", maxWidth:800, margin:"0 auto" }}>
+        {tab === "currency"  && <CurrencyTool />}
+        {tab === "wage"      && <WageTool />}
+        {tab === "overtime"  && <OvertimeTool />}
+        {tab === "allotment" && <AllotmentTool />}
+        {tab === "savings"   && <SavingsTool />}
+        {tab === "leave"     && <LeaveTool />}
+        {tab === "relief"    && <ReliefTool />}
+        {tab === "contracts" && <ContractsTool />}
+        {tab === "mental"    && <MentalTool />}
+        {tab === "fatigue"   && <FatigueTool />}
+        {tab === "iswan"     && <ISWANTool />}
+      </div>
+    </div>
+  );
+}
+
+// ── SHARED ────────────────────────────────────────────────────────────────────
+const CURR = [
+  {code:"USD",name:"US Dollar",sym:"$",flag:"🇺🇸"},{code:"EUR",name:"Euro",sym:"€",flag:"🇪🇺"},
+  {code:"GBP",name:"British Pound",sym:"£",flag:"🇬🇧"},{code:"PHP",name:"Philippine Peso",sym:"₱",flag:"🇵🇭"},
+  {code:"INR",name:"Indian Rupee",sym:"₹",flag:"🇮🇳"},{code:"IDR",name:"Indonesian Rupiah",sym:"Rp",flag:"🇮🇩"},
+  {code:"MYR",name:"Malaysian Ringgit",sym:"RM",flag:"🇲🇾"},{code:"SGD",name:"Singapore Dollar",sym:"S$",flag:"🇸🇬"},
+  {code:"CNY",name:"Chinese Yuan",sym:"¥",flag:"🇨🇳"},{code:"JPY",name:"Japanese Yen",sym:"¥",flag:"🇯🇵"},
+  {code:"KRW",name:"South Korean Won",sym:"₩",flag:"🇰🇷"},{code:"AUD",name:"Australian Dollar",sym:"A$",flag:"🇦🇺"},
+  {code:"CAD",name:"Canadian Dollar",sym:"C$",flag:"🇨🇦"},{code:"AED",name:"UAE Dirham",sym:"AED",flag:"🇦🇪"},
+  {code:"BRL",name:"Brazilian Real",sym:"R$",flag:"🇧🇷"},{code:"ZAR",name:"South African Rand",sym:"R",flag:"🇿🇦"},
+  {code:"NGN",name:"Nigerian Naira",sym:"NGN",flag:"🇳🇬"},{code:"NOK",name:"Norwegian Krone",sym:"kr",flag:"🇳🇴"},
+  {code:"SEK",name:"Swedish Krona",sym:"kr",flag:"🇸🇪"},{code:"CHF",name:"Swiss Franc",sym:"Fr",flag:"🇨🇭"},
+  {code:"HKD",name:"Hong Kong Dollar",sym:"HK$",flag:"🇭🇰"},{code:"UAH",name:"Ukrainian Hryvnia",sym:"UAH",flag:"🇺🇦"},
+  {code:"PLN",name:"Polish Zloty",sym:"zl",flag:"🇵🇱"},{code:"TRY",name:"Turkish Lira",sym:"TRY",flag:"🇹🇷"},
+];
+
+function f(n, d=2) {
+  if (n===null||n===undefined||isNaN(Number(n))) return "--";
+  return Number(n).toLocaleString("en-US",{minimumFractionDigits:d,maximumFractionDigits:d});
+}
+
+function Box({children,style={}}) {
+  return <div style={{background:"#111",border:"1px solid #1f1f1f",borderRadius:8,padding:"14px 16px",marginBottom:10,...style}}>{children}</div>;
+}
+function Lbl({children}) {
+  return <div style={{fontSize:10,color:"#666",letterSpacing:1,marginBottom:4,marginTop:8}}>{children}</div>;
+}
+function Row({label,value,color}) {
+  return (
+    <div style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid #161616"}}>
+      <span style={{fontSize:11,color:"#666"}}>{label}</span>
+      <span style={{fontSize:13,fontWeight:700,color:color||"#e5e5e5",fontFamily:"monospace"}}>{value}</span>
+    </div>
+  );
+}
+function Inp({value,onChange,placeholder,type="text",style={}}) {
+  return <input type={type} value={value} onChange={onChange} placeholder={placeholder}
+    style={{width:"100%",background:"#0d0d0d",border:"1px solid #2a2a2a",borderRadius:6,padding:"8px 12px",
+      color:"#e5e5e5",fontSize:12,boxSizing:"border-box",outline:"none",...style}} />;
+}
+function Sel({value,onChange,children,style={}}) {
+  return <select value={value} onChange={onChange}
+    style={{width:"100%",background:"#0d0d0d",border:"1px solid #2a2a2a",borderRadius:6,padding:"8px 12px",
+      color:"#e5e5e5",fontSize:12,outline:"none",cursor:"pointer",...style}}>{children}</select>;
+}
+function CurrSel({value,onChange}) {
+  return <Sel value={value} onChange={e=>onChange(e.target.value)}>
+    {CURR.map(c=><option key={c.code} value={c.code}>{c.flag} {c.code} - {c.name}</option>)}
+  </Sel>;
+}
+function Head({icon,title,sub}) {
+  return (
+    <div style={{marginBottom:20,paddingBottom:10,borderBottom:"1px solid #1f1f1f"}}>
+      <div style={{display:"flex",alignItems:"center",gap:10}}>
+        <span style={{fontSize:20}}>{icon}</span>
+        <div style={{fontSize:14,fontWeight:700,color:"#fff",letterSpacing:2,textTransform:"uppercase"}}>{title}</div>
+      </div>
+      {sub && <div style={{fontSize:11,color:"#555",marginTop:4,paddingLeft:30}}>{sub}</div>}
+    </div>
+  );
+}
+function G2({children}) {
+  return <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:4}}>{children}</div>;
+}
+
+// ── CURRENCY ──────────────────────────────────────────────────────────────────
+function CurrencyTool() {
+  const [amt,setAmt]=useState("1000");
+  const [from,setFrom]=useState("USD");
+  const [to,setTo]=useState("PHP");
+  const [rate,setRate]=useState(null);
+  const [loading,setLoading]=useState(false);
+  const [manual,setManual]=useState("");
+  const [useManual,setUseManual]=useState(false);
+  const [updated,setUpdated]=useState("");
+
+  const fetch2=(f,t)=>{
+    setLoading(true);
+    fetch("https://api.exchangerate-api.com/v4/latest/"+f)
+      .then(r=>r.json()).then(d=>{
+        if(d&&d.rates&&d.rates[t]){setRate(d.rates[t]);setUpdated(new Date().toLocaleTimeString());}
+        setLoading(false);
+      }).catch(()=>setLoading(false));
+  };
+
+  useEffect(()=>{if(!useManual)fetch2(from,to);},[from,to,useManual]);
+
+  const ar=useManual?parseFloat(manual):rate;
+  const a=parseFloat(amt);
+  const conv=(ar&&!isNaN(a))?a*ar:null;
+  const fc=CURR.find(c=>c.code===from)||{};
+  const tc=CURR.find(c=>c.code===to)||{};
 
   return (
     <div>
-      <SectionHeader icon="💱" title="Currency Converter" subtitle="Live rates via ExchangeRate-API" />
-      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:10 }}>
-        <div>
-          <Lbl>FROM</Lbl>
-          <Sel value={from} onChange={function(e){setFrom(e.target.value);}}>
-            {CURRENCIES.map(function(c){return <option key={c.code} value={c.code}>{c.flag} {c.code} - {c.name}</option>;})}
-          </Sel>
-        </div>
-        <div>
-          <Lbl>TO</Lbl>
-          <Sel value={to} onChange={function(e){setTo(e.target.value);}}>
-            {CURRENCIES.map(function(c){return <option key={c.code} value={c.code}>{c.flag} {c.code} - {c.name}</option>;})}
-          </Sel>
-        </div>
-      </div>
-      <Lbl>AMOUNT ({fromC.symbol || from})</Lbl>
-      <Inp type="number" value={amount} onChange={function(e){setAmount(e.target.value);}} placeholder="1000" />
-      <div style={{ display:"flex", alignItems:"center", gap:12, marginTop:10, flexWrap:"wrap" }}>
-        <label style={{ display:"flex", alignItems:"center", gap:6, fontSize:11, color:"#888", cursor:"pointer" }}>
-          <input type="checkbox" checked={useManual} onChange={function(e){setUseManual(e.target.checked);}} />
+      <Head icon="💱" title="Currency Converter" sub="Live rates via ExchangeRate-API" />
+      <G2>
+        <div><Lbl>FROM</Lbl><CurrSel value={from} onChange={setFrom}/></div>
+        <div><Lbl>TO</Lbl><CurrSel value={to} onChange={setTo}/></div>
+      </G2>
+      <Lbl>AMOUNT ({fc.sym||from})</Lbl>
+      <Inp type="number" value={amt} onChange={e=>setAmt(e.target.value)} placeholder="1000"/>
+      <div style={{display:"flex",alignItems:"center",gap:12,marginTop:10,flexWrap:"wrap"}}>
+        <label style={{display:"flex",alignItems:"center",gap:6,fontSize:11,color:"#888",cursor:"pointer"}}>
+          <input type="checkbox" checked={useManual} onChange={e=>setUseManual(e.target.checked)}/>
           Manual rate
         </label>
-        {useManual ? (
-          <Inp type="number" value={manual} onChange={function(e){setManual(e.target.value);}} placeholder="e.g. 56.50" style={{ width:140 }} />
-        ) : (
-          <Btn onClick={function(){fetchRate(from,to);}} color="#1f2937" style={{ border:"1px solid #374151", fontSize:11 }}>
-            {loading ? "..." : "REFRESH"}
-          </Btn>
-        )}
-        {updated && !useManual && <span style={{ fontSize:10, color:"#444" }}>Updated {updated}</span>}
+        {useManual
+          ? <Inp type="number" value={manual} onChange={e=>setManual(e.target.value)} placeholder="e.g. 56.50" style={{width:140}}/>
+          : <button onClick={()=>fetch2(from,to)} style={{background:"#1f2937",border:"1px solid #374151",color:"#aaa",borderRadius:6,padding:"6px 14px",fontSize:11,cursor:"pointer"}}>{loading?"...":"REFRESH"}</button>
+        }
+        {updated&&!useManual&&<span style={{fontSize:10,color:"#444"}}>Updated {updated}</span>}
       </div>
-      {converted !== null && activeRate && (
-        <Card style={{ marginTop:12, borderColor:"#1a2a1a" }}>
-          <Row label={fmt(amount,2) + " " + from + " ="} value={(toC.symbol||to) + " " + fmt(converted,2) + " " + to} color="#4ade80" />
-          <Row label="Exchange rate" value={"1 " + from + " = " + fmt(activeRate,4) + " " + to} />
-          <Row label="Reverse rate"  value={"1 " + to + " = " + fmt(1/activeRate,4) + " " + from} />
-        </Card>
+      {conv!==null&&ar&&(
+        <Box style={{marginTop:12,borderColor:"#1a2a1a"}}>
+          <Row label={f(amt,2)+" "+from+" ="} value={(tc.sym||to)+" "+f(conv,2)+" "+to} color="#4ade80"/>
+          <Row label="Rate"    value={"1 "+from+" = "+f(ar,4)+" "+to}/>
+          <Row label="Reverse" value={"1 "+to+" = "+f(1/ar,4)+" "+from}/>
+        </Box>
       )}
     </div>
   );
 }
 
-// ─── TOOL: WAGE CALCULATOR ────────────────────────────────────────────────────
-
-function WageCalculator() {
-  var [basic, setBasic]       = useState("");
-  var [currency, setCurrency] = useState("USD");
-  var [months, setMonths]     = useState("9");
-  var [rank, setRank]         = useState("Officer");
-
-  var b   = parseFloat(basic)  || 0;
-  var m   = parseFloat(months) || 0;
-  var cur = CURRENCIES.find(function(c){return c.code===currency;}) || {};
-  var ot  = b * 0.25;
-  var vac = b / 12;
-  var tot = b + ot;
-
-  var RANKS = ["Master","Chief Officer","2nd Officer","3rd Officer","Chief Engineer","2nd Engineer","3rd Engineer","4th Engineer","Bosun","AB Seaman","OS","Cook","Steward","Officer","Rating"];
-
+// ── WAGE ──────────────────────────────────────────────────────────────────────
+function WageTool() {
+  const [basic,setBasic]=useState("");
+  const [cur,setCur]=useState("USD");
+  const [mo,setMo]=useState("9");
+  const b=parseFloat(basic)||0, m=parseFloat(mo)||0;
+  const c=CURR.find(x=>x.code===cur)||{};
+  const ot=b*0.25, vac=b/12, tot=b+ot;
   return (
     <div>
-      <SectionHeader icon="💵" title="Wage Calculator" subtitle="ITF / CBA standard breakdown" />
-      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:4 }}>
-        <div>
-          <Lbl>RANK / POSITION</Lbl>
-          <Sel value={rank} onChange={function(e){setRank(e.target.value);}}>
-            {RANKS.map(function(r){return <option key={r}>{r}</option>;})}
-          </Sel>
-        </div>
-        <div>
-          <Lbl>CURRENCY</Lbl>
-          <Sel value={currency} onChange={function(e){setCurrency(e.target.value);}}>
-            {CURRENCIES.map(function(c){return <option key={c.code} value={c.code}>{c.flag} {c.code}</option>;})}
-          </Sel>
-        </div>
-      </div>
-      <Lbl>BASIC MONTHLY WAGE ({cur.symbol || currency})</Lbl>
-      <Inp type="number" value={basic} onChange={function(e){setBasic(e.target.value);}} placeholder="e.g. 1800" />
-      <Lbl>CONTRACT LENGTH (MONTHS)</Lbl>
-      <Inp type="number" value={months} onChange={function(e){setMonths(e.target.value);}} placeholder="e.g. 9" />
-      {b > 0 && (
-        <Card style={{ marginTop:12, borderColor:"#1a2a0a" }}>
-          <Row label="Basic Wage / month"          value={(cur.symbol||"")+fmt(b)} />
-          <Row label="Fixed OT (25%)"              value={(cur.symbol||"")+fmt(ot)} />
-          <Row label="Vacation Pay / month (1/12)" value={(cur.symbol||"")+fmt(vac)} color="#60a5fa" />
-          <Row label="Total Monthly Package"       value={(cur.symbol||"")+fmt(tot)} color="#4ade80" />
-          {m > 0 && <Row label={"Contract Total ("+months+" months)"} value={(cur.symbol||"")+fmt(tot*m)} color="#fbbf24" />}
-          {m > 0 && <Row label="Annualised (est.)"  value={(cur.symbol||"")+fmt(tot*12)} color="#a78bfa" />}
-        </Card>
-      )}
+      <Head icon="💵" title="Wage Calculator" sub="ITF / CBA standard breakdown"/>
+      <G2>
+        <div><Lbl>CURRENCY</Lbl><CurrSel value={cur} onChange={setCur}/></div>
+        <div><Lbl>CONTRACT (MONTHS)</Lbl><Inp type="number" value={mo} onChange={e=>setMo(e.target.value)} placeholder="9"/></div>
+      </G2>
+      <Lbl>BASIC MONTHLY WAGE ({c.sym||cur})</Lbl>
+      <Inp type="number" value={basic} onChange={e=>setBasic(e.target.value)} placeholder="e.g. 1800"/>
+      {b>0&&<Box style={{marginTop:12}}>
+        <Row label="Basic Wage"           value={(c.sym||"")+f(b)}/>
+        <Row label="Fixed OT 25%"         value={(c.sym||"")+f(ot)}/>
+        <Row label="Vacation Pay 1/12"    value={(c.sym||"")+f(vac)} color="#60a5fa"/>
+        <Row label="Total Monthly"        value={(c.sym||"")+f(tot)} color="#4ade80"/>
+        {m>0&&<Row label={"Contract "+mo+" months"} value={(c.sym||"")+f(tot*m)} color="#fbbf24"/>}
+      </Box>}
     </div>
   );
 }
 
-// ─── TOOL: OVERTIME CALCULATOR ────────────────────────────────────────────────
-
-function OvertimeCalculator() {
-  var [basic, setBasic]     = useState("");
-  var [currency, setCurrency] = useState("USD");
-  var [worked, setWorked]   = useState("");
-  var [regular, setRegular] = useState("208");
-  var [mult, setMult]       = useState("1.25");
-
-  var b   = parseFloat(basic)   || 0;
-  var hw  = parseFloat(worked)  || 0;
-  var rh  = parseFloat(regular) || 208;
-  var or  = parseFloat(mult)    || 1.25;
-  var cur = CURRENCIES.find(function(c){return c.code===currency;}) || {};
-  var hr  = rh > 0 ? b / rh : 0;
-  var oth = Math.max(0, hw - rh);
-  var otp = oth * hr * or;
-  var tot = Math.min(hw,rh)*hr + otp;
-
+// ── OVERTIME ──────────────────────────────────────────────────────────────────
+function OvertimeTool() {
+  const [basic,setBasic]=useState("");
+  const [cur,setCur]=useState("USD");
+  const [worked,setWorked]=useState("");
+  const [reg,setReg]=useState("208");
+  const [mult,setMult]=useState("1.25");
+  const b=parseFloat(basic)||0, hw=parseFloat(worked)||0, rh=parseFloat(reg)||208, or=parseFloat(mult)||1.25;
+  const c=CURR.find(x=>x.code===cur)||{};
+  const hr=rh>0?b/rh:0, oth=Math.max(0,hw-rh), otp=oth*hr*or, tot=Math.min(hw,rh)*hr+otp;
   return (
     <div>
-      <SectionHeader icon="⏱" title="Overtime Calculator" subtitle="MLC 2006 compliant" />
-      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:4 }}>
-        <div>
-          <Lbl>CURRENCY</Lbl>
-          <Sel value={currency} onChange={function(e){setCurrency(e.target.value);}}>
-            {CURRENCIES.map(function(c){return <option key={c.code} value={c.code}>{c.flag} {c.code}</option>;})}
-          </Sel>
-        </div>
-        <div>
-          <Lbl>OT MULTIPLIER</Lbl>
-          <Sel value={mult} onChange={function(e){setMult(e.target.value);}}>
+      <Head icon="⏱" title="Overtime Calculator" sub="MLC 2006 compliant"/>
+      <G2>
+        <div><Lbl>CURRENCY</Lbl><CurrSel value={cur} onChange={setCur}/></div>
+        <div><Lbl>OT MULTIPLIER</Lbl>
+          <Sel value={mult} onChange={e=>setMult(e.target.value)}>
             <option value="1.25">1.25x Standard</option>
             <option value="1.5">1.5x Time and Half</option>
             <option value="2.0">2.0x Double</option>
             <option value="1.0">1.0x Flat</option>
           </Sel>
         </div>
-      </div>
-      <Lbl>BASIC MONTHLY WAGE ({cur.symbol || currency})</Lbl>
-      <Inp type="number" value={basic} onChange={function(e){setBasic(e.target.value);}} placeholder="e.g. 1800" />
-      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginTop:4 }}>
-        <div>
-          <Lbl>REGULAR HOURS / MONTH</Lbl>
-          <Inp type="number" value={regular} onChange={function(e){setRegular(e.target.value);}} placeholder="208" />
-        </div>
-        <div>
-          <Lbl>ACTUAL HOURS WORKED</Lbl>
-          <Inp type="number" value={worked} onChange={function(e){setWorked(e.target.value);}} placeholder="e.g. 240" />
-        </div>
-      </div>
-      {b > 0 && hw > 0 && (
-        <Card style={{ marginTop:12, borderColor:"#2a1a00" }}>
-          <Row label="Hourly Rate"              value={(cur.symbol||"")+fmt(hr,3)+" /hr"} />
-          <Row label="OT Hours"                 value={fmt(oth,0)+" hrs"} color={oth>0?"#fbbf24":"#888"} />
-          <Row label={"OT Pay ("+or+"x)"}       value={(cur.symbol||"")+fmt(otp)} color="#fbbf24" />
-          <Row label="Total Pay"                value={(cur.symbol||"")+fmt(tot)} color="#4ade80" />
-          {hw > 208 && (
-            <div style={{ marginTop:8, padding:"8px 10px", background:"#1a0a00", borderRadius:6, fontSize:11, color:"#d97706" }}>
-              MLC 2006: Max 14 hrs/day and 72 hrs/week. Please verify compliance with flag state requirements.
-            </div>
-          )}
-        </Card>
-      )}
+      </G2>
+      <Lbl>BASIC MONTHLY WAGE ({c.sym||cur})</Lbl>
+      <Inp type="number" value={basic} onChange={e=>setBasic(e.target.value)} placeholder="e.g. 1800"/>
+      <G2>
+        <div><Lbl>REGULAR HOURS</Lbl><Inp type="number" value={reg} onChange={e=>setReg(e.target.value)} placeholder="208"/></div>
+        <div><Lbl>ACTUAL HOURS</Lbl><Inp type="number" value={worked} onChange={e=>setWorked(e.target.value)} placeholder="e.g. 240"/></div>
+      </G2>
+      {b>0&&hw>0&&<Box style={{marginTop:12}}>
+        <Row label="Hourly Rate"      value={(c.sym||"")+f(hr,3)+" /hr"}/>
+        <Row label="OT Hours"         value={f(oth,0)+" hrs"} color={oth>0?"#fbbf24":"#888"}/>
+        <Row label={"OT Pay "+or+"x"} value={(c.sym||"")+f(otp)} color="#fbbf24"/>
+        <Row label="Total Pay"        value={(c.sym||"")+f(tot)} color="#4ade80"/>
+        {hw>208&&<div style={{marginTop:8,padding:"8px",background:"#1a0a00",borderRadius:6,fontSize:11,color:"#d97706"}}>MLC 2006: Max 14 hrs/day and 72 hrs/week.</div>}
+      </Box>}
     </div>
   );
 }
 
-// ─── TOOL: ALLOTMENT CALCULATOR ───────────────────────────────────────────────
-
-function AllotmentCalculator() {
-  var [basic, setBasic]     = useState("");
-  var [currency, setCurrency] = useState("USD");
-  var [homeCur, setHomeCur] = useState("PHP");
-  var [pct, setPct]         = useState(80);
-  var [mode, setMode]       = useState("pct");
-  var [fixed, setFixed]     = useState("");
-  var [conv, setConv]       = useState("");
-
-  var b   = parseFloat(basic) || 0;
-  var all = mode === "pct" ? b*(pct/100) : (parseFloat(fixed)||0);
-  var ret = b - all;
-  var cr  = parseFloat(conv) || 0;
-  var cur = CURRENCIES.find(function(c){return c.code===currency;})  || {};
-  var hc  = CURRENCIES.find(function(c){return c.code===homeCur;}) || {};
-
+// ── ALLOTMENT ─────────────────────────────────────────────────────────────────
+function AllotmentTool() {
+  const [basic,setBasic]=useState(""), [cur,setCur]=useState("USD"), [home,setHome]=useState("PHP");
+  const [pct,setPct]=useState(80), [mode,setMode]=useState("pct"), [fixed,setFixed]=useState(""), [conv,setConv]=useState("");
+  const b=parseFloat(basic)||0, all=mode==="pct"?b*(pct/100):(parseFloat(fixed)||0), ret=b-all, cr=parseFloat(conv)||0;
+  const c=CURR.find(x=>x.code===cur)||{}, hc=CURR.find(x=>x.code===home)||{};
   return (
     <div>
-      <SectionHeader icon="📤" title="Allotment Calculator" subtitle="Plan your monthly remittance home" />
-      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:4 }}>
-        <div>
-          <Lbl>WAGE CURRENCY</Lbl>
-          <Sel value={currency} onChange={function(e){setCurrency(e.target.value);}}>
-            {CURRENCIES.map(function(c){return <option key={c.code} value={c.code}>{c.flag} {c.code}</option>;})}
-          </Sel>
-        </div>
-        <div>
-          <Lbl>HOME CURRENCY</Lbl>
-          <Sel value={homeCur} onChange={function(e){setHomeCur(e.target.value);}}>
-            {CURRENCIES.map(function(c){return <option key={c.code} value={c.code}>{c.flag} {c.code}</option>;})}
-          </Sel>
-        </div>
+      <Head icon="📤" title="Allotment Calculator" sub="Plan your monthly remittance"/>
+      <G2>
+        <div><Lbl>WAGE CURRENCY</Lbl><CurrSel value={cur} onChange={setCur}/></div>
+        <div><Lbl>HOME CURRENCY</Lbl><CurrSel value={home} onChange={setHome}/></div>
+      </G2>
+      <Lbl>MONTHLY WAGE ({c.sym||cur})</Lbl>
+      <Inp type="number" value={basic} onChange={e=>setBasic(e.target.value)} placeholder="e.g. 1800"/>
+      <div style={{display:"flex",gap:8,margin:"10px 0"}}>
+        <button onClick={()=>setMode("pct")} style={{background:mode==="pct"?"#172554":"#1f2937",border:"1px solid #374151",color:mode==="pct"?"#60a5fa":"#aaa",borderRadius:6,padding:"6px 14px",fontSize:11,cursor:"pointer"}}>BY PERCENT</button>
+        <button onClick={()=>setMode("fixed")} style={{background:mode==="fixed"?"#172554":"#1f2937",border:"1px solid #374151",color:mode==="fixed"?"#60a5fa":"#aaa",borderRadius:6,padding:"6px 14px",fontSize:11,cursor:"pointer"}}>FIXED AMOUNT</button>
       </div>
-      <Lbl>MONTHLY WAGE ({cur.symbol || currency})</Lbl>
-      <Inp type="number" value={basic} onChange={function(e){setBasic(e.target.value);}} placeholder="e.g. 1800" />
-      <div style={{ display:"flex", gap:8, margin:"10px 0" }}>
-        <Btn onClick={function(){setMode("pct");}} color={mode==="pct"?"#2563eb":"#1f2937"} style={{ border:"1px solid #374151", fontSize:11 }}>BY PERCENT</Btn>
-        <Btn onClick={function(){setMode("fixed");}} color={mode==="fixed"?"#2563eb":"#1f2937"} style={{ border:"1px solid #374151", fontSize:11 }}>FIXED AMOUNT</Btn>
-      </div>
-      {mode === "pct" ? (
-        <div>
-          <Lbl>ALLOTMENT: {pct}%</Lbl>
-          <input type="range" min={0} max={100} value={pct} onChange={function(e){setPct(Number(e.target.value));}} style={{ width:"100%", accentColor:"#2563eb" }} />
-        </div>
-      ) : (
-        <div>
-          <Lbl>FIXED AMOUNT ({cur.symbol || currency})</Lbl>
-          <Inp type="number" value={fixed} onChange={function(e){setFixed(e.target.value);}} placeholder="e.g. 1400" />
-        </div>
-      )}
-      <Lbl>CONVERSION RATE (1 {currency} = ? {homeCur}) — OPTIONAL</Lbl>
-      <Inp type="number" value={conv} onChange={function(e){setConv(e.target.value);}} placeholder="Enter manually e.g. 56.50" />
-      {b > 0 && (
-        <Card style={{ marginTop:12, borderColor:"#2a1500" }}>
-          <Row label="Allotment to family" value={(cur.symbol||"")+fmt(all)} color="#fbbf24" />
-          <Row label="Retained onboard"    value={(cur.symbol||"")+fmt(ret)} />
-          <Row label="Allotment percent"   value={fmt((all/b)*100,1)+"%"} color="#60a5fa" />
-          {cr > 0 && <Row label={"In "+homeCur} value={(hc.symbol||"")+fmt(all*cr)} color="#4ade80" />}
-        </Card>
-      )}
-    </div>
-  );
-}
-
-// ─── TOOL: SAVINGS PLANNER ────────────────────────────────────────────────────
-
-function SavingsPlanner() {
-  var [income,   setIncome]   = useState("");
-  var [currency, setCurrency] = useState("USD");
-  var [expenses, setExpenses] = useState("");
-  var [months,   setMonths]   = useState("9");
-  var [existing, setExisting] = useState("0");
-  var [goal,     setGoal]     = useState("");
-
-  var inc = parseFloat(income)   || 0;
-  var exp = parseFloat(expenses) || 0;
-  var m   = parseFloat(months)   || 1;
-  var ex  = parseFloat(existing) || 0;
-  var g   = parseFloat(goal)     || 0;
-  var cur = CURRENCIES.find(function(c){return c.code===currency;}) || {};
-  var mo  = inc - exp;
-  var tot = mo*m + ex;
-  var rt  = inc > 0 ? (mo/inc)*100 : 0;
-  var pct = g > 0 ? Math.min(100,(tot/g)*100) : 0;
-  var mtg = (g > 0 && mo > 0) ? Math.ceil((g-ex)/mo) : null;
-
-  return (
-    <div>
-      <SectionHeader icon="🏦" title="Savings Planner" subtitle="Track your contract savings goal" />
-      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:4 }}>
-        <div>
-          <Lbl>CURRENCY</Lbl>
-          <Sel value={currency} onChange={function(e){setCurrency(e.target.value);}}>
-            {CURRENCIES.map(function(c){return <option key={c.code} value={c.code}>{c.flag} {c.code}</option>;})}
-          </Sel>
-        </div>
-        <div>
-          <Lbl>CONTRACT (MONTHS)</Lbl>
-          <Inp type="number" value={months} onChange={function(e){setMonths(e.target.value);}} placeholder="9" />
-        </div>
-      </div>
-      <Lbl>MONTHLY INCOME ({cur.symbol || currency})</Lbl>
-      <Inp type="number" value={income} onChange={function(e){setIncome(e.target.value);}} placeholder="e.g. 2000" />
-      <Lbl>MONTHLY EXPENSES / ALLOTMENT ({cur.symbol || currency})</Lbl>
-      <Inp type="number" value={expenses} onChange={function(e){setExpenses(e.target.value);}} placeholder="e.g. 400" />
-      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginTop:4 }}>
-        <div>
-          <Lbl>EXISTING SAVINGS ({cur.symbol || currency})</Lbl>
-          <Inp type="number" value={existing} onChange={function(e){setExisting(e.target.value);}} placeholder="0" />
-        </div>
-        <div>
-          <Lbl>GOAL ({cur.symbol || currency}) — OPTIONAL</Lbl>
-          <Inp type="number" value={goal} onChange={function(e){setGoal(e.target.value);}} placeholder="e.g. 20000" />
-        </div>
-      </div>
-      {inc > 0 && (
-        <Card style={{ marginTop:12, borderColor:"#1a2a0a" }}>
-          <Row label="Monthly Savings"           value={(cur.symbol||"")+fmt(mo)}    color={mo>=0?"#4ade80":"#ef4444"} />
-          <Row label="Savings Rate"              value={fmt(rt,1)+"%"}               color={rt>=30?"#4ade80":rt>=10?"#fbbf24":"#ef4444"} />
-          <Row label={"Contract ("+months+" mo)"}value={(cur.symbol||"")+fmt(mo*m)}  color="#60a5fa" />
-          <Row label="Total incl. existing"      value={(cur.symbol||"")+fmt(tot)}   color="#fbbf24" />
-          {g > 0 && (
-            <div style={{ marginTop:10 }}>
-              <div style={{ display:"flex", justifyContent:"space-between", fontSize:11, color:"#666", marginBottom:6 }}>
-                <span>Goal progress</span><span style={{color:"#60a5fa"}}>{fmt(pct,1)}%</span>
-              </div>
-              <div style={{ height:6, background:"#1f1f1f", borderRadius:4, overflow:"hidden" }}>
-                <div style={{ height:"100%", width:pct+"%", background:"linear-gradient(90deg,#2563eb,#4ade80)", borderRadius:4 }} />
-              </div>
-            </div>
-          )}
-          {mtg && <Row label="Months to reach goal" value={mtg+" months"} color="#a78bfa" />}
-        </Card>
-      )}
-    </div>
-  );
-}
-
-// ─── TOOL: LEAVE PLANNER ─────────────────────────────────────────────────────
-
-function LeavePlanner() {
-  var [join,     setJoin]     = useState("");
-  var [contract, setContract] = useState("9");
-  var [ratio,    setRatio]    = useState("1:2");
-  var [planned,  setPlanned]  = useState("30");
-
-  var ratioMap = { "1:1":1, "1:2":0.5, "1:3":0.333, "2:1":2, "3:1":3 };
-  var cm  = parseFloat(contract) || 0;
-  var pl  = parseFloat(planned)  || 0;
-  var rv  = ratioMap[ratio]      || 0.5;
-  var sea = cm * 30;
-  var ear = sea * rv;
-  var bal = ear - pl;
-
-  var addDate = function(base, addMonths, addDays) {
-    if (!base) return null;
-    try {
-      var d = new Date(base);
-      if (isNaN(d.getTime())) return null;
-      d.setMonth(d.getMonth() + (addMonths||0));
-      d.setDate(d.getDate() + (addDays||0));
-      return d.toLocaleDateString("en-GB", { day:"2-digit", month:"short", year:"numeric" });
-    } catch(e) { return null; }
-  };
-
-  return (
-    <div>
-      <SectionHeader icon="🗓" title="Leave Planner" subtitle="Calculate earned leave and next sign-on" />
-      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:4 }}>
-        <div>
-          <Lbl>JOIN DATE</Lbl>
-          <Inp type="date" value={join} onChange={function(e){setJoin(e.target.value);}} />
-        </div>
-        <div>
-          <Lbl>CONTRACT (MONTHS)</Lbl>
-          <Inp type="number" value={contract} onChange={function(e){setContract(e.target.value);}} placeholder="9" />
-        </div>
-      </div>
-      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginTop:4 }}>
-        <div>
-          <Lbl>LEAVE RATIO (leave:sea)</Lbl>
-          <Sel value={ratio} onChange={function(e){setRatio(e.target.value);}}>
-            {Object.keys(ratioMap).map(function(r){return <option key={r}>{r}</option>;})}
-          </Sel>
-        </div>
-        <div>
-          <Lbl>PLANNED LEAVE DAYS</Lbl>
-          <Inp type="number" value={planned} onChange={function(e){setPlanned(e.target.value);}} placeholder="30" />
-        </div>
-      </div>
-      {cm > 0 && (
-        <Card style={{ marginTop:12, borderColor:"#1a2a1a" }}>
-          <Row label="Sea Days"                      value={fmt(sea,0)+" days"} />
-          <Row label={"Earned Leave ("+ratio+")"}    value={fmt(ear,0)+" days"} color="#60a5fa" />
-          {addDate(join,cm)    && <Row label="Contract End"      value={addDate(join,cm)}    color="#fbbf24" />}
-          {addDate(join,cm,pl) && <Row label="Est. Next Sign-On" value={addDate(join,cm,pl)} color="#4ade80" />}
-          <Row label="Leave Balance" value={fmt(bal,0)+" days"} color={bal>=0?"#4ade80":"#ef4444"} />
-        </Card>
-      )}
-    </div>
-  );
-}
-
-// ─── TOOL: RELIEF DATE CALCULATOR ────────────────────────────────────────────
-
-function ReliefDateCalc() {
-  var [join,  setJoin]  = useState("");
-  var [minMo, setMinMo] = useState("7");
-  var [maxMo, setMaxMo] = useState("11");
-
-  var today = new Date();
-
-  var addMo = function(ds, mo) {
-    if (!ds) return null;
-    try {
-      var d = new Date(ds);
-      if (isNaN(d.getTime())) return null;
-      d.setMonth(d.getMonth() + (mo||0));
-      return d;
-    } catch(e) { return null; }
-  };
-
-  var fmtD = function(d) {
-    if (!d) return "--";
-    return d.toLocaleDateString("en-GB", { weekday:"short", day:"2-digit", month:"short", year:"numeric" });
-  };
-
-  var minD = addMo(join, parseFloat(minMo)||0);
-  var maxD = addMo(join, parseFloat(maxMo)||0);
-  var dob  = join ? Math.floor((today - new Date(join))/86400000) : null;
-  var dtm  = minD ? Math.max(0, Math.ceil((minD-today)/86400000)) : null;
-  var dtx  = maxD ? Math.max(0, Math.ceil((maxD-today)/86400000)) : null;
-  var inW  = (minD && maxD) ? (today>=minD && today<=maxD) : false;
-
-  return (
-    <div>
-      <SectionHeader icon="🔄" title="Relief Date Calculator" subtitle="Track your relief window and days onboard" />
-      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:10, marginBottom:4 }}>
-        <div>
-          <Lbl>JOIN DATE</Lbl>
-          <Inp type="date" value={join} onChange={function(e){setJoin(e.target.value);}} />
-        </div>
-        <div>
-          <Lbl>MIN CONTRACT (MO)</Lbl>
-          <Inp type="number" value={minMo} onChange={function(e){setMinMo(e.target.value);}} placeholder="7" />
-        </div>
-        <div>
-          <Lbl>MAX CONTRACT (MO)</Lbl>
-          <Inp type="number" value={maxMo} onChange={function(e){setMaxMo(e.target.value);}} placeholder="11" />
-        </div>
-      </div>
-      {join && dob !== null && (
-        <Card style={{ marginTop:12, borderColor:"#1a1a2a" }}>
-          <Row label="Days Onboard"         value={dob+" days"} color={dob>210?"#ef4444":"#e5e5e5"} />
-          <Row label="Earliest Relief Date" value={fmtD(minD)}  color="#60a5fa" />
-          <Row label="Latest Relief Date"   value={fmtD(maxD)}  color="#fbbf24" />
-          {!inW && dtm > 0 && <Row label="Days Until Window Opens" value={dtm+" days"} color="#888" />}
-          {inW && (
-            <div style={{ marginTop:8, padding:"10px 12px", background:"#0a1a0a", border:"1px solid #16a34a", borderRadius:7, fontSize:12, color:"#4ade80", textAlign:"center" }}>
-              You are currently within your relief window
-            </div>
-          )}
-          {inW && dtx !== null && <Row label="Days Until Max Contract" value={dtx+" days"} color="#ef4444" />}
-        </Card>
-      )}
-    </div>
-  );
-}
-
-// ─── TOOL: CONTRACT TRACKER ───────────────────────────────────────────────────
-
-function ContractTracker() {
-  var [list,   setList]   = useState([]);
-  var [form,   setForm]   = useState({ vessel:"", rank:"", company:"", start:"", end:"", notes:"" });
-  var [adding, setAdding] = useState(false);
-  var [loaded, setLoaded] = useState(false);
-
-  useEffect(function() {
-    try {
-      var saved = localStorage.getItem("cw_contracts");
-      if (saved) {
-        var parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) setList(parsed);
+      {mode==="pct"
+        ? <div><Lbl>ALLOTMENT {pct}%</Lbl><input type="range" min={0} max={100} value={pct} onChange={e=>setPct(Number(e.target.value))} style={{width:"100%",accentColor:"#2563eb"}}/></div>
+        : <div><Lbl>FIXED ({c.sym||cur})</Lbl><Inp type="number" value={fixed} onChange={e=>setFixed(e.target.value)} placeholder="e.g. 1400"/></div>
       }
-    } catch(e) {}
-    setLoaded(true);
-  }, []);
+      <Lbl>CONVERSION RATE (1 {cur} = ? {home}) optional</Lbl>
+      <Inp type="number" value={conv} onChange={e=>setConv(e.target.value)} placeholder="e.g. 56.50"/>
+      {b>0&&<Box style={{marginTop:12}}>
+        <Row label="Allotment"    value={(c.sym||"")+f(all)} color="#fbbf24"/>
+        <Row label="Retained"     value={(c.sym||"")+f(ret)}/>
+        <Row label="Percent"      value={f((all/b)*100,1)+"%"} color="#60a5fa"/>
+        {cr>0&&<Row label={"In "+home} value={(hc.sym||"")+f(all*cr)} color="#4ade80"/>}
+      </Box>}
+    </div>
+  );
+}
 
-  useEffect(function() {
-    if (loaded) {
-      try { localStorage.setItem("cw_contracts", JSON.stringify(list)); } catch(e) {}
-    }
-  }, [list, loaded]);
-
-  var add = function() {
-    if (!form.vessel || !form.start) return;
-    setList(function(prev) { return [Object.assign({}, form, { id:Date.now() }), ...prev]; });
-    setForm({ vessel:"", rank:"", company:"", start:"", end:"", notes:"" });
-    setAdding(false);
-  };
-
-  var remove = function(id) {
-    setList(function(prev) { return prev.filter(function(c){return c.id!==id;}); });
-  };
-
-  var totalDays = list.reduce(function(acc, c) {
-    if (!c.start || !c.end) return acc;
-    try { return acc + Math.max(0, Math.floor((new Date(c.end)-new Date(c.start))/86400000)); }
-    catch(e) { return acc; }
-  }, 0);
-
+// ── SAVINGS ───────────────────────────────────────────────────────────────────
+function SavingsTool() {
+  const [inc,setInc]=useState(""), [cur,setCur]=useState("USD"), [exp,setExp]=useState("");
+  const [mo,setMo]=useState("9"), [ex,setEx]=useState("0"), [goal,setGoal]=useState("");
+  const i=parseFloat(inc)||0, e=parseFloat(exp)||0, m=parseFloat(mo)||1, x=parseFloat(ex)||0, g=parseFloat(goal)||0;
+  const c=CURR.find(v=>v.code===cur)||{};
+  const monthly=i-e, tot=monthly*m+x, rt=i>0?(monthly/i)*100:0, pct=g>0?Math.min(100,(tot/g)*100):0;
+  const mtg=(g>0&&monthly>0)?Math.ceil((g-x)/monthly):null;
   return (
     <div>
-      <SectionHeader icon="📋" title="Contract Tracker" subtitle="Log your sea service history" />
-      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:12 }}>
-        <span style={{ fontSize:11, color:"#666" }}>{list.length} contracts — {fmt(totalDays,0)} total days</span>
-        <Btn onClick={function(){setAdding(function(a){return !a;});}} color="#1f2937" style={{ border:"1px solid #374151", fontSize:11 }}>
-          {adding ? "CANCEL" : "+ ADD CONTRACT"}
-        </Btn>
+      <Head icon="🏦" title="Savings Planner" sub="Track your contract savings goal"/>
+      <G2>
+        <div><Lbl>CURRENCY</Lbl><CurrSel value={cur} onChange={setCur}/></div>
+        <div><Lbl>CONTRACT (MO)</Lbl><Inp type="number" value={mo} onChange={e=>setMo(e.target.value)} placeholder="9"/></div>
+      </G2>
+      <Lbl>MONTHLY INCOME ({c.sym||cur})</Lbl><Inp type="number" value={inc} onChange={e=>setInc(e.target.value)} placeholder="e.g. 2000"/>
+      <Lbl>EXPENSES / ALLOTMENT ({c.sym||cur})</Lbl><Inp type="number" value={exp} onChange={e=>setExp(e.target.value)} placeholder="e.g. 400"/>
+      <G2>
+        <div><Lbl>EXISTING ({c.sym||cur})</Lbl><Inp type="number" value={ex} onChange={e=>setEx(e.target.value)} placeholder="0"/></div>
+        <div><Lbl>GOAL ({c.sym||cur})</Lbl><Inp type="number" value={goal} onChange={e=>setGoal(e.target.value)} placeholder="e.g. 20000"/></div>
+      </G2>
+      {i>0&&<Box style={{marginTop:12}}>
+        <Row label="Monthly Savings"  value={(c.sym||"")+f(monthly)} color={monthly>=0?"#4ade80":"#ef4444"}/>
+        <Row label="Savings Rate"     value={f(rt,1)+"%"} color={rt>=30?"#4ade80":rt>=10?"#fbbf24":"#ef4444"}/>
+        <Row label={"Contract "+mo+"mo"} value={(c.sym||"")+f(monthly*m)} color="#60a5fa"/>
+        <Row label="Total incl. existing" value={(c.sym||"")+f(tot)} color="#fbbf24"/>
+        {g>0&&<div style={{marginTop:10}}>
+          <div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:"#666",marginBottom:6}}><span>Goal progress</span><span style={{color:"#60a5fa"}}>{f(pct,1)}%</span></div>
+          <div style={{height:6,background:"#1f1f1f",borderRadius:4,overflow:"hidden"}}><div style={{height:"100%",width:pct+"%",background:"linear-gradient(90deg,#2563eb,#4ade80)",borderRadius:4}}/></div>
+        </div>}
+        {mtg&&<Row label="Months to goal" value={mtg+" months"} color="#a78bfa"/>}
+      </Box>}
+    </div>
+  );
+}
+
+// ── LEAVE ─────────────────────────────────────────────────────────────────────
+function LeaveTool() {
+  const [join,setJoin]=useState(""), [contract,setContract]=useState("9"), [ratio,setRatio]=useState("1:2"), [planned,setPlanned]=useState("30");
+  const rm={"1:1":1,"1:2":0.5,"1:3":0.333,"2:1":2,"3:1":3};
+  const cm=parseFloat(contract)||0, pl=parseFloat(planned)||0, rv=rm[ratio]||0.5;
+  const sea=cm*30, ear=sea*rv, bal=ear-pl;
+  const addD=(base,amo,ady)=>{
+    if(!base)return null;
+    try{const d=new Date(base);if(isNaN(d.getTime()))return null;d.setMonth(d.getMonth()+(amo||0));d.setDate(d.getDate()+(ady||0));return d.toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"numeric"});}catch(e){return null;}
+  };
+  return (
+    <div>
+      <Head icon="🗓" title="Leave Planner" sub="Earned leave and next sign-on date"/>
+      <G2>
+        <div><Lbl>JOIN DATE</Lbl><Inp type="date" value={join} onChange={e=>setJoin(e.target.value)}/></div>
+        <div><Lbl>CONTRACT (MO)</Lbl><Inp type="number" value={contract} onChange={e=>setContract(e.target.value)} placeholder="9"/></div>
+      </G2>
+      <G2>
+        <div><Lbl>LEAVE RATIO</Lbl><Sel value={ratio} onChange={e=>setRatio(e.target.value)}>{Object.keys(rm).map(r=><option key={r}>{r}</option>)}</Sel></div>
+        <div><Lbl>PLANNED LEAVE DAYS</Lbl><Inp type="number" value={planned} onChange={e=>setPlanned(e.target.value)} placeholder="30"/></div>
+      </G2>
+      {cm>0&&<Box style={{marginTop:12}}>
+        <Row label="Sea Days"                  value={f(sea,0)+" days"}/>
+        <Row label={"Earned Leave "+ratio}     value={f(ear,0)+" days"} color="#60a5fa"/>
+        {addD(join,cm)&&<Row label="Contract End"      value={addD(join,cm)} color="#fbbf24"/>}
+        {addD(join,cm,pl)&&<Row label="Est. Next Sign-On" value={addD(join,cm,pl)} color="#4ade80"/>}
+        <Row label="Leave Balance" value={f(bal,0)+" days"} color={bal>=0?"#4ade80":"#ef4444"}/>
+      </Box>}
+    </div>
+  );
+}
+
+// ── RELIEF ────────────────────────────────────────────────────────────────────
+function ReliefTool() {
+  const [join,setJoin]=useState(""), [minMo,setMinMo]=useState("7"), [maxMo,setMaxMo]=useState("11");
+  const today=new Date();
+  const addM=(ds,mo)=>{if(!ds)return null;try{const d=new Date(ds);if(isNaN(d.getTime()))return null;d.setMonth(d.getMonth()+(mo||0));return d;}catch(e){return null;}};
+  const fD=d=>d?d.toLocaleDateString("en-GB",{weekday:"short",day:"2-digit",month:"short",year:"numeric"}):"--";
+  const minD=addM(join,parseFloat(minMo)||0), maxD=addM(join,parseFloat(maxMo)||0);
+  const dob=join?Math.floor((today-new Date(join))/86400000):null;
+  const dtm=minD?Math.max(0,Math.ceil((minD-today)/86400000)):null;
+  const dtx=maxD?Math.max(0,Math.ceil((maxD-today)/86400000)):null;
+  const inW=(minD&&maxD)?(today>=minD&&today<=maxD):false;
+  return (
+    <div>
+      <Head icon="🔄" title="Relief Date Calculator" sub="Track your relief window"/>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:4}}>
+        <div><Lbl>JOIN DATE</Lbl><Inp type="date" value={join} onChange={e=>setJoin(e.target.value)}/></div>
+        <div><Lbl>MIN (MO)</Lbl><Inp type="number" value={minMo} onChange={e=>setMinMo(e.target.value)} placeholder="7"/></div>
+        <div><Lbl>MAX (MO)</Lbl><Inp type="number" value={maxMo} onChange={e=>setMaxMo(e.target.value)} placeholder="11"/></div>
       </div>
-      {adding && (
-        <Card style={{ borderColor:"#2563eb44", marginBottom:14 }}>
-          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
-            <div><Lbl>VESSEL NAME</Lbl><Inp value={form.vessel}  onChange={function(e){setForm(function(p){return Object.assign({},p,{vessel:e.target.value});});}}  placeholder="MV Example" /></div>
-            <div><Lbl>RANK</Lbl>       <Inp value={form.rank}    onChange={function(e){setForm(function(p){return Object.assign({},p,{rank:e.target.value});});}}    placeholder="2nd Officer" /></div>
-            <div><Lbl>COMPANY</Lbl>    <Inp value={form.company} onChange={function(e){setForm(function(p){return Object.assign({},p,{company:e.target.value});});}} placeholder="Shipping Co." /></div>
-            <div></div>
-            <div><Lbl>START DATE</Lbl> <Inp type="date" value={form.start} onChange={function(e){setForm(function(p){return Object.assign({},p,{start:e.target.value});});}} /></div>
-            <div><Lbl>END DATE</Lbl>   <Inp type="date" value={form.end}   onChange={function(e){setForm(function(p){return Object.assign({},p,{end:e.target.value});});}} /></div>
-          </div>
-          <Lbl>NOTES</Lbl>
-          <textarea value={form.notes} onChange={function(e){setForm(function(p){return Object.assign({},p,{notes:e.target.value});});}}
-            placeholder="Flag, trade area, vessel type..."
-            style={{ width:"100%", background:"#0d0d0d", border:"1px solid #2a2a2a", borderRadius:6, padding:"8px 12px", color:"#e5e5e5", fontFamily:"'IBM Plex Mono',monospace", fontSize:12, minHeight:50, resize:"vertical", outline:"none", boxSizing:"border-box", marginTop:4 }} />
-          <Btn onClick={add} style={{ marginTop:10 }}>SAVE CONTRACT</Btn>
-        </Card>
-      )}
-      {list.length === 0 && !adding && (
-        <div style={{ textAlign:"center", color:"#444", fontSize:12, padding:30 }}>No contracts logged yet. Add your first one above.</div>
-      )}
-      {list.map(function(c) {
-        var days = null;
-        try { if (c.start && c.end) days = Math.max(0, Math.floor((new Date(c.end)-new Date(c.start))/86400000)); } catch(e) {}
-        return (
-          <Card key={c.id} style={{ marginBottom:8 }}>
-            <div style={{ display:"flex", justifyContent:"space-between" }}>
-              <div>
-                <div style={{ fontSize:13, fontWeight:700, color:"#60a5fa", marginBottom:3 }}>{c.vessel}</div>
-                <div style={{ fontSize:11, color:"#888" }}>{c.rank}{c.company?" — "+c.company:""}</div>
-                <div style={{ fontSize:10, color:"#555", marginTop:3 }}>
-                  {c.start} to {c.end||"ongoing"}{days!==null?" — "+days+" days":""}
-                </div>
-                {c.notes && <div style={{ fontSize:10, color:"#444", marginTop:2 }}>{c.notes}</div>}
-              </div>
-              <button onClick={function(){remove(c.id);}} style={{ background:"none", border:"none", color:"#ef4444", cursor:"pointer", fontSize:16, padding:"0 4px" }}>x</button>
+      {join&&dob!==null&&<Box style={{marginTop:12}}>
+        <Row label="Days Onboard"     value={dob+" days"} color={dob>210?"#ef4444":"#e5e5e5"}/>
+        <Row label="Earliest Relief"  value={fD(minD)} color="#60a5fa"/>
+        <Row label="Latest Relief"    value={fD(maxD)} color="#fbbf24"/>
+        {!inW&&dtm>0&&<Row label="Days to Window" value={dtm+" days"} color="#888"/>}
+        {inW&&<div style={{marginTop:8,padding:"10px",background:"#0a1a0a",border:"1px solid #16a34a",borderRadius:7,fontSize:12,color:"#4ade80",textAlign:"center"}}>You are within your relief window</div>}
+        {inW&&dtx!==null&&<Row label="Days to Max Contract" value={dtx+" days"} color="#ef4444"/>}
+      </Box>}
+    </div>
+  );
+}
+
+// ── CONTRACTS ─────────────────────────────────────────────────────────────────
+function ContractsTool() {
+  const [list,setList]=useState([]), [form,setForm]=useState({vessel:"",rank:"",company:"",start:"",end:"",notes:""}), [adding,setAdding]=useState(false), [loaded,setLoaded]=useState(false);
+  useEffect(()=>{try{const s=localStorage.getItem("cw_contracts");if(s){const p=JSON.parse(s);if(Array.isArray(p))setList(p);}}catch(e){}setLoaded(true);},[]);
+  useEffect(()=>{if(loaded)try{localStorage.setItem("cw_contracts",JSON.stringify(list));}catch(e){};},[list,loaded]);
+  const add=()=>{if(!form.vessel||!form.start)return;setList(p=>[{...form,id:Date.now()},...p]);setForm({vessel:"",rank:"",company:"",start:"",end:"",notes:""});setAdding(false);};
+  const totalDays=list.reduce((a,c)=>{if(!c.start||!c.end)return a;try{return a+Math.max(0,Math.floor((new Date(c.end)-new Date(c.start))/86400000));}catch(e){return a;}},0);
+  return (
+    <div>
+      <Head icon="📋" title="Contract Tracker" sub="Sea service history log"/>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+        <span style={{fontSize:11,color:"#666"}}>{list.length} contracts — {f(totalDays,0)} total days</span>
+        <button onClick={()=>setAdding(a=>!a)} style={{background:"#1f2937",border:"1px solid #374151",color:"#aaa",borderRadius:6,padding:"6px 14px",fontSize:11,cursor:"pointer"}}>{adding?"CANCEL":"+ ADD"}</button>
+      </div>
+      {adding&&<Box style={{borderColor:"#2563eb44",marginBottom:14}}>
+        <G2>
+          <div><Lbl>VESSEL</Lbl><Inp value={form.vessel} onChange={e=>setForm(p=>({...p,vessel:e.target.value}))} placeholder="MV Example"/></div>
+          <div><Lbl>RANK</Lbl><Inp value={form.rank} onChange={e=>setForm(p=>({...p,rank:e.target.value}))} placeholder="2nd Officer"/></div>
+          <div><Lbl>COMPANY</Lbl><Inp value={form.company} onChange={e=>setForm(p=>({...p,company:e.target.value}))} placeholder="Shipping Co."/></div>
+          <div></div>
+          <div><Lbl>START</Lbl><Inp type="date" value={form.start} onChange={e=>setForm(p=>({...p,start:e.target.value}))}/></div>
+          <div><Lbl>END</Lbl><Inp type="date" value={form.end} onChange={e=>setForm(p=>({...p,end:e.target.value}))}/></div>
+        </G2>
+        <Lbl>NOTES</Lbl>
+        <textarea value={form.notes} onChange={e=>setForm(p=>({...p,notes:e.target.value}))} placeholder="Flag, trade area..."
+          style={{width:"100%",background:"#0d0d0d",border:"1px solid #2a2a2a",borderRadius:6,padding:"8px 12px",color:"#e5e5e5",fontSize:12,minHeight:50,resize:"vertical",outline:"none",boxSizing:"border-box",marginTop:4}}/>
+        <button onClick={add} style={{background:"#dc2626",color:"#fff",border:"none",borderRadius:6,padding:"8px 16px",fontSize:11,fontWeight:700,cursor:"pointer",marginTop:10}}>SAVE</button>
+      </Box>}
+      {list.length===0&&!adding&&<div style={{textAlign:"center",color:"#444",fontSize:12,padding:30}}>No contracts yet.</div>}
+      {list.map(c=>{
+        let days=null;try{if(c.start&&c.end)days=Math.max(0,Math.floor((new Date(c.end)-new Date(c.start))/86400000));}catch(e){}
+        return <Box key={c.id} style={{marginBottom:8}}>
+          <div style={{display:"flex",justifyContent:"space-between"}}>
+            <div>
+              <div style={{fontSize:13,fontWeight:700,color:"#60a5fa",marginBottom:3}}>{c.vessel}</div>
+              <div style={{fontSize:11,color:"#888"}}>{c.rank}{c.company?" — "+c.company:""}</div>
+              <div style={{fontSize:10,color:"#555",marginTop:3}}>{c.start} to {c.end||"ongoing"}{days!==null?" — "+days+" days":""}</div>
+              {c.notes&&<div style={{fontSize:10,color:"#444",marginTop:2}}>{c.notes}</div>}
             </div>
-          </Card>
-        );
+            <button onClick={()=>setList(p=>p.filter(x=>x.id!==c.id))} style={{background:"none",border:"none",color:"#ef4444",cursor:"pointer",fontSize:16,padding:"0 4px"}}>x</button>
+          </div>
+        </Box>;
       })}
     </div>
   );
 }
 
-// ─── TOOL: MENTAL HEALTH CHECK ────────────────────────────────────────────────
-
-function MentalHealthCheck() {
-  var [answers, setAnswers] = useState({});
-  var labels  = ["Never","Rarely","Sometimes","Often","Always"];
-  var crisis  = (answers["mh8"]||0) >= 3;
-  var allDone = MH_QUESTIONS.every(function(q){return answers[q.id]!==undefined;});
-  var score   = allDone ? MH_QUESTIONS.reduce(function(a,q){return a+(answers[q.id]||0);}, 0) : null;
-
-  var risk = null;
-  if (score !== null) {
-    if (score <= 4)       risk = { label:"Low — Coping Well",          color:"#16a34a" };
-    else if (score <= 12) risk = { label:"Moderate — Monitor Closely", color:"#d97706" };
-    else if (score <= 20) risk = { label:"High — Seek Support",        color:"#dc2626" };
-    else                  risk = { label:"Critical — Get Help Now",    color:"#dc2626" };
-  }
-
-  var setAnswer = function(id, val) {
-    setAnswers(function(a) { var n = Object.assign({},a); n[id]=val; return n; });
-  };
-
-  return (
-    <div>
-      <SectionHeader icon="🧠" title="Mental Health Self-Check" subtitle="Private — stored locally only — not a clinical diagnosis" />
-      {crisis && (
-        <div style={{ padding:"12px 16px", background:"#1a0000", border:"2px solid #dc2626", borderRadius:8, marginBottom:16, fontSize:12, color:"#ef4444", lineHeight:1.7 }}>
-          If you are having thoughts of harming yourself please reach out immediately.
-          SeafarerHelp: +44 20 7323 2737 — free, confidential, available 24 hours a day.
-        </div>
-      )}
-      <Card>
-        <div style={{ fontSize:11, color:"#666", marginBottom:14, lineHeight:1.7 }}>
-          Rate each statement over the past 2 weeks. Your answers never leave your device.
-        </div>
-        {MH_QUESTIONS.map(function(q, i) {
-          return (
-            <div key={q.id} style={{ marginBottom:14, paddingBottom:14, borderBottom: i<MH_QUESTIONS.length-1?"1px solid #161616":"none" }}>
-              <div style={{ fontSize:12, color:"#e5e5e5", marginBottom:8, lineHeight:1.5 }}>
-                <span style={{ color:"#555", marginRight:6 }}>{i+1}.</span>
-                {q.text}
-                {q.crisis && <span style={{ color:"#ef4444", marginLeft:6 }}>!</span>}
-              </div>
-              <div style={{ display:"flex", gap:5, flexWrap:"wrap" }}>
-                {labels.map(function(lbl, val) {
-                  var sel = answers[q.id]===val;
-                  return (
-                    <button key={val} onClick={function(){setAnswer(q.id,val);}}
-                      style={{ padding:"5px 10px", borderRadius:5, fontSize:11, cursor:"pointer", border:"1px solid "+(sel?"#2563eb":"#2a2a2a"), background:sel?"#172554":"#0d0d0d", color:sel?"#60a5fa":"#888", fontFamily:"'IBM Plex Mono',monospace" }}>
-                      {lbl}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          );
-        })}
-        {risk && (
-          <div style={{ marginTop:12, padding:"12px 14px", background:risk.color+"18", border:"1px solid "+risk.color+"55", borderRadius:8 }}>
-            <div style={{ display:"flex", justifyContent:"space-between", marginBottom:8 }}>
-              <span style={{ fontSize:13, fontWeight:700, color:risk.color }}>{risk.label}</span>
-              <span style={{ fontSize:12, color:risk.color, fontFamily:"'IBM Plex Mono',monospace" }}>{score}/{MH_QUESTIONS.length*4}</span>
-            </div>
-            <div style={{ height:6, background:"#1f1f1f", borderRadius:4, overflow:"hidden" }}>
-              <div style={{ height:"100%", width:((score/(MH_QUESTIONS.length*4))*100)+"%", background:risk.color, borderRadius:4 }} />
-            </div>
-            {score > 4 && (
-              <div style={{ marginTop:10, fontSize:11, color:"#888", lineHeight:1.7 }}>
-                SeafarerHelp: +44 20 7323 2737 — free, 24/7, multiple languages.
-              </div>
-            )}
-          </div>
-        )}
-        {!allDone && <div style={{ fontSize:11, color:"#555", marginTop:8 }}>Answer all {MH_QUESTIONS.length} questions to see your result.</div>}
-        <Btn onClick={function(){setAnswers({});}} color="#1f2937" style={{ border:"1px solid #374151", fontSize:11, marginTop:12 }}>RESET</Btn>
-      </Card>
-    </div>
-  );
-}
-
-// ─── TOOL: FATIGUE ASSESSMENT ─────────────────────────────────────────────────
-
-function FatigueAssessment() {
-  var [answers, setAnswers] = useState({});
-  var allDone = FATIGUE_QUESTIONS.every(function(q){return answers[q.id]!==undefined;});
-  var score   = allDone ? FATIGUE_QUESTIONS.reduce(function(a,q){return a+(q.w[answers[q.id]]||0);}, 0) : null;
-
-  var risk = null;
-  if (score !== null) {
-    if (score <= 5)       risk = { label:"Low — Fit for Duty",     color:"#16a34a", advice:"Levels manageable. Maintain regular rest patterns." };
-    else if (score <= 11) risk = { label:"Moderate — Monitor",     color:"#d97706", advice:"Plan extra rest. Avoid complex navigation if possible." };
-    else if (score <= 17) risk = { label:"High — Caution",         color:"#dc2626", advice:"Inform OOW and Master. Avoid solo watchkeeping." };
-    else                  risk = { label:"Critical — Not Fit",     color:"#dc2626", advice:"Do NOT stand watch. Notify Master. Rest mandatory per MLC 2006." };
-  }
-
-  var setAnswer = function(id, val) {
-    setAnswers(function(a) { var n = Object.assign({},a); n[id]=val; return n; });
-  };
-
-  return (
-    <div>
-      <SectionHeader icon="😴" title="Fatigue Assessment" subtitle="MLC 2006 and STCW rest hour awareness tool" />
-      <Card>
-        {FATIGUE_QUESTIONS.map(function(q, i) {
-          return (
-            <div key={q.id} style={{ marginBottom:14, paddingBottom:14, borderBottom: i<FATIGUE_QUESTIONS.length-1?"1px solid #161616":"none" }}>
-              <div style={{ fontSize:12, color:"#e5e5e5", marginBottom:8 }}>
-                <span style={{ color:"#555", marginRight:6 }}>{i+1}.</span>{q.text}
-              </div>
-              <div style={{ display:"flex", gap:5, flexWrap:"wrap" }}>
-                {q.opts.map(function(opt, idx) {
-                  var sel = answers[q.id]===idx;
-                  return (
-                    <button key={idx} onClick={function(){setAnswer(q.id,idx);}}
-                      style={{ padding:"5px 10px", borderRadius:5, fontSize:11, cursor:"pointer", border:"1px solid "+(sel?"#2563eb":"#2a2a2a"), background:sel?"#172554":"#0d0d0d", color:sel?"#60a5fa":"#888", fontFamily:"'IBM Plex Mono',monospace" }}>
-                      {opt}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          );
-        })}
-        {risk && (
-          <div style={{ marginTop:12, padding:"12px 14px", background:risk.color+"18", border:"1px solid "+risk.color+"55", borderRadius:8 }}>
-            <div style={{ display:"flex", justifyContent:"space-between", marginBottom:8 }}>
-              <span style={{ fontSize:13, fontWeight:700, color:risk.color }}>{risk.label}</span>
-              <span style={{ fontSize:12, color:risk.color, fontFamily:"'IBM Plex Mono',monospace" }}>{score}/22</span>
-            </div>
-            <div style={{ height:6, background:"#1f1f1f", borderRadius:4, overflow:"hidden", marginBottom:10 }}>
-              <div style={{ height:"100%", width:((score/22)*100)+"%", background:risk.color, borderRadius:4 }} />
-            </div>
-            <div style={{ fontSize:11, color:"#888", lineHeight:1.7 }}>{risk.advice}</div>
-          </div>
-        )}
-        {!allDone && <div style={{ fontSize:11, color:"#555", marginTop:8 }}>Answer all {FATIGUE_QUESTIONS.length} questions to see your result.</div>}
-        <Btn onClick={function(){setAnswers({});}} color="#1f2937" style={{ border:"1px solid #374151", fontSize:11, marginTop:12 }}>RESET</Btn>
-      </Card>
-    </div>
-  );
-}
-
-// ─── TOOL: ISWAN CONTACTS ─────────────────────────────────────────────────────
-
-function ISWANContacts() {
-  var [expanded, setExpanded] = useState(null);
-
-  return (
-    <div>
-      <SectionHeader icon="📞" title="ISWAN Welfare Contacts" subtitle="Free and confidential support for seafarers worldwide" />
-      <Card style={{ borderColor:"#1a2a3a", marginBottom:16 }}>
-        <div style={{ fontSize:11, color:"#60a5fa", fontWeight:700, marginBottom:4 }}>IMPORTANT</div>
-        <div style={{ fontSize:11, color:"#666", lineHeight:1.7 }}>All organisations listed provide free, confidential support to seafarers and their families. You are not alone. Reach out any time.</div>
-      </Card>
-      {ISWAN.map(function(c, i) {
-        var isExp = expanded === i;
-        return (
-          <Card key={i} style={{ cursor:"pointer", borderColor: isExp ? c.color+"55" : "#1f1f1f", marginBottom:8 }} >
-            <div style={{ display:"flex", alignItems:"flex-start", gap:12 }} onClick={function(){setExpanded(isExp?null:i);}}>
-              <div style={{ width:40, height:40, borderRadius:10, background:c.color+"18", border:"1px solid "+c.color+"44", display:"flex", alignItems:"center", justifyContent:"center", fontSize:18, flexShrink:0 }}>{c.icon}</div>
-              <div style={{ flex:1 }}>
-                <div style={{ fontSize:12, fontWeight:700, color:c.color, marginBottom:3 }}>{c.service}</div>
-                <div style={{ fontSize:11, color:"#aaa" }}>{c.org}</div>
-                <div style={{ fontSize:10, color:"#555", marginTop:2 }}>{c.hours}</div>
-              </div>
-              <span style={{ color:"#555", fontSize:12 }}>{isExp?"▲":"▼"}</span>
-            </div>
-            {isExp && (
-              <div style={{ marginTop:12, paddingTop:12, borderTop:"1px solid #1f1f1f" }}>
-                <div style={{ fontSize:11, color:"#aaa", lineHeight:1.7, marginBottom:12 }}>{c.desc}</div>
-                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
-                  <a href={"tel:"+c.phone.replace(/\s/g,"")} style={{ textDecoration:"none" }}>
-                    <div style={{ padding:"8px 10px", background:c.color+"15", border:"1px solid "+c.color+"44", borderRadius:7 }}>
-                      <div style={{ fontSize:10, color:"#555" }}>Phone</div>
-                      <div style={{ fontSize:12, color:c.color, fontWeight:700, marginTop:2 }}>{c.phone}</div>
-                    </div>
-                  </a>
-                  <a href={"mailto:"+c.email} style={{ textDecoration:"none" }}>
-                    <div style={{ padding:"8px 10px", background:c.color+"15", border:"1px solid "+c.color+"44", borderRadius:7 }}>
-                      <div style={{ fontSize:10, color:"#555" }}>Email</div>
-                      <div style={{ fontSize:11, color:c.color, fontWeight:700, marginTop:2 }}>{c.email}</div>
-                    </div>
-                  </a>
-                </div>
-                <div style={{ marginTop:8, padding:"7px 10px", background:"#0a0a0a", border:"1px solid #1f1f1f", borderRadius:7, fontSize:11 }}>
-                  <span style={{ color:"#555" }}>Website: </span><span style={{ color:"#60a5fa" }}>{c.website}</span>
-                </div>
-                <div style={{ marginTop:6, fontSize:10, color:"#555" }}>Languages: {c.lang}</div>
-              </div>
-            )}
-          </Card>
-        );
-      })}
-    </div>
-  );
-}
-
-// ─── TABS CONFIG ──────────────────────────────────────────────────────────────
-
-var CW_TABS = [
-  { id:"currency",  label:"💱 Currency",     icon:"💱", subtitle:"Live exchange rates and manual override" },
-  { id:"wage",      label:"💵 Wage",         icon:"💵", subtitle:"Basic wage breakdown per ITF/CBA standards" },
-  { id:"overtime",  label:"⏱ Overtime",      icon:"⏱",  subtitle:"MLC 2006 compliant OT calculator" },
-  { id:"allotment", label:"📤 Allotment",    icon:"📤", subtitle:"Plan your monthly remittance home" },
-  { id:"savings",   label:"🏦 Savings",      icon:"🏦", subtitle:"Contract savings goal planner" },
-  { id:"leave",     label:"🗓 Leave",         icon:"🗓", subtitle:"Earned leave and next sign-on date" },
-  { id:"relief",    label:"🔄 Relief",       icon:"🔄", subtitle:"Relief window and days onboard tracker" },
-  { id:"contract",  label:"📋 Contracts",    icon:"📋", subtitle:"Sea service history log" },
-  { id:"mental",    label:"🧠 Mental Health",icon:"🧠", subtitle:"Private self-check — stored locally only" },
-  { id:"fatigue",   label:"😴 Fatigue",      icon:"😴", subtitle:"MLC 2006 and STCW rest hour awareness" },
-  { id:"iswan",     label:"📞 ISWAN",        icon:"📞", subtitle:"Free welfare contacts for seafarers" },
+// ── MENTAL HEALTH ─────────────────────────────────────────────────────────────
+const MH_Q=[
+  {id:"mh1",text:"Felt down, hopeless or little interest in activities"},
+  {id:"mh2",text:"Felt anxious, nervous or on edge"},
+  {id:"mh3",text:"Had trouble sleeping or sleeping too much"},
+  {id:"mh4",text:"Felt isolated or disconnected from family and friends"},
+  {id:"mh5",text:"Been irritable, angry or easily frustrated"},
+  {id:"mh6",text:"Had difficulty concentrating on tasks"},
+  {id:"mh7",text:"Been consuming alcohol more than usual"},
+  {id:"mh8",text:"Had thoughts of harming yourself",crisis:true},
 ];
-
-// ─── MAIN PAGE ────────────────────────────────────────────────────────────────
-
-export default function CrewWelfarePage() {
-  var [activeTab, setActiveTab] = useState("currency");
-
-  var renderContent = function(id) {
-    if (id === "currency")  return <CurrencyConverter />;
-    if (id === "wage")      return <WageCalculator />;
-    if (id === "overtime")  return <OvertimeCalculator />;
-    if (id === "allotment") return <AllotmentCalculator />;
-    if (id === "savings")   return <SavingsPlanner />;
-    if (id === "leave")     return <LeavePlanner />;
-    if (id === "relief")    return <ReliefDateCalc />;
-    if (id === "contract")  return <ContractTracker />;
-    if (id === "mental")    return <MentalHealthCheck />;
-    if (id === "fatigue")   return <FatigueAssessment />;
-    if (id === "iswan")     return <ISWANContacts />;
-    return null;
-  };
-
-  var currentTab = CW_TABS.find(function(t){return t.id===activeTab;}) || CW_TABS[0];
-
+function MentalTool() {
+  const [ans,setAns]=useState({});
+  const labels=["Never","Rarely","Sometimes","Often","Always"];
+  const crisis=(ans["mh8"]||0)>=3;
+  const allDone=MH_Q.every(q=>ans[q.id]!==undefined);
+  const score=allDone?MH_Q.reduce((a,q)=>a+(ans[q.id]||0),0):null;
+  const risk=score===null?null:score<=4?{label:"Low — Coping Well",color:"#16a34a"}:score<=12?{label:"Moderate — Monitor",color:"#d97706"}:score<=20?{label:"High — Seek Support",color:"#dc2626"}:{label:"Critical — Get Help Now",color:"#dc2626"};
   return (
-    <div style={{ minHeight:"100vh", background:"#0a0a0a", color:"#e5e5e5", fontFamily:"'IBM Plex Mono','Courier New',monospace" }}>
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&display=swap');
-        .cw-tab-bar::-webkit-scrollbar{display:none;}
-        input:focus,select:focus,textarea:focus{border-color:#2563eb !important;}
-        @media(max-width:767px){.cw-desktop{display:none!important;}.cw-mobile{display:block!important;}}
-        @media(min-width:768px){.cw-desktop{display:block!important;}.cw-mobile{display:none!important;}.cw-tab-bar{display:none!important;}}
-      `}</style>
-
-      {/* Header */}
-      <div style={{ background:"linear-gradient(135deg,#060f1c,#0a1628,#060f1c)", borderBottom:"2px solid #1e3a5c", padding:"14px 20px", display:"flex", alignItems:"center", justifyContent:"space-between", flexWrap:"wrap", gap:12, position:"sticky", top:0, zIndex:100 }}>
-        <div style={{ display:"flex", alignItems:"center", gap:16 }}>
-          <div style={{ background:"linear-gradient(135deg,#1565c0,#00b4d8)", borderRadius:10, width:42, height:42, display:"flex", alignItems:"center", justifyContent:"center", fontSize:20, boxShadow:"0 0 16px rgba(0,180,216,0.4)" }}>
-            ⚓
-          </div>
-          <div>
-            <div style={{ fontSize:18, fontWeight:700, color:"#fff", letterSpacing:2 }}>CREW WELFARE</div>
-            <div style={{ fontSize:10, color:"#00b4d8", marginTop:2, letterSpacing:1 }}>FINANCIAL · PLANNING · WELLBEING TOOLS</div>
-          </div>
-        </div>
-        <div style={{ background:"#111", border:"1px solid #1e3a5c", borderRadius:6, padding:"6px 12px", fontSize:11, color:"#60a5fa", display:"flex", alignItems:"center", gap:6 }}>
-          <span>🌊</span><span>Data stored on device only</span>
-        </div>
-      </div>
-
-      {/* Mobile tab bar */}
-      <div className="cw-tab-bar" style={{ display:"flex", overflowX:"auto", background:"#111", borderBottom:"1px solid #1f1f1f", scrollbarWidth:"none", padding:"0 4px" }}>
-        {CW_TABS.map(function(t) {
-          var active = activeTab === t.id;
-          return (
-            <button key={t.id} onClick={function(){setActiveTab(t.id);}} style={{ flexShrink:0, padding:"10px 12px", fontSize:10, fontWeight:active?700:400, color:active?"#60a5fa":"#555", borderTop:"none", borderLeft:"none", borderRight:"none", borderBottom:active?"2px solid #2563eb":"2px solid transparent", cursor:"pointer", whiteSpace:"nowrap", background:"none", fontFamily:"'IBM Plex Mono',monospace", transition:"color 0.2s" }}>
-              {t.label}
-            </button>
-          );
-        })}
-      </div>
-
-      {/* Desktop: all sections stacked */}
-      <div className="cw-desktop">
-        {CW_TABS.map(function(t) {
-          return (
-            <div key={t.id} style={{ padding:"28px 20px", borderBottom:"1px solid #1a1a1a", maxWidth:1100, margin:"0 auto" }}>
-              {renderContent(t.id)}
+    <div>
+      <Head icon="🧠" title="Mental Health Self-Check" sub="Private — stored locally only"/>
+      {crisis&&<div style={{padding:"12px 16px",background:"#1a0000",border:"2px solid #dc2626",borderRadius:8,marginBottom:16,fontSize:12,color:"#ef4444",lineHeight:1.7}}>
+        If you are having thoughts of harming yourself please reach out immediately. SeafarerHelp: +44 20 7323 2737 — free, confidential, 24 hours a day.
+      </div>}
+      <Box>
+        <div style={{fontSize:11,color:"#666",marginBottom:14,lineHeight:1.7}}>Rate each statement over the past 2 weeks. Answers never leave your device.</div>
+        {MH_Q.map((q,i)=>(
+          <div key={q.id} style={{marginBottom:14,paddingBottom:14,borderBottom:i<MH_Q.length-1?"1px solid #161616":"none"}}>
+            <div style={{fontSize:12,color:"#e5e5e5",marginBottom:8,lineHeight:1.5}}>
+              <span style={{color:"#555",marginRight:6}}>{i+1}.</span>{q.text}{q.crisis&&<span style={{color:"#ef4444",marginLeft:6}}>!</span>}
             </div>
-          );
-        })}
-      </div>
+            <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
+              {labels.map((lbl,val)=>{
+                const sel=ans[q.id]===val;
+                return <button key={val} onClick={()=>setAns(a=>({...a,[q.id]:val}))}
+                  style={{padding:"5px 10px",borderRadius:5,fontSize:11,cursor:"pointer",border:"1px solid "+(sel?"#2563eb":"#2a2a2a"),background:sel?"#172554":"#0d0d0d",color:sel?"#60a5fa":"#888"}}>{lbl}</button>;
+              })}
+            </div>
+          </div>
+        ))}
+        {risk&&<div style={{marginTop:12,padding:"12px 14px",background:risk.color+"18",border:"1px solid "+risk.color+"55",borderRadius:8}}>
+          <div style={{display:"flex",justifyContent:"space-between",marginBottom:8}}>
+            <span style={{fontSize:13,fontWeight:700,color:risk.color}}>{risk.label}</span>
+            <span style={{fontSize:12,color:risk.color,fontFamily:"monospace"}}>{score}/{MH_Q.length*4}</span>
+          </div>
+          <div style={{height:6,background:"#1f1f1f",borderRadius:4,overflow:"hidden"}}><div style={{height:"100%",width:((score/(MH_Q.length*4))*100)+"%",background:risk.color,borderRadius:4}}/></div>
+          {score>4&&<div style={{marginTop:10,fontSize:11,color:"#888"}}>SeafarerHelp: +44 20 7323 2737 — free, 24/7</div>}
+        </div>}
+        {!allDone&&<div style={{fontSize:11,color:"#555",marginTop:8}}>Answer all {MH_Q.length} questions to see your result.</div>}
+        <button onClick={()=>setAns({})} style={{background:"#1f2937",border:"1px solid #374151",color:"#aaa",borderRadius:6,padding:"6px 14px",fontSize:11,cursor:"pointer",marginTop:12}}>RESET</button>
+      </Box>
+    </div>
+  );
+}
 
-      {/* Mobile: only active section */}
-      <div className="cw-mobile" style={{ display:"none" }}>
-        <div style={{ padding:"24px 16px", maxWidth:600, margin:"0 auto" }}>
-          {renderContent(activeTab)}
-        </div>
-      </div>
+// ── FATIGUE ───────────────────────────────────────────────────────────────────
+const FAT_Q=[
+  {id:"f1",text:"Hours slept in last 24 hours",opts:["Less than 4","4 to 5","5 to 6","6 to 7","7 to 8","More than 8"],w:[5,4,3,2,1,0]},
+  {id:"f2",text:"Hours on duty in last 24 hours",opts:["8 or less","9 to 10","11 to 12","13 to 14","More than 14"],w:[0,1,2,3,5]},
+  {id:"f3",text:"Days since last proper rest day",opts:["0 to 1","2 to 3","4 to 5","6 to 7","More than 7"],w:[0,1,2,3,5]},
+  {id:"f4",text:"Sea conditions affecting your rest",opts:["Calm","Moderate","Rough","Very rough","Extreme"],w:[0,1,2,3,4]},
+  {id:"f5",text:"Times woken during last sleep",opts:["None","1 to 2","3 to 4","More than 4"],w:[0,1,2,3]},
+];
+function FatigueTool() {
+  const [ans,setAns]=useState({});
+  const allDone=FAT_Q.every(q=>ans[q.id]!==undefined);
+  const score=allDone?FAT_Q.reduce((a,q)=>a+(q.w[ans[q.id]]||0),0):null;
+  const risk=score===null?null:score<=5?{label:"Low — Fit for Duty",color:"#16a34a",advice:"Levels manageable. Maintain regular rest."}:score<=11?{label:"Moderate — Monitor",color:"#d97706",advice:"Plan extra rest. Avoid complex navigation if possible."}:score<=17?{label:"High — Caution",color:"#dc2626",advice:"Inform OOW and Master. Avoid solo watchkeeping."}:{label:"Critical — Not Fit",color:"#dc2626",advice:"Do NOT stand watch. Notify Master. Rest is mandatory per MLC 2006."};
+  return (
+    <div>
+      <Head icon="😴" title="Fatigue Assessment" sub="MLC 2006 and STCW rest hour awareness"/>
+      <Box>
+        {FAT_Q.map((q,i)=>(
+          <div key={q.id} style={{marginBottom:14,paddingBottom:14,borderBottom:i<FAT_Q.length-1?"1px solid #161616":"none"}}>
+            <div style={{fontSize:12,color:"#e5e5e5",marginBottom:8}}><span style={{color:"#555",marginRight:6}}>{i+1}.</span>{q.text}</div>
+            <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
+              {q.opts.map((opt,idx)=>{
+                const sel=ans[q.id]===idx;
+                return <button key={idx} onClick={()=>setAns(a=>({...a,[q.id]:idx}))}
+                  style={{padding:"5px 10px",borderRadius:5,fontSize:11,cursor:"pointer",border:"1px solid "+(sel?"#2563eb":"#2a2a2a"),background:sel?"#172554":"#0d0d0d",color:sel?"#60a5fa":"#888"}}>{opt}</button>;
+              })}
+            </div>
+          </div>
+        ))}
+        {risk&&<div style={{marginTop:12,padding:"12px 14px",background:risk.color+"18",border:"1px solid "+risk.color+"55",borderRadius:8}}>
+          <div style={{display:"flex",justifyContent:"space-between",marginBottom:8}}>
+            <span style={{fontSize:13,fontWeight:700,color:risk.color}}>{risk.label}</span>
+            <span style={{fontSize:12,color:risk.color,fontFamily:"monospace"}}>{score}/22</span>
+          </div>
+          <div style={{height:6,background:"#1f1f1f",borderRadius:4,overflow:"hidden",marginBottom:10}}><div style={{height:"100%",width:((score/22)*100)+"%",background:risk.color,borderRadius:4}}/></div>
+          <div style={{fontSize:11,color:"#888",lineHeight:1.7}}>{risk.advice}</div>
+        </div>}
+        {!allDone&&<div style={{fontSize:11,color:"#555",marginTop:8}}>Answer all {FAT_Q.length} questions to see your result.</div>}
+        <button onClick={()=>setAns({})} style={{background:"#1f2937",border:"1px solid #374151",color:"#aaa",borderRadius:6,padding:"6px 14px",fontSize:11,cursor:"pointer",marginTop:12}}>RESET</button>
+      </Box>
+    </div>
+  );
+}
+
+// ── ISWAN ─────────────────────────────────────────────────────────────────────
+const ISWAN_DATA=[
+  {org:"ISWAN / SeafarerHelp",service:"24/7 Helpline",phone:"+44 20 7323 2737",email:"help@seafarerhelp.org",website:"seafarerhelp.org",hours:"24/7 Free and Confidential",desc:"Free confidential helpline for seafarers and families. Emotional support, welfare advice, financial guidance.",icon:"🌊",color:"#2563eb"},
+  {org:"Mission to Seafarers",service:"Port Chaplaincy",phone:"+44 20 7248 5202",email:"contactus@missiontoseafarers.org",website:"missiontoseafarers.org",hours:"Office hours plus port chaplains worldwide",desc:"Practical and emotional support through port chaplains globally.",icon:"⚓",color:"#d97706"},
+  {org:"Sailors Society",service:"Wellness at Sea",phone:"+44 23 8051 5950",email:"info@sailors-society.org",website:"sailors-society.org",hours:"Office hours plus port chaplains",desc:"Wellness at Sea training, crisis counseling and port welfare.",icon:"🧭",color:"#16a34a"},
+  {org:"ITF Seafarers Trust",service:"Seafarer Rights",phone:"+44 20 7403 2733",email:"seafarers@itf.org.uk",website:"itfseafarers.org",hours:"Office hours",desc:"Advocacy, welfare grants and support for seafarers facing hardship.",icon:"🏛",color:"#7c3aed"},
+  {org:"Apostleship of the Sea",service:"Maritime Welfare",phone:"+44 20 7901 1950",email:"aos@cbcew.org.uk",website:"apostleshipofthesea.org.uk",hours:"Port chaplains globally",desc:"Pastoral and practical support for seafarers of all faiths.",icon:"✝",color:"#0891b2"},
+];
+function ISWANTool() {
+  const [exp,setExp]=useState(null);
+  return (
+    <div>
+      <Head icon="📞" title="ISWAN Welfare Contacts" sub="Free and confidential support for seafarers worldwide"/>
+      <Box style={{borderColor:"#1a2a3a",marginBottom:16}}>
+        <div style={{fontSize:11,color:"#60a5fa",fontWeight:700,marginBottom:4}}>IMPORTANT</div>
+        <div style={{fontSize:11,color:"#666",lineHeight:1.7}}>All organisations provide free, confidential support to seafarers and families. You are not alone.</div>
+      </Box>
+      {ISWAN_DATA.map((c,i)=>{
+        const isExp=exp===i;
+        return <Box key={i} style={{cursor:"pointer",borderColor:isExp?c.color+"55":"#1f1f1f",marginBottom:8}}>
+          <div style={{display:"flex",alignItems:"flex-start",gap:12}} onClick={()=>setExp(isExp?null:i)}>
+            <div style={{width:38,height:38,borderRadius:9,background:c.color+"18",border:"1px solid "+c.color+"44",display:"flex",alignItems:"center",justifyContent:"center",fontSize:17,flexShrink:0}}>{c.icon}</div>
+            <div style={{flex:1}}>
+              <div style={{fontSize:12,fontWeight:700,color:c.color,marginBottom:2}}>{c.service}</div>
+              <div style={{fontSize:11,color:"#aaa"}}>{c.org}</div>
+              <div style={{fontSize:10,color:"#555",marginTop:2}}>{c.hours}</div>
+            </div>
+            <span style={{color:"#555",fontSize:12}}>{isExp?"▲":"▼"}</span>
+          </div>
+          {isExp&&<div style={{marginTop:12,paddingTop:12,borderTop:"1px solid #1f1f1f"}}>
+            <div style={{fontSize:11,color:"#aaa",lineHeight:1.7,marginBottom:12}}>{c.desc}</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+              <a href={"tel:"+c.phone.replace(/\s/g,"")} style={{textDecoration:"none"}}>
+                <div style={{padding:"8px 10px",background:c.color+"15",border:"1px solid "+c.color+"44",borderRadius:7}}>
+                  <div style={{fontSize:10,color:"#555"}}>Phone</div>
+                  <div style={{fontSize:12,color:c.color,fontWeight:700,marginTop:2}}>{c.phone}</div>
+                </div>
+              </a>
+              <a href={"mailto:"+c.email} style={{textDecoration:"none"}}>
+                <div style={{padding:"8px 10px",background:c.color+"15",border:"1px solid "+c.color+"44",borderRadius:7}}>
+                  <div style={{fontSize:10,color:"#555"}}>Email</div>
+                  <div style={{fontSize:11,color:c.color,fontWeight:700,marginTop:2}}>{c.email}</div>
+                </div>
+              </a>
+            </div>
+            <div style={{marginTop:8,padding:"7px 10px",background:"#0a0a0a",border:"1px solid #1f1f1f",borderRadius:7,fontSize:11}}>
+              <span style={{color:"#555"}}>Website: </span><span style={{color:"#60a5fa"}}>{c.website}</span>
+            </div>
+          </div>}
+        </Box>;
+      })}
     </div>
   );
 }
