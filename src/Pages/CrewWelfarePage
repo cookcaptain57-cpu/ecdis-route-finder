@@ -1,587 +1,820 @@
 /* eslint-disable */
-import { useState, useEffect } from "react";
+// src/Pages/CrewWelfarePage.jsx
+import { useState } from "react";
+import { auth, db } from "../firebase";
+import { doc, setDoc, serverTimestamp } from "firebase/firestore";
 
-export default function CrewWelfarePage() {
-  const [tab, setTab] = useState("currency");
+// ─── tiny helpers ────────────────────────────────────────────────────────────
+const fmt = (n) => isNaN(n) ? "0.00" : Number(n).toFixed(2);
+const fmtInt = (n) => isNaN(n) ? "0" : Math.round(Number(n)).toLocaleString();
 
-  const TABS = [
-    "currency","wage","overtime","allotment","savings",
-    "leave","relief","contracts","mental","fatigue","iswan"
+const S = `
+  .cw-wrap { padding: 1.2rem; max-width: 1000px; margin: 0 auto; width: 100%; }
+  .cw-header { margin-bottom: 1.4rem; }
+  .cw-title { font-family: 'Orbitron', monospace; font-size: 1rem; font-weight: 700;
+    letter-spacing: 0.08em; color: var(--cyan); display: flex; align-items: center; gap: 8px; }
+  .cw-sub { font-size: 0.74rem; color: var(--text2); margin-top: 4px; }
+
+  .cw-tabs { display: flex; gap: 0; border-bottom: 1px solid var(--border); margin-bottom: 1.4rem; overflow-x: auto; }
+  .cw-tab { flex: 1; min-width: 110px; padding: 10px 8px; border: none; background: transparent;
+    color: var(--text2); font-family: 'Exo 2', sans-serif; font-size: 0.74rem; font-weight: 600;
+    cursor: pointer; transition: all 0.2s; text-align: center; text-transform: uppercase;
+    letter-spacing: 0.06em; border-bottom: 2px solid transparent; white-space: nowrap; }
+  .cw-tab:hover { color: var(--text); }
+  .cw-tab.active-fin { color: var(--gold); border-bottom-color: var(--gold); }
+  .cw-tab.active-plan { color: var(--cyan); border-bottom-color: var(--cyan); }
+  .cw-tab.active-well { color: var(--green); border-bottom-color: var(--green); }
+
+  .cw-grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); }
+  .cw-card { background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+    padding: 1.1rem; transition: all 0.25s; }
+  .cw-card:hover { border-color: rgba(0,180,216,0.3); box-shadow: 0 8px 28px rgba(0,0,0,0.35); }
+  .cw-card-title { font-family: 'Orbitron', monospace; font-size: 0.68rem; font-weight: 700;
+    letter-spacing: 0.08em; margin-bottom: 1rem; display: flex; align-items: center; gap: 7px; }
+  .cw-result { background: var(--bg2); border: 1px solid var(--border); border-radius: 9px;
+    padding: 10px 13px; margin-top: 0.8rem; font-size: 0.78rem; color: var(--text2); line-height: 1.7; }
+  .cw-result strong { color: var(--cyan); font-size: 0.92rem; }
+  .cw-result .gold { color: var(--gold); }
+  .cw-result .green { color: var(--green); }
+  .cw-result .red { color: var(--red); }
+
+  .cw-save-btn { margin-top: 0.7rem; width: 100%; padding: 8px; border: none; border-radius: 8px;
+    font-family: 'Exo 2', sans-serif; font-size: 0.72rem; font-weight: 700; cursor: pointer;
+    background: rgba(0,180,216,0.12); color: var(--cyan); border: 1px solid rgba(0,180,216,0.25);
+    transition: all 0.2s; }
+  .cw-save-btn:hover { background: rgba(0,180,216,0.22); }
+  .cw-save-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  .score-row { display: flex; align-items: center; justify-content: space-between;
+    padding: 7px 0; border-bottom: 1px solid rgba(255,255,255,0.05); font-size: 0.78rem; }
+  .score-row:last-child { border-bottom: none; }
+  .score-opts { display: flex; gap: 5px; }
+  .score-opt { width: 30px; height: 28px; border: 1px solid var(--border); border-radius: 6px;
+    background: transparent; color: var(--text2); font-size: 0.7rem; cursor: pointer;
+    transition: all 0.15s; }
+  .score-opt.sel { background: rgba(0,200,150,0.15); border-color: var(--green); color: var(--green); font-weight: 700; }
+
+  .prog-bar { height: 8px; border-radius: 4px; background: var(--border); overflow: hidden; margin-top: 6px; }
+  .prog-fill { height: 100%; border-radius: 4px; transition: width 0.4s ease; }
+
+  .rest-row { display: grid; grid-template-columns: 1fr 80px 80px; gap: 6px;
+    align-items: center; font-size: 0.74rem; padding: 5px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.04); }
+  .rest-row:last-child { border-bottom: none; }
+
+  .strategy-step { background: var(--bg2); border-left: 3px solid var(--cyan);
+    border-radius: 0 8px 8px 0; padding: 10px 13px; margin-bottom: 8px; font-size: 0.76rem; line-height: 1.6; }
+  .strategy-step .step-num { font-family: 'Orbitron', monospace; font-size: 0.6rem;
+    color: var(--cyan); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 3px; }
+
+  @media (max-width: 600px) { .cw-grid { grid-template-columns: 1fr; } }
+`;
+
+// ─── Firestore save helper ────────────────────────────────────────────────────
+async function saveToFirestore(toolName, data, setMsg) {
+  const user = auth.currentUser;
+  if (!user) { setMsg("⚠️ Login required to save"); setTimeout(() => setMsg(""), 3000); return; }
+  try {
+    await setDoc(
+      doc(db, "crewWelfare", user.uid, "tools", toolName),
+      { ...data, savedAt: serverTimestamp() },
+      { merge: true }
+    );
+    setMsg("✅ Saved to your account");
+  } catch (e) {
+    setMsg("❌ Save failed: " + e.message);
+  }
+  setTimeout(() => setMsg(""), 3500);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TAB 1 — FINANCIAL TOOLS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+function WageCalculator() {
+  const [basic, setBasic]     = useState("");
+  const [days, setDays]       = useState("30");
+  const [currency, setCurrency] = useState("USD");
+  const [msg, setMsg]         = useState("");
+  const monthly = parseFloat(basic) || 0;
+  const daily   = monthly / 30;
+  const earned  = daily * (parseFloat(days) || 0);
+  return (
+    <div className="cw-card">
+      <div className="cw-card-title">💵 Wage Calculator</div>
+      <div className="ff">
+        <label className="fl">Currency</label>
+        <select className="fi" value={currency} onChange={e => setCurrency(e.target.value)}>
+          {["USD","EUR","GBP","PHP","INR","SGD"].map(c => <option key={c}>{c}</option>)}
+        </select>
+      </div>
+      <div className="ff">
+        <label className="fl">Basic Monthly Wage ({currency})</label>
+        <input className="fi" type="number" placeholder="e.g. 2500" value={basic} onChange={e => setBasic(e.target.value)} />
+      </div>
+      <div className="ff">
+        <label className="fl">Days Worked This Month</label>
+        <input className="fi" type="number" placeholder="30" value={days} onChange={e => setDays(e.target.value)} />
+      </div>
+      {basic && (
+        <div className="cw-result">
+          Daily Rate: <strong>{currency} {fmt(daily)}</strong><br />
+          Earned ({days} days): <strong className="gold">{currency} {fmt(earned)}</strong>
+        </div>
+      )}
+      {msg && <div className="ok-box" style={{marginTop:"0.5rem",marginBottom:0}}>{msg}</div>}
+      <button className="cw-save-btn" onClick={() => saveToFirestore("wage", { basic, days, currency, monthly: fmt(monthly), earned: fmt(earned) }, setMsg)}>
+        💾 Save Result
+      </button>
+    </div>
+  );
+}
+
+function OvertimeCalculator() {
+  const [basic, setBasic]   = useState("");
+  const [otHours, setOtHours] = useState("");
+  const [currency, setCurrency] = useState("USD");
+  const [msg, setMsg]       = useState("");
+  const hourlyOT  = (parseFloat(basic) || 0) / 208;
+  const otRate    = hourlyOT * 1.25;
+  const otEarned  = otRate * (parseFloat(otHours) || 0);
+  const total     = (parseFloat(basic) || 0) + otEarned;
+  return (
+    <div className="cw-card">
+      <div className="cw-card-title">⏰ Overtime Calculator</div>
+      <div className="ff">
+        <label className="fl">Currency</label>
+        <select className="fi" value={currency} onChange={e => setCurrency(e.target.value)}>
+          {["USD","EUR","GBP","PHP","INR","SGD"].map(c => <option key={c}>{c}</option>)}
+        </select>
+      </div>
+      <div className="ff">
+        <label className="fl">Basic Monthly Wage ({currency})</label>
+        <input className="fi" type="number" placeholder="e.g. 2500" value={basic} onChange={e => setBasic(e.target.value)} />
+      </div>
+      <div className="ff">
+        <label className="fl">OT Hours This Month</label>
+        <input className="fi" type="number" placeholder="e.g. 20" value={otHours} onChange={e => setOtHours(e.target.value)} />
+      </div>
+      {basic && (
+        <div className="cw-result">
+          MLC OT Rate (×1.25): <strong>{currency} {fmt(otRate)}/hr</strong><br />
+          OT Earned: <strong className="gold">{currency} {fmt(otEarned)}</strong><br />
+          Total Wage: <strong className="green">{currency} {fmt(total)}</strong>
+          <div style={{fontSize:"0.65rem",color:"var(--text3)",marginTop:4}}>Based on MLC 208 hrs/month standard</div>
+        </div>
+      )}
+      {msg && <div className="ok-box" style={{marginTop:"0.5rem",marginBottom:0}}>{msg}</div>}
+      <button className="cw-save-btn" onClick={() => saveToFirestore("overtime", { basic, otHours, currency, otEarned: fmt(otEarned), total: fmt(total) }, setMsg)}>
+        💾 Save Result
+      </button>
+    </div>
+  );
+}
+
+function AllotmentCalculator() {
+  const [wage, setWage]         = useState("");
+  const [allotPct, setAllotPct] = useState("70");
+  const [currency, setCurrency] = useState("USD");
+  const [msg, setMsg]           = useState("");
+  const total    = parseFloat(wage) || 0;
+  const allot    = total * ((parseFloat(allotPct) || 0) / 100);
+  const retained = total - allot;
+  return (
+    <div className="cw-card">
+      <div className="cw-card-title">🏦 Allotment Calculator</div>
+      <div className="ff">
+        <label className="fl">Currency</label>
+        <select className="fi" value={currency} onChange={e => setCurrency(e.target.value)}>
+          {["USD","EUR","GBP","PHP","INR","SGD"].map(c => <option key={c}>{c}</option>)}
+        </select>
+      </div>
+      <div className="ff">
+        <label className="fl">Total Monthly Wage ({currency})</label>
+        <input className="fi" type="number" placeholder="e.g. 3000" value={wage} onChange={e => setWage(e.target.value)} />
+      </div>
+      <div className="ff">
+        <label className="fl">Allotment % (sent home)</label>
+        <input className="fi" type="number" min="0" max="100" placeholder="70" value={allotPct} onChange={e => setAllotPct(e.target.value)} />
+      </div>
+      {wage && (
+        <div className="cw-result">
+          Sent Home: <strong className="gold">{currency} {fmt(allot)} ({allotPct}%)</strong><br />
+          Retained Onboard: <strong className="green">{currency} {fmt(retained)} ({fmt(100 - (parseFloat(allotPct)||0))}%)</strong>
+        </div>
+      )}
+      {msg && <div className="ok-box" style={{marginTop:"0.5rem",marginBottom:0}}>{msg}</div>}
+      <button className="cw-save-btn" onClick={() => saveToFirestore("allotment", { wage, allotPct, currency, allot: fmt(allot), retained: fmt(retained) }, setMsg)}>
+        💾 Save Result
+      </button>
+    </div>
+  );
+}
+
+function OnboardEarningsTotal() {
+  const [basic, setBasic]       = useState("");
+  const [otHours, setOtHours]   = useState("");
+  const [months, setMonths]     = useState("");
+  const [currency, setCurrency] = useState("USD");
+  const [msg, setMsg]           = useState("");
+  const monthlyBasic = parseFloat(basic) || 0;
+  const otRate       = (monthlyBasic / 208) * 1.25;
+  const otMonthly    = otRate * (parseFloat(otHours) || 0);
+  const totalMonth   = monthlyBasic + otMonthly;
+  const contractTotal = totalMonth * (parseFloat(months) || 0);
+  return (
+    <div className="cw-card">
+      <div className="cw-card-title">📊 Onboard Earnings Total</div>
+      <div className="ff">
+        <label className="fl">Currency</label>
+        <select className="fi" value={currency} onChange={e => setCurrency(e.target.value)}>
+          {["USD","EUR","GBP","PHP","INR","SGD"].map(c => <option key={c}>{c}</option>)}
+        </select>
+      </div>
+      <div className="ff">
+        <label className="fl">Basic Monthly Wage ({currency})</label>
+        <input className="fi" type="number" placeholder="e.g. 2500" value={basic} onChange={e => setBasic(e.target.value)} />
+      </div>
+      <div className="ff">
+        <label className="fl">Avg OT Hours / Month</label>
+        <input className="fi" type="number" placeholder="e.g. 20" value={otHours} onChange={e => setOtHours(e.target.value)} />
+      </div>
+      <div className="ff">
+        <label className="fl">Contract Duration (Months)</label>
+        <input className="fi" type="number" placeholder="e.g. 9" value={months} onChange={e => setMonths(e.target.value)} />
+      </div>
+      {basic && months && (
+        <div className="cw-result">
+          Monthly (Basic + OT): <strong>{currency} {fmt(totalMonth)}</strong><br />
+          Full Contract ({months} mo): <strong className="gold">{currency} {fmt(contractTotal)}</strong>
+        </div>
+      )}
+      {msg && <div className="ok-box" style={{marginTop:"0.5rem",marginBottom:0}}>{msg}</div>}
+      <button className="cw-save-btn" onClick={() => saveToFirestore("earningsTotal", { basic, otHours, months, currency, totalMonth: fmt(totalMonth), contractTotal: fmt(contractTotal) }, setMsg)}>
+        💾 Save Result
+      </button>
+    </div>
+  );
+}
+
+function LeaveAccountPlanner() {
+  const [leaveDays, setLeaveDays]       = useState("");
+  const [monthlyExpense, setMonthlyExpense] = useState("");
+  const [currency, setCurrency]         = useState("USD");
+  const [msg, setMsg]                   = useState("");
+  const days     = parseFloat(leaveDays) || 0;
+  const expense  = parseFloat(monthlyExpense) || 0;
+  const months   = days / 30;
+  const needed   = expense * months;
+  const buffer   = needed * 0.15;
+  const total    = needed + buffer;
+  return (
+    <div className="cw-card">
+      <div className="cw-card-title">🏖 Leave Account Planner</div>
+      <div style={{fontSize:"0.7rem",color:"var(--text2)",marginBottom:"0.8rem",lineHeight:1.5}}>
+        How much to have in account during leave period
+      </div>
+      <div className="ff">
+        <label className="fl">Currency</label>
+        <select className="fi" value={currency} onChange={e => setCurrency(e.target.value)}>
+          {["USD","EUR","GBP","PHP","INR","SGD"].map(c => <option key={c}>{c}</option>)}
+        </select>
+      </div>
+      <div className="ff">
+        <label className="fl">Leave Duration (Days)</label>
+        <input className="fi" type="number" placeholder="e.g. 60" value={leaveDays} onChange={e => setLeaveDays(e.target.value)} />
+      </div>
+      <div className="ff">
+        <label className="fl">Monthly Living Expense ({currency})</label>
+        <input className="fi" type="number" placeholder="e.g. 800" value={monthlyExpense} onChange={e => setMonthlyExpense(e.target.value)} />
+      </div>
+      {leaveDays && monthlyExpense && (
+        <div className="cw-result">
+          Leave Duration: <strong>{days} days ({fmt(months)} months)</strong><br />
+          Basic Needed: <strong>{currency} {fmt(needed)}</strong><br />
+          +15% Emergency Buffer: <strong>{currency} {fmt(buffer)}</strong><br />
+          <span style={{borderTop:"1px solid var(--border)",display:"block",marginTop:5,paddingTop:5}}>
+            Total Recommended: <strong className="gold">{currency} {fmt(total)}</strong>
+          </span>
+        </div>
+      )}
+      {msg && <div className="ok-box" style={{marginTop:"0.5rem",marginBottom:0}}>{msg}</div>}
+      <button className="cw-save-btn" onClick={() => saveToFirestore("leaveAccount", { leaveDays, monthlyExpense, currency, needed: fmt(needed), total: fmt(total) }, setMsg)}>
+        💾 Save Result
+      </button>
+    </div>
+  );
+}
+
+function SavingsPlanner() {
+  const [wage, setWage]         = useState("");
+  const [expense, setExpense]   = useState("");
+  const [savePct, setSavePct]   = useState("30");
+  const [months, setMonths]     = useState("");
+  const [currency, setCurrency] = useState("USD");
+  const [msg, setMsg]           = useState("");
+  const w  = parseFloat(wage) || 0;
+  const e  = parseFloat(expense) || 0;
+  const pct = parseFloat(savePct) || 0;
+  const mo  = parseFloat(months) || 0;
+  const savingsPerMonth = w * (pct / 100);
+  const net = w - e - savingsPerMonth;
+  const totalSavings = savingsPerMonth * mo;
+  return (
+    <div className="cw-card">
+      <div className="cw-card-title">💰 Savings Planner</div>
+      <div className="ff">
+        <label className="fl">Currency</label>
+        <select className="fi" value={currency} onChange={e => setCurrency(e.target.value)}>
+          {["USD","EUR","GBP","PHP","INR","SGD"].map(c => <option key={c}>{c}</option>)}
+        </select>
+      </div>
+      <div className="ff">
+        <label className="fl">Monthly Wage ({currency})</label>
+        <input className="fi" type="number" placeholder="e.g. 3000" value={wage} onChange={e => setWage(e.target.value)} />
+      </div>
+      <div className="ff">
+        <label className="fl">Monthly Onboard Expense ({currency})</label>
+        <input className="fi" type="number" placeholder="e.g. 200" value={expense} onChange={e => setExpense(e.target.value)} />
+      </div>
+      <div className="ff">
+        <label className="fl">Save % of Wage</label>
+        <input className="fi" type="number" min="0" max="100" placeholder="30" value={savePct} onChange={e => setSavePct(e.target.value)} />
+      </div>
+      <div className="ff">
+        <label className="fl">Contract Months</label>
+        <input className="fi" type="number" placeholder="e.g. 9" value={months} onChange={e => setMonths(e.target.value)} />
+      </div>
+      {wage && (
+        <div className="cw-result">
+          Savings/Month: <strong className="green">{currency} {fmt(savingsPerMonth)}</strong><br />
+          Remaining: <strong>{currency} {fmt(net)}</strong><br />
+          Contract Savings: <strong className="gold">{currency} {fmt(totalSavings)}</strong>
+        </div>
+      )}
+      {msg && <div className="ok-box" style={{marginTop:"0.5rem",marginBottom:0}}>{msg}</div>}
+      <button className="cw-save-btn" onClick={() => saveToFirestore("savings", { wage, expense, savePct, months, currency, savingsPerMonth: fmt(savingsPerMonth), totalSavings: fmt(totalSavings) }, setMsg)}>
+        💾 Save Result
+      </button>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TAB 2 — PLANNING TOOLS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+function LeavePlanner() {
+  const [start, setStart] = useState("");
+  const [end, setEnd]     = useState("");
+  const [msg, setMsg]     = useState("");
+  const days = start && end
+    ? Math.max(0, Math.round((new Date(end) - new Date(start)) / 86400000))
+    : 0;
+  const returnDate = end ? new Date(new Date(end).getTime() + 86400000).toDateString() : "";
+  return (
+    <div className="cw-card">
+      <div className="cw-card-title">🏖 Leave Planner</div>
+      <div className="ff">
+        <label className="fl">Leave Start Date</label>
+        <input className="fi" type="date" value={start} onChange={e => setStart(e.target.value)} />
+      </div>
+      <div className="ff">
+        <label className="fl">Leave End Date</label>
+        <input className="fi" type="date" value={end} onChange={e => setEnd(e.target.value)} />
+      </div>
+      {start && end && (
+        <div className="cw-result">
+          Total Leave Days: <strong className="gold">{days} days</strong><br />
+          Return to Duty: <strong>{returnDate}</strong><br />
+          <div className="prog-bar" style={{marginTop:8}}>
+            <div className="prog-fill" style={{width:"100%",background:"linear-gradient(90deg,var(--cyan),var(--blue))"}} />
+          </div>
+        </div>
+      )}
+      {msg && <div className="ok-box" style={{marginTop:"0.5rem",marginBottom:0}}>{msg}</div>}
+      <button className="cw-save-btn" onClick={() => saveToFirestore("leave", { start, end, days }, setMsg)}>
+        💾 Save to Account
+      </button>
+    </div>
+  );
+}
+
+function ReliefDateCalculator() {
+  const [joinDate, setJoinDate]       = useState("");
+  const [contractMonths, setContractMonths] = useState("");
+  const [bufferDays, setBufferDays]   = useState("14");
+  const [msg, setMsg]                 = useState("");
+
+  let reliefDate = "", planDate = "", daysServed = 0, daysLeft = 0, pct = 0;
+  if (joinDate && contractMonths) {
+    const join    = new Date(joinDate);
+    const end     = new Date(join);
+    end.setMonth(end.getMonth() + (parseFloat(contractMonths) || 0));
+    const plan    = new Date(end);
+    plan.setDate(plan.getDate() - (parseFloat(bufferDays) || 0));
+    reliefDate    = end.toDateString();
+    planDate      = plan.toDateString();
+    const today   = new Date();
+    daysServed    = Math.max(0, Math.round((today - join) / 86400000));
+    const total   = Math.round((end - join) / 86400000);
+    daysLeft      = Math.max(0, total - daysServed);
+    pct           = Math.min(100, Math.round((daysServed / total) * 100));
+  }
+  return (
+    <div className="cw-card">
+      <div className="cw-card-title">📅 Relief Date Calculator</div>
+      <div className="ff">
+        <label className="fl">Join Date</label>
+        <input className="fi" type="date" value={joinDate} onChange={e => setJoinDate(e.target.value)} />
+      </div>
+      <div className="ff">
+        <label className="fl">Contract Duration (Months)</label>
+        <input className="fi" type="number" placeholder="e.g. 9" value={contractMonths} onChange={e => setContractMonths(e.target.value)} />
+      </div>
+      <div className="ff">
+        <label className="fl">Relief Buffer (Days before contract end)</label>
+        <input className="fi" type="number" placeholder="14" value={bufferDays} onChange={e => setBufferDays(e.target.value)} />
+      </div>
+      {joinDate && contractMonths && (
+        <div className="cw-result">
+          Contract End: <strong>{reliefDate}</strong><br />
+          Plan Relief By: <strong className="gold">{planDate}</strong><br />
+          Days Served: <strong>{daysServed}</strong> &nbsp;|&nbsp; Days Left: <strong className="green">{daysLeft}</strong>
+          <div className="prog-bar" style={{marginTop:8}}>
+            <div className="prog-fill" style={{width:`${pct}%`, background:"linear-gradient(90deg,var(--green),var(--cyan))"}} />
+          </div>
+          <div style={{fontSize:"0.65rem",color:"var(--text3)",marginTop:3}}>{pct}% contract completed</div>
+        </div>
+      )}
+      {msg && <div className="ok-box" style={{marginTop:"0.5rem",marginBottom:0}}>{msg}</div>}
+      <button className="cw-save-btn" onClick={() => saveToFirestore("reliefDate", { joinDate, contractMonths, bufferDays, reliefDate, planDate }, setMsg)}>
+        💾 Save to Account
+      </button>
+    </div>
+  );
+}
+
+function ContractTracker() {
+  const [joinDate, setJoinDate]     = useState("");
+  const [endDate, setEndDate]       = useState("");
+  const [rank, setRank]             = useState("");
+  const [vessel, setVessel]         = useState("");
+  const [msg, setMsg]               = useState("");
+
+  let daysServed = 0, daysLeft = 0, pct = 0, totalDays = 0, weeksLeft = 0;
+  if (joinDate && endDate) {
+    const join  = new Date(joinDate);
+    const end   = new Date(endDate);
+    const today = new Date();
+    totalDays   = Math.max(1, Math.round((end - join) / 86400000));
+    daysServed  = Math.max(0, Math.round((today - join) / 86400000));
+    daysLeft    = Math.max(0, totalDays - daysServed);
+    weeksLeft   = Math.floor(daysLeft / 7);
+    pct         = Math.min(100, Math.round((daysServed / totalDays) * 100));
+  }
+  const color = pct < 33 ? "var(--green)" : pct < 66 ? "var(--gold)" : "var(--cyan)";
+  return (
+    <div className="cw-card">
+      <div className="cw-card-title">📋 Contract Tracker</div>
+      <div className="ff">
+        <label className="fl">Rank</label>
+        <input className="fi" type="text" placeholder="e.g. Chief Officer" value={rank} onChange={e => setRank(e.target.value)} />
+      </div>
+      <div className="ff">
+        <label className="fl">Vessel Name</label>
+        <input className="fi" type="text" placeholder="e.g. MV Explorer" value={vessel} onChange={e => setVessel(e.target.value)} />
+      </div>
+      <div className="ff">
+        <label className="fl">Join Date</label>
+        <input className="fi" type="date" value={joinDate} onChange={e => setJoinDate(e.target.value)} />
+      </div>
+      <div className="ff">
+        <label className="fl">Contract End Date</label>
+        <input className="fi" type="date" value={endDate} onChange={e => setEndDate(e.target.value)} />
+      </div>
+      {joinDate && endDate && (
+        <div className="cw-result">
+          {rank && <div style={{marginBottom:4}}><strong>{rank}</strong>{vessel ? ` — ${vessel}` : ""}</div>}
+          Days Served: <strong style={{color}}>{daysServed}</strong> / {totalDays}<br />
+          Days Remaining: <strong className="green">{daysLeft}</strong> ({weeksLeft} weeks)<br />
+          <div className="prog-bar" style={{marginTop:8}}>
+            <div className="prog-fill" style={{width:`${pct}%`, background:`linear-gradient(90deg,${color},var(--cyan))`}} />
+          </div>
+          <div style={{fontSize:"0.65rem",color:"var(--text3)",marginTop:3}}>{pct}% of contract completed</div>
+        </div>
+      )}
+      {msg && <div className="ok-box" style={{marginTop:"0.5rem",marginBottom:0}}>{msg}</div>}
+      <button className="cw-save-btn" onClick={() => saveToFirestore("contractTracker", { rank, vessel, joinDate, endDate, daysServed, daysLeft, pct }, setMsg)}>
+        💾 Save to Account
+      </button>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TAB 3 — WELLBEING TOOLS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const MH_QUESTIONS = [
+  "I have felt down, depressed or hopeless",
+  "I have had little interest or pleasure in doing things",
+  "I have felt nervous, anxious or on edge",
+  "I have had trouble sleeping or sleeping too much",
+  "I have felt tired or had little energy",
+  "I have had difficulty concentrating",
+  "I have felt isolated or lonely at sea",
+  "I have felt stressed about family matters at home",
+];
+
+function MentalHealthCheck() {
+  const [scores, setScores] = useState({});
+  const [msg, setMsg]       = useState("");
+  const setScore = (i, v) => setScores(s => ({ ...s, [i]: v }));
+  const answered = Object.keys(scores).length;
+  const total    = Object.values(scores).reduce((a, b) => a + b, 0);
+  const max      = MH_QUESTIONS.length * 3;
+  const pct      = Math.round((total / max) * 100);
+  let level = "", levelColor = "";
+  if (answered === MH_QUESTIONS.length) {
+    if (pct <= 25)      { level = "Low distress — You appear to be doing well"; levelColor = "var(--green)"; }
+    else if (pct <= 50) { level = "Mild distress — Consider talking to someone"; levelColor = "var(--gold)"; }
+    else if (pct <= 75) { level = "Moderate distress — Speak to a wellness officer or counsellor"; levelColor = "var(--gold)"; }
+    else                { level = "High distress — Please seek professional support"; levelColor = "var(--red)"; }
+  }
+  return (
+    <div className="cw-card">
+      <div className="cw-card-title">🧠 Mental Health Self-Check</div>
+      <div style={{fontSize:"0.68rem",color:"var(--text2)",marginBottom:"0.9rem",lineHeight:1.5,background:"rgba(0,180,216,0.05)",padding:"8px 10px",borderRadius:7,border:"1px solid rgba(0,180,216,0.12)"}}>
+        ⚠️ For personal awareness only — not a medical diagnosis.<br/>Rate each in the past 2 weeks: 0=Never · 1=Sometimes · 2=Often · 3=Always
+      </div>
+      {MH_QUESTIONS.map((q, i) => (
+        <div className="score-row" key={i}>
+          <span style={{fontSize:"0.72rem",flex:1,paddingRight:8}}>{q}</span>
+          <div className="score-opts">
+            {[0,1,2,3].map(v => (
+              <button key={v} className={`score-opt ${scores[i]===v?"sel":""}`}
+                onClick={() => setScore(i, v)}>{v}</button>
+            ))}
+          </div>
+        </div>
+      ))}
+      {answered === MH_QUESTIONS.length && (
+        <div className="cw-result">
+          Score: <strong>{total}/{max}</strong><br />
+          <span style={{color:levelColor,fontWeight:700}}>{level}</span>
+          <div className="prog-bar" style={{marginTop:8}}>
+            <div className="prog-fill" style={{width:`${pct}%`, background:`linear-gradient(90deg,var(--green),var(--gold),var(--red))`}} />
+          </div>
+          {pct > 50 && (
+            <div style={{marginTop:8,fontSize:"0.69rem",color:"var(--text2)"}}>
+              💙 Resources: ISWAN SeafarerHelp +44 20 7323 2737 (24/7)
+            </div>
+          )}
+        </div>
+      )}
+      {msg && <div className="ok-box" style={{marginTop:"0.5rem",marginBottom:0}}>{msg}</div>}
+      <button className="cw-save-btn" disabled={answered < MH_QUESTIONS.length}
+        onClick={() => saveToFirestore("mentalHealth", { scores, total, pct, level }, setMsg)}>
+        💾 Save Result ({answered}/{MH_QUESTIONS.length} answered)
+      </button>
+    </div>
+  );
+}
+
+const REST_PERIODS = [
+  { label: "Min rest in any 24h period", minRest: 10 },
+  { label: "Min rest in any 7-day period", minRest: 77 },
+];
+
+function FatigueAssessment() {
+  const [entries, setEntries] = useState([
+    { day: "Day 1", rest24: "", work24: "" },
+    { day: "Day 2", rest24: "", work24: "" },
+    { day: "Day 3", rest24: "", work24: "" },
+    { day: "Day 4", rest24: "", work24: "" },
+    { day: "Day 5", rest24: "", work24: "" },
+    { day: "Day 6", rest24: "", work24: "" },
+    { day: "Day 7", rest24: "", work24: "" },
+  ]);
+  const [msg, setMsg] = useState("");
+
+  const update = (i, field, val) => {
+    setEntries(e => e.map((r, idx) => idx === i ? { ...r, [field]: val } : r));
+  };
+  const totalRest7 = entries.reduce((s, e) => s + (parseFloat(e.rest24) || 0), 0);
+  const violations = entries.map(e => {
+    const r = parseFloat(e.rest24) || 0;
+    return r > 0 && r < 10;
+  });
+  const week7Viol = totalRest7 < 77 && entries.some(e => e.rest24 !== "");
+
+  return (
+    <div className="cw-card">
+      <div className="cw-card-title">😴 Fatigue Assessment (MLC/STCW)</div>
+      <div style={{fontSize:"0.68rem",color:"var(--text2)",marginBottom:"0.9rem",lineHeight:1.5,background:"rgba(240,165,0,0.05)",padding:"8px 10px",borderRadius:7,border:"1px solid rgba(240,165,0,0.12)"}}>
+        MLC Rule: Min 10 hrs rest/24h · Min 77 hrs rest/7 days<br/>Max work: 14 hrs/24h · 72 hrs/7 days
+      </div>
+      <div className="rest-row" style={{fontWeight:700,color:"var(--text3)",fontSize:"0.65rem",borderBottom:"1px solid var(--border)"}}>
+        <span>Day</span><span>Rest (hrs)</span><span>Work (hrs)</span>
+      </div>
+      {entries.map((e, i) => (
+        <div className="rest-row" key={i}>
+          <span style={{fontSize:"0.72rem",color:violations[i]?"var(--red)":"var(--text)"}}>{e.day} {violations[i]?"⚠️":""}</span>
+          <input className="fi" type="number" min="0" max="24" placeholder="hrs"
+            value={e.rest24} onChange={v => update(i, "rest24", v.target.value)}
+            style={{padding:"4px 7px",fontSize:"0.74rem"}} />
+          <input className="fi" type="number" min="0" max="24" placeholder="hrs"
+            value={e.work24} onChange={v => update(i, "work24", v.target.value)}
+            style={{padding:"4px 7px",fontSize:"0.74rem"}} />
+        </div>
+      ))}
+      <div className="cw-result">
+        Total Rest (7 days): <strong style={{color: week7Viol ? "var(--red)" : "var(--green)"}}>{fmt(totalRest7)} hrs</strong>
+        {week7Viol
+          ? <span style={{color:"var(--red)"}}> ⚠️ BELOW 77hr MLC minimum</span>
+          : <span style={{color:"var(--green)"}}> ✅ Compliant</span>
+        }
+        {violations.some(Boolean) && (
+          <div style={{color:"var(--red)",marginTop:4,fontSize:"0.7rem"}}>
+            ⚠️ {violations.filter(Boolean).length} day(s) below 10hr daily minimum
+          </div>
+        )}
+      </div>
+      {msg && <div className="ok-box" style={{marginTop:"0.5rem",marginBottom:0}}>{msg}</div>}
+      <button className="cw-save-btn"
+        onClick={() => saveToFirestore("fatigue", { entries, totalRest7: fmt(totalRest7), weekCompliant: !week7Viol }, setMsg)}>
+        💾 Save Assessment
+      </button>
+    </div>
+  );
+}
+
+function FullStrategySavingPlanner() {
+  const [currency, setCurrency]         = useState("USD");
+  const [monthlyWage, setMonthlyWage]   = useState("");
+  const [savePct, setSavePct]           = useState("35");
+  const [contractLen, setContractLen]   = useState("9");
+  const [leaveLen, setLeaveLen]         = useState("3");
+  const [numContracts, setNumContracts] = useState("3");
+  const [goal, setGoal]                 = useState("");
+  const [msg, setMsg]                   = useState("");
+
+  const wage     = parseFloat(monthlyWage) || 0;
+  const sPct     = parseFloat(savePct) || 0;
+  const cLen     = parseFloat(contractLen) || 0;
+  const lLen     = parseFloat(leaveLen) || 0;
+  const nC       = parseFloat(numContracts) || 0;
+  const gAmt     = parseFloat(goal) || 0;
+
+  const savingPerMonth    = wage * (sPct / 100);
+  const savingPerContract = savingPerMonth * cLen;
+  const totalSavings      = savingPerContract * nC;
+  const totalOnboard      = cLen * nC;
+  const totalLeave        = lLen * nC;
+  const totalMonths       = totalOnboard + totalLeave;
+  const totalYears        = (totalMonths / 12).toFixed(1);
+  const goalMet           = gAmt > 0 ? totalSavings >= gAmt : null;
+  const contractsNeeded   = gAmt > 0 ? Math.ceil(gAmt / savingPerContract) : 0;
+
+  const steps = [
+    { num: "01", title: "Per Contract Savings", detail: `${currency} ${fmt(savingPerContract)} over ${cLen} months` },
+    { num: "02", title: "Leave Period", detail: `${lLen} months unpaid — budget from contract earnings` },
+    { num: "03", title: `After ${nC} Contracts`, detail: `${currency} ${fmt(totalSavings)} saved over ${totalYears} years` },
+    ...(gAmt > 0 ? [{ num: "04", title: goalMet ? "🎯 Goal Achieved" : "📍 Goal Gap", detail: goalMet ? `You reach ${currency} ${fmt(gAmt)} in ${nC} contracts` : `Need ${contractsNeeded} contracts to reach ${currency} ${fmt(gAmt)}` }] : []),
   ];
 
-  const LABELS = {
-    currency:"💱 Currency", wage:"💵 Wage", overtime:"⏱ Overtime",
-    allotment:"📤 Allotment", savings:"🏦 Savings", leave:"🗓 Leave",
-    relief:"🔄 Relief", contracts:"📋 Contracts",
-    mental:"🧠 Mental Health", fatigue:"😴 Fatigue", iswan:"📞 ISWAN"
-  };
-
   return (
-    <div style={{ minHeight:"100vh", background:"#0a0a0a", color:"#e5e5e5" }}>
-
-      {/* Header */}
-      <div style={{ background:"#060f1c", borderBottom:"2px solid #1e3a5c", padding:"14px 20px", position:"sticky", top:0, zIndex:100 }}>
-        <div style={{ fontSize:16, fontWeight:700, color:"#00b4d8", letterSpacing:2 }}>⚓ CREW WELFARE</div>
-        <div style={{ fontSize:10, color:"#555", marginTop:2 }}>FINANCIAL · PLANNING · WELLBEING</div>
-      </div>
-
-      {/* Tab bar */}
-      <div style={{ display:"flex", overflowX:"auto", background:"#111", borderBottom:"1px solid #1f1f1f", padding:"0 4px" }}>
-        {TABS.map(t => (
-          <button key={t} onClick={() => setTab(t)} style={{
-            flexShrink:0, padding:"10px 12px", fontSize:10,
-            fontWeight:tab===t?700:400, color:tab===t?"#60a5fa":"#555",
-            borderTop:"none", borderLeft:"none", borderRight:"none",
-            borderBottom:tab===t?"2px solid #2563eb":"2px solid transparent",
-            cursor:"pointer", whiteSpace:"nowrap", background:"none",
-          }}>
-            {LABELS[t]}
-          </button>
-        ))}
-      </div>
-
-      {/* Content */}
-      <div style={{ padding:"24px 20px", maxWidth:800, margin:"0 auto" }}>
-        {tab === "currency"  && <CurrencyTool />}
-        {tab === "wage"      && <WageTool />}
-        {tab === "overtime"  && <OvertimeTool />}
-        {tab === "allotment" && <AllotmentTool />}
-        {tab === "savings"   && <SavingsTool />}
-        {tab === "leave"     && <LeaveTool />}
-        {tab === "relief"    && <ReliefTool />}
-        {tab === "contracts" && <ContractsTool />}
-        {tab === "mental"    && <MentalTool />}
-        {tab === "fatigue"   && <FatigueTool />}
-        {tab === "iswan"     && <ISWANTool />}
-      </div>
-    </div>
-  );
-}
-
-// ── SHARED ────────────────────────────────────────────────────────────────────
-const CURR = [
-  {code:"USD",name:"US Dollar",sym:"$",flag:"🇺🇸"},{code:"EUR",name:"Euro",sym:"€",flag:"🇪🇺"},
-  {code:"GBP",name:"British Pound",sym:"£",flag:"🇬🇧"},{code:"PHP",name:"Philippine Peso",sym:"₱",flag:"🇵🇭"},
-  {code:"INR",name:"Indian Rupee",sym:"₹",flag:"🇮🇳"},{code:"IDR",name:"Indonesian Rupiah",sym:"Rp",flag:"🇮🇩"},
-  {code:"MYR",name:"Malaysian Ringgit",sym:"RM",flag:"🇲🇾"},{code:"SGD",name:"Singapore Dollar",sym:"S$",flag:"🇸🇬"},
-  {code:"CNY",name:"Chinese Yuan",sym:"¥",flag:"🇨🇳"},{code:"JPY",name:"Japanese Yen",sym:"¥",flag:"🇯🇵"},
-  {code:"KRW",name:"South Korean Won",sym:"₩",flag:"🇰🇷"},{code:"AUD",name:"Australian Dollar",sym:"A$",flag:"🇦🇺"},
-  {code:"CAD",name:"Canadian Dollar",sym:"C$",flag:"🇨🇦"},{code:"AED",name:"UAE Dirham",sym:"AED",flag:"🇦🇪"},
-  {code:"BRL",name:"Brazilian Real",sym:"R$",flag:"🇧🇷"},{code:"ZAR",name:"South African Rand",sym:"R",flag:"🇿🇦"},
-  {code:"NGN",name:"Nigerian Naira",sym:"NGN",flag:"🇳🇬"},{code:"NOK",name:"Norwegian Krone",sym:"kr",flag:"🇳🇴"},
-  {code:"SEK",name:"Swedish Krona",sym:"kr",flag:"🇸🇪"},{code:"CHF",name:"Swiss Franc",sym:"Fr",flag:"🇨🇭"},
-  {code:"HKD",name:"Hong Kong Dollar",sym:"HK$",flag:"🇭🇰"},{code:"UAH",name:"Ukrainian Hryvnia",sym:"UAH",flag:"🇺🇦"},
-  {code:"PLN",name:"Polish Zloty",sym:"zl",flag:"🇵🇱"},{code:"TRY",name:"Turkish Lira",sym:"TRY",flag:"🇹🇷"},
-];
-
-function f(n, d=2) {
-  if (n===null||n===undefined||isNaN(Number(n))) return "--";
-  return Number(n).toLocaleString("en-US",{minimumFractionDigits:d,maximumFractionDigits:d});
-}
-
-function Box({children,style={}}) {
-  return <div style={{background:"#111",border:"1px solid #1f1f1f",borderRadius:8,padding:"14px 16px",marginBottom:10,...style}}>{children}</div>;
-}
-function Lbl({children}) {
-  return <div style={{fontSize:10,color:"#666",letterSpacing:1,marginBottom:4,marginTop:8}}>{children}</div>;
-}
-function Row({label,value,color}) {
-  return (
-    <div style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid #161616"}}>
-      <span style={{fontSize:11,color:"#666"}}>{label}</span>
-      <span style={{fontSize:13,fontWeight:700,color:color||"#e5e5e5",fontFamily:"monospace"}}>{value}</span>
-    </div>
-  );
-}
-function Inp({value,onChange,placeholder,type="text",style={}}) {
-  return <input type={type} value={value} onChange={onChange} placeholder={placeholder}
-    style={{width:"100%",background:"#0d0d0d",border:"1px solid #2a2a2a",borderRadius:6,padding:"8px 12px",
-      color:"#e5e5e5",fontSize:12,boxSizing:"border-box",outline:"none",...style}} />;
-}
-function Sel({value,onChange,children,style={}}) {
-  return <select value={value} onChange={onChange}
-    style={{width:"100%",background:"#0d0d0d",border:"1px solid #2a2a2a",borderRadius:6,padding:"8px 12px",
-      color:"#e5e5e5",fontSize:12,outline:"none",cursor:"pointer",...style}}>{children}</select>;
-}
-function CurrSel({value,onChange}) {
-  return <Sel value={value} onChange={e=>onChange(e.target.value)}>
-    {CURR.map(c=><option key={c.code} value={c.code}>{c.flag} {c.code} - {c.name}</option>)}
-  </Sel>;
-}
-function Head({icon,title,sub}) {
-  return (
-    <div style={{marginBottom:20,paddingBottom:10,borderBottom:"1px solid #1f1f1f"}}>
-      <div style={{display:"flex",alignItems:"center",gap:10}}>
-        <span style={{fontSize:20}}>{icon}</span>
-        <div style={{fontSize:14,fontWeight:700,color:"#fff",letterSpacing:2,textTransform:"uppercase"}}>{title}</div>
-      </div>
-      {sub && <div style={{fontSize:11,color:"#555",marginTop:4,paddingLeft:30}}>{sub}</div>}
-    </div>
-  );
-}
-function G2({children}) {
-  return <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:4}}>{children}</div>;
-}
-
-// ── CURRENCY ──────────────────────────────────────────────────────────────────
-function CurrencyTool() {
-  const [amt,setAmt]=useState("1000");
-  const [from,setFrom]=useState("USD");
-  const [to,setTo]=useState("PHP");
-  const [rate,setRate]=useState(null);
-  const [loading,setLoading]=useState(false);
-  const [manual,setManual]=useState("");
-  const [useManual,setUseManual]=useState(false);
-  const [updated,setUpdated]=useState("");
-
-  const fetch2=(f,t)=>{
-    setLoading(true);
-    fetch("https://api.exchangerate-api.com/v4/latest/"+f)
-      .then(r=>r.json()).then(d=>{
-        if(d&&d.rates&&d.rates[t]){setRate(d.rates[t]);setUpdated(new Date().toLocaleTimeString());}
-        setLoading(false);
-      }).catch(()=>setLoading(false));
-  };
-
-  useEffect(()=>{if(!useManual)fetch2(from,to);},[from,to,useManual]);
-
-  const ar=useManual?parseFloat(manual):rate;
-  const a=parseFloat(amt);
-  const conv=(ar&&!isNaN(a))?a*ar:null;
-  const fc=CURR.find(c=>c.code===from)||{};
-  const tc=CURR.find(c=>c.code===to)||{};
-
-  return (
-    <div>
-      <Head icon="💱" title="Currency Converter" sub="Live rates via ExchangeRate-API" />
-      <G2>
-        <div><Lbl>FROM</Lbl><CurrSel value={from} onChange={setFrom}/></div>
-        <div><Lbl>TO</Lbl><CurrSel value={to} onChange={setTo}/></div>
-      </G2>
-      <Lbl>AMOUNT ({fc.sym||from})</Lbl>
-      <Inp type="number" value={amt} onChange={e=>setAmt(e.target.value)} placeholder="1000"/>
-      <div style={{display:"flex",alignItems:"center",gap:12,marginTop:10,flexWrap:"wrap"}}>
-        <label style={{display:"flex",alignItems:"center",gap:6,fontSize:11,color:"#888",cursor:"pointer"}}>
-          <input type="checkbox" checked={useManual} onChange={e=>setUseManual(e.target.checked)}/>
-          Manual rate
-        </label>
-        {useManual
-          ? <Inp type="number" value={manual} onChange={e=>setManual(e.target.value)} placeholder="e.g. 56.50" style={{width:140}}/>
-          : <button onClick={()=>fetch2(from,to)} style={{background:"#1f2937",border:"1px solid #374151",color:"#aaa",borderRadius:6,padding:"6px 14px",fontSize:11,cursor:"pointer"}}>{loading?"...":"REFRESH"}</button>
-        }
-        {updated&&!useManual&&<span style={{fontSize:10,color:"#444"}}>Updated {updated}</span>}
-      </div>
-      {conv!==null&&ar&&(
-        <Box style={{marginTop:12,borderColor:"#1a2a1a"}}>
-          <Row label={f(amt,2)+" "+from+" ="} value={(tc.sym||to)+" "+f(conv,2)+" "+to} color="#4ade80"/>
-          <Row label="Rate"    value={"1 "+from+" = "+f(ar,4)+" "+to}/>
-          <Row label="Reverse" value={"1 "+to+" = "+f(1/ar,4)+" "+from}/>
-        </Box>
-      )}
-    </div>
-  );
-}
-
-// ── WAGE ──────────────────────────────────────────────────────────────────────
-function WageTool() {
-  const [basic,setBasic]=useState("");
-  const [cur,setCur]=useState("USD");
-  const [mo,setMo]=useState("9");
-  const b=parseFloat(basic)||0, m=parseFloat(mo)||0;
-  const c=CURR.find(x=>x.code===cur)||{};
-  const ot=b*0.25, vac=b/12, tot=b+ot;
-  return (
-    <div>
-      <Head icon="💵" title="Wage Calculator" sub="ITF / CBA standard breakdown"/>
-      <G2>
-        <div><Lbl>CURRENCY</Lbl><CurrSel value={cur} onChange={setCur}/></div>
-        <div><Lbl>CONTRACT (MONTHS)</Lbl><Inp type="number" value={mo} onChange={e=>setMo(e.target.value)} placeholder="9"/></div>
-      </G2>
-      <Lbl>BASIC MONTHLY WAGE ({c.sym||cur})</Lbl>
-      <Inp type="number" value={basic} onChange={e=>setBasic(e.target.value)} placeholder="e.g. 1800"/>
-      {b>0&&<Box style={{marginTop:12}}>
-        <Row label="Basic Wage"           value={(c.sym||"")+f(b)}/>
-        <Row label="Fixed OT 25%"         value={(c.sym||"")+f(ot)}/>
-        <Row label="Vacation Pay 1/12"    value={(c.sym||"")+f(vac)} color="#60a5fa"/>
-        <Row label="Total Monthly"        value={(c.sym||"")+f(tot)} color="#4ade80"/>
-        {m>0&&<Row label={"Contract "+mo+" months"} value={(c.sym||"")+f(tot*m)} color="#fbbf24"/>}
-      </Box>}
-    </div>
-  );
-}
-
-// ── OVERTIME ──────────────────────────────────────────────────────────────────
-function OvertimeTool() {
-  const [basic,setBasic]=useState("");
-  const [cur,setCur]=useState("USD");
-  const [worked,setWorked]=useState("");
-  const [reg,setReg]=useState("208");
-  const [mult,setMult]=useState("1.25");
-  const b=parseFloat(basic)||0, hw=parseFloat(worked)||0, rh=parseFloat(reg)||208, or=parseFloat(mult)||1.25;
-  const c=CURR.find(x=>x.code===cur)||{};
-  const hr=rh>0?b/rh:0, oth=Math.max(0,hw-rh), otp=oth*hr*or, tot=Math.min(hw,rh)*hr+otp;
-  return (
-    <div>
-      <Head icon="⏱" title="Overtime Calculator" sub="MLC 2006 compliant"/>
-      <G2>
-        <div><Lbl>CURRENCY</Lbl><CurrSel value={cur} onChange={setCur}/></div>
-        <div><Lbl>OT MULTIPLIER</Lbl>
-          <Sel value={mult} onChange={e=>setMult(e.target.value)}>
-            <option value="1.25">1.25x Standard</option>
-            <option value="1.5">1.5x Time and Half</option>
-            <option value="2.0">2.0x Double</option>
-            <option value="1.0">1.0x Flat</option>
-          </Sel>
+    <div className="cw-card" style={{gridColumn:"1/-1"}}>
+      <div className="cw-card-title">🎯 Full Strategy Saving Planner</div>
+      <div style={{display:"grid",gap:"0.7rem",gridTemplateColumns:"repeat(auto-fill,minmax(180px,1fr))",marginBottom:"1rem"}}>
+        <div className="ff" style={{margin:0}}>
+          <label className="fl">Currency</label>
+          <select className="fi" value={currency} onChange={e => setCurrency(e.target.value)}>
+            {["USD","EUR","GBP","PHP","INR","SGD"].map(c => <option key={c}>{c}</option>)}
+          </select>
         </div>
-      </G2>
-      <Lbl>BASIC MONTHLY WAGE ({c.sym||cur})</Lbl>
-      <Inp type="number" value={basic} onChange={e=>setBasic(e.target.value)} placeholder="e.g. 1800"/>
-      <G2>
-        <div><Lbl>REGULAR HOURS</Lbl><Inp type="number" value={reg} onChange={e=>setReg(e.target.value)} placeholder="208"/></div>
-        <div><Lbl>ACTUAL HOURS</Lbl><Inp type="number" value={worked} onChange={e=>setWorked(e.target.value)} placeholder="e.g. 240"/></div>
-      </G2>
-      {b>0&&hw>0&&<Box style={{marginTop:12}}>
-        <Row label="Hourly Rate"      value={(c.sym||"")+f(hr,3)+" /hr"}/>
-        <Row label="OT Hours"         value={f(oth,0)+" hrs"} color={oth>0?"#fbbf24":"#888"}/>
-        <Row label={"OT Pay "+or+"x"} value={(c.sym||"")+f(otp)} color="#fbbf24"/>
-        <Row label="Total Pay"        value={(c.sym||"")+f(tot)} color="#4ade80"/>
-        {hw>208&&<div style={{marginTop:8,padding:"8px",background:"#1a0a00",borderRadius:6,fontSize:11,color:"#d97706"}}>MLC 2006: Max 14 hrs/day and 72 hrs/week.</div>}
-      </Box>}
-    </div>
-  );
-}
-
-// ── ALLOTMENT ─────────────────────────────────────────────────────────────────
-function AllotmentTool() {
-  const [basic,setBasic]=useState(""), [cur,setCur]=useState("USD"), [home,setHome]=useState("PHP");
-  const [pct,setPct]=useState(80), [mode,setMode]=useState("pct"), [fixed,setFixed]=useState(""), [conv,setConv]=useState("");
-  const b=parseFloat(basic)||0, all=mode==="pct"?b*(pct/100):(parseFloat(fixed)||0), ret=b-all, cr=parseFloat(conv)||0;
-  const c=CURR.find(x=>x.code===cur)||{}, hc=CURR.find(x=>x.code===home)||{};
-  return (
-    <div>
-      <Head icon="📤" title="Allotment Calculator" sub="Plan your monthly remittance"/>
-      <G2>
-        <div><Lbl>WAGE CURRENCY</Lbl><CurrSel value={cur} onChange={setCur}/></div>
-        <div><Lbl>HOME CURRENCY</Lbl><CurrSel value={home} onChange={setHome}/></div>
-      </G2>
-      <Lbl>MONTHLY WAGE ({c.sym||cur})</Lbl>
-      <Inp type="number" value={basic} onChange={e=>setBasic(e.target.value)} placeholder="e.g. 1800"/>
-      <div style={{display:"flex",gap:8,margin:"10px 0"}}>
-        <button onClick={()=>setMode("pct")} style={{background:mode==="pct"?"#172554":"#1f2937",border:"1px solid #374151",color:mode==="pct"?"#60a5fa":"#aaa",borderRadius:6,padding:"6px 14px",fontSize:11,cursor:"pointer"}}>BY PERCENT</button>
-        <button onClick={()=>setMode("fixed")} style={{background:mode==="fixed"?"#172554":"#1f2937",border:"1px solid #374151",color:mode==="fixed"?"#60a5fa":"#aaa",borderRadius:6,padding:"6px 14px",fontSize:11,cursor:"pointer"}}>FIXED AMOUNT</button>
+        <div className="ff" style={{margin:0}}>
+          <label className="fl">Monthly Wage ({currency})</label>
+          <input className="fi" type="number" placeholder="e.g. 3000" value={monthlyWage} onChange={e => setMonthlyWage(e.target.value)} />
+        </div>
+        <div className="ff" style={{margin:0}}>
+          <label className="fl">Save % per Month</label>
+          <input className="fi" type="number" placeholder="35" value={savePct} onChange={e => setSavePct(e.target.value)} />
+        </div>
+        <div className="ff" style={{margin:0}}>
+          <label className="fl">Contract Length (Months)</label>
+          <input className="fi" type="number" placeholder="9" value={contractLen} onChange={e => setContractLen(e.target.value)} />
+        </div>
+        <div className="ff" style={{margin:0}}>
+          <label className="fl">Leave Per Contract (Months)</label>
+          <input className="fi" type="number" placeholder="3" value={leaveLen} onChange={e => setLeaveLen(e.target.value)} />
+        </div>
+        <div className="ff" style={{margin:0}}>
+          <label className="fl">Number of Contracts</label>
+          <input className="fi" type="number" placeholder="3" value={numContracts} onChange={e => setNumContracts(e.target.value)} />
+        </div>
+        <div className="ff" style={{margin:0}}>
+          <label className="fl">Savings Goal ({currency}) — optional</label>
+          <input className="fi" type="number" placeholder="e.g. 50000" value={goal} onChange={e => setGoal(e.target.value)} />
+        </div>
       </div>
-      {mode==="pct"
-        ? <div><Lbl>ALLOTMENT {pct}%</Lbl><input type="range" min={0} max={100} value={pct} onChange={e=>setPct(Number(e.target.value))} style={{width:"100%",accentColor:"#2563eb"}}/></div>
-        : <div><Lbl>FIXED ({c.sym||cur})</Lbl><Inp type="number" value={fixed} onChange={e=>setFixed(e.target.value)} placeholder="e.g. 1400"/></div>
-      }
-      <Lbl>CONVERSION RATE (1 {cur} = ? {home}) optional</Lbl>
-      <Inp type="number" value={conv} onChange={e=>setConv(e.target.value)} placeholder="e.g. 56.50"/>
-      {b>0&&<Box style={{marginTop:12}}>
-        <Row label="Allotment"    value={(c.sym||"")+f(all)} color="#fbbf24"/>
-        <Row label="Retained"     value={(c.sym||"")+f(ret)}/>
-        <Row label="Percent"      value={f((all/b)*100,1)+"%"} color="#60a5fa"/>
-        {cr>0&&<Row label={"In "+home} value={(hc.sym||"")+f(all*cr)} color="#4ade80"/>}
-      </Box>}
+      {monthlyWage && (
+        <>
+          <div style={{display:"grid",gap:"8px",gridTemplateColumns:"repeat(auto-fill,minmax(200px,1fr))",marginBottom:"1rem"}}>
+            {steps.map(s => (
+              <div className="strategy-step" key={s.num}>
+                <div className="step-num">Step {s.num}</div>
+                <div style={{fontWeight:700,fontSize:"0.76rem",color:"var(--text)",marginBottom:2}}>{s.title}</div>
+                <div style={{color:"var(--gold)"}}>{s.detail}</div>
+              </div>
+            ))}
+          </div>
+          <div className="cw-result">
+            💰 Save per month: <strong className="green">{currency} {fmt(savingPerMonth)}</strong> &nbsp;|&nbsp;
+            📦 Per contract: <strong className="gold">{currency} {fmt(savingPerContract)}</strong> &nbsp;|&nbsp;
+            🏦 Total ({nC} contracts): <strong style={{color:"var(--cyan)",fontSize:"1rem"}}>{currency} {fmt(totalSavings)}</strong><br/>
+            ⏱ Timeline: <strong>{totalYears} years</strong> ({totalOnboard} mo onboard + {totalLeave} mo leave)
+            {gAmt > 0 && (
+              <div style={{marginTop:6,fontWeight:700,color: goalMet ? "var(--green)" : "var(--red)"}}>
+                {goalMet ? `✅ Goal of ${currency} ${fmt(gAmt)} achieved!` : `📍 Need ${contractsNeeded} contracts to reach ${currency} ${fmt(gAmt)}`}
+              </div>
+            )}
+          </div>
+        </>
+      )}
+      {msg && <div className="ok-box" style={{marginTop:"0.5rem",marginBottom:0}}>{msg}</div>}
+      <button className="cw-save-btn"
+        onClick={() => saveToFirestore("strategyPlanner", { currency, monthlyWage, savePct, contractLen, leaveLen, numContracts, goal, totalSavings: fmt(totalSavings) }, setMsg)}>
+        💾 Save Strategy
+      </button>
     </div>
   );
 }
 
-// ── SAVINGS ───────────────────────────────────────────────────────────────────
-function SavingsTool() {
-  const [inc,setInc]=useState(""), [cur,setCur]=useState("USD"), [exp,setExp]=useState("");
-  const [mo,setMo]=useState("9"), [ex,setEx]=useState("0"), [goal,setGoal]=useState("");
-  const i=parseFloat(inc)||0, e=parseFloat(exp)||0, m=parseFloat(mo)||1, x=parseFloat(ex)||0, g=parseFloat(goal)||0;
-  const c=CURR.find(v=>v.code===cur)||{};
-  const monthly=i-e, tot=monthly*m+x, rt=i>0?(monthly/i)*100:0, pct=g>0?Math.min(100,(tot/g)*100):0;
-  const mtg=(g>0&&monthly>0)?Math.ceil((g-x)/monthly):null;
-  return (
-    <div>
-      <Head icon="🏦" title="Savings Planner" sub="Track your contract savings goal"/>
-      <G2>
-        <div><Lbl>CURRENCY</Lbl><CurrSel value={cur} onChange={setCur}/></div>
-        <div><Lbl>CONTRACT (MO)</Lbl><Inp type="number" value={mo} onChange={e=>setMo(e.target.value)} placeholder="9"/></div>
-      </G2>
-      <Lbl>MONTHLY INCOME ({c.sym||cur})</Lbl><Inp type="number" value={inc} onChange={e=>setInc(e.target.value)} placeholder="e.g. 2000"/>
-      <Lbl>EXPENSES / ALLOTMENT ({c.sym||cur})</Lbl><Inp type="number" value={exp} onChange={e=>setExp(e.target.value)} placeholder="e.g. 400"/>
-      <G2>
-        <div><Lbl>EXISTING ({c.sym||cur})</Lbl><Inp type="number" value={ex} onChange={e=>setEx(e.target.value)} placeholder="0"/></div>
-        <div><Lbl>GOAL ({c.sym||cur})</Lbl><Inp type="number" value={goal} onChange={e=>setGoal(e.target.value)} placeholder="e.g. 20000"/></div>
-      </G2>
-      {i>0&&<Box style={{marginTop:12}}>
-        <Row label="Monthly Savings"  value={(c.sym||"")+f(monthly)} color={monthly>=0?"#4ade80":"#ef4444"}/>
-        <Row label="Savings Rate"     value={f(rt,1)+"%"} color={rt>=30?"#4ade80":rt>=10?"#fbbf24":"#ef4444"}/>
-        <Row label={"Contract "+mo+"mo"} value={(c.sym||"")+f(monthly*m)} color="#60a5fa"/>
-        <Row label="Total incl. existing" value={(c.sym||"")+f(tot)} color="#fbbf24"/>
-        {g>0&&<div style={{marginTop:10}}>
-          <div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:"#666",marginBottom:6}}><span>Goal progress</span><span style={{color:"#60a5fa"}}>{f(pct,1)}%</span></div>
-          <div style={{height:6,background:"#1f1f1f",borderRadius:4,overflow:"hidden"}}><div style={{height:"100%",width:pct+"%",background:"linear-gradient(90deg,#2563eb,#4ade80)",borderRadius:4}}/></div>
-        </div>}
-        {mtg&&<Row label="Months to goal" value={mtg+" months"} color="#a78bfa"/>}
-      </Box>}
-    </div>
-  );
-}
+// ═══════════════════════════════════════════════════════════════════════════════
+// MAIN PAGE
+// ═══════════════════════════════════════════════════════════════════════════════
 
-// ── LEAVE ─────────────────────────────────────────────────────────────────────
-function LeaveTool() {
-  const [join,setJoin]=useState(""), [contract,setContract]=useState("9"), [ratio,setRatio]=useState("1:2"), [planned,setPlanned]=useState("30");
-  const rm={"1:1":1,"1:2":0.5,"1:3":0.333,"2:1":2,"3:1":3};
-  const cm=parseFloat(contract)||0, pl=parseFloat(planned)||0, rv=rm[ratio]||0.5;
-  const sea=cm*30, ear=sea*rv, bal=ear-pl;
-  const addD=(base,amo,ady)=>{
-    if(!base)return null;
-    try{const d=new Date(base);if(isNaN(d.getTime()))return null;d.setMonth(d.getMonth()+(amo||0));d.setDate(d.getDate()+(ady||0));return d.toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"numeric"});}catch(e){return null;}
-  };
-  return (
-    <div>
-      <Head icon="🗓" title="Leave Planner" sub="Earned leave and next sign-on date"/>
-      <G2>
-        <div><Lbl>JOIN DATE</Lbl><Inp type="date" value={join} onChange={e=>setJoin(e.target.value)}/></div>
-        <div><Lbl>CONTRACT (MO)</Lbl><Inp type="number" value={contract} onChange={e=>setContract(e.target.value)} placeholder="9"/></div>
-      </G2>
-      <G2>
-        <div><Lbl>LEAVE RATIO</Lbl><Sel value={ratio} onChange={e=>setRatio(e.target.value)}>{Object.keys(rm).map(r=><option key={r}>{r}</option>)}</Sel></div>
-        <div><Lbl>PLANNED LEAVE DAYS</Lbl><Inp type="number" value={planned} onChange={e=>setPlanned(e.target.value)} placeholder="30"/></div>
-      </G2>
-      {cm>0&&<Box style={{marginTop:12}}>
-        <Row label="Sea Days"                  value={f(sea,0)+" days"}/>
-        <Row label={"Earned Leave "+ratio}     value={f(ear,0)+" days"} color="#60a5fa"/>
-        {addD(join,cm)&&<Row label="Contract End"      value={addD(join,cm)} color="#fbbf24"/>}
-        {addD(join,cm,pl)&&<Row label="Est. Next Sign-On" value={addD(join,cm,pl)} color="#4ade80"/>}
-        <Row label="Leave Balance" value={f(bal,0)+" days"} color={bal>=0?"#4ade80":"#ef4444"}/>
-      </Box>}
-    </div>
-  );
-}
+export default function CrewWelfarePage() {
+  const [activeTab, setActiveTab] = useState("financial");
 
-// ── RELIEF ────────────────────────────────────────────────────────────────────
-function ReliefTool() {
-  const [join,setJoin]=useState(""), [minMo,setMinMo]=useState("7"), [maxMo,setMaxMo]=useState("11");
-  const today=new Date();
-  const addM=(ds,mo)=>{if(!ds)return null;try{const d=new Date(ds);if(isNaN(d.getTime()))return null;d.setMonth(d.getMonth()+(mo||0));return d;}catch(e){return null;}};
-  const fD=d=>d?d.toLocaleDateString("en-GB",{weekday:"short",day:"2-digit",month:"short",year:"numeric"}):"--";
-  const minD=addM(join,parseFloat(minMo)||0), maxD=addM(join,parseFloat(maxMo)||0);
-  const dob=join?Math.floor((today-new Date(join))/86400000):null;
-  const dtm=minD?Math.max(0,Math.ceil((minD-today)/86400000)):null;
-  const dtx=maxD?Math.max(0,Math.ceil((maxD-today)/86400000)):null;
-  const inW=(minD&&maxD)?(today>=minD&&today<=maxD):false;
   return (
-    <div>
-      <Head icon="🔄" title="Relief Date Calculator" sub="Track your relief window"/>
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:4}}>
-        <div><Lbl>JOIN DATE</Lbl><Inp type="date" value={join} onChange={e=>setJoin(e.target.value)}/></div>
-        <div><Lbl>MIN (MO)</Lbl><Inp type="number" value={minMo} onChange={e=>setMinMo(e.target.value)} placeholder="7"/></div>
-        <div><Lbl>MAX (MO)</Lbl><Inp type="number" value={maxMo} onChange={e=>setMaxMo(e.target.value)} placeholder="11"/></div>
+    <>
+      <style>{S}</style>
+      <div className="cw-wrap">
+
+        <div className="cw-header">
+          <div className="cw-title">⚓ Crew Welfare Centre</div>
+          <div className="cw-sub">Financial tools · Leave planning · Wellbeing assessment — all in one place</div>
+        </div>
+
+        <div className="cw-tabs">
+          <button
+            className={`cw-tab ${activeTab === "financial" ? "active-fin" : ""}`}
+            onClick={() => setActiveTab("financial")}>
+            💰 Financial
+          </button>
+          <button
+            className={`cw-tab ${activeTab === "planning" ? "active-plan" : ""}`}
+            onClick={() => setActiveTab("planning")}>
+            📅 Planning
+          </button>
+          <button
+            className={`cw-tab ${activeTab === "wellbeing" ? "active-well" : ""}`}
+            onClick={() => setActiveTab("wellbeing")}>
+            🧠 Wellbeing
+          </button>
+        </div>
+
+        {activeTab === "financial" && (
+          <div className="cw-grid">
+            <WageCalculator />
+            <OvertimeCalculator />
+            <AllotmentCalculator />
+            <OnboardEarningsTotal />
+            <LeaveAccountPlanner />
+            <SavingsPlanner />
+          </div>
+        )}
+
+        {activeTab === "planning" && (
+          <div className="cw-grid">
+            <LeavePlanner />
+            <ReliefDateCalculator />
+            <ContractTracker />
+          </div>
+        )}
+
+        {activeTab === "wellbeing" && (
+          <div className="cw-grid">
+            <MentalHealthCheck />
+            <FatigueAssessment />
+            <FullStrategySavingPlanner />
+          </div>
+        )}
+
       </div>
-      {join&&dob!==null&&<Box style={{marginTop:12}}>
-        <Row label="Days Onboard"     value={dob+" days"} color={dob>210?"#ef4444":"#e5e5e5"}/>
-        <Row label="Earliest Relief"  value={fD(minD)} color="#60a5fa"/>
-        <Row label="Latest Relief"    value={fD(maxD)} color="#fbbf24"/>
-        {!inW&&dtm>0&&<Row label="Days to Window" value={dtm+" days"} color="#888"/>}
-        {inW&&<div style={{marginTop:8,padding:"10px",background:"#0a1a0a",border:"1px solid #16a34a",borderRadius:7,fontSize:12,color:"#4ade80",textAlign:"center"}}>You are within your relief window</div>}
-        {inW&&dtx!==null&&<Row label="Days to Max Contract" value={dtx+" days"} color="#ef4444"/>}
-      </Box>}
-    </div>
-  );
-}
-
-// ── CONTRACTS ─────────────────────────────────────────────────────────────────
-function ContractsTool() {
-  const [list,setList]=useState([]), [form,setForm]=useState({vessel:"",rank:"",company:"",start:"",end:"",notes:""}), [adding,setAdding]=useState(false), [loaded,setLoaded]=useState(false);
-  useEffect(()=>{try{const s=localStorage.getItem("cw_contracts");if(s){const p=JSON.parse(s);if(Array.isArray(p))setList(p);}}catch(e){}setLoaded(true);},[]);
-  useEffect(()=>{if(loaded)try{localStorage.setItem("cw_contracts",JSON.stringify(list));}catch(e){};},[list,loaded]);
-  const add=()=>{if(!form.vessel||!form.start)return;setList(p=>[{...form,id:Date.now()},...p]);setForm({vessel:"",rank:"",company:"",start:"",end:"",notes:""});setAdding(false);};
-  const totalDays=list.reduce((a,c)=>{if(!c.start||!c.end)return a;try{return a+Math.max(0,Math.floor((new Date(c.end)-new Date(c.start))/86400000));}catch(e){return a;}},0);
-  return (
-    <div>
-      <Head icon="📋" title="Contract Tracker" sub="Sea service history log"/>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
-        <span style={{fontSize:11,color:"#666"}}>{list.length} contracts — {f(totalDays,0)} total days</span>
-        <button onClick={()=>setAdding(a=>!a)} style={{background:"#1f2937",border:"1px solid #374151",color:"#aaa",borderRadius:6,padding:"6px 14px",fontSize:11,cursor:"pointer"}}>{adding?"CANCEL":"+ ADD"}</button>
-      </div>
-      {adding&&<Box style={{borderColor:"#2563eb44",marginBottom:14}}>
-        <G2>
-          <div><Lbl>VESSEL</Lbl><Inp value={form.vessel} onChange={e=>setForm(p=>({...p,vessel:e.target.value}))} placeholder="MV Example"/></div>
-          <div><Lbl>RANK</Lbl><Inp value={form.rank} onChange={e=>setForm(p=>({...p,rank:e.target.value}))} placeholder="2nd Officer"/></div>
-          <div><Lbl>COMPANY</Lbl><Inp value={form.company} onChange={e=>setForm(p=>({...p,company:e.target.value}))} placeholder="Shipping Co."/></div>
-          <div></div>
-          <div><Lbl>START</Lbl><Inp type="date" value={form.start} onChange={e=>setForm(p=>({...p,start:e.target.value}))}/></div>
-          <div><Lbl>END</Lbl><Inp type="date" value={form.end} onChange={e=>setForm(p=>({...p,end:e.target.value}))}/></div>
-        </G2>
-        <Lbl>NOTES</Lbl>
-        <textarea value={form.notes} onChange={e=>setForm(p=>({...p,notes:e.target.value}))} placeholder="Flag, trade area..."
-          style={{width:"100%",background:"#0d0d0d",border:"1px solid #2a2a2a",borderRadius:6,padding:"8px 12px",color:"#e5e5e5",fontSize:12,minHeight:50,resize:"vertical",outline:"none",boxSizing:"border-box",marginTop:4}}/>
-        <button onClick={add} style={{background:"#dc2626",color:"#fff",border:"none",borderRadius:6,padding:"8px 16px",fontSize:11,fontWeight:700,cursor:"pointer",marginTop:10}}>SAVE</button>
-      </Box>}
-      {list.length===0&&!adding&&<div style={{textAlign:"center",color:"#444",fontSize:12,padding:30}}>No contracts yet.</div>}
-      {list.map(c=>{
-        let days=null;try{if(c.start&&c.end)days=Math.max(0,Math.floor((new Date(c.end)-new Date(c.start))/86400000));}catch(e){}
-        return <Box key={c.id} style={{marginBottom:8}}>
-          <div style={{display:"flex",justifyContent:"space-between"}}>
-            <div>
-              <div style={{fontSize:13,fontWeight:700,color:"#60a5fa",marginBottom:3}}>{c.vessel}</div>
-              <div style={{fontSize:11,color:"#888"}}>{c.rank}{c.company?" — "+c.company:""}</div>
-              <div style={{fontSize:10,color:"#555",marginTop:3}}>{c.start} to {c.end||"ongoing"}{days!==null?" — "+days+" days":""}</div>
-              {c.notes&&<div style={{fontSize:10,color:"#444",marginTop:2}}>{c.notes}</div>}
-            </div>
-            <button onClick={()=>setList(p=>p.filter(x=>x.id!==c.id))} style={{background:"none",border:"none",color:"#ef4444",cursor:"pointer",fontSize:16,padding:"0 4px"}}>x</button>
-          </div>
-        </Box>;
-      })}
-    </div>
-  );
-}
-
-// ── MENTAL HEALTH ─────────────────────────────────────────────────────────────
-const MH_Q=[
-  {id:"mh1",text:"Felt down, hopeless or little interest in activities"},
-  {id:"mh2",text:"Felt anxious, nervous or on edge"},
-  {id:"mh3",text:"Had trouble sleeping or sleeping too much"},
-  {id:"mh4",text:"Felt isolated or disconnected from family and friends"},
-  {id:"mh5",text:"Been irritable, angry or easily frustrated"},
-  {id:"mh6",text:"Had difficulty concentrating on tasks"},
-  {id:"mh7",text:"Been consuming alcohol more than usual"},
-  {id:"mh8",text:"Had thoughts of harming yourself",crisis:true},
-];
-function MentalTool() {
-  const [ans,setAns]=useState({});
-  const labels=["Never","Rarely","Sometimes","Often","Always"];
-  const crisis=(ans["mh8"]||0)>=3;
-  const allDone=MH_Q.every(q=>ans[q.id]!==undefined);
-  const score=allDone?MH_Q.reduce((a,q)=>a+(ans[q.id]||0),0):null;
-  const risk=score===null?null:score<=4?{label:"Low — Coping Well",color:"#16a34a"}:score<=12?{label:"Moderate — Monitor",color:"#d97706"}:score<=20?{label:"High — Seek Support",color:"#dc2626"}:{label:"Critical — Get Help Now",color:"#dc2626"};
-  return (
-    <div>
-      <Head icon="🧠" title="Mental Health Self-Check" sub="Private — stored locally only"/>
-      {crisis&&<div style={{padding:"12px 16px",background:"#1a0000",border:"2px solid #dc2626",borderRadius:8,marginBottom:16,fontSize:12,color:"#ef4444",lineHeight:1.7}}>
-        If you are having thoughts of harming yourself please reach out immediately. SeafarerHelp: +44 20 7323 2737 — free, confidential, 24 hours a day.
-      </div>}
-      <Box>
-        <div style={{fontSize:11,color:"#666",marginBottom:14,lineHeight:1.7}}>Rate each statement over the past 2 weeks. Answers never leave your device.</div>
-        {MH_Q.map((q,i)=>(
-          <div key={q.id} style={{marginBottom:14,paddingBottom:14,borderBottom:i<MH_Q.length-1?"1px solid #161616":"none"}}>
-            <div style={{fontSize:12,color:"#e5e5e5",marginBottom:8,lineHeight:1.5}}>
-              <span style={{color:"#555",marginRight:6}}>{i+1}.</span>{q.text}{q.crisis&&<span style={{color:"#ef4444",marginLeft:6}}>!</span>}
-            </div>
-            <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
-              {labels.map((lbl,val)=>{
-                const sel=ans[q.id]===val;
-                return <button key={val} onClick={()=>setAns(a=>({...a,[q.id]:val}))}
-                  style={{padding:"5px 10px",borderRadius:5,fontSize:11,cursor:"pointer",border:"1px solid "+(sel?"#2563eb":"#2a2a2a"),background:sel?"#172554":"#0d0d0d",color:sel?"#60a5fa":"#888"}}>{lbl}</button>;
-              })}
-            </div>
-          </div>
-        ))}
-        {risk&&<div style={{marginTop:12,padding:"12px 14px",background:risk.color+"18",border:"1px solid "+risk.color+"55",borderRadius:8}}>
-          <div style={{display:"flex",justifyContent:"space-between",marginBottom:8}}>
-            <span style={{fontSize:13,fontWeight:700,color:risk.color}}>{risk.label}</span>
-            <span style={{fontSize:12,color:risk.color,fontFamily:"monospace"}}>{score}/{MH_Q.length*4}</span>
-          </div>
-          <div style={{height:6,background:"#1f1f1f",borderRadius:4,overflow:"hidden"}}><div style={{height:"100%",width:((score/(MH_Q.length*4))*100)+"%",background:risk.color,borderRadius:4}}/></div>
-          {score>4&&<div style={{marginTop:10,fontSize:11,color:"#888"}}>SeafarerHelp: +44 20 7323 2737 — free, 24/7</div>}
-        </div>}
-        {!allDone&&<div style={{fontSize:11,color:"#555",marginTop:8}}>Answer all {MH_Q.length} questions to see your result.</div>}
-        <button onClick={()=>setAns({})} style={{background:"#1f2937",border:"1px solid #374151",color:"#aaa",borderRadius:6,padding:"6px 14px",fontSize:11,cursor:"pointer",marginTop:12}}>RESET</button>
-      </Box>
-    </div>
-  );
-}
-
-// ── FATIGUE ───────────────────────────────────────────────────────────────────
-const FAT_Q=[
-  {id:"f1",text:"Hours slept in last 24 hours",opts:["Less than 4","4 to 5","5 to 6","6 to 7","7 to 8","More than 8"],w:[5,4,3,2,1,0]},
-  {id:"f2",text:"Hours on duty in last 24 hours",opts:["8 or less","9 to 10","11 to 12","13 to 14","More than 14"],w:[0,1,2,3,5]},
-  {id:"f3",text:"Days since last proper rest day",opts:["0 to 1","2 to 3","4 to 5","6 to 7","More than 7"],w:[0,1,2,3,5]},
-  {id:"f4",text:"Sea conditions affecting your rest",opts:["Calm","Moderate","Rough","Very rough","Extreme"],w:[0,1,2,3,4]},
-  {id:"f5",text:"Times woken during last sleep",opts:["None","1 to 2","3 to 4","More than 4"],w:[0,1,2,3]},
-];
-function FatigueTool() {
-  const [ans,setAns]=useState({});
-  const allDone=FAT_Q.every(q=>ans[q.id]!==undefined);
-  const score=allDone?FAT_Q.reduce((a,q)=>a+(q.w[ans[q.id]]||0),0):null;
-  const risk=score===null?null:score<=5?{label:"Low — Fit for Duty",color:"#16a34a",advice:"Levels manageable. Maintain regular rest."}:score<=11?{label:"Moderate — Monitor",color:"#d97706",advice:"Plan extra rest. Avoid complex navigation if possible."}:score<=17?{label:"High — Caution",color:"#dc2626",advice:"Inform OOW and Master. Avoid solo watchkeeping."}:{label:"Critical — Not Fit",color:"#dc2626",advice:"Do NOT stand watch. Notify Master. Rest is mandatory per MLC 2006."};
-  return (
-    <div>
-      <Head icon="😴" title="Fatigue Assessment" sub="MLC 2006 and STCW rest hour awareness"/>
-      <Box>
-        {FAT_Q.map((q,i)=>(
-          <div key={q.id} style={{marginBottom:14,paddingBottom:14,borderBottom:i<FAT_Q.length-1?"1px solid #161616":"none"}}>
-            <div style={{fontSize:12,color:"#e5e5e5",marginBottom:8}}><span style={{color:"#555",marginRight:6}}>{i+1}.</span>{q.text}</div>
-            <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
-              {q.opts.map((opt,idx)=>{
-                const sel=ans[q.id]===idx;
-                return <button key={idx} onClick={()=>setAns(a=>({...a,[q.id]:idx}))}
-                  style={{padding:"5px 10px",borderRadius:5,fontSize:11,cursor:"pointer",border:"1px solid "+(sel?"#2563eb":"#2a2a2a"),background:sel?"#172554":"#0d0d0d",color:sel?"#60a5fa":"#888"}}>{opt}</button>;
-              })}
-            </div>
-          </div>
-        ))}
-        {risk&&<div style={{marginTop:12,padding:"12px 14px",background:risk.color+"18",border:"1px solid "+risk.color+"55",borderRadius:8}}>
-          <div style={{display:"flex",justifyContent:"space-between",marginBottom:8}}>
-            <span style={{fontSize:13,fontWeight:700,color:risk.color}}>{risk.label}</span>
-            <span style={{fontSize:12,color:risk.color,fontFamily:"monospace"}}>{score}/22</span>
-          </div>
-          <div style={{height:6,background:"#1f1f1f",borderRadius:4,overflow:"hidden",marginBottom:10}}><div style={{height:"100%",width:((score/22)*100)+"%",background:risk.color,borderRadius:4}}/></div>
-          <div style={{fontSize:11,color:"#888",lineHeight:1.7}}>{risk.advice}</div>
-        </div>}
-        {!allDone&&<div style={{fontSize:11,color:"#555",marginTop:8}}>Answer all {FAT_Q.length} questions to see your result.</div>}
-        <button onClick={()=>setAns({})} style={{background:"#1f2937",border:"1px solid #374151",color:"#aaa",borderRadius:6,padding:"6px 14px",fontSize:11,cursor:"pointer",marginTop:12}}>RESET</button>
-      </Box>
-    </div>
-  );
-}
-
-// ── ISWAN ─────────────────────────────────────────────────────────────────────
-const ISWAN_DATA=[
-  {org:"ISWAN / SeafarerHelp",service:"24/7 Helpline",phone:"+44 20 7323 2737",email:"help@seafarerhelp.org",website:"seafarerhelp.org",hours:"24/7 Free and Confidential",desc:"Free confidential helpline for seafarers and families. Emotional support, welfare advice, financial guidance.",icon:"🌊",color:"#2563eb"},
-  {org:"Mission to Seafarers",service:"Port Chaplaincy",phone:"+44 20 7248 5202",email:"contactus@missiontoseafarers.org",website:"missiontoseafarers.org",hours:"Office hours plus port chaplains worldwide",desc:"Practical and emotional support through port chaplains globally.",icon:"⚓",color:"#d97706"},
-  {org:"Sailors Society",service:"Wellness at Sea",phone:"+44 23 8051 5950",email:"info@sailors-society.org",website:"sailors-society.org",hours:"Office hours plus port chaplains",desc:"Wellness at Sea training, crisis counseling and port welfare.",icon:"🧭",color:"#16a34a"},
-  {org:"ITF Seafarers Trust",service:"Seafarer Rights",phone:"+44 20 7403 2733",email:"seafarers@itf.org.uk",website:"itfseafarers.org",hours:"Office hours",desc:"Advocacy, welfare grants and support for seafarers facing hardship.",icon:"🏛",color:"#7c3aed"},
-  {org:"Apostleship of the Sea",service:"Maritime Welfare",phone:"+44 20 7901 1950",email:"aos@cbcew.org.uk",website:"apostleshipofthesea.org.uk",hours:"Port chaplains globally",desc:"Pastoral and practical support for seafarers of all faiths.",icon:"✝",color:"#0891b2"},
-];
-function ISWANTool() {
-  const [exp,setExp]=useState(null);
-  return (
-    <div>
-      <Head icon="📞" title="ISWAN Welfare Contacts" sub="Free and confidential support for seafarers worldwide"/>
-      <Box style={{borderColor:"#1a2a3a",marginBottom:16}}>
-        <div style={{fontSize:11,color:"#60a5fa",fontWeight:700,marginBottom:4}}>IMPORTANT</div>
-        <div style={{fontSize:11,color:"#666",lineHeight:1.7}}>All organisations provide free, confidential support to seafarers and families. You are not alone.</div>
-      </Box>
-      {ISWAN_DATA.map((c,i)=>{
-        const isExp=exp===i;
-        return <Box key={i} style={{cursor:"pointer",borderColor:isExp?c.color+"55":"#1f1f1f",marginBottom:8}}>
-          <div style={{display:"flex",alignItems:"flex-start",gap:12}} onClick={()=>setExp(isExp?null:i)}>
-            <div style={{width:38,height:38,borderRadius:9,background:c.color+"18",border:"1px solid "+c.color+"44",display:"flex",alignItems:"center",justifyContent:"center",fontSize:17,flexShrink:0}}>{c.icon}</div>
-            <div style={{flex:1}}>
-              <div style={{fontSize:12,fontWeight:700,color:c.color,marginBottom:2}}>{c.service}</div>
-              <div style={{fontSize:11,color:"#aaa"}}>{c.org}</div>
-              <div style={{fontSize:10,color:"#555",marginTop:2}}>{c.hours}</div>
-            </div>
-            <span style={{color:"#555",fontSize:12}}>{isExp?"▲":"▼"}</span>
-          </div>
-          {isExp&&<div style={{marginTop:12,paddingTop:12,borderTop:"1px solid #1f1f1f"}}>
-            <div style={{fontSize:11,color:"#aaa",lineHeight:1.7,marginBottom:12}}>{c.desc}</div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-              <a href={"tel:"+c.phone.replace(/\s/g,"")} style={{textDecoration:"none"}}>
-                <div style={{padding:"8px 10px",background:c.color+"15",border:"1px solid "+c.color+"44",borderRadius:7}}>
-                  <div style={{fontSize:10,color:"#555"}}>Phone</div>
-                  <div style={{fontSize:12,color:c.color,fontWeight:700,marginTop:2}}>{c.phone}</div>
-                </div>
-              </a>
-              <a href={"mailto:"+c.email} style={{textDecoration:"none"}}>
-                <div style={{padding:"8px 10px",background:c.color+"15",border:"1px solid "+c.color+"44",borderRadius:7}}>
-                  <div style={{fontSize:10,color:"#555"}}>Email</div>
-                  <div style={{fontSize:11,color:c.color,fontWeight:700,marginTop:2}}>{c.email}</div>
-                </div>
-              </a>
-            </div>
-            <div style={{marginTop:8,padding:"7px 10px",background:"#0a0a0a",border:"1px solid #1f1f1f",borderRadius:7,fontSize:11}}>
-              <span style={{color:"#555"}}>Website: </span><span style={{color:"#60a5fa"}}>{c.website}</span>
-            </div>
-          </div>}
-        </Box>;
-      })}
-    </div>
+    </>
   );
 }
