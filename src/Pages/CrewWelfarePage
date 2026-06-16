@@ -1,7 +1,8 @@
 /* eslint-disable */
 // src/Pages/CrewWelfarePage.jsx
 import { useState } from "react";
-import { auth, db } from "../firebase";
+import { db } from "../firebase";
+import { getAuth } from "firebase/auth";
 import { doc, setDoc, serverTimestamp } from "firebase/firestore";
 
 // ─── tiny helpers ────────────────────────────────────────────────────────────
@@ -72,7 +73,7 @@ const S = `
 
 // ─── Firestore save helper ────────────────────────────────────────────────────
 async function saveToFirestore(toolName, data, setMsg) {
-  const user = auth.currentUser;
+  const user = getAuth().currentUser;
   if (!user) { setMsg("⚠️ Login required to save"); setTimeout(() => setMsg(""), 3000); return; }
   try {
     await setDoc(
