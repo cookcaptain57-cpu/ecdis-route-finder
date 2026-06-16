@@ -213,7 +213,6 @@ function MaritimeAIWidget() {
                 </div>
               </div>
             )}
-
             {messages.map((msg,idx)=>(
               <div key={idx} style={{marginBottom:14,display:'flex',flexDirection:'column',alignItems:msg.role==='user'?'flex-end':'flex-start'}}>
                 <div style={{fontSize:'0.58rem',fontWeight:700,letterSpacing:'0.1em',color:msg.role==='user'?'var(--cyan)':'var(--green)',marginBottom:4,paddingRight:msg.role==='user'?2:0,paddingLeft:msg.role==='assistant'?2:0}}>
@@ -229,7 +228,6 @@ function MaritimeAIWidget() {
                 </div>
               </div>
             ))}
-
             {loading && (
               <div style={{marginBottom:14,display:'flex',flexDirection:'column',alignItems:'flex-start'}}>
                 <div style={{fontSize:'0.58rem',fontWeight:700,letterSpacing:'0.1em',color:'var(--green)',marginBottom:4,paddingLeft:2}}>⚓ NAVISPHERE AI</div>
@@ -289,9 +287,8 @@ export default function HomePage({ routes, charts, onSearch, setTab, user, ports
     catch { return ['routes','charts','planner','navmode','ports','library']; }
   });
 
-  // ── FIX: separate refs for search and weather ──
-  const searchRef  = useRef();   // for route/chart/port search dropdown
-  const weatherRef = useRef();   // for weather suggestions dropdown
+  const searchRef  = useRef();
+  const weatherRef = useRef();
 
   useEffect(() => {
     idbGet('routes_d').then(d=>{if(Array.isArray(d)&&d.length>0){setIsOffline(true);setCachedRoutes(d);}}).catch(()=>{});
@@ -324,7 +321,6 @@ export default function HomePage({ routes, charts, onSearch, setTab, user, ports
   const loadCerts = async () => {
     try { const s=await getDoc(doc(db,'certificates',user.uid)); if(s.exists()) setExpCerts((s.data().list||[]).filter(c=>{if(!c.expiryDate)return false;const d=Math.floor((new Date(c.expiryDate)-new Date())/86400000);return d>=0&&d<=90;})); } catch {}
   };
-
   const fetchWeatherByCoords = async (lat, lon, portName) => {
     setWeatherLoading(true);
     try {
@@ -344,7 +340,6 @@ export default function HomePage({ routes, charts, onSearch, setTab, user, ports
       ()=>{ setGpsLoading(false); }
     );
   };
-
   const doSearch = (sq) => {
     const s=(sq!==undefined?sq:q).trim();
     if (!s||s.length<2) { setQResults([]); return; }
@@ -354,29 +349,28 @@ export default function HomePage({ routes, charts, onSearch, setTab, user, ports
     const pr=portsDb.filter(p=>(p.name||'').toLowerCase().includes(ql)).slice(0,4).map(p=>({type:'port',label:p.name,sub:p.country||''}));
     setQResults([...rr,...cr,...pr]);
   };
-
   const wc = weather ? weatherIcon(weather.code) : null;
 
   const ALL_FEATURES = [
-    {icon:'🚢',label:'ROUTES',         desc:'Browse, search & download routes.',          tab:'routes',    color:'#00B4D8',bg:'linear-gradient(135deg,#00B4D8,#1565C0)'},
-    {icon:'📡',label:'ECDIS CHARTS',   desc:'Charts for all major ECDIS brands.',         tab:'charts',    color:'#F0A500',bg:'linear-gradient(135deg,#F0A500,#D4900A)'},
-    {icon:'📐',label:'ROUTE PLANNER',  desc:'Plan optimised routes with advanced tools.', tab:'planner',   color:'#00C896',bg:'linear-gradient(135deg,#00C896,#00a87a)'},
-    {icon:'🧭',label:'NAV MODE',       desc:'Navigate with precision.',                   tab:'navmode',   color:'#A78BFA',bg:'linear-gradient(135deg,#7C3AED,#A78BFA)',badge:'NEW'},
-    {icon:'⚓',label:'PORTS DATABASE', desc:'27,000+ global ports with coordinates.',     tab:'ports',     color:'#00B4D8',bg:'linear-gradient(135deg,#00B4D8,#0070cc)'},
-    {icon:'📚',label:'MARITIME LIBRARY',desc:'SOLAS, MARPOL, IMO, STCW & more.',        tab:'library',   color:'#F0A500',bg:'linear-gradient(135deg,#F0A500,#b07000)'},
-    {icon:'🛳',label:'VESSEL SEARCH',  desc:'Search by IMO, MMSI or flag state.',        tab:'vessel',    color:'#A78BFA',bg:'linear-gradient(135deg,#7C3AED,#A78BFA)'},
-    {icon:'🧮',label:'VOYAGE CALC',    desc:'Calculate distance, duration and fuel.',    tab:'voyage',    color:'#00C896',bg:'linear-gradient(135deg,#00C896,#00a87a)'},
-    {icon:'📜',label:'CERTIFICATES',   desc:'Track STCW certificate expiry dates.',      tab:'certs',     color:'#F0A500',bg:'linear-gradient(135deg,#F0A500,#b07000)'},
-    {icon:'⏱',label:'SEA TIME',       desc:'Log sea service time across all ships.',    tab:'seatime',   color:'#00B4D8',bg:'linear-gradient(135deg,#00B4D8,#1565C0)'},
-    {icon:'📢',label:'PORT NOTICES',   desc:'Closures, restrictions & warnings.',        tab:'notices',   color:'#ff6b35',bg:'linear-gradient(135deg,#ff6b35,#cc4400)'},
-    {icon:'🔭',label:'COMPASS ERROR',  desc:'Calculate and log compass errors.',         tab:'compass',   color:'#A78BFA',bg:'linear-gradient(135deg,#7C3AED,#A78BFA)'},
-    {icon:'🪢',label:'KNOTS & MOORING',desc:'Reference guide for knots and mooring.',    tab:'knots',     color:'#00C896',bg:'linear-gradient(135deg,#00C896,#00a87a)'},
-    {icon:'🚨',label:'EMERGENCY',      desc:'Emergency procedures & contacts.',          tab:'emergency', color:'#FF4757',bg:'linear-gradient(135deg,#FF4757,#cc2233)'},
-    {icon:'🗺',label:'NAV & BRIDGE',   desc:'Navigation and bridge procedures.',         tab:'navbridge', color:'#00B4D8',bg:'linear-gradient(135deg,#00B4D8,#1565C0)'},
-    {icon:'🧳',label:'CREW JOURNEY',   desc:'Track your career voyage.',                 tab:'crewjourney',color:'#A78BFA',bg:'linear-gradient(135deg,#7C3AED,#A78BFA)'},
-    {icon:'🏖',label:'PORT & SHORE',   desc:'Port info, shore leave & services.',        tab:'portshore', color:'#00C896',bg:'linear-gradient(135deg,#00C896,#00a87a)'},
-    {icon:'🌟',label:'CELESTIAL NAV',  desc:'Sight reduction & celestial navigation.',   tab:'sights',    color:'#F0A500',bg:'linear-gradient(135deg,#F0A500,#b07000)',badge:'NEW'},
-    {icon:'ℹ️',label:'HELP & INFO',    desc:'Contact, About, Legal, FAQ.',               tab:'info',      color:'#00B4D8',bg:'linear-gradient(135deg,#00B4D8,#1565C0)'},
+    {icon:'🚢',label:'ROUTES',          desc:'Browse, search & download routes.',          tab:'routes',    color:'#00B4D8',bg:'linear-gradient(135deg,#00B4D8,#1565C0)'},
+    {icon:'📡',label:'ECDIS CHARTS',    desc:'Charts for all major ECDIS brands.',         tab:'charts',    color:'#F0A500',bg:'linear-gradient(135deg,#F0A500,#D4900A)'},
+    {icon:'📐',label:'ROUTE PLANNER',   desc:'Plan optimised routes with advanced tools.', tab:'planner',   color:'#00C896',bg:'linear-gradient(135deg,#00C896,#00a87a)'},
+    {icon:'🧭',label:'NAV MODE',        desc:'Navigate with precision.',                   tab:'navmode',   color:'#A78BFA',bg:'linear-gradient(135deg,#7C3AED,#A78BFA)',badge:'NEW'},
+    {icon:'⚓',label:'PORTS DATABASE',  desc:'27,000+ global ports with coordinates.',     tab:'ports',     color:'#00B4D8',bg:'linear-gradient(135deg,#00B4D8,#0070cc)'},
+    {icon:'📚',label:'MARITIME LIBRARY',desc:'SOLAS, MARPOL, IMO, STCW & more.',         tab:'library',   color:'#F0A500',bg:'linear-gradient(135deg,#F0A500,#b07000)'},
+    {icon:'🛳',label:'VESSEL SEARCH',   desc:'Search by IMO, MMSI or flag state.',        tab:'vessel',    color:'#A78BFA',bg:'linear-gradient(135deg,#7C3AED,#A78BFA)'},
+    {icon:'🧮',label:'VOYAGE CALC',     desc:'Calculate distance, duration and fuel.',    tab:'voyage',    color:'#00C896',bg:'linear-gradient(135deg,#00C896,#00a87a)'},
+    {icon:'📜',label:'CERTIFICATES',    desc:'Track STCW certificate expiry dates.',      tab:'certs',     color:'#F0A500',bg:'linear-gradient(135deg,#F0A500,#b07000)'},
+    {icon:'⏱',label:'SEA TIME',        desc:'Log sea service time across all ships.',    tab:'seatime',   color:'#00B4D8',bg:'linear-gradient(135deg,#00B4D8,#1565C0)'},
+    {icon:'📢',label:'PORT NOTICES',    desc:'Closures, restrictions & warnings.',        tab:'notices',   color:'#ff6b35',bg:'linear-gradient(135deg,#ff6b35,#cc4400)'},
+    {icon:'🔭',label:'COMPASS ERROR',   desc:'Calculate and log compass errors.',         tab:'compass',   color:'#A78BFA',bg:'linear-gradient(135deg,#7C3AED,#A78BFA)'},
+    {icon:'🪢',label:'KNOTS & MOORING', desc:'Reference guide for knots and mooring.',    tab:'knots',     color:'#00C896',bg:'linear-gradient(135deg,#00C896,#00a87a)'},
+    {icon:'🚨',label:'EMERGENCY',       desc:'Emergency procedures & contacts.',          tab:'emergency', color:'#FF4757',bg:'linear-gradient(135deg,#FF4757,#cc2233)'},
+    {icon:'🗺',label:'NAV & BRIDGE',    desc:'Navigation and bridge procedures.',         tab:'navbridge', color:'#00B4D8',bg:'linear-gradient(135deg,#00B4D8,#1565C0)'},
+    {icon:'🧳',label:'CREW JOURNEY',    desc:'Track your career voyage.',                 tab:'crewjourney',color:'#A78BFA',bg:'linear-gradient(135deg,#7C3AED,#A78BFA)'},
+    {icon:'🏖',label:'PORT & SHORE',    desc:'Port info, shore leave & services.',        tab:'portshore', color:'#00C896',bg:'linear-gradient(135deg,#00C896,#00a87a)'},
+    {icon:'🌟',label:'CELESTIAL NAV',   desc:'Sight reduction & celestial navigation.',   tab:'sights',    color:'#F0A500',bg:'linear-gradient(135deg,#F0A500,#b07000)',badge:'NEW'},
+    {icon:'ℹ️',label:'HELP & INFO',     desc:'Contact, About, Legal, FAQ.',               tab:'info',      color:'#00B4D8',bg:'linear-gradient(135deg,#00B4D8,#1565C0)'},
   ].filter((f,i,arr)=>arr.findIndex(x=>x.tab===f.tab)===i);
 
   const FEATURES = ALL_FEATURES.filter(f=>pinnedTabs.includes(f.tab));
@@ -398,146 +392,143 @@ export default function HomePage({ routes, charts, onSearch, setTab, user, ports
     <div style={{background:'var(--bg)',minHeight:'calc(100vh - 56px)',display:'flex',flexDirection:'column'}}>
 
       {/* ── HERO ── */}
-      <div style={{position:'relative',background:'linear-gradient(135deg,#020810 0%,#040C1A 40%,#071428 70%,#0a1e3a 100%)',overflow:'hidden',padding:'2rem 1.5rem 2.5rem',borderBottom:'1px solid var(--border)'}}>
+      <div style={{position:'relative',background:'linear-gradient(135deg,#020810 0%,#040C1A 40%,#071428 70%,#0a1e3a 100%)',overflow:'hidden',padding:'1.5rem 1.2rem 2rem',borderBottom:'1px solid var(--border)'}}>
         <div style={{position:'absolute',inset:0,opacity:0.15,backgroundImage:'linear-gradient(rgba(0,180,216,0.3) 1px,transparent 1px),linear-gradient(90deg,rgba(0,180,216,0.3) 1px,transparent 1px)',backgroundSize:'40px 40px',pointerEvents:'none'}}/>
-        <div style={{position:'absolute',top:16,right:16,display:'flex',alignItems:'center',gap:6,fontSize:'0.7rem',color:'var(--green)'}}>
-          <span style={{width:8,height:8,borderRadius:'50%',background:'var(--green)',boxShadow:'0 0 8px var(--green)',animation:'pulse 2s infinite',display:'inline-block'}}/>Live Data
+
+        {/* Live badge */}
+        <div style={{position:'absolute',top:12,right:12,display:'flex',alignItems:'center',gap:5,fontSize:'0.65rem',color:'var(--green)'}}>
+          <span style={{width:7,height:7,borderRadius:'50%',background:'var(--green)',boxShadow:'0 0 6px var(--green)',animation:'pulse 2s infinite',display:'inline-block'}}/>Live
         </div>
 
+        {/* Port notice */}
         {portNotice && (
-          <div onClick={()=>setTab('notices')} style={{background:'rgba(255,107,53,0.1)',border:'1px solid rgba(255,107,53,0.3)',borderRadius:8,padding:'8px 12px',marginBottom:'1rem',cursor:'pointer',display:'flex',alignItems:'center',gap:8,fontSize:'0.74rem'}}>
+          <div onClick={()=>setTab('notices')} style={{background:'rgba(255,107,53,0.1)',border:'1px solid rgba(255,107,53,0.3)',borderRadius:8,padding:'7px 10px',marginBottom:'0.9rem',cursor:'pointer',display:'flex',alignItems:'center',gap:7,fontSize:'0.72rem'}}>
             <span>⚠️</span>
             <span style={{color:'var(--text2)',flex:1}}><strong style={{color:'#ff6b35'}}>Port Notice:</strong> {portNotice.title}</span>
-            <span style={{color:'#ff6b35',fontSize:'0.68rem'}}>View all →</span>
+            <span style={{color:'#ff6b35',fontSize:'0.66rem'}}>View →</span>
           </div>
         )}
 
-        <div style={{display:'flex',alignItems:'flex-start',gap:'1.5rem',flexWrap:'wrap'}}>
+        {/* Title */}
+        <div style={{fontSize:'0.58rem',color:'var(--text3)',letterSpacing:'0.16em',marginBottom:'0.4rem',textTransform:'uppercase'}}>
+          SMART NAVIGATION · ROUTES · CHARTS · PORTS
+        </div>
+        <h1 style={{fontFamily:'Orbitron,monospace',fontSize:'clamp(1.3rem,5vw,2rem)',fontWeight:900,letterSpacing:'0.04em',margin:'0 0 0.5rem',lineHeight:1.15}}>
+          NAVISPHERE<span style={{color:'var(--cyan)'}}>X</span> MARINE
+        </h1>
+        <p style={{fontSize:'0.82rem',color:'var(--text2)',lineHeight:1.55,marginBottom:'1rem',maxWidth:460}}>
+          Your all-in-one maritime platform for planning, navigation and knowledge.
+          {user&&<span style={{color:'var(--cyan)'}}> Welcome{userProfile?.rank?`, ${userProfile.rank} `:', '}{userProfile?.name?.split(' ')[0]||user.email.split('@')[0]}!</span>}
+        </p>
 
-          {/* LEFT col */}
-          <div style={{flex:1,minWidth:240,position:'relative'}}>
-            <div style={{fontSize:'0.6rem',color:'var(--text3)',letterSpacing:'0.18em',marginBottom:'0.5rem',textTransform:'uppercase',display:'flex',gap:6,flexWrap:'wrap'}}>
-              {'SMART NAVIGATION · ROUTES · CHARTS · PORTS · MARITIME LIBRARY'.split('·').map((t,i)=>(
-                <span key={i}>{t.trim()}{i<4?' ·':''}</span>
-              ))}
+        {/* ── Search bar — full width, always visible ── */}
+        <div ref={searchRef} style={{position:'relative',maxWidth:540,marginBottom:'1rem'}}>
+          <div style={{display:'flex',gap:8}}>
+            <div className="siw" style={{flex:1}}>
+              <span className="si-ic">🔍</span>
+              <input className="si" style={{paddingLeft:40,fontSize:'0.86rem'}}
+                placeholder="Search routes, charts, ports… type anything"
+                value={q} onChange={e=>{setQ(e.target.value);doSearch(e.target.value);}}
+                onKeyDown={e=>e.key==='Enter'&&q.trim()&&onSearch(q)}/>
             </div>
-            <h1 style={{fontFamily:'Orbitron,monospace',fontSize:'clamp(1.4rem,4vw,2.2rem)',fontWeight:900,letterSpacing:'0.04em',margin:'0 0 0.6rem',lineHeight:1.15}}>
-              NAVISPHERE<span style={{color:'var(--cyan)'}}>X</span> MARINE
-            </h1>
-            <p style={{fontSize:'0.86rem',color:'var(--text2)',lineHeight:1.6,marginBottom:'1.2rem',maxWidth:480}}>
-              Your all-in-one maritime platform for planning, navigation and knowledge.
-              {user&&<span style={{color:'var(--cyan)'}}> Welcome{userProfile?.rank?`, ${userProfile.rank} `:', '}{userProfile?.name?.split(' ')[0]||user.email.split('@')[0]}!</span>}
-            </p>
-
-            {/* ── Search bar — uses searchRef ── */}
-            <div ref={searchRef} style={{position:'relative',maxWidth:500}}>
-              <div style={{display:'flex',gap:8}}>
-                <div className="siw" style={{flex:1}}>
-                  <span className="si-ic">🔍</span>
-                  <input className="si" style={{paddingLeft:40,fontSize:'0.86rem'}}
-                    placeholder="Search routes, charts, ports… type anything"
-                    value={q} onChange={e=>{setQ(e.target.value);doSearch(e.target.value);}}
-                    onKeyDown={e=>e.key==='Enter'&&q.trim()&&onSearch(q)}/>
-                </div>
-                <button className="btn btn-primary" style={{padding:'0 16px',fontSize:'0.8rem',flexShrink:0}}
-                  onClick={()=>{if(q.trim())onSearch(q);}}>Search</button>
-              </div>
-              {qResults.length>0&&(
-                <div style={{position:'absolute',top:'calc(100% + 6px)',left:0,right:0,zIndex:300,background:'var(--card)',border:'1px solid var(--border)',borderRadius:12,boxShadow:'0 12px 40px rgba(0,0,0,0.6)',overflow:'hidden'}}>
-                  {['route','chart','port'].map(type=>{
-                    const items=qResults.filter(r=>r.type===type); if(!items.length)return null;
-                    const cols={route:'var(--cyan)',chart:'var(--gold)',port:'var(--green)'};
-                    const lbls={route:'Routes',chart:'Charts',port:'Ports'};
-                    return (
-                      <div key={type}>
-                        <div style={{padding:'5px 12px',fontSize:'0.58rem',color:'var(--text3)',textTransform:'uppercase',letterSpacing:'0.1em',borderBottom:'1px solid var(--border)',background:'rgba(255,255,255,0.02)'}}>{lbls[type]}</div>
-                        {items.map((r,i)=>(
-                          <div key={i} onMouseDown={()=>{setQ('');setQResults([]);onSearch(r.label);}}
-                            style={{padding:'8px 12px',cursor:'pointer',display:'flex',gap:8,alignItems:'center',borderBottom:'1px solid rgba(255,255,255,0.03)'}}
-                            onMouseEnter={e=>e.currentTarget.style.background='rgba(0,180,216,0.07)'}
-                            onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
-                            <span style={{width:7,height:7,borderRadius:'50%',background:cols[type],flexShrink:0}}/>
-                            <div><div style={{fontSize:'0.8rem'}}>{r.label}</div>{r.sub&&<div style={{fontSize:'0.66rem',color:'var(--text3)'}}>{r.sub}</div>}</div>
-                          </div>
-                        ))}
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
+            <button className="btn btn-primary" style={{padding:'0 14px',fontSize:'0.8rem',flexShrink:0}}
+              onClick={()=>{if(q.trim())onSearch(q);}}>Search</button>
           </div>
-
-          {/* RIGHT col — weather — uses weatherRef */}
-          <div ref={weatherRef} style={{flexShrink:0,width:180,background:'rgba(7,20,40,0.7)',border:'1px solid rgba(0,180,216,0.2)',borderRadius:14,padding:'0.9rem',backdropFilter:'blur(10px)'}}>
-            <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:'0.6rem'}}>
-              <div style={{width:22,height:22,borderRadius:6,background:'linear-gradient(135deg,var(--cyan),var(--blue))',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'0.8rem'}}>🌊</div>
-              <div style={{fontFamily:'Orbitron,monospace',fontSize:'0.58rem',color:'var(--cyan)',letterSpacing:'0.08em'}}>WEATHER</div>
+          {qResults.length>0&&(
+            <div style={{position:'absolute',top:'calc(100% + 5px)',left:0,right:0,zIndex:300,background:'var(--card)',border:'1px solid var(--border)',borderRadius:12,boxShadow:'0 12px 40px rgba(0,0,0,0.6)',overflow:'hidden'}}>
+              {['route','chart','port'].map(type=>{
+                const items=qResults.filter(r=>r.type===type); if(!items.length)return null;
+                const cols={route:'var(--cyan)',chart:'var(--gold)',port:'var(--green)'};
+                const lbls={route:'Routes',chart:'Charts',port:'Ports'};
+                return (
+                  <div key={type}>
+                    <div style={{padding:'5px 12px',fontSize:'0.58rem',color:'var(--text3)',textTransform:'uppercase',letterSpacing:'0.1em',borderBottom:'1px solid var(--border)',background:'rgba(255,255,255,0.02)'}}>{lbls[type]}</div>
+                    {items.map((r,i)=>(
+                      <div key={i} onMouseDown={()=>{setQ('');setQResults([]);onSearch(r.label);}}
+                        style={{padding:'8px 12px',cursor:'pointer',display:'flex',gap:8,alignItems:'center',borderBottom:'1px solid rgba(255,255,255,0.03)'}}
+                        onMouseEnter={e=>e.currentTarget.style.background='rgba(0,180,216,0.07)'}
+                        onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
+                        <span style={{width:7,height:7,borderRadius:'50%',background:cols[type],flexShrink:0}}/>
+                        <div><div style={{fontSize:'0.8rem'}}>{r.label}</div>{r.sub&&<div style={{fontSize:'0.66rem',color:'var(--text3)'}}>{r.sub}</div>}</div>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })}
             </div>
+          )}
+        </div>
+
+        {/* ── Weather — compact strip, always below search ── */}
+        <div ref={weatherRef} style={{background:'rgba(7,20,40,0.7)',border:'1px solid rgba(0,180,216,0.2)',borderRadius:12,padding:'0.7rem 0.9rem',backdropFilter:'blur(10px)',maxWidth:540}}>
+          <div style={{display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}}>
+            <div style={{display:'flex',alignItems:'center',gap:5}}>
+              <span style={{fontSize:'0.9rem'}}>🌊</span>
+              <span style={{fontFamily:'Orbitron,monospace',fontSize:'0.56rem',color:'var(--cyan)',letterSpacing:'0.08em'}}>WEATHER</span>
+            </div>
+            {/* GPS button */}
             <button onClick={fetchGPSWeather} disabled={gpsLoading}
-              style={{width:'100%',padding:'6px 8px',borderRadius:7,border:'1px solid rgba(0,200,150,0.3)',background:'rgba(0,200,150,0.08)',color:'var(--green)',fontFamily:'Exo 2,sans-serif',fontSize:'0.68rem',cursor:'pointer',marginBottom:'0.5rem',display:'flex',alignItems:'center',justifyContent:'center',gap:5,transition:'all 0.2s'}}
-              onMouseEnter={e=>e.currentTarget.style.background='rgba(0,200,150,0.16)'}
-              onMouseLeave={e=>e.currentTarget.style.background='rgba(0,200,150,0.08)'}>
-              {gpsLoading?<><div className="spin" style={{width:10,height:10}}/>Locating…</>:<>📍 Use My Location</>}
+              style={{padding:'4px 10px',borderRadius:6,border:'1px solid rgba(0,200,150,0.3)',background:'rgba(0,200,150,0.08)',color:'var(--green)',fontFamily:'Exo 2,sans-serif',fontSize:'0.66rem',cursor:'pointer',display:'flex',alignItems:'center',gap:4,flexShrink:0}}>
+              {gpsLoading?<><div className="spin" style={{width:8,height:8}}/>Locating…</>:<>📍 My Location</>}
             </button>
-            <div style={{position:'relative',marginBottom:'0.5rem'}}>
+            {/* Port search */}
+            <div style={{position:'relative',flex:1,minWidth:120}}>
               <div className="siw">
                 <span className="si-ic" style={{fontSize:'0.7rem'}}>⚓</span>
-                <input className="si" style={{paddingLeft:26,fontSize:'0.72rem',padding:'6px 6px 6px 24px'}}
+                <input className="si" style={{padding:'5px 5px 5px 22px',fontSize:'0.7rem'}}
                   placeholder="Search port…" value={weatherQ} onChange={e=>setWeatherQ(e.target.value)}/>
               </div>
               {weatherSugg.length>0&&(
-                <div style={{position:'absolute',top:'calc(100% + 3px)',left:0,right:0,zIndex:200,background:'var(--card)',border:'1px solid var(--border)',borderRadius:8,boxShadow:'0 8px 24px rgba(0,0,0,0.5)',overflow:'hidden',maxHeight:140,overflowY:'auto'}}>
+                <div style={{position:'absolute',top:'calc(100% + 3px)',left:0,right:0,zIndex:200,background:'var(--card)',border:'1px solid var(--border)',borderRadius:8,boxShadow:'0 8px 24px rgba(0,0,0,0.5)',overflow:'hidden',maxHeight:130,overflowY:'auto'}}>
                   {weatherSugg.map((p,i)=>(
                     <div key={i} onMouseDown={()=>fetchWeather(p)}
-                      style={{padding:'6px 9px',cursor:'pointer',fontSize:'0.72rem',borderBottom:'1px solid rgba(255,255,255,0.04)'}}
+                      style={{padding:'6px 9px',cursor:'pointer',fontSize:'0.7rem',borderBottom:'1px solid rgba(255,255,255,0.04)'}}
                       onMouseEnter={e=>e.currentTarget.style.background='rgba(0,180,216,0.08)'}
                       onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
-                      {p.name} <span style={{color:'var(--text3)',fontSize:'0.62rem'}}>{p.country}</span>
+                      {p.name} <span style={{color:'var(--text3)',fontSize:'0.6rem'}}>{p.country}</span>
                     </div>
                   ))}
                 </div>
               )}
             </div>
-            {weatherLoading&&<div style={{textAlign:'center',padding:'0.4rem 0'}}><div className="spin" style={{width:14,height:14,margin:'0 auto'}}/></div>}
+            {/* Weather result */}
+            {weatherLoading&&<div className="spin" style={{width:12,height:12,flexShrink:0}}/>}
             {weather&&!weatherLoading&&(
-              <div style={{display:'flex',alignItems:'center',gap:8}}>
-                <div style={{fontSize:'1.8rem'}}>{wc?.icon}</div>
+              <div style={{display:'flex',alignItems:'center',gap:6,flexShrink:0}}>
+                <span style={{fontSize:'1.4rem'}}>{wc?.icon}</span>
                 <div>
-                  <div style={{fontFamily:'Orbitron,monospace',fontSize:'1rem',fontWeight:700,color:'var(--cyan)'}}>{weather.temp}°C</div>
-                  <div style={{fontSize:'0.64rem',color:'var(--text2)'}}>💨 {weather.wind} kts</div>
-                  <div style={{fontSize:'0.6rem',color:'var(--text3)',marginTop:1}}>{weather.port}</div>
+                  <div style={{fontFamily:'Orbitron,monospace',fontSize:'0.82rem',fontWeight:700,color:'var(--cyan)'}}>{weather.temp}°C</div>
+                  <div style={{fontSize:'0.58rem',color:'var(--text2)'}}>💨{weather.wind}kts · {weather.port}</div>
                 </div>
               </div>
             )}
-            {!weather&&!weatherLoading&&<div style={{fontSize:'0.66rem',color:'var(--text3)',textAlign:'center',padding:'0.3rem 0'}}>📍 or search a port</div>}
+            {!weather&&!weatherLoading&&<span style={{fontSize:'0.62rem',color:'var(--text3)'}}>📍 or search a port above</span>}
           </div>
-
         </div>
       </div>
       {/* ── END HERO ── */}
 
-      <div style={{padding:'1.4rem 1.2rem',maxWidth:1100,margin:'0 auto',width:'100%'}}>
+      <div style={{padding:'1.2rem 1rem',maxWidth:1100,margin:'0 auto',width:'100%'}}>
 
         {/* Personal widgets */}
         {user&&(seaTimeDays!==null||expCerts.length>0||isOffline)&&(
-          <div style={{display:'flex',gap:10,flexWrap:'wrap',marginBottom:'1.4rem'}}>
+          <div style={{display:'flex',gap:8,flexWrap:'wrap',marginBottom:'1.2rem'}}>
             {seaTimeDays!==null&&(
-              <div onClick={()=>setTab('seatime')} style={{background:'var(--card)',border:'1px solid rgba(0,180,216,0.25)',borderRadius:12,padding:'10px 14px',cursor:'pointer',display:'flex',alignItems:'center',gap:10,flex:'1',minWidth:140}}>
-                <div style={{fontSize:'1.6rem'}}>⏱</div>
-                <div><div style={{fontFamily:'Orbitron,monospace',fontSize:'0.82rem',fontWeight:700,color:'var(--cyan)'}}>{fmt(seaTimeDays)}</div><div style={{fontSize:'0.6rem',color:'var(--text3)',textTransform:'uppercase'}}>Sea Time</div></div>
+              <div onClick={()=>setTab('seatime')} style={{background:'var(--card)',border:'1px solid rgba(0,180,216,0.25)',borderRadius:12,padding:'9px 12px',cursor:'pointer',display:'flex',alignItems:'center',gap:8,flex:'1',minWidth:120}}>
+                <div style={{fontSize:'1.4rem'}}>⏱</div>
+                <div><div style={{fontFamily:'Orbitron,monospace',fontSize:'0.78rem',fontWeight:700,color:'var(--cyan)'}}>{fmt(seaTimeDays)}</div><div style={{fontSize:'0.58rem',color:'var(--text3)',textTransform:'uppercase'}}>Sea Time</div></div>
               </div>
             )}
             {expCerts.length>0&&(
-              <div onClick={()=>setTab('certs')} style={{background:'rgba(255,71,87,0.06)',border:'1px solid rgba(255,71,87,0.3)',borderRadius:12,padding:'10px 14px',cursor:'pointer',display:'flex',alignItems:'center',gap:10,flex:'1',minWidth:140}}>
-                <div style={{fontSize:'1.6rem'}}>📜</div>
-                <div><div style={{fontFamily:'Orbitron,monospace',fontSize:'0.82rem',fontWeight:700,color:'#ff4757'}}>{expCerts.length} Expiring</div><div style={{fontSize:'0.6rem',color:'#ff4757',textTransform:'uppercase'}}>Certificates</div></div>
+              <div onClick={()=>setTab('certs')} style={{background:'rgba(255,71,87,0.06)',border:'1px solid rgba(255,71,87,0.3)',borderRadius:12,padding:'9px 12px',cursor:'pointer',display:'flex',alignItems:'center',gap:8,flex:'1',minWidth:120}}>
+                <div style={{fontSize:'1.4rem'}}>📜</div>
+                <div><div style={{fontFamily:'Orbitron,monospace',fontSize:'0.78rem',fontWeight:700,color:'#ff4757'}}>{expCerts.length} Expiring</div><div style={{fontSize:'0.58rem',color:'#ff4757',textTransform:'uppercase'}}>Certificates</div></div>
               </div>
             )}
             {isOffline&&(
-              <div style={{background:'rgba(0,200,100,0.06)',border:'1px solid rgba(0,200,100,0.25)',borderRadius:12,padding:'10px 14px',display:'flex',alignItems:'center',gap:10,minWidth:120}}>
-                <div style={{fontSize:'1.6rem'}}>✅</div>
-                <div><div style={{fontFamily:'Orbitron,monospace',fontSize:'0.72rem',fontWeight:700,color:'var(--green)'}}>Available</div><div style={{fontSize:'0.6rem',color:'var(--green)',textTransform:'uppercase'}}>Offline</div></div>
+              <div style={{background:'rgba(0,200,100,0.06)',border:'1px solid rgba(0,200,100,0.25)',borderRadius:12,padding:'9px 12px',display:'flex',alignItems:'center',gap:8,minWidth:100}}>
+                <div style={{fontSize:'1.4rem'}}>✅</div>
+                <div><div style={{fontFamily:'Orbitron,monospace',fontSize:'0.7rem',fontWeight:700,color:'var(--green)'}}>Available</div><div style={{fontSize:'0.58rem',color:'var(--green)',textTransform:'uppercase'}}>Offline</div></div>
               </div>
             )}
           </div>
@@ -546,8 +537,8 @@ export default function HomePage({ routes, charts, onSearch, setTab, user, ports
         {/* Explore header */}
         <div style={{marginBottom:'0.6rem',display:'flex',alignItems:'center',gap:10}}>
           <div style={{width:4,height:22,background:'linear-gradient(180deg,var(--cyan),var(--blue))',borderRadius:2}}/>
-          <div style={{fontFamily:'Orbitron,monospace',fontSize:'0.78rem',fontWeight:700,letterSpacing:'0.06em',flex:1}}>Explore NavisphereX Marine</div>
-          <button onClick={()=>setShowTabSettings(true)} style={{background:'rgba(0,180,216,0.08)',border:'1px solid rgba(0,180,216,0.25)',borderRadius:7,padding:'4px 9px',cursor:'pointer',fontSize:'0.72rem',color:'var(--cyan)',display:'flex',alignItems:'center',gap:5,fontFamily:'Exo 2,sans-serif'}}>⚙️ Customise</button>
+          <div style={{fontFamily:'Orbitron,monospace',fontSize:'0.76rem',fontWeight:700,letterSpacing:'0.06em',flex:1}}>Explore NavisphereX Marine</div>
+          <button onClick={()=>setShowTabSettings(true)} style={{background:'rgba(0,180,216,0.08)',border:'1px solid rgba(0,180,216,0.25)',borderRadius:7,padding:'4px 8px',cursor:'pointer',fontSize:'0.7rem',color:'var(--cyan)',display:'flex',alignItems:'center',gap:4,fontFamily:'Exo 2,sans-serif'}}>⚙️ Customise</button>
         </div>
 
         {/* Customise modal */}
@@ -563,7 +554,7 @@ export default function HomePage({ routes, charts, onSearch, setTab, user, ports
               </div>
               <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
                 {ALL_FEATURES.map(f=>{
-                  const pinned=pinnedTabs.includes(f.tab), disabled=!pinned&&pinnedTabs.length>=6;
+                  const pinned=pinnedTabs.includes(f.tab),disabled=!pinned&&pinnedTabs.length>=6;
                   return (
                     <div key={f.tab} onClick={()=>!disabled&&togglePin(f.tab)}
                       style={{display:'flex',alignItems:'center',gap:10,padding:'10px 12px',borderRadius:10,border:`1px solid ${pinned?f.color+'55':'var(--border)'}`,background:pinned?`${f.color}12`:'rgba(255,255,255,0.02)',cursor:disabled?'not-allowed':'pointer',opacity:disabled?0.45:1,transition:'all 0.15s'}}>
@@ -579,77 +570,77 @@ export default function HomePage({ routes, charts, onSearch, setTab, user, ports
           </div>
         )}
 
-        {/* Feature cards — 2 per row mobile, 3 per row desktop */}
-        <div className="hp-features-grid" style={{marginBottom:'1.4rem'}}>
+        {/* Feature cards */}
+        <div className="hp-features-grid" style={{marginBottom:'1.2rem'}}>
           {FEATURES.map((f,i)=>(
             <div key={i} onClick={()=>setTab(f.tab)}
-              style={{background:'var(--card)',border:'1px solid var(--border)',borderRadius:16,padding:'1.2rem',cursor:'pointer',transition:'all 0.25s',position:'relative',overflow:'hidden',display:'flex',flexDirection:'column',gap:10}}
-              onMouseEnter={e=>{e.currentTarget.style.borderColor=f.color+'55';e.currentTarget.style.transform='translateY(-3px)';e.currentTarget.style.boxShadow=`0 12px 32px rgba(0,0,0,0.5),0 0 20px ${f.color}18`;}}
+              style={{background:'var(--card)',border:'1px solid var(--border)',borderRadius:14,padding:'1rem',cursor:'pointer',transition:'all 0.25s',position:'relative',overflow:'hidden',display:'flex',flexDirection:'column',gap:8}}
+              onMouseEnter={e=>{e.currentTarget.style.borderColor=f.color+'55';e.currentTarget.style.transform='translateY(-2px)';e.currentTarget.style.boxShadow=`0 8px 24px rgba(0,0,0,0.4),0 0 16px ${f.color}18`;}}
               onMouseLeave={e=>{e.currentTarget.style.borderColor='var(--border)';e.currentTarget.style.transform='translateY(0)';e.currentTarget.style.boxShadow='none';}}>
               <div style={{position:'absolute',top:0,left:0,right:0,height:2,background:f.bg,opacity:0.6}}/>
-              {f.badge&&<span style={{position:'absolute',top:10,right:10,padding:'2px 7px',borderRadius:6,fontSize:'0.56rem',fontWeight:700,background:'rgba(0,200,100,0.15)',color:'var(--green)',border:'1px solid rgba(0,200,100,0.3)'}}>{f.badge}</span>}
-              <div style={{width:52,height:52,borderRadius:14,background:f.bg,display:'flex',alignItems:'center',justifyContent:'center',fontSize:'1.7rem',boxShadow:`0 6px 20px ${f.color}40`}}>{f.icon}</div>
+              {f.badge&&<span style={{position:'absolute',top:8,right:8,padding:'1px 6px',borderRadius:5,fontSize:'0.52rem',fontWeight:700,background:'rgba(0,200,100,0.15)',color:'var(--green)',border:'1px solid rgba(0,200,100,0.3)'}}>{f.badge}</span>}
+              <div style={{width:44,height:44,borderRadius:12,background:f.bg,display:'flex',alignItems:'center',justifyContent:'center',fontSize:'1.4rem',boxShadow:`0 4px 14px ${f.color}40`}}>{f.icon}</div>
               <div>
-                <div style={{fontFamily:'Orbitron,monospace',fontSize:'0.68rem',fontWeight:700,color:f.color,letterSpacing:'0.06em',marginBottom:4}}>{f.label}</div>
-                <div style={{fontSize:'0.74rem',color:'var(--text2)',lineHeight:1.5}}>{f.desc}</div>
+                <div style={{fontFamily:'Orbitron,monospace',fontSize:'0.64rem',fontWeight:700,color:f.color,letterSpacing:'0.05em',marginBottom:3}}>{f.label}</div>
+                <div style={{fontSize:'0.7rem',color:'var(--text2)',lineHeight:1.4}}>{f.desc}</div>
               </div>
-              <div style={{marginTop:'auto',fontSize:'0.7rem',color:f.color,display:'flex',alignItems:'center',gap:4}}>Explore <span>→</span></div>
+              <div style={{marginTop:'auto',fontSize:'0.68rem',color:f.color,display:'flex',alignItems:'center',gap:3}}>Explore <span>→</span></div>
             </div>
           ))}
         </div>
 
         {/* My Account */}
         {user&&(
-          <div onClick={()=>setTab('account')} style={{background:'linear-gradient(135deg,var(--card) 0%,#0F2444 100%)',border:'1px solid rgba(0,180,216,0.2)',borderRadius:16,padding:'1.2rem',cursor:'pointer',display:'flex',alignItems:'center',gap:16,marginBottom:'1.4rem',transition:'all 0.2s'}}
-            onMouseEnter={e=>{e.currentTarget.style.borderColor='rgba(0,180,216,0.4)';e.currentTarget.style.boxShadow='0 8px 28px rgba(0,0,0,0.4)';}}
+          <div onClick={()=>setTab('account')} style={{background:'linear-gradient(135deg,var(--card) 0%,#0F2444 100%)',border:'1px solid rgba(0,180,216,0.2)',borderRadius:14,padding:'1rem',cursor:'pointer',display:'flex',alignItems:'center',gap:14,marginBottom:'1.2rem',transition:'all 0.2s'}}
+            onMouseEnter={e=>{e.currentTarget.style.borderColor='rgba(0,180,216,0.4)';e.currentTarget.style.boxShadow='0 6px 20px rgba(0,0,0,0.4)';}}
             onMouseLeave={e=>{e.currentTarget.style.borderColor='rgba(0,180,216,0.2)';e.currentTarget.style.boxShadow='none';}}>
-            <div style={{width:50,height:50,borderRadius:'50%',background:'linear-gradient(135deg,var(--cyan),var(--blue))',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'1.5rem',flexShrink:0}}>👤</div>
+            <div style={{width:46,height:46,borderRadius:'50%',background:'linear-gradient(135deg,var(--cyan),var(--blue))',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'1.3rem',flexShrink:0}}>👤</div>
             <div style={{flex:1}}>
-              <div style={{fontFamily:'Orbitron,monospace',fontSize:'0.82rem',fontWeight:700,color:'var(--cyan)',marginBottom:2}}>MY ACCOUNT</div>
-              <div style={{fontSize:'0.74rem',color:'var(--text2)'}}>{userProfile?.name?`${userProfile?.rank?userProfile.rank+' ':''}${userProfile.name}`:'Login, save routes, manage your data.'}</div>
+              <div style={{fontFamily:'Orbitron,monospace',fontSize:'0.78rem',fontWeight:700,color:'var(--cyan)',marginBottom:2}}>MY ACCOUNT</div>
+              <div style={{fontSize:'0.72rem',color:'var(--text2)'}}>{userProfile?.name?`${userProfile?.rank?userProfile.rank+' ':''}${userProfile.name}`:'Login, save routes, manage your data.'}</div>
             </div>
-            <div style={{fontSize:'1.2rem',color:'var(--cyan)',flexShrink:0}}>→</div>
+            <div style={{fontSize:'1.1rem',color:'var(--cyan)',flexShrink:0}}>→</div>
           </div>
         )}
 
         {/* Quick Actions */}
         <div style={{marginBottom:'0.6rem',display:'flex',alignItems:'center',gap:10}}>
-          <div style={{width:4,height:22,background:'linear-gradient(180deg,var(--gold),var(--gold2))',borderRadius:2}}/>
-          <div style={{fontFamily:'Orbitron,monospace',fontSize:'0.78rem',fontWeight:700,letterSpacing:'0.06em'}}>Quick Actions</div>
+          <div style={{width:4,height:20,background:'linear-gradient(180deg,var(--gold),var(--gold2))',borderRadius:2}}/>
+          <div style={{fontFamily:'Orbitron,monospace',fontSize:'0.74rem',fontWeight:700,letterSpacing:'0.06em'}}>Quick Actions</div>
         </div>
-        <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(130px,1fr))',gap:8,marginBottom:'1.4rem'}}>
+        <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(120px,1fr))',gap:8,marginBottom:'1.2rem'}}>
           {[
             {icon:'⬇️',label:'Download Latest',sub:'Get latest updates', tab:'routes', color:'var(--green)'},
             {icon:'📊',label:'New Charts',      sub:'Explore new charts', tab:'charts', color:'var(--gold)'},
             {icon:'🚢',label:'Vessel Search',   sub:'IMO / MMSI lookup',  tab:'vessel', color:'#A78BFA'},
             {icon:'🧮',label:'Voyage Calc',     sub:'Distance & duration',tab:'voyage', color:'var(--cyan)'},
           ].map((a,i)=>(
-            <button key={i} onClick={()=>setTab(a.tab)} style={{padding:'10px',borderRadius:10,border:`1px solid ${a.color}33`,background:`${a.color}0a`,cursor:'pointer',display:'flex',flexDirection:'column',alignItems:'flex-start',gap:4,fontFamily:'Exo 2,sans-serif',transition:'all 0.2s'}}
+            <button key={i} onClick={()=>setTab(a.tab)} style={{padding:'9px',borderRadius:10,border:`1px solid ${a.color}33`,background:`${a.color}0a`,cursor:'pointer',display:'flex',flexDirection:'column',alignItems:'flex-start',gap:4,fontFamily:'Exo 2,sans-serif',transition:'all 0.2s'}}
               onMouseEnter={e=>e.currentTarget.style.background=`${a.color}18`}
               onMouseLeave={e=>e.currentTarget.style.background=`${a.color}0a`}>
-              <div style={{width:36,height:36,borderRadius:9,background:a.color+'22',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'1.2rem'}}>{a.icon}</div>
-              <div style={{fontSize:'0.74rem',fontWeight:600,color:a.color,textAlign:'left'}}>{a.label}</div>
-              <div style={{fontSize:'0.62rem',color:'var(--text3)'}}>{a.sub}</div>
+              <div style={{width:32,height:32,borderRadius:8,background:a.color+'22',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'1.1rem'}}>{a.icon}</div>
+              <div style={{fontSize:'0.7rem',fontWeight:600,color:a.color,textAlign:'left'}}>{a.label}</div>
+              <div style={{fontSize:'0.6rem',color:'var(--text3)'}}>{a.sub}</div>
             </button>
           ))}
         </div>
 
         {/* Knowledge Hub */}
-        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'0.8rem'}}>
-          <div style={{display:'flex',alignItems:'center',gap:10}}>
-            <div style={{width:4,height:22,background:'linear-gradient(180deg,#A78BFA,#7C3AED)',borderRadius:2}}/>
-            <div style={{fontFamily:'Orbitron,monospace',fontSize:'0.78rem',fontWeight:700}}>Maritime Knowledge Hub</div>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'0.7rem'}}>
+          <div style={{display:'flex',alignItems:'center',gap:8}}>
+            <div style={{width:4,height:20,background:'linear-gradient(180deg,#A78BFA,#7C3AED)',borderRadius:2}}/>
+            <div style={{fontFamily:'Orbitron,monospace',fontSize:'0.74rem',fontWeight:700}}>Maritime Knowledge Hub</div>
           </div>
-          <button onClick={()=>setTab('library')} style={{fontSize:'0.72rem',color:'var(--cyan)',background:'none',border:'none',cursor:'pointer'}}>View all →</button>
+          <button onClick={()=>setTab('library')} style={{fontSize:'0.7rem',color:'var(--cyan)',background:'none',border:'none',cursor:'pointer'}}>View all →</button>
         </div>
-        <div style={{display:'flex',gap:8,overflowX:'auto',paddingBottom:8,marginBottom:'1.4rem',scrollbarWidth:'none'}}>
+        <div style={{display:'flex',gap:8,overflowX:'auto',paddingBottom:6,marginBottom:'1.2rem',scrollbarWidth:'none'}}>
           {KNOWLEDGE.map((k,i)=>(
-            <div key={i} onClick={()=>setTab(k.tab)} style={{flexShrink:0,width:130,background:'var(--card)',border:'1px solid var(--border)',borderRadius:12,padding:'1rem',cursor:'pointer',transition:'all 0.2s'}}
+            <div key={i} onClick={()=>setTab(k.tab)} style={{flexShrink:0,width:118,background:'var(--card)',border:'1px solid var(--border)',borderRadius:11,padding:'0.85rem',cursor:'pointer',transition:'all 0.2s'}}
               onMouseEnter={e=>{e.currentTarget.style.borderColor='rgba(167,139,250,0.4)';e.currentTarget.style.transform='translateY(-2px)';}}
               onMouseLeave={e=>{e.currentTarget.style.borderColor='var(--border)';e.currentTarget.style.transform='translateY(0)';}}>
-              <div style={{fontSize:'1.8rem',marginBottom:6}}>{k.icon}</div>
-              <div style={{fontFamily:'Orbitron,monospace',fontSize:'0.64rem',fontWeight:700,color:'#A78BFA',marginBottom:4}}>{k.label}</div>
-              <div style={{fontSize:'0.64rem',color:'var(--text3)',lineHeight:1.4}}>{k.sub}</div>
+              <div style={{fontSize:'1.6rem',marginBottom:5}}>{k.icon}</div>
+              <div style={{fontFamily:'Orbitron,monospace',fontSize:'0.6rem',fontWeight:700,color:'#A78BFA',marginBottom:3}}>{k.label}</div>
+              <div style={{fontSize:'0.6rem',color:'var(--text3)',lineHeight:1.4}}>{k.sub}</div>
             </div>
           ))}
         </div>
@@ -658,14 +649,14 @@ export default function HomePage({ routes, charts, onSearch, setTab, user, ports
         <MaritimeAIWidget />
 
         {/* Tip of the Day */}
-        <div style={{marginBottom:'1.4rem'}}>
-          <div style={{background:'var(--card)',border:'1px solid var(--border)',borderRadius:14,padding:'1.1rem'}}>
-            <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:'0.6rem'}}>
-              <div style={{width:28,height:28,borderRadius:7,background:'linear-gradient(135deg,var(--gold),var(--gold2))',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'0.9rem'}}>💡</div>
-              <div style={{fontFamily:'Orbitron,monospace',fontSize:'0.65rem',color:'var(--gold)',letterSpacing:'0.08em'}}>TIP OF THE DAY</div>
+        <div style={{marginBottom:'1.2rem'}}>
+          <div style={{background:'var(--card)',border:'1px solid var(--border)',borderRadius:13,padding:'1rem'}}>
+            <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:'0.5rem'}}>
+              <div style={{width:26,height:26,borderRadius:7,background:'linear-gradient(135deg,var(--gold),var(--gold2))',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'0.85rem'}}>💡</div>
+              <div style={{fontFamily:'Orbitron,monospace',fontSize:'0.62rem',color:'var(--gold)',letterSpacing:'0.08em'}}>TIP OF THE DAY</div>
             </div>
-            <div style={{fontSize:'0.78rem',color:'var(--text2)',lineHeight:1.7,minHeight:'3.5rem'}}>{MARITIME_TIPS[tipIndex]}</div>
-            <button className="btn btn-secondary" style={{marginTop:'0.8rem',padding:'4px 10px',fontSize:'0.66rem'}}
+            <div style={{fontSize:'0.76rem',color:'var(--text2)',lineHeight:1.65,minHeight:'3rem'}}>{MARITIME_TIPS[tipIndex]}</div>
+            <button className="btn btn-secondary" style={{marginTop:'0.7rem',padding:'4px 10px',fontSize:'0.64rem'}}
               onClick={()=>setTipIndex(i=>(i+1)%MARITIME_TIPS.length)}>Next tip →</button>
           </div>
         </div>
@@ -673,8 +664,8 @@ export default function HomePage({ routes, charts, onSearch, setTab, user, ports
       </div>
 
       <style>{`
-        @keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-10px)}}
-        .hp-features-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:0.8rem;}
+        @keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}
+        .hp-features-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:0.7rem;}
         @media(min-width:640px){.hp-features-grid{grid-template-columns:repeat(3,1fr);}}
       `}</style>
     </div>
