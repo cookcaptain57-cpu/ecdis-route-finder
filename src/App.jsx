@@ -43,7 +43,6 @@ import CrewJourneyPage         from "./Pages/CrewJourneyPage";
 import PortShorePage           from "./Pages/PortShorePage";
 import InfoPage                from "./Pages/InfoPage";
 import SeaDiaryPage            from "./Pages/SeaDiaryPage";
-// ── CHANGE 1: CargoOpsPage import ──
 import CargoOpsPage            from "./Pages/CargoOpsPage";
 
 const S = `
@@ -97,7 +96,6 @@ const S = `
   .si-btn.green.active{background:rgba(0,200,150,0.1);color:var(--green);}
   .si-btn.red.active{background:rgba(255,71,87,0.12);color:var(--red);}
   .si-icon{font-size:1.05rem;width:22px;text-align:center;flex-shrink:0;}
-  /* ── MOBILE MENU — fixed scrollable ── */
   .mob-menu{
     display:none;
     position:fixed;top:56px;left:0;right:0;
@@ -281,8 +279,8 @@ export default function App() {
   const isAdmin = user?.email === ADMIN_EMAIL;
   const notify  = (msg, type = 'success') => setNotif({ msg, type, key: Date.now() });
 
-  // Tabs that don't require login
-  const PUBLIC_TABS = new Set(['home', 'login', 'info']);
+  // ── FIX: 'info' and 'welfare' are public tabs ──
+  const PUBLIC_TABS = new Set(['home', 'login', 'info', 'welfare']);
 
   const applyPortData = (d3) => {
     if (!Array.isArray(d3) || d3.length === 0) return;
@@ -390,7 +388,15 @@ export default function App() {
 
   useEffect(() => { loadAppData(); }, []);
   useEffect(() => { if (!authChecked) return; if (sheetRoutes.length === 0 || portsDb.length === 0) loadAppData(); }, [authChecked]);
-  useEffect(() => { if (user && tab === 'login') { const i = sessionStorage.getItem('intendedTab'); sessionStorage.removeItem('intendedTab'); setTab(i || 'home'); } }, [user]);
+
+  // ── FIX: Don't redirect to 'info' as intendedTab — it's now public ──
+  useEffect(() => {
+    if (user && tab === 'login') {
+      const i = sessionStorage.getItem('intendedTab');
+      sessionStorage.removeItem('intendedTab');
+      setTab((i && i !== 'info') ? i : 'home');
+    }
+  }, [user]);
 
   useEffect(() => {
     setPersistence(auth, browserLocalPersistence).catch(() => {});
@@ -446,7 +452,6 @@ export default function App() {
     localStorage.setItem('notif_read', JSON.stringify([...allIds]));
   };
 
-  // ── CHANGE 2: Added cargoops to TABS array ──
   const TABS = [
     { k:'home',        i:'🏠', l:'Dashboard' },
     { k:'routes',      i:'🚢', l:'Routes' },
@@ -573,7 +578,6 @@ export default function App() {
           </div>
         </nav>
 
-        {/* ── Mobile menu — scrollable ── */}
         <div className={`mob-menu ${menuOpen ? 'open' : ''}`}>
           {TABS.map(t => (
             <button key={t.k} className={`mtab ${tab===t.k?'active':''}`} onClick={() => switchTab(t.k)}>
@@ -619,7 +623,6 @@ export default function App() {
                 {t.k==='navmode'  && <span style={{ marginLeft:'auto', padding:'1px 5px', borderRadius:4, fontSize:'0.5rem', background:'rgba(0,200,100,0.15)', color:'var(--green)', border:'1px solid rgba(0,200,100,0.25)', fontWeight:700, flexShrink:0 }}>NEW</span>}
                 {t.k==='sights'   && <span style={{ marginLeft:'auto', padding:'1px 5px', borderRadius:4, fontSize:'0.5rem', background:'rgba(240,165,0,0.15)', color:'var(--gold)', border:'1px solid rgba(240,165,0,0.25)', fontWeight:700, flexShrink:0 }}>NEW</span>}
                 {t.k==='seadiary' && <span style={{ marginLeft:'auto', padding:'1px 5px', borderRadius:4, fontSize:'0.5rem', background:'rgba(0,180,216,0.15)', color:'var(--cyan)', border:'1px solid rgba(0,180,216,0.25)', fontWeight:700, flexShrink:0 }}>NEW</span>}
-                {/* ── CHANGE 3: CargoOps NEW badge ── */}
                 {t.k==='cargoops' && <span style={{ marginLeft:'auto', padding:'1px 5px', borderRadius:4, fontSize:'0.5rem', background:'rgba(245,158,11,0.15)', color:'#F59E0B', border:'1px solid rgba(245,158,11,0.25)', fontWeight:700, flexShrink:0 }}>NEW</span>}
               </button>
             ))}
@@ -732,11 +735,11 @@ export default function App() {
             {tab==='emergency'   && <EmergencyPage portsDb={portsDb} />}
             {tab==='knots'       && <KnotsRopesMooringPage />}
             {tab==='navbridge'   && <NavigationBridgePage />}
-            {tab==='welfare'     && <CrewWelfarePage />}
+            {/* ── FIX: Pass user and notify to CrewWelfarePage ── */}
+            {tab==='welfare'     && <CrewWelfarePage user={user} notify={notify} />}
             {tab==='crewjourney' && <CrewJourneyPage user={user} userProfile={userProfile} notify={notify} />}
             {tab==='portshore'   && <PortShorePage user={user} onNavigate={switchTab} />}
             {tab==='seadiary'    && user && <SeaDiaryPage user={user} notify={notify} portsDb={portsDb} />}
-            {/* ── CHANGE 4: CargoOpsPage render ── */}
             {tab==='cargoops'    && user && <CargoOpsPage notify={notify} />}
             {tab==='login'       && <LoginPage notify={notify} onLogin={(u, redirectTo, isNew, userName, userRank) => {
               setUser(u); setTab(redirectTo || 'home');
@@ -755,22 +758,10 @@ export default function App() {
               : <div className="section"><div className="empty"><div className="empty-icon">🔒</div><div className="empty-t">Admin Access Only</div></div></div>
             )}
 
-            {/* ── Help & Info ── */}
-            {tab==='info' && user && <InfoPage notify={notify} user={user} setTab={switchTab} />}
-            {tab==='info' && !user && authChecked && (
-              <div style={{ display:'flex', flex:1, alignItems:'center', justifyContent:'center', padding:'2rem' }}>
-                <div style={{ maxWidth:380, width:'100%', background:'var(--card)', border:'1px solid var(--border2)', borderRadius:16, padding:'2rem', textAlign:'center' }}>
-                  <div style={{ fontSize:'3rem', marginBottom:'1rem' }}>🔐</div>
-                  <div style={{ fontFamily:'Orbitron,monospace', fontSize:'0.9rem', fontWeight:700, marginBottom:'0.5rem' }}>Login Required</div>
-                  <div style={{ fontSize:'0.82rem', color:'var(--text2)', marginBottom:'1.4rem', lineHeight:1.6 }}>Please login to access Help & Info.</div>
-                  <div style={{ display:'flex', gap:10, justifyContent:'center' }}>
-                    <button className="btn btn-primary" onClick={() => switchTab('login')}>🔐 Login</button>
-                    <button className="btn btn-secondary" onClick={() => switchTab('login')}>✅ Register Free</button>
-                  </div>
-                </div>
-              </div>
-            )}
+            {/* ── FIX: Info is now fully public — no login wall ── */}
+            {tab==='info' && <InfoPage notify={notify} user={user} setTab={switchTab} />}
 
+            {/* ── Generic login wall for all other protected tabs ── */}
             {authChecked && !user && tab!=='home' && tab!=='login' && !PUBLIC_TABS.has(tab) && (
               <div style={{ display:'flex', flex:1, alignItems:'center', justifyContent:'center', padding:'2rem' }}>
                 <div style={{ maxWidth:380, width:'100%', background:'var(--card)', border:'1px solid var(--border2)', borderRadius:16, padding:'2rem', textAlign:'center' }}>
