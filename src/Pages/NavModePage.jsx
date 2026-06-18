@@ -204,6 +204,9 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
   const [offTrackAlarm,setOffTrackAlarm]=useState(false);
   const [fullScreen,setFullScreen]=useState(false);
   const [mapZoom,setMapZoom]=useState(4);
+  // Derived band (not raw zoom) so route labels only re-render when crossing the threshold,
+  // not on every single zoom step — prevents flicker while still hiding labels when zoomed out
+  const [routeLabelZoomBand,setRouteLabelZoomBand]=useState(()=>mapZoom>=8?'in':'out');
   const [cogPanelPos,setCogPanelPos]=useState(()=>{try{return JSON.parse(localStorage.getItem('nav_cogPanelPos')||'null')||{x:null,y:8};}catch{return{x:null,y:8};}});
   const [cogPanelVisible,setCogPanelVisible]=useState(()=>localStorage.getItem('nav_cogPanel')!=='false');
   const cogDragRef=useRef(null);
@@ -644,20 +647,26 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
     lrs.xtdPort=null;lrs.xtdStbd=null;lrs.xtdFill=null;
     if(!activeRoute?.waypoints?.length)return;
     const wps=normalizeRoute(activeRoute.waypoints),c=colors;
+    const showLabels=routeLabelZoomBand==='in'; // hide text labels when zoomed out — prevents label-stacking chaos
     lrs.route=L.polyline(wps.map(w=>[w.lat,w.lon]),{color:c.route,weight:2.5,opacity:0.9,dashArray:'8 4',noClip:true}).addTo(m);
     wps.forEach((wp,i)=>{
       const first=i===0,last=i===wps.length-1,col=first?'#00C896':last?'#FF4757':c.route,sz=first||last?14:8;
       const di=L.divIcon({html:`<div style="background:${col};border:2.5px solid #fff;border-radius:50%;width:${sz}px;height:${sz}px;box-shadow:0 0 4px rgba(0,0,0,0.5);"></div>`,className:'',iconSize:[sz,sz],iconAnchor:[sz/2,sz/2]});
       const lbl=`WP${String(i+1).padStart(2,'0')}${wp.name?' '+wp.name:''}`;
-      const li=L.divIcon({html:`<div style="color:#fff;font-size:10px;font-weight:700;font-family:monospace;white-space:nowrap;text-shadow:1px 1px 2px #000,-1px -1px 2px #000;pointer-events:none;">${lbl}</div>`,className:'',iconSize:[0,0],iconAnchor:[-4,-sz/2-2]});
       const mk=L.marker([wp.lat,wp.lon],{icon:di}).bindPopup(`<div style="font-size:13px;min-width:150px"><b style="color:${col}">${lbl}</b><br/>${toDMS(wp.lat,true)}<br/>${toDMS(wp.lon,false)}${i>0?`<hr style="margin:4px 0"/>Leg ${i}: ${brg(wps[i-1].lat,wps[i-1].lon,wp.lat,wp.lon).toFixed(1)}°T · ${distNM(wps[i-1].lat,wps[i-1].lon,wp.lat,wp.lon).toFixed(1)} NM`:''}</div>`).addTo(m);
-      lrs.routeMarkers.push(mk,L.marker([wp.lat,wp.lon],{icon:li,interactive:false,zIndexOffset:200}).addTo(m));
+      lrs.routeMarkers.push(mk);
+      if(showLabels){
+        const li=L.divIcon({html:`<div style="color:#fff;font-size:10px;font-weight:700;font-family:monospace;white-space:nowrap;text-shadow:1px 1px 2px #000,-1px -1px 2px #000;pointer-events:none;">${lbl}</div>`,className:'',iconSize:[0,0],iconAnchor:[-4,-sz/2-2]});
+        lrs.routeMarkers.push(L.marker([wp.lat,wp.lon],{icon:li,interactive:false,zIndexOffset:200}).addTo(m));
+      }
     });
-    for(let i=0;i<wps.length-1;i++){
-      const mid=[(wps[i].lat+wps[i+1].lat)/2,(wps[i].lon+wps[i+1].lon)/2];
-      const bd=brg(wps[i].lat,wps[i].lon,wps[i+1].lat,wps[i+1].lon),dn=distNM(wps[i].lat,wps[i].lon,wps[i+1].lat,wps[i+1].lon);
-      const li=L.divIcon({html:`<div style="background:rgba(0,0,0,0.65);color:#FFD700;font-size:10px;font-weight:600;font-family:monospace;white-space:nowrap;padding:1px 4px;border-radius:3px;pointer-events:none;">${bd.toFixed(0)}°T · ${dn.toFixed(1)} NM</div>`,className:'',iconSize:[0,0],iconAnchor:[-4,8]});
-      lrs.routeMarkers.push(L.marker(mid,{icon:li,interactive:false,zIndexOffset:100}).addTo(m));
+    if(showLabels){
+      for(let i=0;i<wps.length-1;i++){
+        const mid=[(wps[i].lat+wps[i+1].lat)/2,(wps[i].lon+wps[i+1].lon)/2];
+        const bd=brg(wps[i].lat,wps[i].lon,wps[i+1].lat,wps[i+1].lon),dn=distNM(wps[i].lat,wps[i].lon,wps[i+1].lat,wps[i+1].lon);
+        const li=L.divIcon({html:`<div style="background:rgba(0,0,0,0.65);color:#FFD700;font-size:10px;font-weight:600;font-family:monospace;white-space:nowrap;padding:1px 4px;border-radius:3px;pointer-events:none;">${bd.toFixed(0)}°T · ${dn.toFixed(1)} NM</div>`,className:'',iconSize:[0,0],iconAnchor:[-4,8]});
+        lrs.routeMarkers.push(L.marker(mid,{icon:li,interactive:false,zIndexOffset:100}).addTo(m));
+      }
     }
     if(wps.length>=2){
       const X=xtdNM;
@@ -673,7 +682,7 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
       lrs.xtdPort=portLines;lrs.xtdStbd=stbdLines;lrs.xtdFill=fillPolys;
     }
     if(activeRoute?.name!==prevRouteNameRef.current){prevRouteNameRef.current=activeRoute?.name||null;try{m.fitBounds(lrs.route.getBounds(),{padding:[60,60]});}catch{}}
-  },[activeRoute,mapReady,colors,xtdNM]);
+  },[activeRoute,mapReady,colors,xtdNM,routeLabelZoomBand]);
 
   // ETA
   // ETA — throttled, only recalculate when position meaningfully changes
@@ -736,7 +745,11 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
       if(typeof L.Map.prototype.setBearing==='function'){try{opts.rotate=true;opts.rotateControl=false;}catch{}}
       leafRef.current=L.map(mapRef.current,opts);
       L.control.scale({position:'bottomleft',imperial:true,metric:true,maxWidth:120}).addTo(leafRef.current);
-      leafRef.current.on('zoomend',()=>setMapZoom(leafRef.current.getZoom()));
+      leafRef.current.on('zoomend',()=>{
+        const z=leafRef.current.getZoom();
+        setMapZoom(z);
+        setRouteLabelZoomBand(prev=>{const band=z>=8?'in':'out';return prev===band?prev:band;});
+      });
       baseTileRef.current=L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{subdomains:'abcd',attribution:'© CARTO'}).addTo(leafRef.current);
       seamarkRef.current=L.tileLayer('https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png',{opacity:0.55,maxZoom:18,attribution:'© OpenSeaMap'}).addTo(leafRef.current);
       leafRef.current.on('click',e=>{
@@ -789,7 +802,48 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
     if(guardZoneOn&&livePosRef.current){const pos=livePosRef.current;layersRef.current.guardZone=L.circle([pos.lat,pos.lon],{radius:guardZoneRadiusNM*1852,color:guardZoneAlarm?'#FF2020':'#FF6B35',fillColor:guardZoneAlarm?'#FF2020':'#FF6B35',fillOpacity:0.04,weight:2,dashArray:'10 5'}).addTo(m);}
   },[guardZoneOn,guardZoneRadiusNM,guardZoneAlarm,livePos,mapReady]);
 
-  const fetchWeather=async(lat,lon)=>{if(weatherLoading)return;setWeatherLoading(true);try{const res=await fetch(`https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&units=metric&appid=dc9f59e2df05e49c03bc4aaacbb6d27a`);if(res.ok){const d=await res.json();setWeatherData({temp:d.main?.temp,desc:d.weather?.[0]?.description||'',windSpd:((d.wind?.speed||0)*1.94384).toFixed(1),windDir:d.wind?.deg||0,humidity:d.main?.humidity,pressure:d.main?.pressure,visibility:(d.visibility||0)/1000,city:d.name||''});setShowWeather(true);}else notify('Weather: no data','error');}catch{notify('Weather fetch failed','error');}setWeatherLoading(false);};
+  const fetchWeather=async(lat,lon)=>{
+    if(weatherLoading)return;
+    setWeatherLoading(true);
+    try{
+      // Open-Meteo — free, no API key required, no rate limits for reasonable use
+      const res=await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,wind_speed_10m,wind_direction_10m,weather_code,surface_pressure,visibility&wind_speed_unit=kn`);
+      if(res.ok){
+        const d=await res.json();
+        const cur=d.current||{};
+        const WEATHER_CODES={0:'Clear sky',1:'Mainly clear',2:'Partly cloudy',3:'Overcast',45:'Fog',48:'Fog',51:'Light drizzle',53:'Drizzle',55:'Dense drizzle',61:'Light rain',63:'Rain',65:'Heavy rain',71:'Light snow',73:'Snow',75:'Heavy snow',80:'Rain showers',81:'Rain showers',82:'Violent rain showers',95:'Thunderstorm',96:'Thunderstorm w/ hail',99:'Thunderstorm w/ hail'};
+        setWeatherData({
+          temp:cur.temperature_2m,
+          desc:WEATHER_CODES[cur.weather_code]||'',
+          windSpd:(cur.wind_speed_10m||0).toFixed(1),
+          windDir:cur.wind_direction_10m||0,
+          humidity:cur.relative_humidity_2m,
+          pressure:cur.surface_pressure?Math.round(cur.surface_pressure):'—',
+          visibility:cur.visibility?(cur.visibility/1000):null,
+          city:''
+        });
+        setShowWeather(true);
+        setWeatherLoading(false);
+        return;
+      }
+      throw new Error(`Open-Meteo HTTP ${res.status}`);
+    }catch(e1){
+      // Fallback to OpenWeatherMap if Open-Meteo somehow fails
+      try{
+        const res2=await fetch(`https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&units=metric&appid=dc9f59e2df05e49c03bc4aaacbb6d27a`);
+        if(res2.ok){
+          const d=await res2.json();
+          setWeatherData({temp:d.main?.temp,desc:d.weather?.[0]?.description||'',windSpd:((d.wind?.speed||0)*1.94384).toFixed(1),windDir:d.wind?.deg||0,humidity:d.main?.humidity,pressure:d.main?.pressure,visibility:(d.visibility||0)/1000,city:d.name||''});
+          setShowWeather(true);
+        } else {
+          notify(`Weather unavailable (${e1.message})`,'error');
+        }
+      }catch(e2){
+        notify(`Weather fetch failed: ${e1.message}`,'error');
+      }
+    }
+    setWeatherLoading(false);
+  };
   useEffect(()=>{if(!portSearch.trim()||portSearch.length<2){setPortSearchResults([]);return;}const q=portSearch.toLowerCase();setPortSearchResults((portsDb||[]).filter(p=>(p.name||'').toLowerCase().includes(q)||(p.country||'').toLowerCase().includes(q)).slice(0,8));},[portSearch,portsDb]);
   const exportTrack=()=>{const pts=pastTrackRef.current;if(!pts||pts.length<2){notify('No track','error');return;}const wpts=pts.map(p=>`    <trkpt lat="${p.lat.toFixed(6)}" lon="${p.lon.toFixed(6)}"><time>${new Date(p.t).toISOString()}</time></trkpt>`).join('\n');const gpx=`<?xml version="1.0"?>\n<gpx version="1.1" creator="NavisphereX">\n  <trk><name>Track ${new Date().toISOString().slice(0,10)}</name>\n  <trkseg>\n${wpts}\n  </trkseg></trk>\n</gpx>`;const blob=new Blob([gpx],{type:'application/gpx+xml'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`track_${new Date().toISOString().slice(0,10)}.gpx`;a.click();URL.revokeObjectURL(a.href);notify('✓ Track exported','error');};
   const anchorWatchCircleNM=()=>(anchorShipLengthM+anchorShackles*27.5+30)/1852;
