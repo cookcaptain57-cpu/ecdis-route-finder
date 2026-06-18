@@ -280,7 +280,7 @@ export default function App() {
   const notify  = (msg, type = 'success') => setNotif({ msg, type, key: Date.now() });
 
   // ── FIX: 'info' and 'welfare' are public tabs ──
-  const PUBLIC_TABS = new Set(['home', 'login', 'info', 'welfare']);
+  const PUBLIC_TABS = new Set(['home', 'login', 'info']);
 
   const applyPortData = (d3) => {
     if (!Array.isArray(d3) || d3.length === 0) return;
@@ -736,7 +736,7 @@ export default function App() {
             {tab==='knots'       && <KnotsRopesMooringPage />}
             {tab==='navbridge'   && <NavigationBridgePage />}
             {/* ── FIX: Pass user and notify to CrewWelfarePage ── */}
-            {tab==='welfare'     && <CrewWelfarePage user={user} notify={notify} />}
+            {tab==='welfare'     && user && <CrewWelfarePage user={user} notify={notify} />}
             {tab==='crewjourney' && <CrewJourneyPage user={user} userProfile={userProfile} notify={notify} />}
             {tab==='portshore'   && <PortShorePage user={user} onNavigate={switchTab} />}
             {tab==='seadiary'    && user && <SeaDiaryPage user={user} notify={notify} portsDb={portsDb} />}
