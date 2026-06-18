@@ -146,6 +146,7 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
   const depthCheckOnRef=useRef(false),contoursRef=useRef({shallow:10,safety:20,deep:200,draft:6});
   const aisRangeRef=useRef(0),aisSourceRef=useRef('internet');
   const prevRouteNameRef=useRef(null),indonesiaEncLayerRef=useRef(null);
+  const scsEncLayerRef=useRef(null);
   // ROT tracking — separate refs per source to avoid interference
   const prevHdgRef=useRef(null),prevHdgTimeRef=useRef(null);
   const spPrevHdgRef=useRef(null),spPrevHdgTimeRef=useRef(null);
@@ -285,7 +286,57 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
   const delRoute=n=>{setSavedRoutes(prev=>{const u=prev.filter(r=>r.name!==n);localStorage.setItem('nav_savedRoutes',JSON.stringify(u));return u;});};
 
   const loadIndonesiaEnc=useCallback(async()=>{if(!leafRef.current||!window.L||indonesiaEncLayerRef.current)return;notify('⏳ Loading Indonesia ENC…','error');try{const res=await fetch(INDONESIA_ENC_URL);if(!res.ok)throw new Error(`HTTP ${res.status}`);const geojson=await res.json();const L=window.L,m=leafRef.current;if(!m.getPane('indonesiaPane')){const cp=m.createPane('indonesiaPane');cp.style.zIndex='445';cp.style.pointerEvents='none';}const depthOnly={...geojson,features:(geojson.features||[]).filter(f=>['depth_area','depth_contour','sounding'].includes(f.properties?.type||f.properties?.featureType||''))};const layer=L.geoJSON(depthOnly,{pane:'indonesiaPane',style:ft=>{const t=ft.properties?.type||ft.properties?.featureType||'';if(t==='depth_area')return{color:'#0050AA',weight:0,fillColor:'#AADDFF',fillOpacity:0.18};if(t==='depth_contour')return{color:'#0050AA',weight:0.8,opacity:0.6,dashArray:'3 3'};return{opacity:0,weight:0,color:'transparent',fillOpacity:0};},pointToLayer:(ft,ll)=>{const p=ft.properties;if(p.type==='sounding'||p.featureType==='sounding')return L.marker(ll,{icon:L.divIcon({html:`<div style="color:#00D4FF;font-size:9px;font-weight:700;font-family:monospace;white-space:nowrap;text-shadow:1px 1px 2px #000;pointer-events:none;">${p.depth!=null?p.depth:''}</div>`,className:'',iconSize:[0,0],iconAnchor:[8,6]}),interactive:false});return L.circleMarker(ll,{radius:3,color:'#00BFFF',fillOpacity:0.6,weight:1});}}).addTo(m);indonesiaEncLayerRef.current=layer;notify(`✓ Indonesia ENC (${geojson.features?.length||0} features)`,'error');}catch(e){notify(`Indonesia ENC: ${e.message}`,'error');}},[]);
-  const removeIndonesiaEnc=useCallback(()=>{if(indonesiaEncLayerRef.current&&leafRef.current){try{leafRef.current.removeLayer(indonesiaEncLayerRef.current);}catch{}indonesiaEncLayerRef.current=null;}},[]);
+  const removeSCSEnc=useCallback(()=>{if(scsEncLayerRef.current&&leafRef.current){try{leafRef.current.removeLayer(scsEncLayerRef.current);}catch{}scsEncLayerRef.current=null;}},[]);
+
+  const loadSCSEnc=useCallback(async()=>{
+    if(!leafRef.current||!window.L||scsEncLayerRef.current)return;
+    notify('⏳ Loading South China Sea ENC…','error');
+    try{
+      const res=await fetch('https://raw.githubusercontent.com/cookcaptain57-cpu/ecdis-route-finder/main/public/EA200004_SCS.geojson');
+      if(!res.ok)throw new Error(`HTTP ${res.status}`);
+      const geojson=await res.json();
+      const L=window.L,m=leafRef.current;
+      if(!m.getPane('scsPane')){const cp=m.createPane('scsPane');cp.style.zIndex='444';cp.style.pointerEvents='none';}
+      const layer=L.geoJSON(geojson,{
+        pane:'scsPane',
+        style:ft=>{
+          const t=ft.properties?.type||'';
+          if(t==='depth_area'||t==='Depth area (meta)')return{color:'#0066CC',weight:0,fillColor:'#99CCFF',fillOpacity:0.15};
+          if(t==='depth_contour')return{color:'#0055AA',weight:1,opacity:0.6,dashArray:'4 3',fill:false};
+          if(t==='land'||t==='land_elevation'||t==='land_region'||t==='Magnetic variation')return{color:'#556B2F',weight:0.5,fillColor:'#8FBC8F',fillOpacity:0.3};
+          if(t.includes('tss')||t.includes('TSS')||t==='Traffic separation line'||t==='Traffic separation zone')return{color:'#FF6600',weight:1.5,opacity:0.8,dashArray:'6 3',fill:false};
+          if(t==='fairway'||t==='Fairway'||t==='recommended_track'||t==='two_way_route')return{color:'#9966FF',weight:1.5,opacity:0.7,dashArray:'8 4',fill:false};
+          if(t==='ferry_route'||t==='Ferry route')return{color:'#00AAFF',weight:1,opacity:0.5,dashArray:'4 4',fill:false};
+          if(t==='anchorage')return{color:'#FFD700',weight:1,fillColor:'#FFD700',fillOpacity:0.1};
+          if(t==='precautionary'||t==='caution')return{color:'#FF9500',weight:1.5,fillColor:'#FF9500',fillOpacity:0.08};
+          if(t==='obstruction'||t==='rock'||t==='wreck')return{color:'#FF2020',weight:1,fillColor:'#FF2020',fillOpacity:0.2};
+          if(t==='coverage')return{color:'rgba(0,212,255,0.4)',weight:1,dashArray:'4 4',fill:false};
+          return{color:'#00D4FF',weight:0.8,opacity:0.5,fill:false};
+        },
+        pointToLayer:(ft,ll)=>{
+          const p=ft.properties;const t=p.type||'';
+          if(t==='sounding'){
+            const d=p.depth;
+            const col=d<5?'#FF2020':d<10?'#FF9500':d<20?'#FFD700':'#00D4FF';
+            return L.marker(ll,{icon:L.divIcon({html:`<div style="color:${col};font-size:9px;font-weight:700;font-family:monospace;white-space:nowrap;text-shadow:1px 1px 2px #000;pointer-events:none;">${d!=null?d:''}</div>`,className:'',iconSize:[0,0],iconAnchor:[8,6]}),interactive:false});
+          }
+          if(t==='light'||t==='landmark')return L.circleMarker(ll,{radius:4,color:'#FFD700',fillOpacity:0.9,weight:1}).bindPopup(`<b>${p.name||t}</b>`);
+          if(t==='buoy_cardinal'||t==='buoy_lateral'||t.includes('buoy'))return L.circleMarker(ll,{radius:3,color:'#FF6B35',fillOpacity:0.85,weight:1}).bindPopup(`<b>${p.name||t}</b>`);
+          return L.circleMarker(ll,{radius:3,color:'#00D4FF',fillOpacity:0.7,weight:1}).bindPopup(`<b>${p.name||t}</b>`);
+        },
+        onEachFeature:(ft,l)=>{
+          const p=ft.properties;
+          if(p.name&&p.type!=='sounding'){
+            const info=`<b>${p.name}</b><br/><small>${p.type}</small>${p.drval1?`<br/>Depth: ${p.drval1}–${p.drval2||'?'}m`:''}`;
+            l.bindPopup(info);
+          }
+        }
+      }).addTo(m);
+      scsEncLayerRef.current=layer;
+      const count=geojson.features?.length||0;
+      notify(`✓ SCS ENC loaded (${count} features — depth contours, TSS, fairways)`,'error');
+    }catch(e){notify(`SCS ENC: ${e.message}`,'error');}
+  },[]);
 
   const loadChartLayer=(ov)=>{if(!ov||!leafRef.current||!window.L)return;const L=window.L,m=leafRef.current;if(!m.getPane('chartPane')){const cp=m.createPane('chartPane');cp.style.zIndex='450';cp.style.pointerEvents='none';}const cc=colorsRef.current.chart||'#FF2020';const layer=L.geoJSON(ov.data,{pane:'chartPane',style:ft=>{const p=ft.properties,dg=p.checkDanger,da=p.lineType===2?'8 5':p.lineType===3?'3 5':null;return{color:dg?'#FF2020':cc,weight:3,opacity:1,dashArray:da,fillColor:dg?'#FF2020':cc,fillOpacity:0.12};},pointToLayer:(ft,ll)=>{const p=ft.properties;if(p.featureType==='label')return L.marker(ll,{icon:L.divIcon({html:`<div style="background:rgba(0,0,20,0.8);color:${cc};font-size:11px;font-weight:700;white-space:nowrap;font-family:monospace;padding:1px 4px;border-radius:3px;pointer-events:none;">${p.labelText||''}</div>`,className:'',iconAnchor:[0,8]}),interactive:false,zIndexOffset:300});return L.circleMarker(ll,{radius:6,color:cc,fillOpacity:0.85,weight:2}).bindPopup(`<b>${p.name||''}</b>`);},onEachFeature:(ft,l)=>{if(ft.properties.name&&ft.properties.featureType!=='label')l.bindPopup(`<b>${ft.properties.name}</b>`);}}).addTo(m);layer.bringToFront();chartLayersRef.current.push({id:ov.name,layer});try{const b=layer.getBounds();if(b.isValid())m.fitBounds(b,{padding:[40,40]});}catch{}};
 
@@ -508,13 +559,23 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
   useEffect(()=>{
     if(!mapReady||!leafRef.current||!window.L)return;
     const L=window.L,m=leafRef.current;
-    [baseTileRef,esriBaseRef,emodnetTileRef,gebcoWmsRef,gebcoRefTile,encTileRef,seamarkRef].forEach(r=>{if(r.current){try{m.removeLayer(r.current);}catch{}r.current=null;}});
+    // Only remove base tile on mapMode change — don't touch depth layers
+    if(baseTileRef.current){try{m.removeLayer(baseTileRef.current);}catch{}baseTileRef.current=null;}
     const TILES={night:'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',day:'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',dusk:'https://{s}.basemaps.cartocdn.com/rastertiles/voyager_nolabels/{z}/{x}/{y}{r}.png'};
     baseTileRef.current=L.tileLayer(TILES[mapMode]||TILES.night,{subdomains:'abcd',maxZoom:20,zIndex:1,attribution:'© CARTO'}).addTo(m);
+  },[mapMode,mapReady]);
+
+  useEffect(()=>{
+    if(!mapReady||!leafRef.current||!window.L)return;
+    const L=window.L,m=leafRef.current;
+    // Only remove depth/ENC layers — NOT base tile or seamark
+    [esriBaseRef,emodnetTileRef,gebcoWmsRef,gebcoRefTile,encTileRef].forEach(r=>{if(r.current){try{m.removeLayer(r.current);}catch{}r.current=null;}});
     const ds=depthSources,hasAny=ds.size>0;
-    if(ds.has('usa')){esriBaseRef.current=L.tileLayer('https://server.arcgisonline.com/arcgis/rest/services/Ocean/World_Ocean_Base/MapServer/tile/{z}/{y}/{x}',{maxZoom:13,opacity:0.7,zIndex:2,attribution:'© Esri'}).addTo(m);try{encTileRef.current=L.tileLayer.wms('https://gis.charttools.noaa.gov/arcgis/rest/services/MCS/ENCOnline/MapServer/exts/MaritimeChartService/WMSServer',{layers:'0,1,2,3,4,5,6,7',format:'image/png',transparent:true,version:'1.3.0',opacity:0.9,zIndex:6,attribution:'© NOAA'}).addTo(m);}catch{}}
-    if(ds.has('europe')){try{emodnetTileRef.current=L.tileLayer.wms('https://ows.emodnet-bathymetry.eu/wms',{layers:'emodnet:mean_atlas_land,emodnet:mean_rainbowcolour',format:'image/png',transparent:true,version:'1.3.0',opacity:0.6,zIndex:3,attribution:'© EMODnet'}).addTo(m);}catch{}}
-    if(ds.has('global')){try{gebcoWmsRef.current=L.tileLayer.wms('https://wms.gebco.net/mapserv',{layers:'GEBCO_LATEST_2',format:'image/png',transparent:false,version:'1.3.0',opacity:0.5,zIndex:4,attribution:'© GEBCO 2024'}).addTo(m);}catch{}}
+    // Update seamark opacity without recreating it
+    if(seamarkRef.current)try{seamarkRef.current.setOpacity(hasAny?0.9:0.55);}catch{}
+    if(ds.has('usa')){esriBaseRef.current=L.tileLayer('https://server.arcgisonline.com/arcgis/rest/services/Ocean/World_Ocean_Base/MapServer/tile/{z}/{y}/{x}',{maxZoom:13,opacity:0.55,zIndex:2,attribution:'© Esri'}).addTo(m);try{encTileRef.current=L.tileLayer.wms('https://gis.charttools.noaa.gov/arcgis/rest/services/MCS/ENCOnline/MapServer/exts/MaritimeChartService/WMSServer',{layers:'0,1,2,3,4,5,6,7',format:'image/png',transparent:true,version:'1.3.0',opacity:0.9,zIndex:6,attribution:'© NOAA'}).addTo(m);}catch(e){console.warn('[NOAA ENC]',e);}}
+    if(ds.has('europe')){try{emodnetTileRef.current=L.tileLayer.wms('https://ows.emodnet-bathymetry.eu/wms',{layers:'mean_atlas_land,mean_rainbowcolour',format:'image/png',transparent:true,version:'1.3.0',opacity:0.65,zIndex:3,attribution:'© EMODnet'}).addTo(m);}catch{try{emodnetTileRef.current=L.tileLayer.wms('https://ows.emodnet-bathymetry.eu/wms',{layers:'emodnet:mean_depth_corrected',format:'image/png',transparent:true,version:'1.1.1',opacity:0.6,zIndex:3,attribution:'© EMODnet'}).addTo(m);}catch(e){console.warn('[EMODnet]',e);}}}
+    if(ds.has('global')){try{gebcoWmsRef.current=L.tileLayer.wms('https://wms.gebco.net/mapserv',{layers:'GEBCO_LATEST_2',format:'image/png',transparent:false,version:'1.3.0',opacity:0.5,zIndex:4,attribution:'© GEBCO 2024'}).addTo(m);}catch(e){console.warn('[GEBCO]',e);}}
     if(ds.has('soundings')){gebcoRefTile.current=L.tileLayer('https://server.arcgisonline.com/arcgis/rest/services/Ocean/World_Ocean_Reference/MapServer/tile/{z}/{y}/{x}',{maxZoom:18,opacity:1.0,zIndex:5,attribution:'© Esri'}).addTo(m);}
     if(ds.has('norway')){try{L.tileLayer.wms('https://wms.geonorge.no/skwms1/wms.dybdedata2',{layers:'dybdedata2,dybdedata2_25m',format:'image/png',transparent:true,version:'1.3.0',opacity:0.65,zIndex:7,attribution:'© Kartverket'}).addTo(m);}catch{}}
     if(ds.has('australia')){try{L.tileLayer.wms('https://www.ga.gov.au/geoserver/marine/wms',{layers:'marine:bathymetry',format:'image/png',transparent:true,version:'1.3.0',opacity:0.6,zIndex:7,attribution:'© Geoscience Australia'}).addTo(m);}catch{}}
@@ -524,10 +585,8 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
     if(ds.has('ireland')){try{L.tileLayer.wms('https://atlas.marine.ie/arcgis/services/Bathymetry/MapServer/WMSServer',{layers:'0',format:'image/png',transparent:true,version:'1.3.0',opacity:0.6,zIndex:7,attribution:'© INFOMAR'}).addTo(m);}catch{}}
     if(ds.has('osm_depth')){try{L.tileLayer('https://tiles.openseamap.org/depth/{z}/{x}/{y}.png',{maxZoom:18,opacity:0.8,zIndex:8,attribution:'© OpenSeaMap'}).addTo(m);}catch{}}
     if(ds.has('china')||ds.has('indonesia')){loadIndonesiaEnc();}else{removeIndonesiaEnc();}
-    // Additional regional ENC overlays using OpenSeaMap tiles (work globally)
-    if(ds.has('japan')){try{L.tileLayer('https://map.openseamap.org/chart/seamark/{z}/{x}/{y}.png',{maxZoom:17,opacity:0.7,zIndex:8,attribution:'© OpenSeaMap'}).addTo(m);}catch{}}
-    seamarkRef.current=L.tileLayer('https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png',{opacity:hasAny?0.9:0.55,maxZoom:18,zIndex:10,attribution:'© OpenSeaMap'}).addTo(m);
-  },[depthSources,mapMode,mapReady]);
+    if(ds.has('scs')){loadSCSEnc();}else{removeSCSEnc();}
+  },[depthSources,mapReady]);
 
   useEffect(()=>{rbModeRef.current=rbMode;},[rbMode]);
   useEffect(()=>{vectorMinsRef.current=vectorMins;},[vectorMins]);
@@ -995,6 +1054,8 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
           {activePanel==='enc'&&(<div style={{display:'flex',flexDirection:'column',gap:5}}>
             <div style={{color:S.dm,fontSize:S.lb,marginBottom:2}}>ENC DEPTH LAYERS</div>
             {DEPTH_SOURCES.map(d=>{const on=depthSources.has(d.id);return(<button key={d.id} onClick={()=>toggleDepth(d.id)} title={d.desc} style={{display:'flex',alignItems:'center',gap:5,background:on?'rgba(0,212,255,0.15)':'transparent',border:`1px solid ${on?S.cy:S.vd}`,color:on?S.cy:S.dm,borderRadius:5,padding:'4px 7px',fontSize:'0.65rem',cursor:'pointer',textAlign:'left',width:'100%'}}><span>{d.emoji}</span><span style={{flex:1}}>{d.label}</span>{on&&<span style={{color:S.cy,fontSize:'0.65rem'}}>✓</span>}</button>);})}
+            {/* South China Sea ENC — added directly, not in shared DEPTH_SOURCES constant */}
+            <button onClick={()=>toggleDepth('scs')} title="S-57 ENC: South China Sea / Indonesia / Malacca Strait — depth contours, soundings, TSS, fairways" style={{display:'flex',alignItems:'center',gap:5,background:depthSources.has('scs')?'rgba(0,212,255,0.15)':'transparent',border:`1px solid ${depthSources.has('scs')?S.cy:S.vd}`,color:depthSources.has('scs')?S.cy:S.dm,borderRadius:5,padding:'4px 7px',fontSize:'0.65rem',cursor:'pointer',textAlign:'left',width:'100%'}}><span>🇨🇳</span><span style={{flex:1}}>South China Sea ENC</span>{depthSources.has('scs')&&<span style={{color:S.cy,fontSize:'0.65rem'}}>✓</span>}</button>
             {depthSources.size>0&&<button onClick={()=>setDepthSources(new Set())} style={{background:'transparent',border:`1px solid rgba(255,71,87,0.4)`,color:S.rd,borderRadius:5,padding:'4px',fontSize:S.xs,cursor:'pointer'}}>⭕ Clear All</button>}
           </div>)}
 
