@@ -241,7 +241,12 @@ const S = `
 `;
 
 export default function App() {
-  const [tab, setTab]                     = useState('home');
+  const [tab, setTab]                     = useState(() => {
+    // Clear any stale navigation state on fresh app load
+    sessionStorage.removeItem('intendedTab');
+    sessionStorage.removeItem('info_section');
+    return 'home';
+  });
   const [searchQ, setSearchQ]             = useState('');
   const [notif, setNotif]                 = useState(null);
   const [menuOpen, setMenuOpen]           = useState(false);
@@ -389,14 +394,8 @@ export default function App() {
   useEffect(() => { loadAppData(); }, []);
   useEffect(() => { if (!authChecked) return; if (sheetRoutes.length === 0 || portsDb.length === 0) loadAppData(); }, [authChecked]);
 
-  // ── FIX: Don't redirect to 'info' as intendedTab — it's now public ──
-  useEffect(() => {
-    if (user && tab === 'login') {
-      const i = sessionStorage.getItem('intendedTab');
-      sessionStorage.removeItem('intendedTab');
-      setTab((i && i !== 'info') ? i : 'home');
-    }
-  }, [user]);
+  // Redirect after login — handled entirely by onLogin callback in LoginPage render
+  // No useEffect needed here — avoids double-redirect conflicts
 
   useEffect(() => {
     setPersistence(auth, browserLocalPersistence).catch(() => {});
