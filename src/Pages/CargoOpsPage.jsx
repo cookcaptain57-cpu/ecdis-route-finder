@@ -718,10 +718,6 @@ const STATUS_LABEL = {
   hold:       'ON HOLD',
 };
 
-const SectionLabel = ({ text, color }) => (
-  <div style={{ color:color||S.dm, fontSize:S.lb, letterSpacing:0.8, fontWeight:700, textTransform:'uppercase', marginBottom:5 }}>{text}</div>
-);
-
 const ProgressBar = ({ pct, color, height=6 }) => (
   <div style={{ background:S.bg3, borderRadius:99, height, overflow:'hidden', width:'100%' }}>
     <div style={{ background:color||ACC, height:'100%', width:`${Math.min(100,pct||0)}%`, borderRadius:99, transition:'width 0.4s' }} />
