@@ -52,7 +52,6 @@ const addToHistory = (filename) => {
     const today = getTodayKey();
     const list  = data[today] || [];
     if (!list.includes(filename)) list.unshift(filename);
-    // Keep only last 7 days
     const keys = Object.keys(data).sort().slice(-7);
     const pruned = {};
     keys.forEach(k => pruned[k] = data[k]);
@@ -67,12 +66,10 @@ const normalizeStr = (str) =>
 
 // ── Build Google Drive direct download URL ─────────────────────────────────
 const buildDriveUrl = (row) => {
-  // Prefer Fileid column (most reliable)
   const fileId = row['Fileid'] || row['fileId'] || row['FileID'];
   if (fileId && fileId.trim()) {
     return `https://drive.google.com/uc?export=download&id=${fileId.trim()}&confirm=t`;
   }
-  // Fallback: extract from Fileurl
   const url = row['Fileurl'] || row['fileUrl'] || row['File URL'] || row['Drive Link'] ||
     Object.values(row).find(v => typeof v === 'string' && v.includes('drive.google'));
   if (!url) return null;
@@ -81,75 +78,31 @@ const buildDriveUrl = (row) => {
   return url;
 };
 
-// ── Fetch with retry (1 retry on failure) ─────────────────────────────────
-const fetchWithRetry = async (url, opts = {}, retries = 1) => {
-  try {
-    const res = await fetch(url, opts);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return res;
-  } catch (err) {
-    if (retries > 0) {
-      await new Promise(r => setTimeout(r, 1200));
-      return fetchWithRetry(url, opts, retries - 1);
-    }
-    throw err;
-  }
-};
+// ── Silent iframe download — no CORS, no Drive page jump ──────────────────
+// Creates a hidden iframe pointed at the export URL.
+// The browser's download manager intercepts the content-disposition header
+// and saves the file directly — zero page navigation, zero Drive viewer.
+const triggerIframeDownload = (driveUrl) => {
+  return new Promise((resolve) => {
+    // Remove any stale iframe from a previous download
+    const old = document.getElementById('__mnav_dl_frame');
+    if (old) old.remove();
 
-// ── Large-file Drive virus-scan bypass ────────────────────────────────────
-// Drive returns an HTML confirmation page for files >100MB.
-// We detect this and extract the confirm token to re-fetch.
-const fetchDriveFile = async (driveUrl, onProgress) => {
-  const res1 = await fetchWithRetry(driveUrl);
-  const contentType = res1.headers.get('content-type') || '';
+    const iframe = document.createElement('iframe');
+    iframe.id = '__mnav_dl_frame';
+    iframe.style.display = 'none';
+    iframe.style.position = 'fixed';
+    iframe.style.top = '-9999px';
+    iframe.src = driveUrl;
+    document.body.appendChild(iframe);
 
-  // If Drive returned HTML → it's the virus-scan warning page
-  if (contentType.includes('text/html')) {
-    const html = await res1.text();
-    // Extract confirm token from the warning page form
-    const tokenMatch = html.match(/confirm=([0-9A-Za-z_\-]+)/);
-    const uuidMatch  = html.match(/uuid=([0-9A-Za-z_\-]+)/);
-    if (tokenMatch) {
-      const confirmUrl = `${driveUrl}&confirm=${tokenMatch[1]}${uuidMatch ? `&uuid=${uuidMatch[1]}` : ''}`;
-      const res2 = await fetchWithRetry(confirmUrl);
-      return await readWithProgress(res2, onProgress);
-    }
-    throw new Error('Drive blocked: virus scan page, no token found');
-  }
-
-  return await readWithProgress(res1, onProgress);
-};
-
-// ── Stream response with progress tracking ────────────────────────────────
-const readWithProgress = async (response, onProgress) => {
-  const contentLength = response.headers.get('content-length');
-  const total = contentLength ? parseInt(contentLength, 10) : 0;
-
-  if (!response.body || total === 0) {
-    // No streaming support or unknown size — just return blob
-    onProgress && onProgress(50); // show 50% for indeterminate
-    const blob = await response.blob();
-    onProgress && onProgress(100);
-    return { blob, size: blob.size };
-  }
-
-  const reader = response.body.getReader();
-  const chunks = [];
-  let received = 0;
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    chunks.push(value);
-    received += value.length;
-    if (onProgress && total > 0) {
-      onProgress(Math.round((received / total) * 100));
-    }
-  }
-
-  const blob = new Blob(chunks);
-  onProgress && onProgress(100);
-  return { blob, size: received };
+    // Give the browser time to start the download before resolving.
+    // We can't listen to iframe load reliably for file downloads,
+    // so we resolve after a safe delay.
+    setTimeout(() => {
+      resolve();
+    }, 3500);
+  });
 };
 
 // ── Format file size ───────────────────────────────────────────────────────
@@ -166,7 +119,6 @@ const getTopPorts = (routes, n = 8) => {
   routes.forEach(r => {
     const port = (r['Portname'] || r['Port Name'] || r.portName || '').trim();
     if (port && port.length > 1) {
-      // Extract first word/city from port name
       const key = port.split(/[\s,]/)[0];
       if (key.length > 2) freq[key] = (freq[key] || 0) + 1;
     }
@@ -175,6 +127,39 @@ const getTopPorts = (routes, n = 8) => {
     .sort((a, b) => b[1] - a[1])
     .slice(0, n)
     .map(([name]) => name);
+};
+
+// ── Simulated progress bar during iframe download ─────────────────────────
+// Since iframe gives no progress events, we simulate a smooth fill
+// that completes just as the download kicks off (looks professional).
+const useSimulatedProgress = () => {
+  const [progress, setProgress] = useState(null);
+  const timerRef = useRef(null);
+
+  const startProgress = useCallback(() => {
+    setProgress(0);
+    let current = 0;
+    timerRef.current = setInterval(() => {
+      // Fast at first, slows near 90%, stops at 90% until we call complete()
+      current += current < 30 ? 8 : current < 60 ? 5 : current < 85 ? 2 : 0;
+      setProgress(Math.min(current, 90));
+    }, 150);
+  }, []);
+
+  const completeProgress = useCallback(() => {
+    clearInterval(timerRef.current);
+    setProgress(100);
+    setTimeout(() => setProgress(null), 2200);
+  }, []);
+
+  const resetProgress = useCallback(() => {
+    clearInterval(timerRef.current);
+    setProgress(null);
+  }, []);
+
+  useEffect(() => () => clearInterval(timerRef.current), []);
+
+  return { progress, startProgress, completeProgress, resetProgress };
 };
 
 // ── Progress Bar Component ─────────────────────────────────────────────────
@@ -186,14 +171,14 @@ const ProgressBar = ({ progress, filename }) => (
   }}>
     <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6, fontSize: '0.72rem' }}>
       <span style={{ color: 'var(--cyan)', fontFamily: 'monospace' }}>⬇ {filename}</span>
-      <span style={{ color: 'var(--text2)' }}>{progress < 100 ? `${progress}%` : '✅ Done!'}</span>
+      <span style={{ color: 'var(--text2)' }}>{progress < 100 ? 'Downloading…' : '✅ Done!'}</span>
     </div>
     <div style={{ height: 4, background: 'rgba(255,255,255,0.08)', borderRadius: 4, overflow: 'hidden' }}>
       <div style={{
         height: '100%', borderRadius: 4,
         background: progress < 100 ? 'var(--cyan)' : 'var(--green)',
         width: `${progress}%`,
-        transition: 'width 0.3s ease'
+        transition: 'width 0.25s ease'
       }} />
     </div>
   </div>
@@ -212,10 +197,10 @@ function RoutesPage({ searchQuery, notify, user, setTab, sheetRoutes = [], sheet
   const [showSugg, setShowSugg]     = useState(false);
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
 
-  // Download progress state
-  const [dlProgress, setDlProgress]   = useState(null); // null = hidden, 0-100 = active
+  // Download state
   const [dlFilename, setDlFilename]   = useState('');
-  const [dlLoadingId, setDlLoadingId] = useState(null); // which card is loading
+  const [dlLoadingId, setDlLoadingId] = useState(null);
+  const { progress: dlProgress, startProgress, completeProgress, resetProgress } = useSimulatedProgress();
 
   // Download history (today only, localStorage)
   const [dlHistory, setDlHistory] = useState(() => getTodayHistory());
@@ -237,16 +222,15 @@ function RoutesPage({ searchQuery, notify, user, setTab, sheetRoutes = [], sheet
     const sq = (searchQ !== undefined ? searchQ : q).trim();
     if (!sq || sq.length < 2) { setResults([]); setSearched(false); return; }
     setSearching(true); setSearched(true); setShowSugg(false);
-    // FIX 5: accent-insensitive search using normalize
     const ql = normalizeStr(sq);
     const res = sheetRoutes.filter(r => {
       const hay = normalizeStr(
         Object.values(r).filter(v => v && typeof v === 'string').join(' ')
       );
       return hay.includes(ql);
-    }); // FIX 6: no slice here — pagination handles display limit
+    });
     setResults(res);
-    setVisibleCount(PAGE_SIZE); // reset pagination on new search
+    setVisibleCount(PAGE_SIZE);
     setSearching(false);
   }, [q, sheetRoutes]);
 
@@ -274,7 +258,7 @@ function RoutesPage({ searchQuery, notify, user, setTab, sheetRoutes = [], sheet
     debounceRef.current = setTimeout(() => liveSearch(v), 200);
   };
 
-  // ── Main download handler ─────────────────────────────────────────────────
+  // ── Main download handler — iframe silent download, no Drive page jump ────
   const handleDL = async (r) => {
     if (!user) { notify('Login required to download', 'error'); setTab('login'); return; }
 
@@ -284,77 +268,49 @@ function RoutesPage({ searchQuery, notify, user, setTab, sheetRoutes = [], sheet
       return;
     }
 
-    // Get exact filename from sheet (already has extension)
     const fname = (r['Filename'] || r['File Name'] || r.fileName || 'route').trim();
-
-    // Build Drive URL using Fileid column (most reliable)
     const driveUrl = buildDriveUrl(r);
     if (!driveUrl) { notify('No download link for this file', 'error'); return; }
 
-    // Show loading state on this card
     const cardId = r['Fileid'] || r['Fileurl'] || fname;
     setDlLoadingId(cardId);
     setDlFilename(fname);
-    setDlProgress(0);
-
-    let downloadSuccess = false;
+    startProgress();
 
     try {
-      // FIX 3 + 4: fetch with large-file bypass + progress tracking
-      const { blob, size } = await fetchDriveFile(driveUrl, (pct) => {
-        setDlProgress(pct);
-      });
+      // ── FIXED: iframe silent download ──────────────────────────────────
+      // Bypasses CORS entirely. Browser download manager intercepts the
+      // content-disposition header and saves the file — no Drive page opens.
+      await triggerIframeDownload(driveUrl);
 
-      // Create object URL and trigger native download to file manager
-      const objectUrl = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = objectUrl;
-      a.download = fname; // exact filename from sheet — preserves extension
-      a.style.display = 'none';
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
+      completeProgress();
 
-      // Revoke after short delay to ensure download starts
-      setTimeout(() => URL.revokeObjectURL(objectUrl), 3000);
-
-      downloadSuccess = true;
-
-      // FIX 1: only increment count on success
       if (!isAdmin) await incrementDownloadCount(user.uid);
 
-      // FIX 9: add to local download history
       addToHistory(fname);
       setDlHistory(getTodayHistory());
 
-      const sizeStr = fmtSize(size);
       notify(
-        `✅ Saved: ${fname}${sizeStr ? ` (${sizeStr})` : ''}${isAdmin ? '' : ` — ${limit.remaining - 1} left today`}`,
+        `✅ Downloading: ${fname}${isAdmin ? '' : ` — ${limit.remaining - 1} left today`}`,
         'success'
       );
 
-      // Hide progress bar after 2s
-      setTimeout(() => { setDlProgress(null); setDlLoadingId(null); }, 2000);
-
     } catch (err) {
-      // FIX 1: do NOT increment count on failure
-      // FIX: fallback — open Drive export URL directly (Android download manager picks it up)
-      setDlProgress(null);
-      setDlLoadingId(null);
-      console.warn('Blob download failed, trying direct link:', err.message);
+      // ── FIXED fallback: anchor download WITHOUT target='_blank' ────────
+      // No target means browser handles it as a download, not navigation.
+      resetProgress();
+      console.warn('iframe download error, using anchor fallback:', err?.message);
 
       try {
-        // Last resort: open the export URL directly — browser/Android download manager handles it
         const a = document.createElement('a');
         a.href = driveUrl;
         a.download = fname;
-        a.target = '_blank';
-        a.rel = 'noopener noreferrer';
+        // NOTE: NO a.target — omitting target prevents Drive page from opening
+        a.style.display = 'none';
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
 
-        // Only count if we got this far without throwing
         if (!isAdmin) await incrementDownloadCount(user.uid);
         addToHistory(fname);
         setDlHistory(getTodayHistory());
@@ -362,6 +318,8 @@ function RoutesPage({ searchQuery, notify, user, setTab, sheetRoutes = [], sheet
       } catch {
         notify('❌ Download failed. Check your connection and try again.', 'error');
       }
+    } finally {
+      setTimeout(() => setDlLoadingId(null), 2500);
     }
   };
 
@@ -401,7 +359,7 @@ function RoutesPage({ searchQuery, notify, user, setTab, sheetRoutes = [], sheet
         </div>
       )}
 
-      {/* FIX 9: Download history panel */}
+      {/* Download history panel */}
       {dlHistory.length > 0 && (
         <div style={{ background: 'rgba(0,180,216,0.04)', border: '1px solid rgba(0,180,216,0.12)', borderRadius: 8, padding: '8px 12px', marginBottom: '0.8rem' }}>
           <div style={{ fontSize: '0.65rem', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 5 }}>
@@ -451,7 +409,7 @@ function RoutesPage({ searchQuery, notify, user, setTab, sheetRoutes = [], sheet
         )}
       </div>
 
-      {/* FIX 8: Dynamic quick-filter buttons from top ports in database */}
+      {/* Dynamic quick-filter buttons */}
       <div className="fbar" style={{ marginBottom: '0.8rem' }}>
         {(topPorts.length > 0 ? topPorts : ['Mumbai','Singapore','Dubai','Rotterdam','Colombo','Karachi','Fujairah','Shanghai']).map(p => (
           <button key={p} className={`fbtn ${q === p ? 'active' : ''}`}
@@ -487,14 +445,14 @@ function RoutesPage({ searchQuery, notify, user, setTab, sheetRoutes = [], sheet
         </div>
       )}
 
-      {/* FIX 6: paginated results with Load More */}
+      {/* Paginated results */}
       {visibleResults.length > 0 && (
         <>
           <div className="files-grid">
             {visibleResults.map((r, i) => {
-              const cardId  = r['Fileid'] || r['Fileurl'] || getName(r);
+              const cardId    = r['Fileid'] || r['Fileurl'] || getName(r);
               const isLoading = dlLoadingId === cardId;
-              const fname   = getName(r);
+              const fname     = getName(r);
               const alreadyDl = dlHistory.includes(fname);
               return (
                 <div key={i} className="file-card" style={{ opacity: isLoading ? 0.7 : 1, transition: 'opacity 0.2s' }}>
@@ -509,15 +467,14 @@ function RoutesPage({ searchQuery, notify, user, setTab, sheetRoutes = [], sheet
                   <div className="file-tags">
                     <span className="ftag tag-rtz">Route File</span>
                     <span className="ftag" style={{ background: 'rgba(0,200,100,0.07)', color: 'var(--green)', border: '1px solid rgba(0,200,100,0.2)' }}>Firebase</span>
-                    {/* FIX 9: show if already downloaded today */}
                     {alreadyDl && (
                       <span className="ftag" style={{ background: 'rgba(0,180,216,0.1)', color: 'var(--cyan)', border: '1px solid rgba(0,180,216,0.25)' }}>✓ Today</span>
                     )}
                   </div>
-                  {/* FIX 2: progress bar per card when loading */}
+                  {/* Inline progress bar for active card */}
                   {isLoading && dlProgress !== null && (
                     <div style={{ margin: '6px 0 4px', height: 3, background: 'rgba(255,255,255,0.08)', borderRadius: 3, overflow: 'hidden' }}>
-                      <div style={{ height: '100%', background: 'var(--cyan)', width: `${dlProgress}%`, transition: 'width 0.3s ease', borderRadius: 3 }} />
+                      <div style={{ height: '100%', background: 'var(--cyan)', width: `${dlProgress}%`, transition: 'width 0.25s ease', borderRadius: 3 }} />
                     </div>
                   )}
                   {user
@@ -526,11 +483,7 @@ function RoutesPage({ searchQuery, notify, user, setTab, sheetRoutes = [], sheet
                         onClick={() => handleDL(r)}
                         disabled={isLoading}
                         style={{ opacity: isLoading ? 0.6 : 1 }}>
-                        {isLoading
-                          ? dlProgress !== null && dlProgress < 100
-                            ? `⬇ ${dlProgress}%…`
-                            : '⬇ Saving…'
-                          : '⬇ Download'}
+                        {isLoading ? '⬇ Downloading…' : '⬇ Download'}
                       </button>
                     : <button className="login-req" onClick={() => setTab('login')}>🔐 Login to Download</button>
                   }
@@ -539,7 +492,7 @@ function RoutesPage({ searchQuery, notify, user, setTab, sheetRoutes = [], sheet
             })}
           </div>
 
-          {/* FIX 6: Load More button */}
+          {/* Load More button */}
           {hasMore && (
             <div style={{ textAlign: 'center', marginTop: '1rem' }}>
               <button
