@@ -1,8 +1,7 @@
 /* eslint-disable */
 // src/Pages/CrewWelfarePage.jsx
 import { useState } from "react";
-import { db } from "../firebase";
-import { getAuth } from "firebase/auth";
+import { db, auth } from "../firebase";
 import { doc, setDoc, serverTimestamp } from "firebase/firestore";
 
 // ─── tiny helpers ────────────────────────────────────────────────────────────
@@ -71,9 +70,9 @@ const S = `
   @media (max-width: 600px) { .cw-grid { grid-template-columns: 1fr; } }
 `;
 
-// ─── Firestore save helper ────────────────────────────────────────────────────
+// ─── Firestore save helper — FIX: use shared `auth` instance, not getAuth() ──
 async function saveToFirestore(toolName, data, setMsg) {
-  const user = getAuth().currentUser;
+  const user = auth.currentUser;
   if (!user) { setMsg("⚠️ Login required to save"); setTimeout(() => setMsg(""), 3000); return; }
   try {
     await setDoc(
@@ -583,11 +582,6 @@ function MentalHealthCheck() {
   );
 }
 
-const REST_PERIODS = [
-  { label: "Min rest in any 24h period", minRest: 10 },
-  { label: "Min rest in any 7-day period", minRest: 77 },
-];
-
 function FatigueAssessment() {
   const [entries, setEntries] = useState([
     { day: "Day 1", rest24: "", work24: "" },
@@ -601,14 +595,14 @@ function FatigueAssessment() {
   const [msg, setMsg] = useState("");
 
   const update = (i, field, val) => {
-    setEntries(e => e.map((r, idx) => idx === i ? { ...r, [field]: val } : r));
+    setEntries(arr => arr.map((r, idx) => idx === i ? { ...r, [field]: val } : r));
   };
-  const totalRest7 = entries.reduce((s, e) => s + (parseFloat(e.rest24) || 0), 0);
-  const violations = entries.map(e => {
-    const r = parseFloat(e.rest24) || 0;
+  const totalRest7 = entries.reduce((s, en) => s + (parseFloat(en.rest24) || 0), 0);
+  const violations = entries.map(en => {
+    const r = parseFloat(en.rest24) || 0;
     return r > 0 && r < 10;
   });
-  const week7Viol = totalRest7 < 77 && entries.some(e => e.rest24 !== "");
+  const week7Viol = totalRest7 < 77 && entries.some(en => en.rest24 !== "");
 
   return (
     <div className="cw-card">
@@ -619,14 +613,14 @@ function FatigueAssessment() {
       <div className="rest-row" style={{fontWeight:700,color:"var(--text3)",fontSize:"0.65rem",borderBottom:"1px solid var(--border)"}}>
         <span>Day</span><span>Rest (hrs)</span><span>Work (hrs)</span>
       </div>
-      {entries.map((e, i) => (
+      {entries.map((en, i) => (
         <div className="rest-row" key={i}>
-          <span style={{fontSize:"0.72rem",color:violations[i]?"var(--red)":"var(--text)"}}>{e.day} {violations[i]?"⚠️":""}</span>
+          <span style={{fontSize:"0.72rem",color:violations[i]?"var(--red)":"var(--text)"}}>{en.day} {violations[i]?"⚠️":""}</span>
           <input className="fi" type="number" min="0" max="24" placeholder="hrs"
-            value={e.rest24} onChange={v => update(i, "rest24", v.target.value)}
+            value={en.rest24} onChange={ev => update(i, "rest24", ev.target.value)}
             style={{padding:"4px 7px",fontSize:"0.74rem"}} />
           <input className="fi" type="number" min="0" max="24" placeholder="hrs"
-            value={e.work24} onChange={v => update(i, "work24", v.target.value)}
+            value={en.work24} onChange={ev => update(i, "work24", ev.target.value)}
             style={{padding:"4px 7px",fontSize:"0.74rem"}} />
         </div>
       ))}
@@ -676,7 +670,7 @@ function FullStrategySavingPlanner() {
   const totalMonths       = totalOnboard + totalLeave;
   const totalYears        = (totalMonths / 12).toFixed(1);
   const goalMet           = gAmt > 0 ? totalSavings >= gAmt : null;
-  const contractsNeeded   = gAmt > 0 ? Math.ceil(gAmt / savingPerContract) : 0;
+  const contractsNeeded   = gAmt > 0 && savingPerContract > 0 ? Math.ceil(gAmt / savingPerContract) : 0;
 
   const steps = [
     { num: "01", title: "Per Contract Savings", detail: `${currency} ${fmt(savingPerContract)} over ${cLen} months` },
@@ -754,10 +748,10 @@ function FullStrategySavingPlanner() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// MAIN PAGE
+// MAIN PAGE — FIX: accepts user/notify props (no longer crashes if undefined)
 // ═══════════════════════════════════════════════════════════════════════════════
 
-export default function CrewWelfarePage() {
+export default function CrewWelfarePage({ user, notify } = {}) {
   const [activeTab, setActiveTab] = useState("financial");
 
   return (
