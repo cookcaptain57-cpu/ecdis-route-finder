@@ -163,38 +163,39 @@ function StarRating({ value, onChange }) {
   );
 }
 
-// ─── VOYAGE ANIMATION (LEAFLET + CANVAS OVERLAY) ─────────────────────────────
+// ─── VOYAGE ANIMATION v3 — CANVAS TILE RENDERING + PORTRAIT 9:16 ──────────────
 function VoyageAnimation({ onClose, portsDb = [] }) {
+
   // ── Refs ──
-  const mapRef         = useRef(null);
-  const mapDivRef      = useRef(null);
-  const canvasRef      = useRef(null);
-  const recorderRef    = useRef(null);
-  const chunksRef      = useRef([]);
-  const animRef        = useRef(null);
-  const leafletLoaded  = useRef(false);
-  const markersRef     = useRef([]);
-  const polylineRef    = useRef(null);
+  const canvasRef     = useRef(null);
+  const previewCanRef = useRef(null); // live preview canvas (separate from recording)
+  const animRef       = useRef(null);
+  const recorderRef   = useRef(null);
+  const chunksRef     = useRef([]);
+  const tileCache     = useRef({});   // url → HTMLImageElement
 
   // ── State ──
-  const [waypoints,    setWaypoints]    = useState([]); // [{lat,lng,name,flag,type:'start'|'end'|'wp'}]
-  const [playing,      setPlaying]      = useState(false);
-  const [recording,    setRecording]    = useState(false);
-  const [speed,        setSpeed]        = useState(2);
-  const [progress,     setProgress]     = useState(0);
-  const [status,       setStatus]       = useState('');
-  const [countries,    setCountries]    = useState([]);
-  const [distStats,    setDistStats]    = useState(null);
-  const [inputMode,    setInputMode]    = useState('click');
-  const [dmsForm,      setDmsForm]      = useState({ latD:'',latM:'',latS:'',latDir:'N', lngD:'',lngM:'',lngS:'',lngDir:'E', name:'', flag:'🌊', type:'wp' });
-  const [portSearch,   setPortSearch]   = useState('');
-  const [portResults,  setPortResults]  = useState([]);
-  const [portType,     setPortType]     = useState('wp');
-  const [portFlag]                      = useState('⚓');
-  const [detectingCtry,setDetectingCtry]= useState(false);
+  const [points,        setPoints]       = useState([]); // [{lat,lng,name,flag,type}]
+  const [inputMode,     setInputMode]    = useState('click'); // 'click'|'dms'|'search'
+  const [dmsForm,       setDmsForm]      = useState({ latD:'',latM:'',latS:'',latDir:'N', lngD:'',lngM:'',lngS:'',lngDir:'E', name:'' });
+  const [ptType,        setPtType]       = useState('start');
+  const [portSearch,    setPortSearch]   = useState('');
+  const [portResults,   setPortResults]  = useState([]);
+  const [countries,     setCountries]    = useState([]);
+  const [distStats,     setDistStats]    = useState(null);
+  const [videoSecs,     setVideoSecs]    = useState(30);  // 15/30/60/120
+  const [playing,       setPlaying]      = useState(false);
+  const [recording,     setRecording]    = useState(false);
+  const [progress,      setProgress]     = useState(0);
+  const [status,        setStatus]       = useState('');
+  const [detectingCtry, setDetectingCtry]= useState(false);
+  const [mapZoom,       setMapZoom]      = useState(2);
+  const [mapCenter,     setMapCenter]    = useState({ lat:20, lng:0 });
 
-  const FLAG_OPTS = ['🌊','⚓','🏝','🌴','🏔','🌆','🏭','⛽','🚢','🛳'];
+  // ── Canvas size — portrait 9:16 ──
+  const CW = 540, CH = 960;
 
+  // ── Math helpers ──
   const toRad = d => d * Math.PI / 180;
   const haversineNM = (la1,lo1,la2,lo2) => {
     const R=3440.065, dLa=toRad(la2-la1), dLo=toRad(lo2-lo1);
@@ -202,44 +203,147 @@ function VoyageAnimation({ onClose, portsDb = [] }) {
     return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
   };
 
-  const buildInterp = (wps) => {
-    if (wps.length < 2) return [];
-    const interp = [];
-    for (let i = 0; i < wps.length - 1; i++) {
-      const a = wps[i], b = wps[i+1];
-      for (let j = 0; j < 60; j++) {
-        const f = j / 60;
-        interp.push({ lat: a.lat+(b.lat-a.lat)*f, lng: a.lng+(b.lng-a.lng)*f, flag: j===0?a.flag:null, name: j===0?a.name:'', type: j===0?a.type:null });
+  // ── Tile helpers (Web Mercator) ──
+  const latToTileY = (lat, zoom) => {
+    const r = toRad(lat);
+    return Math.floor((1 - Math.log(Math.tan(r) + 1/Math.cos(r)) / Math.PI) / 2 * Math.pow(2, zoom));
+  };
+  const lngToTileX = (lng, zoom) => Math.floor((lng + 180) / 360 * Math.pow(2, zoom));
+
+  const tileXToLng = (x, zoom) => x / Math.pow(2, zoom) * 360 - 180;
+  const tileYToLat = (y, zoom) => {
+    const n = Math.PI - 2 * Math.PI * y / Math.pow(2, zoom);
+    return 180 / Math.PI * Math.atan(0.5 * (Math.exp(n) - Math.exp(-n)));
+  };
+
+  // ── Convert lat/lng to canvas pixel given map center + zoom ──
+  const latLngToPixel = useCallback((lat, lng, zoom, centerLat, centerLng, W, H) => {
+    const scale = Math.pow(2, zoom) * 256;
+    const worldToPixel = (la, lo) => {
+      const x = (lo + 180) / 360 * scale;
+      const r = toRad(la);
+      const y = (1 - Math.log(Math.tan(r) + 1/Math.cos(r)) / Math.PI) / 2 * scale;
+      return { x, y };
+    };
+    const center = worldToPixel(centerLat, centerLng);
+    const pt     = worldToPixel(lat, lng);
+    return { x: W/2 + (pt.x - center.x), y: H/2 + (pt.y - center.y) };
+  }, []);
+
+  // ── Load a tile image (cached) ──
+  const loadTile = (url) => new Promise(resolve => {
+    if (tileCache.current[url]) { resolve(tileCache.current[url]); return; }
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload  = () => { tileCache.current[url] = img; resolve(img); };
+    img.onerror = () => resolve(null);
+    img.src = url;
+  });
+
+  // ── Draw map tiles onto canvas ──
+  const drawTiles = async (ctx, zoom, centerLat, centerLng, W, H) => {
+    const scale    = Math.pow(2, zoom) * 256;
+    const worldToPixel = (la, lo) => {
+      const x = (lo + 180) / 360 * scale;
+      const r = toRad(la);
+      const y = (1 - Math.log(Math.tan(r) + 1/Math.cos(r)) / Math.PI) / 2 * scale;
+      return { x, y };
+    };
+    const cp = worldToPixel(centerLat, centerLng);
+    // Tile range visible on canvas
+    const tileSize = 256;
+    const tilesX   = Math.ceil(W / tileSize) + 2;
+    const tilesY   = Math.ceil(H / tileSize) + 2;
+    const centerTX = lngToTileX(centerLng, zoom);
+    const centerTY = latToTileY(centerLat, zoom);
+    const numTiles = Math.pow(2, zoom);
+
+    const promises = [];
+    for (let dy = -Math.ceil(tilesY/2); dy <= Math.ceil(tilesY/2); dy++) {
+      for (let dx = -Math.ceil(tilesX/2); dx <= Math.ceil(tilesX/2); dx++) {
+        const tx = ((centerTX + dx) % numTiles + numTiles) % numTiles;
+        const ty = centerTY + dy;
+        if (ty < 0 || ty >= numTiles) continue;
+        const sub = ['a','b','c','d'][Math.abs(tx + ty) % 4];
+        const url = `https://${sub}.basemaps.cartocdn.com/rastertiles/voyager/${zoom}/${tx}/${ty}.png`;
+        const tileOriginWorld = worldToPixel(tileYToLat(ty, zoom), tileXToLng(tx, zoom));
+        const drawX = Math.round(W/2 + (tileOriginWorld.x - cp.x));
+        const drawY = Math.round(H/2 + (tileOriginWorld.y - cp.y));
+        promises.push(loadTile(url).then(img => {
+          if (img) ctx.drawImage(img, drawX, drawY, tileSize, tileSize);
+        }));
       }
     }
-    const last = wps[wps.length-1];
-    interp.push({ lat:last.lat, lng:last.lng, flag:last.flag, name:last.name, type:last.type });
-    return interp;
+    await Promise.all(promises);
   };
 
-  const computeStats = (wps) => {
-    if (wps.length < 2) return null;
+  // ── Auto-fit zoom + center to show all points ──
+  const autoFit = useCallback((pts) => {
+    if (pts.length === 0) return { zoom: 2, lat: 20, lng: 0 };
+    if (pts.length === 1) return { zoom: 5, lat: pts[0].lat, lng: pts[0].lng };
+    const lats = pts.map(p => p.lat);
+    const lngs = pts.map(p => p.lng);
+    const minLat = Math.min(...lats), maxLat = Math.max(...lats);
+    const minLng = Math.min(...lngs), maxLng = Math.max(...lngs);
+    const cLat   = (minLat + maxLat) / 2;
+    const cLng   = (minLng + maxLng) / 2;
+    // Find best zoom for 9:16 canvas
+    let zoom = 8;
+    for (let z = 8; z >= 0; z--) {
+      const p1 = latLngToPixel(minLat, minLng, z, cLat, cLng, CW, CH);
+      const p2 = latLngToPixel(maxLat, maxLng, z, cLat, cLng, CW, CH);
+      const padX = CW * 0.15, padY = CH * 0.12;
+      if (p1.x >= padX && p2.x <= CW-padX && p2.y >= padY && p1.y <= CH-padY) { zoom = z; break; }
+    }
+    return { zoom, lat: cLat, lng: cLng };
+  }, [latLngToPixel]);
+
+  // ── Build interpolated route ──
+  const buildInterp = (pts) => {
+    if (pts.length < 2) return [];
+    const out = [];
+    for (let i = 0; i < pts.length - 1; i++) {
+      const a = pts[i], b = pts[i+1];
+      const steps = 80;
+      for (let j = 0; j < steps; j++) {
+        const f = j / steps;
+        out.push({ lat: a.lat+(b.lat-a.lat)*f, lng: a.lng+(b.lng-a.lng)*f });
+      }
+    }
+    out.push({ lat: pts[pts.length-1].lat, lng: pts[pts.length-1].lng });
+    return out;
+  };
+
+  // ── Compute distance ──
+  const computeStats = (pts) => {
+    if (pts.length < 2) return null;
     let totalNM = 0;
     const legs = [];
-    for (let i = 1; i < wps.length; i++) {
-      const nm = haversineNM(wps[i-1].lat, wps[i-1].lng, wps[i].lat, wps[i].lng);
+    for (let i = 1; i < pts.length; i++) {
+      const nm = haversineNM(pts[i-1].lat, pts[i-1].lng, pts[i].lat, pts[i].lng);
       totalNM += nm;
-      legs.push({ from:wps[i-1].name||`P${i}`, to:wps[i].name||`P${i+1}`, nm:nm.toFixed(1), km:(nm*1.852).toFixed(1) });
+      legs.push({ from: pts[i-1].name||`P${i}`, to: pts[i].name||`P${i+1}`, nm: nm.toFixed(0) });
     }
-    return { totalNM:totalNM.toFixed(1), totalKM:(totalNM*1.852).toFixed(1), legs };
+    return { totalNM: totalNM.toFixed(0), totalKM: (totalNM*1.852).toFixed(0), legs };
   };
 
-  const detectCountries = async (wps) => {
+  // ── Country detection ──
+  const detectCountries = async (pts) => {
+    if (pts.length < 2) return;
     setDetectingCtry(true);
     const seen = new Set(), result = [];
-    const sample = wps.length<=6 ? wps : [wps[0], ...wps.slice(1,-1).filter((_,i,a)=>i%(Math.ceil(a.length/4))===0), wps[wps.length-1]];
+    const sample = pts.length <= 6 ? pts : [
+      pts[0],
+      ...pts.slice(1,-1).filter((_,i,a) => i % Math.ceil(a.length/5) === 0),
+      pts[pts.length-1]
+    ];
     for (const pt of sample) {
       try {
-        const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${pt.lat}&lon=${pt.lng}&zoom=5`,{headers:{'Accept-Language':'en'}});
+        const res  = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${pt.lat}&lon=${pt.lng}&zoom=5`,{headers:{'Accept-Language':'en'}});
         const data = await res.json();
         const country = data.address?.country;
-        const cc = data.address?.country_code;
-        const flag = cc ? String.fromCodePoint(...[...cc.toUpperCase()].map(c=>c.charCodeAt(0)+127397)) : '🌊';
+        const cc      = data.address?.country_code;
+        const flag    = cc ? String.fromCodePoint(...[...cc.toUpperCase()].map(c=>c.charCodeAt(0)+127397)) : '🌊';
         if (country && !seen.has(country)) { seen.add(country); result.push({ country, flag }); }
       } catch {}
     }
@@ -247,177 +351,373 @@ function VoyageAnimation({ onClose, portsDb = [] }) {
     setDetectingCtry(false);
   };
 
-  const loadLeaflet = () => new Promise((res,rej) => {
-    if (window.L) { res(); return; }
-    const link = document.createElement('link');
-    link.rel='stylesheet'; link.href='https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
-    document.head.appendChild(link);
-    const script = document.createElement('script');
-    script.src='https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
-    script.onload=res; script.onerror=rej;
-    document.head.appendChild(script);
-  });
+  // ── Main draw frame function ──
+  const drawFrame = async (ctx, interp, t, zoom, cLat, cLng, pts, ctryList, trails, totalNM, totalKM, currentDay, totalDays, isRecording) => {
+    ctx.clearRect(0, 0, CW, CH);
 
-  useEffect(() => {
-    let map;
-    const init = async () => {
-      if (!mapDivRef.current || leafletLoaded.current) return;
-      leafletLoaded.current = true;
-      await loadLeaflet();
-      const L = window.L;
-      map = L.map(mapDivRef.current, { zoomControl:true, attributionControl:false }).setView([20,0],2);
-      L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',{ subdomains:'abcd', maxZoom:19 }).addTo(map);
-      mapRef.current = map;
-      map.on('click', (e) => {
-        const { lat, lng } = e.latlng;
-        setWaypoints(prev => {
-          const hasStart = prev.some(p=>p.type==='start');
-          const hasEnd   = prev.some(p=>p.type==='end');
-          let type='wp', name='', flag='🌊';
-          if (!hasStart)    { type='start'; name='Start'; flag='🟢'; }
-          else if (!hasEnd) { type='end';   name='End';   flag='🔴'; }
-          else              { type='wp'; name=`WP${prev.filter(p=>p.type==='wp').length+1}`; flag='🌊'; }
-          return [...prev, { lat:parseFloat(lat.toFixed(5)), lng:parseFloat(lng.toFixed(5)), name, flag, type }];
-        });
-      });
-    };
-    init();
-    return () => { if (mapRef.current) { mapRef.current.remove(); mapRef.current=null; leafletLoaded.current=false; } };
-  }, []);
+    // 1. Draw map tiles
+    await drawTiles(ctx, zoom, cLat, cLng, CW, CH);
 
-  useEffect(() => {
-    const L = window.L;
-    if (!L || !mapRef.current) return;
-    markersRef.current.forEach(m=>m.remove()); markersRef.current=[];
-    if (polylineRef.current) { polylineRef.current.remove(); polylineRef.current=null; }
-    const sorted = [...waypoints].sort((a,b)=>{ const o={start:0,wp:1,end:2}; return (o[a.type]||1)-(o[b.type]||1); });
-    if (sorted.length>=2) {
-      polylineRef.current = L.polyline(sorted.map(p=>[p.lat,p.lng]),{ color:'#00B4D8', weight:3, opacity:0.8, dashArray:'8,4' }).addTo(mapRef.current);
-    }
-    sorted.forEach((pt,i) => {
-      const color = pt.type==='start'?'#00C896':pt.type==='end'?'#ff4757':'#00B4D8';
-      const icon = L.divIcon({ className:'', html:`<div style="width:26px;height:26px;border-radius:50%;background:${color};border:2px solid #fff;box-shadow:0 0 8px ${color};display:flex;align-items:center;justify-content:center;font-size:13px;">${pt.flag}</div>`, iconSize:[26,26], iconAnchor:[13,13] });
-      const marker = L.marker([pt.lat,pt.lng],{ icon, draggable:true }).addTo(mapRef.current);
-      marker.bindTooltip(`<b>${pt.name||pt.flag}</b><br/>${pt.lat.toFixed(4)}°, ${pt.lng.toFixed(4)}°`,{ permanent:false, direction:'top' });
-      marker.on('dragend', e => {
-        const {lat,lng} = e.target.getLatLng();
-        setWaypoints(prev=>prev.map((p,j)=>j===i?{...p,lat:parseFloat(lat.toFixed(5)),lng:parseFloat(lng.toFixed(5))}:p));
-      });
-      marker.on('click', () => { if (window.confirm(`Remove ${pt.name||'this point'}?`)) setWaypoints(prev=>prev.filter((_,j)=>j!==i)); });
-      markersRef.current.push(marker);
+    // 2. Slight overlay for contrast (semi-transparent)
+    ctx.fillStyle = 'rgba(0,20,50,0.12)';
+    ctx.fillRect(0, 0, CW, CH);
+
+    const lp = (lat, lng) => latLngToPixel(lat, lng, zoom, cLat, cLng, CW, CH);
+    const total = interp.length - 1;
+    const idx   = Math.min(Math.floor(t * total), total - 1);
+    const frac  = (t * total) - idx;
+
+    // 3. Full route line (dim dashed)
+    ctx.save();
+    ctx.setLineDash([8, 5]);
+    ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+    ctx.lineWidth   = 2;
+    ctx.beginPath();
+    pts.forEach((pt, i) => {
+      const p = lp(pt.lat, pt.lng);
+      i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y);
     });
-    setDistStats(sorted.length>=2 ? computeStats(sorted) : null);
-  }, [waypoints]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.restore();
 
-  useEffect(() => {
-    if (!portSearch.trim()||portSearch.length<2) { setPortResults([]); return; }
-    const q = portSearch.toLowerCase();
-    const dbResults = portsDb.filter(p=>p.name?.toLowerCase().includes(q)||p.city?.toLowerCase().includes(q)||p.country?.toLowerCase().includes(q)).slice(0,5).map(p=>({ name:p.name, lat:p.lat, lng:p.lon, source:'db' }));
-    if (dbResults.length>=4) { setPortResults(dbResults); return; }
-    const timer = setTimeout(async () => {
-      try {
-        const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(portSearch)}&limit=5&accept-language=en`);
-        const data = await res.json();
-        const geo = data.map(d=>({ name:d.display_name.split(',').slice(0,2).join(','), lat:parseFloat(d.lat), lng:parseFloat(d.lon), source:'geo' }));
-        setPortResults([...dbResults,...geo].slice(0,8));
-      } catch { setPortResults(dbResults); }
-    }, 400);
-    return () => clearTimeout(timer);
-  }, [portSearch, portsDb]);
+    // 4. Travelled route line (vivid)
+    ctx.save();
+    ctx.strokeStyle = '#FF3B30';
+    ctx.lineWidth   = 3.5;
+    ctx.lineJoin    = 'round';
+    ctx.lineCap     = 'round';
+    ctx.shadowColor = 'rgba(255,59,48,0.6)';
+    ctx.shadowBlur  = 10;
+    ctx.beginPath();
+    for (let i = 0; i <= idx + 1 && i < interp.length; i++) {
+      const pt  = i <= idx ? interp[i] : {
+        lat: interp[idx].lat + (interp[Math.min(idx+1,total)].lat - interp[idx].lat) * frac,
+        lng: interp[idx].lng + (interp[Math.min(idx+1,total)].lng - interp[idx].lng) * frac,
+      };
+      const p = lp(pt.lat, pt.lng);
+      i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y);
+    }
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+    ctx.restore();
 
+    // 5. Speed trails (wake)
+    trails.forEach((tr, ti) => {
+      const alpha = tr.alpha * (1 - ti / trails.length) * 0.8;
+      ctx.beginPath();
+      ctx.arc(tr.x, tr.y, tr.r, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(255,120,100,${alpha})`;
+      ctx.fill();
+    });
+
+    // 6. Boat position
+    const curLat = idx < total ? interp[idx].lat + (interp[Math.min(idx+1,total)].lat - interp[idx].lat) * frac : interp[total].lat;
+    const curLng = idx < total ? interp[idx].lng + (interp[Math.min(idx+1,total)].lng - interp[idx].lng) * frac : interp[total].lng;
+    const bp = lp(curLat, curLng);
+
+    // Pulsing glow
+    const pulse = 0.6 + 0.4 * Math.sin(t * Math.PI * 40);
+    const glow  = ctx.createRadialGradient(bp.x, bp.y, 0, bp.x, bp.y, 28 * pulse);
+    glow.addColorStop(0, 'rgba(255,59,48,0.5)');
+    glow.addColorStop(1, 'transparent');
+    ctx.fillStyle = glow;
+    ctx.beginPath(); ctx.arc(bp.x, bp.y, 28 * pulse, 0, Math.PI * 2); ctx.fill();
+
+    // Boat emoji — large
+    ctx.font = '28px serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('🚢', bp.x, bp.y);
+
+    // 7. Waypoint flags only (no text labels on video to keep clean)
+    pts.forEach((pt, i) => {
+      const p = lp(pt.lat, pt.lng);
+      const frac_i = i / Math.max(pts.length - 1, 1);
+      const passed = frac_i <= t;
+      if (!passed) return; // only show passed flags
+      ctx.globalAlpha = 1;
+      ctx.font = '18px serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(pt.flag || '📍', p.x, p.y - 18);
+    });
+    ctx.globalAlpha = 1;
+
+    // 8. TOP BAR — brand
+    ctx.fillStyle = 'rgba(4,12,26,0.82)';
+    ctx.fillRect(0, 0, CW, 70);
+    ctx.font = 'bold 15px "Orbitron",monospace';
+    ctx.fillStyle = '#00B4D8';
+    ctx.textAlign = 'left';
+    ctx.fillText('NAVISPHERE X', 18, 28);
+    ctx.font = '11px "Exo 2",sans-serif';
+    ctx.fillStyle = 'rgba(255,255,255,0.55)';
+    ctx.fillText('SEA DIARY  ·  VOYAGE ANIMATION', 18, 48);
+    ctx.font = '11px serif';
+    ctx.textAlign = 'right';
+    ctx.fillText('🚢', CW - 18, 35);
+
+    // 9. BOTTOM INFO BAR
+    const barH = 160;
+    ctx.fillStyle = 'rgba(4,12,26,0.88)';
+    ctx.fillRect(0, CH - barH, CW, barH);
+
+    // Separator line
+    ctx.strokeStyle = '#00B4D8';
+    ctx.lineWidth   = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(0, CH - barH);
+    ctx.lineTo(CW, CH - barH);
+    ctx.stroke();
+
+    // Distance row
+    const distNMNow  = Math.round(parseFloat(totalNM) * t);
+    const distKMNow  = Math.round(parseFloat(totalKM) * t);
+    ctx.font = 'bold 11px "Exo 2",sans-serif';
+    ctx.fillStyle = 'rgba(255,255,255,0.55)';
+    ctx.textAlign = 'left';
+    ctx.fillText('DISTANCE COVERED', 18, CH - barH + 22);
+    ctx.font = 'bold 26px "Orbitron",monospace';
+    ctx.fillStyle = '#00C896';
+    ctx.fillText(`${distNMNow.toLocaleString()} NM`, 18, CH - barH + 52);
+    ctx.font = '13px "Exo 2",sans-serif';
+    ctx.fillStyle = 'rgba(0,200,150,0.7)';
+    ctx.fillText(`${distKMNow.toLocaleString()} km`, 18, CH - barH + 70);
+
+    // Day counter
+    ctx.font = 'bold 22px "Orbitron",monospace';
+    ctx.fillStyle = '#F0A500';
+    ctx.textAlign = 'right';
+    ctx.fillText(`DAY ${currentDay}`, CW - 18, CH - barH + 52);
+    ctx.font = '11px "Exo 2",sans-serif';
+    ctx.fillStyle = 'rgba(240,165,0,0.6)';
+    ctx.fillText(`of ${totalDays}`, CW - 18, CH - barH + 70);
+
+    // Countries row
+    if (ctryList.length > 0) {
+      ctx.font = 'bold 10px "Exo 2",sans-serif';
+      ctx.fillStyle = 'rgba(255,255,255,0.45)';
+      ctx.textAlign = 'left';
+      ctx.fillText('COUNTRIES', 18, CH - barH + 92);
+      let cx = 18;
+      ctryList.forEach((c, i) => {
+        if (cx > CW - 40) return;
+        ctx.font = '18px serif';
+        ctx.fillText(c.flag, cx, CH - barH + 115);
+        cx += 28;
+        if (i < ctryList.length - 1 && cx < CW - 60) {
+          ctx.font = '10px "Exo 2",sans-serif';
+          ctx.fillStyle = 'rgba(255,255,255,0.3)';
+          ctx.fillText('→', cx, CH - barH + 115);
+          cx += 16;
+          ctx.fillStyle = '#fff';
+        }
+      });
+    }
+
+    // Progress bar
+    ctx.fillStyle = 'rgba(255,255,255,0.08)';
+    ctx.fillRect(18, CH - 28, CW - 36, 6);
+    ctx.fillStyle = '#FF3B30';
+    ctx.fillRect(18, CH - 28, (CW - 36) * t, 6);
+  };
+
+  // ── Run animation loop ──
+  const runAnimation = useCallback((canvas, interp, pts, ctryList, stats, zoom, cLat, cLng, onComplete) => {
+    const ctx     = canvas.getContext('2d');
+    const fps     = 30;
+    const frames  = videoSecs * fps;
+    let   frame   = 0;
+    let   trails  = [];
+    const totalDays = Math.max(pts.length, 3);
+
+    const tick = async () => {
+      const t   = Math.min(frame / frames, 1);
+      const idx = Math.min(Math.floor(t * (interp.length-1)), interp.length-2);
+      const frac = (t * (interp.length-1)) - idx;
+      const curLat = interp[idx].lat + (interp[Math.min(idx+1,interp.length-1)].lat - interp[idx].lat)*frac;
+      const curLng = interp[idx].lng + (interp[Math.min(idx+1,interp.length-1)].lng - interp[idx].lng)*frac;
+
+      // Trail
+      const bpx = latLngToPixel(curLat, curLng, zoom, cLat, cLng, CW, CH);
+      trails.unshift({ x:bpx.x, y:bpx.y, r:4+Math.random()*3, alpha:0.8 });
+      if (trails.length > 22) trails.pop();
+
+      const currentDay = Math.max(1, Math.round(t * totalDays));
+
+      await drawFrame(ctx, interp, t, zoom, cLat, cLng, pts, ctryList, trails, stats?.totalNM||'0', stats?.totalKM||'0', currentDay, totalDays, true);
+
+      setProgress(Math.round(t * 100));
+      frame++;
+      if (frame <= frames) {
+        animRef.current = requestAnimationFrame(tick);
+      } else {
+        onComplete();
+      }
+    };
+    animRef.current = requestAnimationFrame(tick);
+  }, [videoSecs, latLngToPixel, drawFrame]);
+
+  // ── Preview (draw one frame at t=0 to show map) ──
+  const drawPreview = useCallback(async () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ordered = getOrderedPts();
+    if (ordered.length < 2) return;
+    const { zoom, lat, lng } = autoFit(ordered);
+    setMapZoom(zoom); setMapCenter({ lat, lng });
+    const ctx = canvas.getContext('2d');
+    const interp = buildInterp(ordered);
+    const stats  = computeStats(ordered);
+    await drawFrame(ctx, interp, 0, zoom, lat, lng, ordered, countries, [], stats?.totalNM||'0', stats?.totalKM||'0', 1, Math.max(ordered.length,3), false);
+  }, [points, countries, autoFit]);
+
+  useEffect(() => { drawPreview(); }, [points, countries]);
+
+  const getOrderedPts = () => {
+    const s = points.filter(p=>p.type==='start');
+    const w = points.filter(p=>p.type==='wp');
+    const e = points.filter(p=>p.type==='end');
+    return [...s, ...w, ...e];
+  };
+
+  // ── Interactions ──
+  const handleCanvasClick = (e) => {
+    if (playing || recording) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = CW / rect.width;
+    const scaleY = CH / rect.height;
+    const px = (e.clientX - rect.left) * scaleX;
+    const py = (e.clientY - rect.top)  * scaleY;
+    // Pixel → lat/lng inverse
+    const { zoom, lat:cLat, lng:cLng } = { zoom: mapZoom, lat: mapCenter.lat, lng: mapCenter.lng };
+    const scale = Math.pow(2, zoom) * 256;
+    const toWorld = (la, lo) => {
+      const x = (lo + 180) / 360 * scale;
+      const r = toRad(la);
+      const y = (1 - Math.log(Math.tan(r) + 1/Math.cos(r)) / Math.PI) / 2 * scale;
+      return { x, y };
+    };
+    const cp  = toWorld(cLat, cLng);
+    const wx  = cp.x + (px - CW/2);
+    const wy  = cp.y + (py - CH/2);
+    const lng2 = wx / scale * 360 - 180;
+    const n   = Math.PI - 2 * Math.PI * wy / scale;
+    const lat2 = 180 / Math.PI * Math.atan(0.5*(Math.exp(n)-Math.exp(-n)));
+
+    const hasStart = points.some(p=>p.type==='start');
+    const hasEnd   = points.some(p=>p.type==='end');
+    let type='wp', flag='🌊', name='';
+    if (!hasStart)    { type='start'; flag='🟢'; name='Start'; }
+    else if (!hasEnd) { type='end';   flag='🔴'; name='End';   }
+    else              { type='wp';    flag='⚓'; name=`WP${points.filter(p=>p.type==='wp').length+1}`; }
+    setPoints(prev => [...prev, { lat:parseFloat(lat2.toFixed(5)), lng:parseFloat(lng2.toFixed(5)), name, flag, type }]);
+  };
+
+  // ── DMS ──
   const dmsToDecimal = (d,m,s,dir) => {
     const dec = parseFloat(d||0)+parseFloat(m||0)/60+parseFloat(s||0)/3600;
     return (dir==='S'||dir==='W') ? -dec : dec;
   };
-
   const applyDMS = () => {
     const lat = dmsToDecimal(dmsForm.latD,dmsForm.latM,dmsForm.latS,dmsForm.latDir);
     const lng = dmsToDecimal(dmsForm.lngD,dmsForm.lngM,dmsForm.lngS,dmsForm.lngDir);
     if (isNaN(lat)||isNaN(lng)||Math.abs(lat)>90||Math.abs(lng)>180) { setStatus('⚠️ Invalid coordinates'); return; }
-    const type = dmsForm.type||'wp';
-    const flag = type==='start'?'🟢':type==='end'?'🔴':(dmsForm.flag||'🌊');
-    const name = dmsForm.name||(type==='start'?'Start':type==='end'?'End':`WP${waypoints.filter(p=>p.type==='wp').length+1}`);
-    setWaypoints(prev=>[...prev,{lat:parseFloat(lat.toFixed(5)),lng:parseFloat(lng.toFixed(5)),name,flag,type}]);
+    const hasStart = points.some(p=>p.type==='start');
+    const hasEnd   = points.some(p=>p.type==='end');
+    let type=ptType, flag='⚓', name=dmsForm.name;
+    if (type==='start') { flag='🟢'; name=name||'Start'; }
+    else if (type==='end') { flag='🔴'; name=name||'End'; }
+    else { flag='⚓'; name=name||`WP${points.filter(p=>p.type==='wp').length+1}`; }
+    setPoints(prev => [...prev, { lat:parseFloat(lat.toFixed(5)), lng:parseFloat(lng.toFixed(5)), name, flag, type }]);
     setDmsForm(f=>({...f,latD:'',latM:'',latS:'',lngD:'',lngM:'',lngS:'',name:''}));
-    if (mapRef.current) mapRef.current.flyTo([lat,lng],5);
     setStatus('');
   };
 
-  const getOrderedWPs = () => {
-    const start = waypoints.filter(p=>p.type==='start');
-    const wps   = waypoints.filter(p=>p.type==='wp');
-    const end   = waypoints.filter(p=>p.type==='end');
-    return [...start,...wps,...end];
+  // ── Port search ──
+  useEffect(() => {
+    if (!portSearch.trim()||portSearch.length<2) { setPortResults([]); return; }
+    const q = portSearch.toLowerCase();
+    const db = portsDb.filter(p=>p.name?.toLowerCase().includes(q)||p.city?.toLowerCase().includes(q)).slice(0,5).map(p=>({name:p.name,lat:p.lat,lng:p.lon,source:'db'}));
+    if (db.length>=4) { setPortResults(db); return; }
+    const t = setTimeout(async()=>{
+      try {
+        const res  = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(portSearch)}&limit=5&accept-language=en`);
+        const data = await res.json();
+        setPortResults([...db,...data.map(d=>({name:d.display_name.split(',')[0], lat:parseFloat(d.lat), lng:parseFloat(d.lon), source:'geo'}))].slice(0,8));
+      } catch { setPortResults(db); }
+    }, 400);
+    return ()=>clearTimeout(t);
+  }, [portSearch, portsDb]);
+
+  const addPortResult = (p) => {
+    const hasStart = points.some(pt=>pt.type==='start');
+    const hasEnd   = points.some(pt=>pt.type==='end');
+    let type=ptType, flag='⚓', name=p.name.split(',')[0];
+    if (type==='start') flag='🟢';
+    else if (type==='end') flag='🔴';
+    setPoints(prev => [...prev, { lat:p.lat, lng:p.lng, name, flag, type }]);
+    setPortSearch(''); setPortResults([]);
   };
 
-  const drawBoatFrame = (ctx,W,H,interp,t,trails) => {
-    ctx.clearRect(0,0,W,H);
-    if (!mapRef.current) return;
-    const latLngToCanvas = (lat,lng) => { const pt=mapRef.current.latLngToContainerPoint([lat,lng]); return {x:pt.x,y:pt.y}; };
-    const total=interp.length-1, idx=Math.min(Math.floor(t*total),total-1), frac=(t*total)-idx;
-    ctx.beginPath(); ctx.strokeStyle='rgba(0,200,150,0.7)'; ctx.lineWidth=3; ctx.shadowBlur=8; ctx.shadowColor='rgba(0,200,150,0.5)';
-    for (let i=0;i<=idx;i++) { const p=latLngToCanvas(interp[i].lat,interp[i].lng); i===0?ctx.moveTo(p.x,p.y):ctx.lineTo(p.x,p.y); }
-    ctx.stroke(); ctx.shadowBlur=0;
-    trails.forEach((tr,ti)=>{ ctx.beginPath(); ctx.arc(tr.x,tr.y,tr.r,0,Math.PI*2); ctx.fillStyle=`rgba(0,200,150,${tr.alpha*(1-ti/trails.length)})`; ctx.fill(); });
-    const curLat=idx<total?interp[idx].lat+(interp[idx+1].lat-interp[idx].lat)*frac:interp[total].lat;
-    const curLng=idx<total?interp[idx].lng+(interp[idx+1].lng-interp[idx].lng)*frac:interp[total].lng;
-    const bp=latLngToCanvas(curLat,curLng);
-    const glow=ctx.createRadialGradient(bp.x,bp.y,0,bp.x,bp.y,22); glow.addColorStop(0,'rgba(0,200,150,0.4)'); glow.addColorStop(1,'transparent');
-    ctx.fillStyle=glow; ctx.beginPath(); ctx.arc(bp.x,bp.y,22,0,Math.PI*2); ctx.fill();
-    ctx.font='22px serif'; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText('🚢',bp.x,bp.y);
-    const ordered=getOrderedWPs();
-    ordered.forEach((pt,i)=>{ const pp=latLngToCanvas(pt.lat,pt.lng); const passed=(i/Math.max(ordered.length-1,1))<=t; ctx.globalAlpha=passed?1:0.3; ctx.font='16px serif'; ctx.fillText(pt.flag||'📍',pp.x,pp.y-20); if(pt.name){ctx.font='bold 11px "Exo 2",sans-serif'; ctx.fillStyle=passed?'#00C896':'rgba(255,255,255,0.3)'; ctx.fillText(pt.name,pp.x,pp.y-36); ctx.fillStyle='#fff';} ctx.globalAlpha=1; });
-    const totalDays=Math.max(2,ordered.length), day=Math.max(1,Math.round(t*totalDays));
-    ctx.fillStyle='rgba(4,12,26,0.8)'; ctx.beginPath(); if(ctx.roundRect) ctx.roundRect(W-120,10,110,40,8); else ctx.rect(W-120,10,110,40); ctx.fill();
-    ctx.strokeStyle='rgba(0,180,216,0.5)'; ctx.lineWidth=1; ctx.beginPath(); if(ctx.roundRect) ctx.roundRect(W-120,10,110,40,8); else ctx.rect(W-120,10,110,40); ctx.stroke();
-    ctx.font='bold 12px "Orbitron",monospace'; ctx.fillStyle='#00B4D8'; ctx.textAlign='right'; ctx.fillText(`DAY ${day}`,W-14,27);
-    ctx.font='9px "Exo 2",sans-serif'; ctx.fillStyle='rgba(255,255,255,0.4)'; ctx.fillText(`of ~${totalDays}`,W-14,42);
-    ctx.font='bold 10px "Orbitron",monospace'; ctx.fillStyle='rgba(0,180,216,0.3)'; ctx.textAlign='left'; ctx.fillText('NAVISPHERE X  ·  SEA DIARY',10,H-8); ctx.textAlign='center';
-  };
-
-  const runAnim = (ordered, onDone) => {
-    const interp=buildInterp(ordered), canvas=canvasRef.current;
-    if (!canvas||!interp.length) return;
-    const ctx=canvas.getContext('2d'), W=canvas.width, H=canvas.height;
-    let t=0, trails=[];
-    const tick=()=>{
-      t+=0.003*speed; if(t>1) t=1; setProgress(Math.round(t*100));
-      const total=interp.length-1, idx=Math.min(Math.floor(t*total),total-1), frac=(t*total)-idx;
-      const curLat=idx<total?interp[idx].lat+(interp[idx+1].lat-interp[idx].lat)*frac:interp[total].lat;
-      const curLng=idx<total?interp[idx].lng+(interp[idx+1].lng-interp[idx].lng)*frac:interp[total].lng;
-      if (mapRef.current) { const bp=mapRef.current.latLngToContainerPoint([curLat,curLng]); trails.unshift({x:bp.x,y:bp.y,r:3+Math.random()*2,alpha:0.6}); if(trails.length>18) trails.pop(); }
-      drawBoatFrame(ctx,W,H,interp,t,trails);
-      if (t<1) { animRef.current=requestAnimationFrame(tick); } else { onDone(); }
-    };
-    animRef.current=requestAnimationFrame(tick);
-  };
-
-  const startAnimation = () => {
-    const ordered=getOrderedWPs();
-    if (ordered.length<2) { setStatus('⚠️ Add at least a Start and End point'); return; }
+  // ── Start animation (preview) ──
+  const startAnimation = async () => {
+    const ordered = getOrderedPts();
+    if (ordered.length < 2) { setStatus('⚠️ Add at least Start and End points'); return; }
+    const interp = buildInterp(ordered);
+    const stats  = computeStats(ordered);
+    const { zoom, lat, lng } = autoFit(ordered);
+    setMapZoom(zoom); setMapCenter({ lat, lng });
+    const canvas = canvasRef.current;
+    if (!canvas) return;
     setPlaying(true); setProgress(0); setStatus('');
-    runAnim(ordered, ()=>{ setPlaying(false); setStatus('✅ Done! Click Record & Export to save as .webm'); });
+    runAnimation(canvas, interp, ordered, countries, stats, zoom, lat, lng, () => {
+      setPlaying(false);
+      setStatus('✅ Preview done! Click Record to export.');
+    });
   };
 
   const stopAnimation = () => {
     if (animRef.current) cancelAnimationFrame(animRef.current);
     setPlaying(false);
-    if (canvasRef.current) canvasRef.current.getContext('2d').clearRect(0,0,canvasRef.current.width,canvasRef.current.height);
+    drawPreview();
   };
 
-  const startRecording = () => {
-    const ordered=getOrderedWPs();
-    if (ordered.length<2) { setStatus('⚠️ Add at least a Start and End point'); return; }
-    const canvas=canvasRef.current; if (!canvas) return;
-    chunksRef.current=[];
-    const stream=canvas.captureStream(30);
-    const opts=MediaRecorder.isTypeSupported('video/webm;codecs=vp9')?{mimeType:'video/webm;codecs=vp9'}:{mimeType:'video/webm'};
-    const mr=new MediaRecorder(stream,opts);
-    mr.ondataavailable=e=>{ if(e.data.size>0) chunksRef.current.push(e.data); };
-    mr.onstop=()=>{ const blob=new Blob(chunksRef.current,{type:'video/webm'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=`SeaDiary_Voyage_${Date.now()}.webm`; a.click(); URL.revokeObjectURL(url); setRecording(false); setStatus('✅ Voyage video downloaded! Share to Instagram or WhatsApp 🚢'); };
-    recorderRef.current=mr; mr.start();
-    setRecording(true); setStatus('🔴 Recording…');
-    runAnim(ordered, ()=>{ mr.stop(); });
+  // ── Record ──
+  const startRecording = async () => {
+    const ordered = getOrderedPts();
+    if (ordered.length < 2) { setStatus('⚠️ Add at least Start and End points'); return; }
+    const interp = buildInterp(ordered);
+    const stats  = computeStats(ordered);
+    const { zoom, lat, lng } = autoFit(ordered);
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    chunksRef.current = [];
+    const stream = canvas.captureStream(30);
+    const opts   = MediaRecorder.isTypeSupported('video/webm;codecs=vp9') ? {mimeType:'video/webm;codecs=vp9',videoBitsPerSecond:4000000} : {mimeType:'video/webm',videoBitsPerSecond:4000000};
+    const mr     = new MediaRecorder(stream, opts);
+    mr.ondataavailable = e => { if(e.data.size>0) chunksRef.current.push(e.data); };
+    mr.onstop = () => {
+      const blob = new Blob(chunksRef.current, {type:'video/webm'});
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement('a');
+      a.href=url; a.download=`SeaDiary_Voyage_${Date.now()}.webm`; a.click();
+      URL.revokeObjectURL(url);
+      setRecording(false);
+      setStatus('✅ Video saved! Share to Instagram Stories or WhatsApp Status 🚢');
+    };
+    recorderRef.current = mr;
+    mr.start(100); // collect data every 100ms
+    setRecording(true); setProgress(0);
+    setStatus(`🔴 Recording ${videoSecs}s portrait video…`);
+
+    runAnimation(canvas, interp, ordered, countries, stats, zoom, lat, lng, () => {
+      setTimeout(() => mr.stop(), 200);
+    });
   };
 
   const stopRecording = () => {
@@ -425,202 +725,265 @@ function VoyageAnimation({ onClose, portsDb = [] }) {
     if (recorderRef.current?.state==='recording') recorderRef.current.stop();
   };
 
-  const clearAll = () => { stopAnimation(); setWaypoints([]); setCountries([]); setDistStats(null); setProgress(0); setStatus(''); };
+  const clearAll = () => {
+    if (animRef.current) cancelAnimationFrame(animRef.current);
+    setPoints([]); setCountries([]); setDistStats(null);
+    setProgress(0); setStatus(''); setPlaying(false); setRecording(false);
+    const canvas = canvasRef.current;
+    if (canvas) canvas.getContext('2d').clearRect(0,0,CW,CH);
+  };
 
-  useEffect(()=>()=>{ if(animRef.current) cancelAnimationFrame(animRef.current); },[]);
+  useEffect(() => () => { if(animRef.current) cancelAnimationFrame(animRef.current); }, []);
 
-  useEffect(()=>{
-    const resize=()=>{ if(!canvasRef.current||!mapDivRef.current) return; const rect=mapDivRef.current.getBoundingClientRect(); canvasRef.current.width=rect.width; canvasRef.current.height=rect.height; };
-    resize(); window.addEventListener('resize',resize); return ()=>window.removeEventListener('resize',resize);
-  },[]);
+  // Update stats when points change
+  useEffect(() => {
+    const ordered = getOrderedPts();
+    setDistStats(ordered.length >= 2 ? computeStats(ordered) : null);
+  }, [points]);
 
-  const inp={padding:'7px 10px',background:'var(--bg2,#071428)',border:'1px solid var(--border2,#1E4570)',borderRadius:7,color:'var(--text,#E2EBF8)',fontSize:'0.78rem',outline:'none',fontFamily:'inherit'};
-  const ordered=getOrderedWPs();
+  const inp = {padding:'7px 10px',background:'rgba(255,255,255,0.07)',border:'1px solid rgba(255,255,255,0.15)',borderRadius:7,color:'var(--text,#E2EBF8)',fontSize:'0.78rem',outline:'none',fontFamily:'inherit',width:'100%'};
+  const ordered = getOrderedPts();
 
   return (
-    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.92)',zIndex:9998,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',padding:'0.5rem'}}>
-      <div style={{background:'var(--card,#0B1D35)',border:'1px solid rgba(0,180,216,0.3)',borderRadius:16,width:'100%',maxWidth:860,maxHeight:'96vh',overflow:'auto',display:'flex',flexDirection:'column'}} onClick={e=>e.stopPropagation()}>
+    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.94)',zIndex:9998,display:'flex',alignItems:'center',justifyContent:'center',padding:'0.5rem',overflowY:'auto'}} onClick={onClose}>
+      <div style={{background:'#0B1D35',border:'1px solid rgba(0,180,216,0.3)',borderRadius:18,width:'100%',maxWidth:820,maxHeight:'98vh',overflow:'hidden',display:'flex',flexDirection:'column',gap:0}} onClick={e=>e.stopPropagation()}>
 
         {/* Header */}
-        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'0.9rem 1.1rem 0.6rem',borderBottom:'1px solid rgba(0,180,216,0.15)',flexShrink:0}}>
-          <div style={{fontFamily:'Orbitron,monospace',fontSize:'0.82rem',fontWeight:700,color:'var(--cyan,#00B4D8)'}}>🎬 VOYAGE ANIMATION STUDIO</div>
-          <button onClick={onClose} style={{background:'none',border:'none',color:'var(--text3,#4A5F80)',fontSize:'1.3rem',cursor:'pointer'}}>✕</button>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'0.8rem 1rem',borderBottom:'1px solid rgba(0,180,216,0.15)',flexShrink:0,background:'rgba(4,12,26,0.6)'}}>
+          <div>
+            <div style={{fontFamily:'Orbitron,monospace',fontSize:'0.82rem',fontWeight:700,color:'#00B4D8'}}>🎬 VOYAGE ANIMATION STUDIO</div>
+            <div style={{fontSize:'0.62rem',color:'rgba(255,255,255,0.4)',marginTop:2}}>Portrait 9:16 · Real map tiles · Instagram ready</div>
+          </div>
+          <button onClick={onClose} style={{background:'none',border:'none',color:'rgba(255,255,255,0.4)',fontSize:'1.4rem',cursor:'pointer',padding:'4px'}}>✕</button>
         </div>
 
-        {/* Map + Canvas */}
-        <div style={{position:'relative',flexShrink:0,margin:'0.7rem 0.7rem 0'}}>
-          <div ref={mapDivRef} style={{width:'100%',height:'320px',borderRadius:10,border:'1px solid rgba(0,180,216,0.2)',overflow:'hidden'}} />
-          <canvas ref={canvasRef} style={{position:'absolute',top:0,left:0,width:'100%',height:'100%',pointerEvents:'none',borderRadius:10}} />
-          <div style={{position:'absolute',top:8,left:8,background:'rgba(4,12,26,0.85)',border:'1px solid rgba(0,180,216,0.35)',borderRadius:8,padding:'4px 10px',fontSize:'0.63rem',color:'var(--cyan,#00B4D8)',pointerEvents:'none',backdropFilter:'blur(6px)'}}>
-            🖱 Click map → {!waypoints.some(p=>p.type==='start')?'Place Start 🟢':!waypoints.some(p=>p.type==='end')?'Place End 🔴':'Add Waypoint ⚓'}
-          </div>
-        </div>
+        <div style={{display:'flex',flex:1,minHeight:0,overflow:'hidden'}}>
 
-        {progress>0&&<div style={{margin:'4px 0.7rem 0',height:4,background:'rgba(255,255,255,0.08)',borderRadius:4,overflow:'hidden',flexShrink:0}}><div style={{height:'100%',background:'linear-gradient(90deg,var(--cyan,#00B4D8),var(--green,#00C896))',width:`${progress}%`,transition:'width 0.1s'}}/></div>}
-
-        <div style={{padding:'0.8rem 0.9rem',overflowY:'auto',flex:1}}>
-
-          {/* Input mode tabs */}
-          <div style={{display:'flex',gap:4,marginBottom:'0.8rem',background:'rgba(255,255,255,0.04)',borderRadius:10,padding:3}}>
-            {[['click','🖱 Click Map'],['dms','📐 DMS Input'],['search','🔍 Search Port']].map(([m,l])=>(
-              <button key={m} onClick={()=>setInputMode(m)} style={{flex:1,padding:'6px 4px',borderRadius:8,fontSize:'0.67rem',fontWeight:inputMode===m?700:400,cursor:'pointer',border:'none',background:inputMode===m?'rgba(0,180,216,0.18)':'transparent',color:inputMode===m?'var(--cyan,#00B4D8)':'var(--text3,#4A5F80)',transition:'all 0.15s'}}>{l}</button>
-            ))}
-          </div>
-
-          {/* DMS Input */}
-          {inputMode==='dms'&&(
-            <div style={{background:'rgba(0,180,216,0.04)',border:'1px solid rgba(0,180,216,0.15)',borderRadius:10,padding:'0.8rem',marginBottom:'0.8rem'}}>
-              <div style={{fontSize:'0.66rem',color:'var(--cyan,#00B4D8)',fontWeight:700,marginBottom:8}}>📐 Degrees / Minutes / Seconds</div>
-              <div style={{marginBottom:6}}>
-                <div style={{fontSize:'0.6rem',color:'var(--text3,#4A5F80)',marginBottom:4}}>LATITUDE</div>
-                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr 70px',gap:5}}>
-                  <input value={dmsForm.latD} onChange={e=>setDmsForm(f=>({...f,latD:e.target.value}))} placeholder="°" style={{...inp,width:'100%'}}/>
-                  <input value={dmsForm.latM} onChange={e=>setDmsForm(f=>({...f,latM:e.target.value}))} placeholder="'" style={{...inp,width:'100%'}}/>
-                  <input value={dmsForm.latS} onChange={e=>setDmsForm(f=>({...f,latS:e.target.value}))} placeholder='"' style={{...inp,width:'100%'}}/>
-                  <select value={dmsForm.latDir} onChange={e=>setDmsForm(f=>({...f,latDir:e.target.value}))} style={{...inp,cursor:'pointer'}}><option value="N">N ↑</option><option value="S">S ↓</option></select>
-                </div>
+          {/* LEFT — Canvas preview (portrait) */}
+          <div style={{flexShrink:0,padding:'0.8rem 0 0.8rem 0.8rem',display:'flex',flexDirection:'column',alignItems:'center',gap:8}}>
+            <canvas
+              ref={canvasRef}
+              width={CW} height={CH}
+              onClick={handleCanvasClick}
+              style={{
+                width: Math.min(260, CW),
+                height: Math.min(260*CH/CW, CH),
+                borderRadius:12,
+                border:'2px solid rgba(0,180,216,0.3)',
+                cursor: playing||recording ? 'default' : 'crosshair',
+                display:'block',
+                background:'#040C1A',
+                boxShadow:'0 0 30px rgba(0,180,216,0.15)',
+              }}
+            />
+            {/* Click hint */}
+            {!playing && !recording && ordered.length < 2 && (
+              <div style={{fontSize:'0.6rem',color:'rgba(0,180,216,0.7)',textAlign:'center',maxWidth:220,lineHeight:1.5,background:'rgba(0,180,216,0.06)',borderRadius:8,padding:'4px 8px',border:'1px solid rgba(0,180,216,0.15)'}}>
+                👆 Click map to place {!points.some(p=>p.type==='start')?'Start 🟢':!points.some(p=>p.type==='end')?'End 🔴':'Waypoint ⚓'}
               </div>
-              <div style={{marginBottom:8}}>
-                <div style={{fontSize:'0.6rem',color:'var(--text3,#4A5F80)',marginBottom:4}}>LONGITUDE</div>
-                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr 70px',gap:5}}>
-                  <input value={dmsForm.lngD} onChange={e=>setDmsForm(f=>({...f,lngD:e.target.value}))} placeholder="°" style={{...inp,width:'100%'}}/>
-                  <input value={dmsForm.lngM} onChange={e=>setDmsForm(f=>({...f,lngM:e.target.value}))} placeholder="'" style={{...inp,width:'100%'}}/>
-                  <input value={dmsForm.lngS} onChange={e=>setDmsForm(f=>({...f,lngS:e.target.value}))} placeholder='"' style={{...inp,width:'100%'}}/>
-                  <select value={dmsForm.lngDir} onChange={e=>setDmsForm(f=>({...f,lngDir:e.target.value}))} style={{...inp,cursor:'pointer'}}><option value="E">E →</option><option value="W">W ←</option></select>
-                </div>
-              </div>
-              <div style={{display:'grid',gridTemplateColumns:'1fr 90px 70px',gap:6,marginBottom:8}}>
-                <input value={dmsForm.name} onChange={e=>setDmsForm(f=>({...f,name:e.target.value}))} placeholder="Name (optional)" style={inp}/>
-                <select value={dmsForm.type} onChange={e=>setDmsForm(f=>({...f,type:e.target.value}))} style={{...inp,cursor:'pointer'}}>
-                  <option value="start">Start 🟢</option><option value="wp">Waypoint</option><option value="end">End 🔴</option>
-                </select>
-                <select value={dmsForm.flag} onChange={e=>setDmsForm(f=>({...f,flag:e.target.value}))} style={{...inp,cursor:'pointer'}}>
-                  {FLAG_OPTS.map(f=><option key={f} value={f}>{f}</option>)}
-                </select>
-              </div>
-              <button onClick={applyDMS} style={{width:'100%',padding:'8px',borderRadius:8,background:'rgba(0,180,216,0.15)',border:'1px solid rgba(0,180,216,0.4)',color:'var(--cyan,#00B4D8)',fontWeight:700,fontSize:'0.74rem',cursor:'pointer'}}>+ Add This Point</button>
-            </div>
-          )}
-
-          {/* Port Search */}
-          {inputMode==='search'&&(
-            <div style={{background:'rgba(0,180,216,0.04)',border:'1px solid rgba(0,180,216,0.15)',borderRadius:10,padding:'0.8rem',marginBottom:'0.8rem'}}>
-              <div style={{fontSize:'0.66rem',color:'var(--cyan,#00B4D8)',fontWeight:700,marginBottom:8}}>🔍 Search Port or Place</div>
-              <div style={{display:'grid',gridTemplateColumns:'1fr 100px',gap:6,marginBottom:6}}>
-                <input value={portSearch} onChange={e=>setPortSearch(e.target.value)} placeholder="Type port, city, or place…" style={inp}/>
-                <select value={portType} onChange={e=>setPortType(e.target.value)} style={{...inp,cursor:'pointer'}}>
-                  <option value="start">Start 🟢</option><option value="wp">Waypoint</option><option value="end">End 🔴</option>
-                </select>
-              </div>
-              {portResults.length>0&&(
-                <div style={{background:'rgba(0,0,0,0.3)',borderRadius:8,overflow:'hidden',maxHeight:180,overflowY:'auto'}}>
-                  {portResults.map((p,i)=>(
-                    <div key={i} onClick={()=>{ const flag=portType==='start'?'🟢':portType==='end'?'🔴':portFlag; setWaypoints(prev=>[...prev,{lat:p.lat,lng:p.lng,name:p.name.split(',')[0],flag,type:portType}]); setPortSearch(''); setPortResults([]); if(mapRef.current) mapRef.current.flyTo([p.lat,p.lng],6); }}
-                      style={{padding:'8px 12px',cursor:'pointer',borderBottom:'1px solid rgba(255,255,255,0.05)',display:'flex',alignItems:'center',gap:8}}>
-                      <span>{p.source==='db'?'⚓':'📍'}</span>
-                      <div>
-                        <div style={{fontSize:'0.74rem',color:'var(--text,#E2EBF8)',fontWeight:600}}>{p.name.split(',')[0]}</div>
-                        <div style={{fontSize:'0.61rem',color:'var(--text3,#4A5F80)'}}>{p.lat.toFixed(3)}°, {p.lng.toFixed(3)}°</div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Points list */}
-          {ordered.length>0&&(
-            <div style={{marginBottom:'0.8rem'}}>
-              <div style={{fontSize:'0.63rem',color:'var(--text3,#4A5F80)',marginBottom:5,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
-                <span>📍 ROUTE POINTS ({ordered.length})</span>
-                <button onClick={clearAll} style={{background:'none',border:'none',color:'#ff4757',cursor:'pointer',fontSize:'0.65rem'}}>🗑 Clear All</button>
-              </div>
-              <div style={{display:'flex',flexDirection:'column',gap:4}}>
-                {ordered.map((pt,i)=>(
-                  <div key={i} style={{display:'flex',alignItems:'center',gap:8,padding:'6px 10px',background:'rgba(255,255,255,0.04)',borderRadius:8,border:`1px solid ${pt.type==='start'?'rgba(0,200,100,0.25)':pt.type==='end'?'rgba(255,71,87,0.25)':'rgba(0,180,216,0.15)'}`}}>
-                    <span style={{fontSize:'1rem'}}>{pt.flag}</span>
-                    <div style={{flex:1,minWidth:0}}>
-                      <div style={{fontSize:'0.73rem',fontWeight:600,color:'var(--text,#E2EBF8)'}}>{pt.name}</div>
-                      <div style={{fontSize:'0.61rem',color:'var(--text3,#4A5F80)'}}>{pt.lat.toFixed(4)}°, {pt.lng.toFixed(4)}°</div>
-                    </div>
-                    <span style={{fontSize:'0.58rem',padding:'1px 6px',borderRadius:10,background:'rgba(255,255,255,0.07)',color:'var(--text3,#4A5F80)'}}>{pt.type}</span>
-                    <button onClick={()=>setWaypoints(prev=>prev.filter((_,j)=>j!==i))} style={{background:'none',border:'none',color:'var(--text3,#4A5F80)',cursor:'pointer',fontSize:'0.8rem'}}>✕</button>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Distance stats */}
-          {distStats&&(
-            <div style={{background:'linear-gradient(135deg,rgba(0,20,50,0.8),rgba(0,40,90,0.7))',border:'1px solid rgba(0,180,216,0.25)',borderRadius:10,padding:'0.8rem',marginBottom:'0.8rem'}}>
-              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginBottom:distStats.legs.length>1?8:0}}>
-                <div style={{textAlign:'center'}}>
-                  <div style={{fontSize:'1.3rem',fontWeight:900,color:'var(--cyan,#00B4D8)',fontFamily:'Orbitron,monospace'}}>{distStats.totalNM}</div>
-                  <div style={{fontSize:'0.6rem',color:'var(--text3,#4A5F80)',textTransform:'uppercase',letterSpacing:'0.08em'}}>Nautical Miles</div>
-                </div>
-                <div style={{textAlign:'center'}}>
-                  <div style={{fontSize:'1.3rem',fontWeight:900,color:'var(--green,#00C896)',fontFamily:'Orbitron,monospace'}}>{distStats.totalKM}</div>
-                  <div style={{fontSize:'0.6rem',color:'var(--text3,#4A5F80)',textTransform:'uppercase',letterSpacing:'0.08em'}}>Kilometres</div>
-                </div>
-              </div>
-              {distStats.legs.length>1&&(
-                <div style={{fontSize:'0.63rem',color:'var(--text3,#4A5F80)',borderTop:'1px solid rgba(255,255,255,0.07)',paddingTop:6}}>
-                  {distStats.legs.map((l,i)=>(
-                    <div key={i} style={{display:'flex',justifyContent:'space-between',padding:'2px 0'}}>
-                      <span style={{color:'var(--text2,#8A9BBF)'}}>{l.from} → {l.to}</span>
-                      <span style={{color:'var(--gold,#F0A500)',fontFamily:'Orbitron,monospace'}}>{l.nm} NM / {l.km} km</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Country detection */}
-          <div style={{marginBottom:'0.8rem'}}>
-            <button onClick={()=>{ const o=getOrderedWPs(); if(o.length<2){setStatus('⚠️ Add at least 2 points first');return;} detectCountries(o); }} disabled={detectingCtry||ordered.length<2}
-              style={{padding:'7px 14px',borderRadius:8,background:'rgba(240,165,0,0.1)',border:'1px solid rgba(240,165,0,0.3)',color:'var(--gold,#F0A500)',fontSize:'0.7rem',fontWeight:600,cursor:'pointer',marginBottom:6,width:'100%',opacity:ordered.length<2?0.5:1}}>
-              {detectingCtry?'🔍 Detecting countries…':'🌍 Detect Countries Along Route (Nominatim)'}
-            </button>
-            {countries.length>0&&(
-              <div style={{display:'flex',flexWrap:'wrap',gap:6}}>
-                <span style={{fontSize:'0.62rem',color:'var(--text3,#4A5F80)',alignSelf:'center'}}>Countries:</span>
-                {countries.map((c,i)=>(
-                  <span key={i} style={{fontSize:'0.72rem',padding:'3px 10px',borderRadius:20,background:'rgba(240,165,0,0.08)',border:'1px solid rgba(240,165,0,0.2)',color:'var(--gold,#F0A500)'}}>{c.flag} {c.country}</span>
-                ))}
+            )}
+            {/* Progress bar */}
+            {progress > 0 && (
+              <div style={{width:Math.min(260,CW),height:5,background:'rgba(255,255,255,0.08)',borderRadius:4,overflow:'hidden'}}>
+                <div style={{height:'100%',background:'linear-gradient(90deg,#FF3B30,#FF9500)',width:`${progress}%`,transition:'width 0.1s'}}/>
               </div>
             )}
           </div>
 
-          {/* Speed + Playback */}
-          <div style={{display:'flex',gap:8,alignItems:'center',marginBottom:'0.8rem',flexWrap:'wrap'}}>
-            <span style={{fontSize:'0.68rem',color:'var(--text3,#4A5F80)'}}>Speed:</span>
-            {[1,2,4].map(s=>(
-              <button key={s} onClick={()=>setSpeed(s)} style={{padding:'4px 10px',borderRadius:6,fontSize:'0.7rem',fontWeight:700,cursor:'pointer',background:speed===s?'rgba(0,180,216,0.2)':'transparent',border:`1px solid ${speed===s?'var(--cyan,#00B4D8)':'rgba(255,255,255,0.1)'}`,color:speed===s?'var(--cyan,#00B4D8)':'var(--text3,#4A5F80)'}}>
-                {s}x
+          {/* RIGHT — Controls */}
+          <div style={{flex:1,overflowY:'auto',padding:'0.8rem',display:'flex',flexDirection:'column',gap:'0.7rem',minWidth:0}}>
+
+            {/* Input mode tabs */}
+            <div style={{display:'flex',background:'rgba(255,255,255,0.04)',borderRadius:10,padding:3,gap:3}}>
+              {[['click','🖱 Click'],['dms','📐 DMS'],['search','🔍 Search']].map(([m,l])=>(
+                <button key={m} onClick={()=>setInputMode(m)}
+                  style={{flex:1,padding:'6px 4px',borderRadius:7,fontSize:'0.67rem',fontWeight:inputMode===m?700:400,cursor:'pointer',border:'none',background:inputMode===m?'rgba(0,180,216,0.2)':'transparent',color:inputMode===m?'#00B4D8':'rgba(255,255,255,0.4)',transition:'all 0.15s'}}>
+                  {l}
+                </button>
+              ))}
+            </div>
+
+            {/* Point type selector */}
+            <div>
+              <div style={{fontSize:'0.6rem',color:'rgba(255,255,255,0.4)',marginBottom:5,textTransform:'uppercase',letterSpacing:'0.08em'}}>Point Type to Add</div>
+              <div style={{display:'flex',gap:5}}>
+                {[['start','🟢 Start'],['wp','⚓ Waypoint'],['end','🔴 End']].map(([t,l])=>(
+                  <button key={t} onClick={()=>setPtType(t)}
+                    style={{flex:1,padding:'6px 4px',borderRadius:7,fontSize:'0.68rem',fontWeight:ptType===t?700:400,cursor:'pointer',border:`1px solid ${ptType===t?'rgba(0,180,216,0.5)':'rgba(255,255,255,0.1)'}`,background:ptType===t?'rgba(0,180,216,0.15)':'transparent',color:ptType===t?'#00B4D8':'rgba(255,255,255,0.4)',transition:'all 0.15s'}}>
+                    {l}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* DMS Input */}
+            {inputMode==='dms' && (
+              <div style={{background:'rgba(0,180,216,0.05)',border:'1px solid rgba(0,180,216,0.15)',borderRadius:10,padding:'0.7rem'}}>
+                <div style={{fontSize:'0.65rem',color:'#00B4D8',fontWeight:700,marginBottom:8}}>📐 Degrees / Minutes / Seconds</div>
+                <div style={{marginBottom:6}}>
+                  <div style={{fontSize:'0.58rem',color:'rgba(255,255,255,0.4)',marginBottom:4}}>LATITUDE</div>
+                  <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr 60px',gap:4}}>
+                    <input value={dmsForm.latD} onChange={e=>setDmsForm(f=>({...f,latD:e.target.value}))} placeholder="°" style={inp}/>
+                    <input value={dmsForm.latM} onChange={e=>setDmsForm(f=>({...f,latM:e.target.value}))} placeholder="'" style={inp}/>
+                    <input value={dmsForm.latS} onChange={e=>setDmsForm(f=>({...f,latS:e.target.value}))} placeholder='"' style={inp}/>
+                    <select value={dmsForm.latDir} onChange={e=>setDmsForm(f=>({...f,latDir:e.target.value}))} style={{...inp,cursor:'pointer'}}>
+                      <option value="N">N ↑</option><option value="S">S ↓</option>
+                    </select>
+                  </div>
+                </div>
+                <div style={{marginBottom:8}}>
+                  <div style={{fontSize:'0.58rem',color:'rgba(255,255,255,0.4)',marginBottom:4}}>LONGITUDE</div>
+                  <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr 60px',gap:4}}>
+                    <input value={dmsForm.lngD} onChange={e=>setDmsForm(f=>({...f,lngD:e.target.value}))} placeholder="°" style={inp}/>
+                    <input value={dmsForm.lngM} onChange={e=>setDmsForm(f=>({...f,lngM:e.target.value}))} placeholder="'" style={inp}/>
+                    <input value={dmsForm.lngS} onChange={e=>setDmsForm(f=>({...f,lngS:e.target.value}))} placeholder='"' style={inp}/>
+                    <select value={dmsForm.lngDir} onChange={e=>setDmsForm(f=>({...f,lngDir:e.target.value}))} style={{...inp,cursor:'pointer'}}>
+                      <option value="E">E →</option><option value="W">W ←</option>
+                    </select>
+                  </div>
+                </div>
+                <input value={dmsForm.name} onChange={e=>setDmsForm(f=>({...f,name:e.target.value}))} placeholder="Name (optional)" style={{...inp,marginBottom:8}}/>
+                <button onClick={applyDMS} style={{width:'100%',padding:'7px',borderRadius:8,background:'rgba(0,180,216,0.15)',border:'1px solid rgba(0,180,216,0.35)',color:'#00B4D8',fontWeight:700,fontSize:'0.73rem',cursor:'pointer'}}>+ Add Point</button>
+              </div>
+            )}
+
+            {/* Port Search */}
+            {inputMode==='search' && (
+              <div style={{background:'rgba(0,180,216,0.05)',border:'1px solid rgba(0,180,216,0.15)',borderRadius:10,padding:'0.7rem'}}>
+                <div style={{fontSize:'0.65rem',color:'#00B4D8',fontWeight:700,marginBottom:8}}>🔍 Search Port or Place</div>
+                <input value={portSearch} onChange={e=>setPortSearch(e.target.value)} placeholder="Type port, city, or country…" style={{...inp,marginBottom:6}}/>
+                {portResults.length>0 && (
+                  <div style={{background:'rgba(0,0,0,0.4)',borderRadius:8,overflow:'hidden',maxHeight:160,overflowY:'auto'}}>
+                    {portResults.map((p,i)=>(
+                      <div key={i} onClick={()=>addPortResult(p)}
+                        style={{padding:'7px 10px',cursor:'pointer',borderBottom:'1px solid rgba(255,255,255,0.05)',display:'flex',alignItems:'center',gap:8}}>
+                        <span style={{fontSize:'0.9rem'}}>{p.source==='db'?'⚓':'📍'}</span>
+                        <div>
+                          <div style={{fontSize:'0.73rem',color:'#E2EBF8',fontWeight:600}}>{p.name.split(',')[0]}</div>
+                          <div style={{fontSize:'0.6rem',color:'rgba(255,255,255,0.35)'}}>{p.lat.toFixed(3)}°, {p.lng.toFixed(3)}°</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Route points */}
+            {ordered.length > 0 && (
+              <div>
+                <div style={{fontSize:'0.6rem',color:'rgba(255,255,255,0.4)',marginBottom:5,display:'flex',justifyContent:'space-between',alignItems:'center',textTransform:'uppercase',letterSpacing:'0.08em'}}>
+                  <span>Route ({ordered.length} points)</span>
+                  <button onClick={clearAll} style={{background:'none',border:'none',color:'#ff4757',cursor:'pointer',fontSize:'0.65rem'}}>🗑 Clear</button>
+                </div>
+                <div style={{display:'flex',flexDirection:'column',gap:3}}>
+                  {ordered.map((pt,i)=>(
+                    <div key={i} style={{display:'flex',alignItems:'center',gap:7,padding:'5px 9px',background:'rgba(255,255,255,0.04)',borderRadius:7,border:`1px solid ${pt.type==='start'?'rgba(0,200,100,0.2)':pt.type==='end'?'rgba(255,71,87,0.2)':'rgba(0,180,216,0.12)'}`}}>
+                      <span>{pt.flag}</span>
+                      <span style={{flex:1,fontSize:'0.72rem',color:'#E2EBF8',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{pt.name}</span>
+                      <span style={{fontSize:'0.58rem',color:'rgba(255,255,255,0.3)'}}>{pt.lat.toFixed(2)}°,{pt.lng.toFixed(2)}°</span>
+                      <button onClick={()=>setPoints(prev=>prev.filter((_,j)=>j!==points.indexOf(pt)))} style={{background:'none',border:'none',color:'rgba(255,255,255,0.3)',cursor:'pointer',fontSize:'0.75rem'}}>✕</button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Distance stats */}
+            {distStats && (
+              <div style={{background:'rgba(0,20,50,0.6)',border:'1px solid rgba(0,180,216,0.2)',borderRadius:10,padding:'0.7rem'}}>
+                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
+                  <div style={{textAlign:'center'}}>
+                    <div style={{fontSize:'1.2rem',fontWeight:900,color:'#00C896',fontFamily:'Orbitron,monospace'}}>{distStats.totalNM}</div>
+                    <div style={{fontSize:'0.58rem',color:'rgba(255,255,255,0.4)',textTransform:'uppercase'}}>Nautical Miles</div>
+                  </div>
+                  <div style={{textAlign:'center'}}>
+                    <div style={{fontSize:'1.2rem',fontWeight:900,color:'#00B4D8',fontFamily:'Orbitron,monospace'}}>{distStats.totalKM}</div>
+                    <div style={{fontSize:'0.58rem',color:'rgba(255,255,255,0.4)',textTransform:'uppercase'}}>Kilometres</div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Country detection */}
+            <div>
+              <button onClick={()=>detectCountries(ordered)} disabled={detectingCtry||ordered.length<2}
+                style={{width:'100%',padding:'7px',borderRadius:8,background:'rgba(240,165,0,0.1)',border:'1px solid rgba(240,165,0,0.25)',color:'#F0A500',fontSize:'0.7rem',fontWeight:600,cursor:ordered.length<2?'not-allowed':'pointer',opacity:ordered.length<2?0.5:1}}>
+                {detectingCtry?'🔍 Detecting…':'🌍 Detect Countries Along Route'}
               </button>
-            ))}
-            <div style={{flex:1}}/>
-            {!playing&&!recording&&<button onClick={startAnimation} disabled={ordered.length<2} style={{padding:'8px 18px',borderRadius:8,background:ordered.length<2?'rgba(255,255,255,0.05)':'linear-gradient(135deg,var(--cyan,#00B4D8),#1565C0)',color:ordered.length<2?'var(--text3,#4A5F80)':'#fff',border:'none',fontWeight:700,fontSize:'0.78rem',cursor:ordered.length<2?'not-allowed':'pointer'}}>▶ Preview</button>}
-            {playing&&<button onClick={stopAnimation} style={{padding:'8px 18px',borderRadius:8,background:'rgba(255,71,87,0.15)',color:'#ff4757',border:'1px solid rgba(255,71,87,0.35)',fontWeight:700,fontSize:'0.78rem',cursor:'pointer'}}>⏹ Stop</button>}
-            {!recording&&!playing&&<button onClick={startRecording} disabled={ordered.length<2} style={{padding:'8px 18px',borderRadius:8,background:ordered.length<2?'rgba(255,255,255,0.05)':'linear-gradient(135deg,var(--green,#00C896),#00a87a)',color:ordered.length<2?'var(--text3,#4A5F80)':'#000',border:'none',fontWeight:700,fontSize:'0.78rem',cursor:ordered.length<2?'not-allowed':'pointer'}}>⏺ Record & Export .webm</button>}
-            {recording&&<button onClick={stopRecording} style={{padding:'8px 18px',borderRadius:8,background:'rgba(255,165,0,0.15)',color:'#ffa502',border:'1px solid rgba(255,165,0,0.4)',fontWeight:700,fontSize:'0.78rem',cursor:'pointer'}}>⏹ Stop Recording</button>}
+              {countries.length>0 && (
+                <div style={{display:'flex',flexWrap:'wrap',gap:5,marginTop:6}}>
+                  {countries.map((c,i)=>(
+                    <span key={i} style={{fontSize:'0.7rem',padding:'3px 9px',borderRadius:20,background:'rgba(240,165,0,0.08)',border:'1px solid rgba(240,165,0,0.2)',color:'#F0A500'}}>{c.flag} {c.country}</span>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Video length selector */}
+            <div>
+              <div style={{fontSize:'0.6rem',color:'rgba(255,255,255,0.4)',marginBottom:6,textTransform:'uppercase',letterSpacing:'0.08em'}}>Video Length</div>
+              <div style={{display:'flex',gap:5}}>
+                {[15,30,60,120].map(s=>(
+                  <button key={s} onClick={()=>setVideoSecs(s)}
+                    style={{flex:1,padding:'8px 4px',borderRadius:8,fontSize:'0.72rem',fontWeight:videoSecs===s?700:400,cursor:'pointer',border:`1px solid ${videoSecs===s?'#FF3B30':'rgba(255,255,255,0.1)'}`,background:videoSecs===s?'rgba(255,59,48,0.15)':'transparent',color:videoSecs===s?'#FF3B30':'rgba(255,255,255,0.4)',transition:'all 0.15s'}}>
+                    {s}s
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Playback controls */}
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:6}}>
+              {!playing && !recording && (
+                <button onClick={startAnimation} disabled={ordered.length<2}
+                  style={{padding:'10px',borderRadius:9,background:ordered.length<2?'rgba(255,255,255,0.05)':'linear-gradient(135deg,#00B4D8,#1565C0)',color:ordered.length<2?'rgba(255,255,255,0.2)':'#fff',border:'none',fontWeight:700,fontSize:'0.76rem',cursor:ordered.length<2?'not-allowed':'pointer'}}>
+                  ▶ Preview
+                </button>
+              )}
+              {playing && (
+                <button onClick={stopAnimation}
+                  style={{padding:'10px',borderRadius:9,background:'rgba(255,71,87,0.15)',color:'#ff4757',border:'1px solid rgba(255,71,87,0.35)',fontWeight:700,fontSize:'0.76rem',cursor:'pointer'}}>
+                  ⏹ Stop
+                </button>
+              )}
+              {!recording && !playing && (
+                <button onClick={startRecording} disabled={ordered.length<2}
+                  style={{padding:'10px',borderRadius:9,background:ordered.length<2?'rgba(255,255,255,0.05)':'linear-gradient(135deg,#FF3B30,#FF9500)',color:ordered.length<2?'rgba(255,255,255,0.2)':'#fff',border:'none',fontWeight:700,fontSize:'0.76rem',cursor:ordered.length<2?'not-allowed':'pointer'}}>
+                  ⏺ Record & Export
+                </button>
+              )}
+              {recording && (
+                <button onClick={stopRecording}
+                  style={{padding:'10px',borderRadius:9,background:'rgba(255,165,0,0.15)',color:'#ffa502',border:'1px solid rgba(255,165,0,0.4)',fontWeight:700,fontSize:'0.76rem',cursor:'pointer',gridColumn:'1/-1'}}>
+                  ⏹ Stop Recording
+                </button>
+              )}
+            </div>
+
+            {/* Status */}
+            {status && (
+              <div style={{fontSize:'0.72rem',padding:'8px 10px',borderRadius:8,background:'rgba(0,0,0,0.3)',color:status.startsWith('✅')?'#00C896':status.startsWith('⚠️')?'#FF9500':status.startsWith('🔴')?'#FF3B30':'rgba(255,255,255,0.7)',lineHeight:1.5}}>
+                {status}
+              </div>
+            )}
+
+            {/* Tips */}
+            <div style={{fontSize:'0.62rem',color:'rgba(255,255,255,0.3)',lineHeight:1.7,background:'rgba(255,255,255,0.02)',borderRadius:8,padding:'8px 10px',border:'1px solid rgba(255,255,255,0.05)'}}>
+              💡 <strong style={{color:'rgba(255,255,255,0.5)'}}>Tips:</strong><br/>
+              • Click the map preview to place points<br/>
+              • Start 🟢 → any Waypoints ⚓ → End 🔴<br/>
+              • Detect countries to show flags on video<br/>
+              • 30s recommended for Instagram Stories<br/>
+              • Video exports as portrait 9:16 .webm
+            </div>
+
           </div>
-
-          {status&&<div style={{fontSize:'0.74rem',color:status.startsWith('⚠️')?'#ff6b35':status.startsWith('✅')?'var(--green,#00C896)':status.startsWith('🔴')?'#ff4757':'#ffa502',background:'rgba(0,0,0,0.2)',borderRadius:8,padding:'7px 10px',marginBottom:'0.6rem'}}>{status}</div>}
-
-          <div style={{fontSize:'0.63rem',color:'var(--text3,#4A5F80)',lineHeight:1.7,background:'rgba(255,255,255,0.03)',borderRadius:8,padding:'8px 10px'}}>
-            💡 <strong style={{color:'var(--text2,#8A9BBF)'}}>How to use:</strong> Click the real map to place Start → Waypoints → End. Use DMS Input for exact coordinates. Drag markers to adjust. Click a marker to remove it. Detect countries, see NM/KM distance, then export as .webm to share 🚢
-          </div>
-
         </div>
       </div>
     </div>
   );
 }
-
 
 // ─── CONTRACT VOYAGE REPORT ───────────────────────────────────────────────────
 function generateVoyageReport(entries, userName) {
