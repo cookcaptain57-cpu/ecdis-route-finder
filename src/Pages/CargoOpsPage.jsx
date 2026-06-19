@@ -684,166 +684,932 @@ function TankerMSDS() {
 // ══════════════════════════════════════════════════════════════════════════════
 // CONTAINER SHIP TABS
 // ══════════════════════════════════════════════════════════════════════════════
-function ContainerBayPlan() {
-  const ACC = VESSEL_COLORS.container.accent;
-  const KEY = 'cargo_container_bayplan';
-  const [bays, setBays] = useState(() => load(KEY, []));
-  const [form, setForm] = useState({ bay: '', row: '', tier: '', containerId: '', type: '20GP', weight: '', port: '', reefer: 'No', oog: 'No', dg: 'No', dgClass: '', remarks: '' });
-  const set = k => e => setForm(f => ({ ...f, [k]: e.target.value }));
-  const add = () => {
-    if (!form.bay || !form.row || !form.tier || !form.containerId) return;
-    const pos = `${String(form.bay).padStart(2,'0')}${String(form.row).padStart(2,'0')}${String(form.tier).padStart(2,'0')}`;
-    const e = [...bays, { ...form, pos, ts: new Date().toISOString().slice(0,10) }];
-    setBays(e); save(KEY, e);
-    setForm(f => ({ ...f, containerId: '', weight: '', dgClass: '', remarks: '' }));
+// ══════════════════════════════════════════════════════════════════════════════
+// CONTAINER SHIP TABS — Live Cargo Operations + Reefer Rounds
+// (Replaces old ContainerBayPlan / ContainerReefer / ContainerOOG / ContainerLashing)
+// ══════════════════════════════════════════════════════════════════════════════
+
+// ── Container Live Ops helpers (scoped to this section) ──
+const clPad = n => String(n).padStart(2, '0');
+const clNow = () => new Date().toTimeString().slice(0,5);
+const clNowFull = () => new Date().toISOString().slice(0,16).replace('T',' ');
+
+function generateBays(from, to, type) {
+  const bays = [];
+  for (let i = from; i <= to; i++) {
+    if (type === 'odd'  && i % 2 !== 0) bays.push(clPad(i));
+    if (type === 'even' && i % 2 === 0) bays.push(clPad(i));
+    if (type === 'all') bays.push(clPad(i));
+  }
+  return bays;
+}
+
+// Status colors
+const STATUS_COLOR = {
+  idle:       S.vd,
+  inprogress: S.gd,
+  completed:  S.gn,
+  hold:       S.rd,
+};
+const STATUS_LABEL = {
+  idle:       'IDLE',
+  inprogress: 'IN PROGRESS',
+  completed:  'DONE',
+  hold:       'ON HOLD',
+};
+
+const SectionLabel = ({ text, color }) => (
+  <div style={{ color:color||S.dm, fontSize:S.lb, letterSpacing:0.8, fontWeight:700, textTransform:'uppercase', marginBottom:5 }}>{text}</div>
+);
+
+const ProgressBar = ({ pct, color, height=6 }) => (
+  <div style={{ background:S.bg3, borderRadius:99, height, overflow:'hidden', width:'100%' }}>
+    <div style={{ background:color||ACC, height:'100%', width:`${Math.min(100,pct||0)}%`, borderRadius:99, transition:'width 0.4s' }} />
+  </div>
+);
+
+const StatBox = ({ label, value, color, sub }) => (
+  <div style={{ background:S.bg3, borderRadius:8, padding:'8px 10px', textAlign:'center', flex:1 }}>
+    <div style={{ color:S.dm, fontSize:S.lb, marginBottom:3 }}>{label}</div>
+    <div style={{ color:color||S.cy, fontFamily:'monospace', fontSize:'0.92rem', fontWeight:700 }}>{value}</div>
+    {sub && <div style={{ color:S.dm, fontSize:S.ti, marginTop:2 }}>{sub}</div>}
+  </div>
+);
+
+// ─── SETUP WIZARD ────────────────────────────────────────────────────────────
+function SetupWizard({ onSave }) {
+  const [port,     setPort]     = useState('');
+  const [vessel,   setVessel]   = useState('');
+  const [bayFrom,  setBayFrom]  = useState(1);
+  const [bayTo,    setBayTo]    = useState(55);
+  const [bayType,  setBayType]  = useState('all');
+  const [gantries, setGantries] = useState(2);
+  const [movesPerHr, setMovesPerHr] = useState(25);
+  const [totalLoad, setTotalLoad]   = useState('');
+  const [totalDisch, setTotalDisch] = useState('');
+  const [totalRest,  setTotalRest]  = useState('');
+
+  const Fi = ({ label, value, onChange, type='text', placeholder='', unit='' }) => (
+    <div style={{ marginBottom:8 }}>
+      <div style={{ color:S.dm, fontSize:S.lb, marginBottom:3 }}>{label}</div>
+      <div style={{ display:'flex', alignItems:'center', gap:5 }}>
+        <input type={type} value={value} onChange={onChange} placeholder={placeholder}
+          style={{ flex:1, background:S.bg3, color:S.cy, border:`1px solid ${S.bd2}`, borderRadius:5,
+            padding:'7px 9px', fontSize:S.xs, outline:'none', fontFamily:'monospace' }} />
+        {unit && <span style={{ color:S.dm, fontSize:S.lb }}>{unit}</span>}
+      </div>
+    </div>
+  );
+
+  const bayCount = generateBays(bayFrom, bayTo, bayType).length;
+
+  return (
+    <div style={{ padding:'16px 0' }}>
+      <div style={{ background:`${ACC}10`, border:`1px solid ${ACC}30`, borderRadius:10,
+        padding:'12px 14px', marginBottom:14 }}>
+        <div style={{ color:ACC, fontWeight:700, fontSize:S.sm, marginBottom:2 }}>📦 New Port Call Setup</div>
+        <div style={{ color:S.dm, fontSize:S.xs }}>Configure vessel and bay range for this port operation</div>
+      </div>
+
+      <Fi label="Port Name" value={port} onChange={e=>setPort(e.target.value)} placeholder="e.g. Singapore, SGSIN" />
+      <Fi label="Vessel Name" value={vessel} onChange={e=>setVessel(e.target.value)} placeholder="e.g. MV EVER GIVEN" />
+
+      <div style={{ background:S.bg3, borderRadius:8, padding:'10px 12px', marginBottom:10 }}>
+        <SectionLabel text="Bay Range Configuration" color={ACC} />
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'0 10px' }}>
+          <Fi label="From Bay" value={bayFrom} onChange={e=>setBayFrom(parseInt(e.target.value)||1)} type="number" />
+          <Fi label="To Bay"   value={bayTo}   onChange={e=>setBayTo(parseInt(e.target.value)||1)}   type="number" />
+        </div>
+        <div style={{ marginBottom:8 }}>
+          <div style={{ color:S.dm, fontSize:S.lb, marginBottom:5 }}>Bay Type</div>
+          <div style={{ display:'flex', gap:6 }}>
+            {[['all','All (20ft+40ft)'],['odd','Odd only (20ft)'],['even','Even only (40ft)']].map(([v,l]) => (
+              <button key={v} onClick={()=>setBayType(v)} style={{
+                flex:1, background:bayType===v?`${ACC}20`:'transparent',
+                border:`1px solid ${bayType===v?ACC:S.vd}`,
+                color:bayType===v?ACC:S.dm, borderRadius:6, padding:'5px 4px',
+                fontSize:S.lb, cursor:'pointer', fontWeight:bayType===v?700:400,
+              }}>{l}</button>
+            ))}
+          </div>
+        </div>
+        <div style={{ color:S.gn, fontSize:S.xs, marginTop:4 }}>
+          ✓ {bayCount} bays will be created (Bay {clPad(bayFrom)} → Bay {clPad(bayTo)})
+        </div>
+      </div>
+
+      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'0 10px' }}>
+        <Fi label="Number of Gantry Cranes" value={gantries} onChange={e=>setGantries(parseInt(e.target.value)||1)} type="number" />
+        <Fi label="Moves per Hour / Gantry" value={movesPerHr} onChange={e=>setMovesPerHr(parseInt(e.target.value)||25)} type="number" unit="mvs" />
+        <Fi label="Total Planned Load" value={totalLoad} onChange={e=>setTotalLoad(e.target.value)} type="number" placeholder="0" unit="mvs" />
+        <Fi label="Total Planned Discharge" value={totalDisch} onChange={e=>setTotalDisch(e.target.value)} type="number" placeholder="0" unit="mvs" />
+      </div>
+      <Fi label="Total Planned Restow" value={totalRest} onChange={e=>setTotalRest(e.target.value)} type="number" placeholder="0" unit="mvs" />
+
+      <Btn onClick={() => {
+        if (!port) return;
+        const bays = generateBays(bayFrom, bayTo, bayType);
+        onSave({
+          port, vessel, bayType, bayFrom, bayTo, gantries, movesPerHr,
+          totalLoad: parseInt(totalLoad)||0,
+          totalDisch: parseInt(totalDisch)||0,
+          totalRest: parseInt(totalRest)||0,
+          createdAt: clNowFull(),
+          bays: bays.map(b => ({
+            bay: b,
+            status: 'idle',
+            crane: '',
+            planLoad: 0, planDisch: 0, planRest: 0,
+            doneLoad: 0, doneDisch: 0, doneRest: 0,
+            deckLoad: 0, deckDisch: 0,
+            holdLoad: 0, holdDisch: 0,
+            isDG: false, isReefer: false,
+            startTime: '', endTime: '', notes: '',
+            lashingDone: false,
+          })),
+        });
+      }} color={ACC} style={{ width:'100%', marginTop:8, padding:'10px', fontSize:S.sm }}>
+        🚀 Start Port Operation
+      </Btn>
+    </div>
+  );
+}
+
+// ─── BAY CARD ────────────────────────────────────────────────────────────────
+function BayCard({ bay, idx, gantries, onUpdate, movesPerHr }) {
+  const [expanded, setExpanded] = useState(false);
+  const col = STATUS_COLOR[bay.status] || S.vd;
+  const totalPlan = bay.planLoad + bay.planDisch + bay.planRest;
+  const totalDone = bay.doneLoad + bay.doneDisch + bay.doneRest;
+  const pct = totalPlan > 0 ? Math.round((totalDone / totalPlan) * 100) : 0;
+
+  const upd = (key, val) => onUpdate(idx, key, val);
+
+  const setStatus = (s) => {
+    onUpdate(idx, 'status', s);
+    if (s === 'inprogress' && !bay.startTime) onUpdate(idx, 'startTime', clNow());
+    if (s === 'completed')  onUpdate(idx, 'endTime',   clNow());
   };
-  const del = i => { const e = bays.filter((_, j) => j !== i); setBays(e); save(KEY, e); };
-  const [search, setSearch] = useState('');
-  const filtered = bays.filter(b => !search || b.containerId.toLowerCase().includes(search.toLowerCase()) || b.pos.includes(search) || b.port.toLowerCase().includes(search.toLowerCase()));
+
+  const incr = (key, delta) => {
+    const cur = bay[key] || 0;
+    const next = Math.max(0, cur + delta);
+    onUpdate(idx, key, next);
+  };
+
+  const isBg = bay.status === 'inprogress' ? `${S.gd}08`
+             : bay.status === 'completed'   ? `${S.gn}08`
+             : bay.status === 'hold'        ? `${S.rd}08`
+             : S.bg2;
+
+  return (
+    <div style={{ background:isBg, border:`1px solid ${col}40`,
+      borderRadius:9, marginBottom:6, overflow:'hidden', transition:'all 0.2s' }}>
+
+      {/* ── BAY HEADER ── */}
+      <div style={{ display:'flex', alignItems:'center', gap:8, padding:'8px 10px',
+        cursor:'pointer', userSelect:'none' }} onClick={() => setExpanded(e => !e)}>
+
+        {/* Bay number */}
+        <div style={{ background:`${col}20`, border:`1px solid ${col}50`,
+          borderRadius:6, padding:'4px 8px', minWidth:42, textAlign:'center' }}>
+          <div style={{ color:S.dm, fontSize:S.ti }}>BAY</div>
+          <div style={{ color:col, fontFamily:'monospace', fontWeight:900, fontSize:'0.88rem' }}>{bay.bay}</div>
+        </div>
+
+        {/* Progress */}
+        <div style={{ flex:1, minWidth:0 }}>
+          <div style={{ display:'flex', justifyContent:'space-between', marginBottom:3 }}>
+            <div style={{ display:'flex', gap:5, alignItems:'center', flexWrap:'wrap' }}>
+              <span style={{ color:col, fontSize:S.lb, fontWeight:700 }}>{STATUS_LABEL[bay.status]}</span>
+              {bay.isDG     && <span style={{ background:'rgba(255,71,87,0.2)',   color:S.rd, border:`1px solid ${S.rd}44`, borderRadius:3, padding:'0 4px', fontSize:S.ti, fontWeight:700 }}>DG</span>}
+              {bay.isReefer && <span style={{ background:'rgba(0,212,255,0.15)', color:S.cy, border:`1px solid ${S.cy}44`, borderRadius:3, padding:'0 4px', fontSize:S.ti, fontWeight:700 }}>RF</span>}
+              {bay.crane && <span style={{ color:S.dm, fontSize:S.ti }}>🏗 {bay.crane}</span>}
+            </div>
+            <span style={{ color:S.dm, fontSize:S.ti }}>{totalDone}/{totalPlan} mvs</span>
+          </div>
+          <ProgressBar pct={pct} color={col} />
+          <div style={{ display:'flex', justifyContent:'space-between', marginTop:2 }}>
+            <span style={{ color:S.dm, fontSize:S.ti }}>L:{bay.doneLoad} D:{bay.doneDisch} R:{bay.doneRest}</span>
+            <span style={{ color:col, fontSize:S.ti, fontWeight:700 }}>{pct}%</span>
+          </div>
+        </div>
+
+        {/* Quick status buttons */}
+        <div style={{ display:'flex', flexDirection:'column', gap:3, flexShrink:0 }}>
+          {bay.status !== 'inprogress' && bay.status !== 'completed' && (
+            <button onClick={e=>{e.stopPropagation();setStatus('inprogress');}}
+              style={{ background:`${S.gd}20`, border:`1px solid ${S.gd}55`, color:S.gd,
+                borderRadius:4, padding:'3px 7px', fontSize:S.ti, cursor:'pointer', fontWeight:700, whiteSpace:'nowrap' }}>▶ START</button>
+          )}
+          {bay.status === 'inprogress' && (
+            <button onClick={e=>{e.stopPropagation();setStatus('completed');}}
+              style={{ background:`${S.gn}20`, border:`1px solid ${S.gn}55`, color:S.gn,
+                borderRadius:4, padding:'3px 7px', fontSize:S.ti, cursor:'pointer', fontWeight:700, whiteSpace:'nowrap' }}>✓ DONE</button>
+          )}
+          {bay.status === 'completed' && (
+            <span style={{ color:S.gn, fontSize:'1rem', textAlign:'center' }}>✅</span>
+          )}
+          <span style={{ color:S.vd, fontSize:S.ti, textAlign:'center' }}>{expanded ? '▲' : '▼'}</span>
+        </div>
+      </div>
+
+      {/* ── EXPANDED DETAIL ── */}
+      {expanded && (
+        <div style={{ padding:'0 10px 10px', borderTop:`1px solid ${col}20` }}>
+
+          {/* Status buttons */}
+          <div style={{ display:'flex', gap:4, marginBottom:8, marginTop:8 }}>
+            {['idle','inprogress','completed','hold'].map(s => (
+              <button key={s} onClick={()=>setStatus(s)} style={{
+                flex:1, background:bay.status===s?`${STATUS_COLOR[s]}25`:'transparent',
+                border:`1px solid ${bay.status===s?STATUS_COLOR[s]:S.vd}`,
+                color:bay.status===s?STATUS_COLOR[s]:S.dm,
+                borderRadius:5, padding:'4px 2px', fontSize:S.ti, cursor:'pointer', fontWeight:bay.status===s?700:400,
+              }}>{STATUS_LABEL[s]}</button>
+            ))}
+          </div>
+
+          {/* Crane + flags */}
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'0 10px', marginBottom:6 }}>
+            <div>
+              <div style={{ color:S.dm, fontSize:S.lb, marginBottom:3 }}>Crane / Gantry</div>
+              <select value={bay.crane} onChange={e=>upd('crane',e.target.value)}
+                style={{ width:'100%', background:S.bg3, color:S.cy, border:`1px solid ${S.bd2}`,
+                  borderRadius:5, padding:'5px 7px', fontSize:S.xs }}>
+                <option value=''>— Unassigned —</option>
+                {Array.from({length: gantries}, (_,i) => (
+                  <option key={i+1} value={`G${i+1}`}>Gantry {i+1}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <div style={{ color:S.dm, fontSize:S.lb, marginBottom:3 }}>Bay Type</div>
+              <div style={{ display:'flex', gap:5, marginTop:2 }}>
+                {[['isDG','DG',S.rd],['isReefer','RF',S.cy],['lashingDone','⚓LSH',S.gn]].map(([k,l,c]) => (
+                  <button key={k} onClick={()=>upd(k,!bay[k])} style={{
+                    flex:1, background:bay[k]?`${c}20`:'transparent',
+                    border:`1px solid ${bay[k]?c:S.vd}`, color:bay[k]?c:S.dm,
+                    borderRadius:5, padding:'4px 2px', fontSize:S.ti, cursor:'pointer', fontWeight:bay[k]?700:400,
+                  }}>{l}</button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Planned moves */}
+          <div style={{ background:S.bg3, borderRadius:7, padding:'8px 10px', marginBottom:6 }}>
+            <SectionLabel text="Planned Moves" color={S.dm} />
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:'0 8px' }}>
+              {[['planLoad','Load',ACC],['planDisch','Disch',S.or],['planRest','Restow',S.pu]].map(([k,l,c]) => (
+                <div key={k}>
+                  <div style={{ color:S.dm, fontSize:S.ti, marginBottom:2 }}>{l}</div>
+                  <input type="number" value={bay[k]} min={0}
+                    onChange={e=>upd(k,parseInt(e.target.value)||0)}
+                    style={{ width:'100%', background:S.bg2, color:c, border:`1px solid ${S.bd2}`,
+                      borderRadius:4, padding:'4px 6px', fontSize:S.xs, outline:'none', fontFamily:'monospace' }} />
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Completed moves — counter buttons */}
+          <div style={{ background:S.bg3, borderRadius:7, padding:'8px 10px', marginBottom:6 }}>
+            <SectionLabel text="Completed Moves" color={S.gn} />
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:'0 8px' }}>
+              {[['doneLoad','planLoad','Load',ACC],['doneDisch','planDisch','Disch',S.or],['doneRest','planRest','Restow',S.pu]].map(([dk,pk,l,c]) => (
+                <div key={dk}>
+                  <div style={{ color:S.dm, fontSize:S.ti, marginBottom:3 }}>{l} ({bay[dk]}/{bay[pk]})</div>
+                  <div style={{ display:'flex', gap:3, alignItems:'center' }}>
+                    <button onClick={()=>incr(dk,-1)} style={{ background:`${S.rd}15`, border:`1px solid ${S.rd}44`, color:S.rd, borderRadius:4, padding:'2px 7px', fontSize:'0.8rem', cursor:'pointer', fontWeight:700 }}>−</button>
+                    <div style={{ flex:1, textAlign:'center', color:c, fontFamily:'monospace', fontWeight:700, fontSize:S.sm }}>{bay[dk]}</div>
+                    <button onClick={()=>incr(dk,+1)} style={{ background:`${S.gn}15`, border:`1px solid ${S.gn}44`, color:S.gn, borderRadius:4, padding:'2px 7px', fontSize:'0.8rem', cursor:'pointer', fontWeight:700 }}>+</button>
+                  </div>
+                  <ProgressBar pct={bay[pk]>0?(bay[dk]/bay[pk])*100:0} color={c} height={4} />
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Deck / Hold split */}
+          <div style={{ background:S.bg3, borderRadius:7, padding:'8px 10px', marginBottom:6 }}>
+            <SectionLabel text="Deck / Hold Split" color={S.dm} />
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr 1fr', gap:'0 6px' }}>
+              {[['deckLoad','Deck Load',ACC],['holdLoad','Hold Load',S.te],['deckDisch','Deck Disch',S.or],['holdDisch','Hold Disch',S.pu]].map(([k,l,c])=>(
+                <div key={k}>
+                  <div style={{ color:S.dm, fontSize:S.ti, marginBottom:2 }}>{l}</div>
+                  <input type="number" value={bay[k]} min={0}
+                    onChange={e=>upd(k,parseInt(e.target.value)||0)}
+                    style={{ width:'100%', background:S.bg2, color:c, border:`1px solid ${S.bd2}`,
+                      borderRadius:4, padding:'4px 5px', fontSize:S.ti, outline:'none', fontFamily:'monospace' }}/>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Time + notes */}
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'0 10px', marginBottom:4 }}>
+            {[['startTime','Start Time'],['endTime','End Time']].map(([k,l])=>(
+              <div key={k}>
+                <div style={{ color:S.dm, fontSize:S.lb, marginBottom:3 }}>{l}</div>
+                <input type="time" value={bay[k]} onChange={e=>upd(k,e.target.value)}
+                  style={{ width:'100%', background:S.bg3, color:S.gd, border:`1px solid ${S.bd2}`,
+                    borderRadius:5, padding:'5px 7px', fontSize:S.xs, outline:'none', fontFamily:'monospace' }}/>
+              </div>
+            ))}
+          </div>
+          <div>
+            <div style={{ color:S.dm, fontSize:S.lb, marginBottom:3 }}>Notes</div>
+            <input value={bay.notes} onChange={e=>upd(idx,'notes',e.target.value)}
+              placeholder="Damage, skip, special instruction…"
+              style={{ width:'100%', background:S.bg3, color:S.tx, border:`1px solid ${S.bd2}`,
+                borderRadius:5, padding:'5px 7px', fontSize:S.xs, outline:'none' }}/>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── LIVE OPS MAIN ────────────────────────────────────────────────────────────
+function LiveOps({ portOp, onUpdate, onReset }) {
+  const [search,    setSearch]    = useState('');
+  const [filter,    setFilter]    = useState('all');
+  const [sortBy,    setSortBy]    = useState('bay');
+  const [tickMode,  setTickMode]  = useState(false); // quick-tick mode
+  const [extraGantries, setExtraGantries] = useState(portOp.gantries);
+
+  const bays = portOp.bays || [];
+
+  const updateBay = useCallback((idx, key, val) => {
+    const updated = bays.map((b, i) => i === idx ? { ...b, [key]: val } : b);
+    onUpdate({ ...portOp, bays: updated });
+  }, [bays, portOp, onUpdate]);
+
+  // ── STATS ──
+  const total      = bays.length;
+  const done       = bays.filter(b => b.status === 'completed').length;
+  const inProg     = bays.filter(b => b.status === 'inprogress').length;
+  const onHold     = bays.filter(b => b.status === 'hold').length;
+  const idle       = bays.filter(b => b.status === 'idle').length;
+
+  const totalPlanMoves = bays.reduce((s,b) => s + b.planLoad + b.planDisch + b.planRest, 0);
+  const totalDoneMoves = bays.reduce((s,b) => s + b.doneLoad + b.doneDisch + b.doneRest, 0);
+  const totalRemMoves  = Math.max(0, totalPlanMoves - totalDoneMoves);
+  const overallPct     = totalPlanMoves > 0 ? Math.round((totalDoneMoves / totalPlanMoves) * 100) : 0;
+
+  const totalGantryOutput = extraGantries * portOp.movesPerHr;
+  const etcHrs  = totalGantryOutput > 0 ? totalRemMoves / totalGantryOutput : 0;
+  const etcH    = Math.floor(etcHrs);
+  const etcM    = Math.round((etcHrs % 1) * 60);
+  const etcStr  = totalRemMoves === 0 ? 'COMPLETE' : `${etcH}h ${etcM}m`;
+
+  const etaTime = (() => {
+    if (totalRemMoves === 0) return '—';
+    const ms  = etcHrs * 3600000;
+    const eta = new Date(Date.clNow() + ms);
+    return `${clPad(eta.getHours())}:${clPad(eta.getMinutes())}`;
+  })();
+
+  const doneL = bays.reduce((s,b)=>s+b.doneLoad,0);
+  const doneD = bays.reduce((s,b)=>s+b.doneDisch,0);
+  const doneR = bays.reduce((s,b)=>s+b.doneRest,0);
+  const planL = bays.reduce((s,b)=>s+b.planLoad,0);
+  const planD = bays.reduce((s,b)=>s+b.planDisch,0);
+  const planR = bays.reduce((s,b)=>s+b.planRest,0);
+
+  // ── FILTER + SORT ──
+  const filtered = bays
+    .map((b,i) => ({ ...b, _idx: i }))
+    .filter(b => {
+      if (search && !b.bay.includes(search)) return false;
+      if (filter === 'inprogress') return b.status === 'inprogress';
+      if (filter === 'completed')  return b.status === 'completed';
+      if (filter === 'idle')       return b.status === 'idle';
+      if (filter === 'hold')       return b.status === 'hold';
+      if (filter === 'dg')         return b.isDG;
+      if (filter === 'reefer')     return b.isReefer;
+      if (filter === 'lashing')    return !b.lashingDone && b.status !== 'idle';
+      return true;
+    })
+    .sort((a,b) => {
+      if (sortBy === 'bay')    return a.bay.localeCompare(b.bay);
+      if (sortBy === 'status') return a.status.localeCompare(b.status);
+      if (sortBy === 'pct') {
+        const pa = a.planLoad+a.planDisch+a.planRest;
+        const pb = b.planLoad+b.planDisch+b.planRest;
+        const va = pa > 0 ? (a.doneLoad+a.doneDisch+a.doneRest)/pa : 0;
+        const vb = pb > 0 ? (b.doneLoad+b.doneDisch+b.doneRest)/pb : 0;
+        return vb - va;
+      }
+      return 0;
+    });
+
+  // ── QUICK TICK (tap to toggle bay status inprogress→completed) ──
+  const quickTick = (idx) => {
+    const b = bays[idx];
+    if (b.status === 'idle')       updateBay(idx, 'status', 'inprogress');
+    else if (b.status === 'inprogress') {
+      updateBay(idx, 'status', 'completed');
+      if (!b.endTime) updateBay(idx, 'endTime', clNow());
+    } else if (b.status === 'completed') updateBay(idx, 'status', 'idle');
+  };
+
   return (
     <div>
-      <Card style={{ marginBottom: 10 }}>
-        <SectionLabel text="Add Container to Bay Plan" color={ACC} />
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0 8px' }}>
-          <Field label="Bay" value={form.bay} onChange={set('bay')} type="number" placeholder="01" />
-          <Field label="Row" value={form.row} onChange={set('row')} type="number" placeholder="01" />
-          <Field label="Tier" value={form.tier} onChange={set('tier')} type="number" placeholder="82" />
+      {/* ── PORT HEADER ── */}
+      <div style={{ background:`${ACC}10`, border:`1px solid ${ACC}30`, borderRadius:10,
+        padding:'10px 13px', marginBottom:10, display:'flex', justifyContent:'space-between', alignItems:'flex-start', flexWrap:'wrap', gap:6 }}>
+        <div>
+          <div style={{ color:ACC, fontWeight:700, fontSize:S.sm }}>📦 {portOp.port}</div>
+          <div style={{ color:S.dm, fontSize:S.xs }}>{portOp.vessel} · Started {portOp.createdAt}</div>
         </div>
-        <Field label="Container ID" value={form.containerId} onChange={set('containerId')} placeholder="e.g. MSCU1234567" color={ACC} />
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 10px' }}>
-          <div style={{ marginBottom: 8 }}>
-            <div style={{ color: S.dm, fontSize: S.lb, marginBottom: 3 }}>Container Type</div>
-            <select value={form.type} onChange={set('type')} style={{ width: '100%', background: S.bg3, color: S.cy, border: `1px solid ${S.bd2}`, borderRadius: 5, padding: '6px 8px', fontSize: S.xs }}>
-              {['20GP','40GP','40HC','20RF','40RF','20OT','40OT','20FR','40FR','45HC'].map(t => <option key={t}>{t}</option>)}
-            </select>
-          </div>
-          <Field label="Gross Weight" value={form.weight} onChange={set('weight')} type="number" placeholder="0" unit="kg" />
-          <Field label="Discharge Port" value={form.port} onChange={set('port')} placeholder="e.g. SGSIN" />
-          <div style={{ marginBottom: 8 }}>
-            <div style={{ color: S.dm, fontSize: S.lb, marginBottom: 3 }}>Reefer</div>
-            <select value={form.reefer} onChange={set('reefer')} style={{ width: '100%', background: S.bg3, color: form.reefer === 'Yes' ? S.cy : S.dm, border: `1px solid ${S.bd2}`, borderRadius: 5, padding: '6px 8px', fontSize: S.xs }}>
-              {['No','Yes'].map(t => <option key={t}>{t}</option>)}
-            </select>
-          </div>
-          <div style={{ marginBottom: 8 }}>
-            <div style={{ color: S.dm, fontSize: S.lb, marginBottom: 3 }}>OOG</div>
-            <select value={form.oog} onChange={set('oog')} style={{ width: '100%', background: S.bg3, color: form.oog === 'Yes' ? S.gd : S.dm, border: `1px solid ${S.bd2}`, borderRadius: 5, padding: '6px 8px', fontSize: S.xs }}>
-              {['No','Yes'].map(t => <option key={t}>{t}</option>)}
-            </select>
-          </div>
-          <div style={{ marginBottom: 8 }}>
-            <div style={{ color: S.dm, fontSize: S.lb, marginBottom: 3 }}>DG Cargo</div>
-            <select value={form.dg} onChange={set('dg')} style={{ width: '100%', background: S.bg3, color: form.dg === 'Yes' ? S.rd : S.dm, border: `1px solid ${S.bd2}`, borderRadius: 5, padding: '6px 8px', fontSize: S.xs }}>
-              {['No','Yes'].map(t => <option key={t}>{t}</option>)}
-            </select>
-          </div>
-          {form.dg === 'Yes' && <Field label="IMDG Class" value={form.dgClass} onChange={set('dgClass')} placeholder="e.g. 3, 8, 9" color={S.rd} />}
-        </div>
-        <Btn onClick={add} color={ACC} style={{ width: '100%', marginTop: 4 }}>+ Add to Bay Plan</Btn>
-      </Card>
-      <Card>
-        <div style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center' }}>
-          <SectionLabel text={`Bay Plan (${bays.length} containers)`} color={ACC} />
-          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search ID, port, position…" style={{ flex: 1, background: S.bg3, color: S.tx, border: `1px solid ${S.vd}`, borderRadius: 5, padding: '5px 8px', fontSize: S.xs, outline: 'none' }} />
-        </div>
-        <div style={{ maxHeight: 280, overflowY: 'auto' }}>
-          {filtered.length === 0
-            ? <div style={{ color: S.vd, fontSize: S.xs, textAlign: 'center', padding: '12px 0' }}>No containers found</div>
-            : filtered.map((c, i) => (
-              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, background: i % 2 === 0 ? S.bg3 : 'transparent', borderRadius: 5, padding: '5px 8px', marginBottom: 2 }}>
-                <div style={{ fontFamily: 'monospace', color: ACC, fontWeight: 700, fontSize: S.xs, minWidth: 55 }}>{c.pos}</div>
-                <div style={{ flex: 1 }}>
-                  <div style={{ color: S.tx, fontSize: S.xs, fontWeight: 600 }}>{c.containerId}</div>
-                  <div style={{ display: 'flex', gap: 4, marginTop: 2, flexWrap: 'wrap' }}>
-                    <Badge text={c.type} color={S.cy} />
-                    {c.reefer === 'Yes' && <Badge text="RF" color={S.cy} />}
-                    {c.oog === 'Yes' && <Badge text="OOG" color={S.gd} />}
-                    {c.dg === 'Yes' && <Badge text={`DG ${c.dgClass}`} color={S.rd} />}
-                    <span style={{ color: S.dm, fontSize: S.lb }}>{c.port}</span>
-                    {c.weight && <span style={{ color: S.dm, fontSize: S.lb }}>{(c.weight/1000).toFixed(1)}t</span>}
-                  </div>
-                </div>
-                <button onClick={() => del(i)} style={{ background: 'transparent', border: 'none', color: S.rd, cursor: 'pointer', fontSize: '0.8rem' }}>✕</button>
-              </div>
+        <div style={{ display:'flex', gap:5, alignItems:'center' }}>
+          <div style={{ color:S.dm, fontSize:S.lb }}>Active Gantries:</div>
+          <div style={{ display:'flex', gap:3 }}>
+            {[1,2,3,4,5,6,7,8].slice(0, portOp.gantries + 2).map(n => (
+              <button key={n} onClick={()=>setExtraGantries(n)} style={{
+                background:extraGantries===n?`${ACC}25`:'transparent',
+                border:`1px solid ${extraGantries===n?ACC:S.vd}`,
+                color:extraGantries===n?ACC:S.dm,
+                borderRadius:4, padding:'2px 6px', fontSize:S.ti, cursor:'pointer', fontWeight:extraGantries===n?700:400,
+              }}>{n}</button>
             ))}
+          </div>
+          <Btn onClick={onReset} color={S.rd} style={{ padding:'3px 8px', fontSize:S.ti }}>⟳ New Port</Btn>
         </div>
-        {bays.length > 0 && (
-          <div style={{ marginTop: 8, borderTop: `1px solid ${S.bd2}`, paddingTop: 6, display: 'flex', gap: 12 }}>
-            {[
-              ['Total', bays.length],
-              ['Reefer', bays.filter(b => b.reefer === 'Yes').length],
-              ['OOG', bays.filter(b => b.oog === 'Yes').length],
-              ['DG', bays.filter(b => b.dg === 'Yes').length],
-            ].map(([k, v]) => (
-              <div key={k} style={{ textAlign: 'center' }}>
-                <div style={{ color: S.dm, fontSize: S.lb }}>{k}</div>
-                <div style={{ color: ACC, fontWeight: 700, fontFamily: 'monospace' }}>{v}</div>
-              </div>
+      </div>
+
+      {/* ── SUMMARY STATS ── */}
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:5, marginBottom:8 }}>
+        <StatBox label="Done" value={done}    color={S.gn} sub={`of ${total} bays`} />
+        <StatBox label="Active" value={inProg} color={S.gd} sub={`${onHold} on hold`} />
+        <StatBox label="Remaining" value={idle} color={S.dm} sub="bays idle" />
+        <StatBox label="Overall" value={`${overallPct}%`} color={overallPct===100?S.gn:ACC} sub={`${totalDoneMoves}/${totalPlanMoves} mvs`} />
+      </div>
+
+      {/* ── OVERALL PROGRESS BAR ── */}
+      <div style={{ background:S.bg2, borderRadius:8, padding:'8px 12px', marginBottom:8 }}>
+        <div style={{ display:'flex', justifyContent:'space-between', marginBottom:4 }}>
+          <span style={{ color:S.dm, fontSize:S.xs }}>Overall Progress</span>
+          <span style={{ color:overallPct===100?S.gn:ACC, fontFamily:'monospace', fontWeight:700, fontSize:S.xs }}>{overallPct}%</span>
+        </div>
+        <ProgressBar pct={overallPct} color={overallPct===100?S.gn:ACC} height={10} />
+        <div style={{ display:'flex', gap:10, marginTop:5, flexWrap:'wrap' }}>
+          {[['Load',doneL,planL,ACC],['Disch',doneD,planD,S.or],['Restow',doneR,planR,S.pu]].map(([l,d,p,c])=>(
+            <div key={l} style={{ fontSize:S.ti }}>
+              <span style={{ color:S.dm }}>{l}: </span>
+              <span style={{ color:c, fontFamily:'monospace', fontWeight:700 }}>{d}/{p}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* ── ETC / ETA ── */}
+      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr 1fr', gap:5, marginBottom:10 }}>
+        <StatBox label="Rem. Moves" value={totalRemMoves} color={totalRemMoves===0?S.gn:S.gd} />
+        <StatBox label="Gantry Rate" value={`${totalGantryOutput}/hr`} color={S.cy} sub={`${extraGantries}×${portOp.movesPerHr}`} />
+        <StatBox label="Time to Finish" value={etcStr} color={totalRemMoves===0?S.gn:S.gd} />
+        <StatBox label="ETA" value={etaTime} color={totalRemMoves===0?S.gn:ACC} />
+      </div>
+
+      {/* ── CONTROLS ── */}
+      <div style={{ display:'flex', gap:5, marginBottom:8, flexWrap:'wrap', alignItems:'center' }}>
+        <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Bay #…"
+          style={{ width:64, background:S.bg3, color:S.cy, border:`1px solid ${S.bd2}`,
+            borderRadius:5, padding:'5px 8px', fontSize:S.xs, outline:'none', fontFamily:'monospace' }} />
+        {[['all','All'],['inprogress','Active'],['completed','Done'],['idle','Idle'],['hold','Hold'],['dg','DG'],['reefer','RF'],['lashing','Lash⚠']].map(([v,l])=>(
+          <button key={v} onClick={()=>setFilter(v)} style={{
+            background:filter===v?`${ACC}20`:'transparent',
+            border:`1px solid ${filter===v?ACC:S.vd}`,
+            color:filter===v?ACC:S.dm,
+            borderRadius:5, padding:'4px 8px', fontSize:S.lb, cursor:'pointer',
+          }}>{l}</button>
+        ))}
+        <div style={{ marginLeft:'auto', display:'flex', gap:4, alignItems:'center' }}>
+          <span style={{ color:S.dm, fontSize:S.lb }}>Sort:</span>
+          {[['bay','Bay'],['status','Status'],['pct','%']].map(([v,l])=>(
+            <button key={v} onClick={()=>setSortBy(v)} style={{
+              background:sortBy===v?`${ACC}20`:'transparent',
+              border:`1px solid ${sortBy===v?ACC:S.vd}`,
+              color:sortBy===v?ACC:S.dm,
+              borderRadius:4, padding:'3px 7px', fontSize:S.lb, cursor:'pointer',
+            }}>{l}</button>
+          ))}
+          <button onClick={()=>setTickMode(t=>!t)} style={{
+            background:tickMode?'rgba(255,215,0,0.15)':'transparent',
+            border:`1px solid ${tickMode?S.gd:S.vd}`,
+            color:tickMode?S.gd:S.dm,
+            borderRadius:5, padding:'4px 8px', fontSize:S.lb, cursor:'pointer', fontWeight:tickMode?700:400,
+          }}>⚡ Quick Tick</button>
+        </div>
+      </div>
+
+      {/* ── QUICK TICK MODE: grid of bay tiles ── */}
+      {tickMode && (
+        <div style={{ background:S.bg3, borderRadius:9, padding:'10px', marginBottom:10 }}>
+          <div style={{ color:S.gd, fontSize:S.xs, fontWeight:700, marginBottom:6 }}>
+            ⚡ Quick Tick Mode — tap bay to cycle: IDLE → ACTIVE → DONE → IDLE
+          </div>
+          <div style={{ display:'flex', flexWrap:'wrap', gap:5 }}>
+            {bays.map((b,i) => {
+              const c = STATUS_COLOR[b.status];
+              return (
+                <button key={i} onClick={()=>quickTick(i)} title={`Bay ${b.bay} — ${STATUS_LABEL[b.status]}`}
+                  style={{ width:44, height:44, background:`${c}20`, border:`1.5px solid ${c}`,
+                    borderRadius:7, color:c, fontFamily:'monospace', fontWeight:900, fontSize:'0.72rem',
+                    cursor:'pointer', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center',
+                    padding:0, transition:'all 0.1s', position:'relative' }}>
+                  {b.bay}
+                  {b.status==='completed' && <span style={{ fontSize:'0.55rem', color:S.gn }}>✓</span>}
+                  {b.status==='inprogress' && <span style={{ fontSize:'0.55rem', color:S.gd }}>▶</span>}
+                  {b.isDG && <div style={{ position:'absolute', top:2, right:2, width:5, height:5, borderRadius:'50%', background:S.rd }} />}
+                  {b.isReefer && <div style={{ position:'absolute', top:2, left:2, width:5, height:5, borderRadius:'50%', background:S.cy }} />}
+                </button>
+              );
+            })}
+          </div>
+          <div style={{ marginTop:6, display:'flex', gap:10, flexWrap:'wrap' }}>
+            {[['IDLE',S.vd],['ACTIVE',S.gd],['DONE',S.gn],['HOLD',S.rd]].map(([l,c])=>(
+              <span key={l} style={{ fontSize:S.ti, color:c }}>■ {l}</span>
             ))}
+            <span style={{ fontSize:S.ti, color:S.rd }}>● DG</span>
+            <span style={{ fontSize:S.ti, color:S.cy }}>● Reefer</span>
+          </div>
+        </div>
+      )}
+
+      {/* ── BAY LIST ── */}
+      <div style={{ fontSize:S.ti, color:S.dm, marginBottom:5 }}>
+        Showing {filtered.length} of {total} bays
+      </div>
+      {filtered.map(b => (
+        <BayCard key={b.bay} bay={b} idx={b._idx}
+          gantries={portOp.gantries} movesPerHr={portOp.movesPerHr}
+          onUpdate={updateBay} />
+      ))}
+
+      {/* ── OPERATION SUMMARY ── */}
+      <div style={{ background:`${S.gn}08`, border:`1px solid ${S.gn}25`, borderRadius:10,
+        padding:'12px 14px', marginTop:10 }}>
+        <SectionLabel text="Operation Summary" color={S.gn} />
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:6, marginBottom:8 }}>
+          {[
+            ['Bays Completed',done,S.gn],
+            ['Bays Active',inProg,S.gd],
+            ['Bays Remaining',idle,S.dm],
+            ['DG Bays',bays.filter(b=>b.isDG).length,S.rd],
+            ['Reefer Bays',bays.filter(b=>b.isReefer).length,S.cy],
+            ['Lashing Pending',bays.filter(b=>!b.lashingDone&&b.status!=='idle').length,S.or],
+          ].map(([l,v,c])=>(
+            <div key={l} style={{ background:S.bg3, borderRadius:6, padding:'6px 8px', textAlign:'center' }}>
+              <div style={{ color:S.dm, fontSize:S.ti }}>{l}</div>
+              <div style={{ color:c, fontFamily:'monospace', fontWeight:700, fontSize:S.sm }}>{v}</div>
+            </div>
+          ))}
+        </div>
+        {done > 0 && (
+          <div style={{ color:S.gn, fontSize:S.xs, fontWeight:600, marginBottom:4 }}>
+            ✅ Completed Bays: {bays.filter(b=>b.status==='completed').map(b=>b.bay).join(', ')}
           </div>
         )}
-      </Card>
+        {inProg > 0 && (
+          <div style={{ color:S.gd, fontSize:S.xs, fontWeight:600 }}>
+            ▶ In Progress: {bays.filter(b=>b.status==='inprogress').map(b=>`${b.bay}${b.crane?' ('+b.crane+')':''}`).join(', ')}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
 
-function ContainerReefer() {
-  const ACC = VESSEL_COLORS.container.accent;
-  const KEY = 'cargo_container_reefer';
-  const [entries, setEntries] = useState(() => load(KEY, []));
-  const [form, setForm] = useState({ ts: new Date().toISOString().slice(0,16), containerId: '', setPoint: '', supply: '', return_: '', humidity: '', defrost: 'No', alarm: 'None', remarks: '' });
+// ─── REEFER ROUNDS ────────────────────────────────────────────────────────────
+function ReeferRounds({ portOp, onUpdateReefer }) {
+  const KEY = `cargo_reefer_rounds_${portOp?.port || 'default'}`;
+  const [rounds, setRounds] = useState(() => load(KEY, []));
+  const [form, setForm] = useState({
+    ts: new Date().toISOString().slice(0,16),
+    bay: '', containerId: '', opType: 'Loading',
+    setPoint: '', supply: '', returnTemp: '',
+    humidity: '', alarm: 'None', defrost: 'No',
+    inspector: '', remarks: '',
+  });
+  const [filterBay, setFilterBay] = useState('');
+  const [filterOp,  setFilterOp]  = useState('all');
   const set = k => e => setForm(f => ({ ...f, [k]: e.target.value }));
-  const add = () => { if (!form.containerId || !form.supply) return; const e = [...entries, { ...form }]; setEntries(e); save(KEY, e); setForm(f => ({ ...f, ts: new Date().toISOString().slice(0,16), containerId: '', supply: '', return_: '', humidity: '', remarks: '' })); };
-  const del = i => { const e = entries.filter((_, j) => j !== i); setEntries(e); save(KEY, e); };
-  const tempDiff = (parseFloat(form.supply) - parseFloat(form.setPoint)).toFixed(1);
-  const COLS = [
-    { key: 'ts', label: 'Date/Time', w: 110 }, { key: 'containerId', label: 'Container', w: 100 },
-    { key: 'setPoint', label: 'Set °C', w: 55 }, { key: 'supply', label: 'Supply °C', w: 65 },
-    { key: 'return_', label: 'Return °C', w: 65 }, { key: 'humidity', label: 'RH%', w: 45 },
-    { key: 'alarm', label: 'Alarm', w: 80 }, { key: 'remarks', label: 'Remarks', w: 100 },
-  ];
+
+  // Get reefer bays from port op for quick select
+  const reeferBays = portOp?.bays?.filter(b => b.isReefer).map(b => b.bay) || [];
+
+  const saveRounds = (r) => { setRounds(r); save(KEY, r); };
+
+  const add = () => {
+    if (!form.bay || !form.supply) return;
+    const diff = parseFloat(form.supply) - parseFloat(form.setPoint);
+    const entry = { ...form, tempDiff: isNaN(diff) ? '' : diff.toFixed(1), id: Date.clNow() };
+    saveRounds([...rounds, entry]);
+    setForm(f => ({ ...f, ts: new Date().toISOString().slice(0,16), supply: '', returnTemp: '', humidity: '', remarks: '' }));
+  };
+
+  const del = (id) => saveRounds(rounds.filter(r => r.id !== id));
+
+  const filtered = rounds.filter(r => {
+    if (filterBay && !r.bay.includes(filterBay)) return false;
+    if (filterOp !== 'all' && r.opType !== filterOp) return false;
+    return true;
+  });
+
+  // Stats
+  const alarmCount = rounds.filter(r => r.alarm !== 'None').length;
+  const loadCount  = rounds.filter(r => r.opType === 'Loading').length;
+  const dischCount = rounds.filter(r => r.opType === 'Discharging').length;
+  const restCount  = rounds.filter(r => r.opType === 'Restow').length;
+  const outOfRange = rounds.filter(r => Math.abs(parseFloat(r.tempDiff)||0) > 3).length;
+
+  const Fi = ({ label, value, onChange, type='text', placeholder='', unit='', color }) => (
+    <div style={{ marginBottom:7 }}>
+      <div style={{ color:S.dm, fontSize:S.lb, marginBottom:2 }}>{label}</div>
+      <div style={{ display:'flex', alignItems:'center', gap:4 }}>
+        <input type={type} value={value} onChange={onChange} placeholder={placeholder}
+          style={{ flex:1, background:S.bg3, color:color||S.cy, border:`1px solid ${S.bd2}`,
+            borderRadius:5, padding:'5px 7px', fontSize:S.xs, outline:'none', fontFamily:'monospace' }}/>
+        {unit && <span style={{ color:S.dm, fontSize:S.lb }}>{unit}</span>}
+      </div>
+    </div>
+  );
+
   return (
     <div>
-      <Card style={{ marginBottom: 10 }}>
-        <SectionLabel text="Reefer Monitoring Entry" color={ACC} />
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 10px' }}>
-          <Field label="Date / Time" value={form.ts} onChange={set('ts')} type="datetime-local" />
-          <Field label="Container ID" value={form.containerId} onChange={set('containerId')} placeholder="MSCU1234567" color={ACC} />
-          <Field label="Set Point" value={form.setPoint} onChange={set('setPoint')} type="number" placeholder="e.g. -18" unit="°C" />
-          <Field label="Supply Air Temp" value={form.supply} onChange={set('supply')} type="number" placeholder="°C" unit="°C" color={form.setPoint && form.supply && Math.abs(parseFloat(tempDiff)) > 3 ? S.rd : S.gn} />
-          <Field label="Return Air Temp" value={form.return_} onChange={set('return_')} type="number" placeholder="°C" unit="°C" />
-          <Field label="Humidity" value={form.humidity} onChange={set('humidity')} type="number" placeholder="%" unit="% RH" />
-          <div style={{ marginBottom: 8 }}>
-            <div style={{ color: S.dm, fontSize: S.lb, marginBottom: 3 }}>Defrost Running</div>
-            <select value={form.defrost} onChange={set('defrost')} style={{ width: '100%', background: S.bg3, color: S.cy, border: `1px solid ${S.bd2}`, borderRadius: 5, padding: '6px 8px', fontSize: S.xs }}>
-              {['No','Yes'].map(t => <option key={t}>{t}</option>)}
+      {/* Stats */}
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:5, marginBottom:10 }}>
+        <StatBox label="Total Rounds" value={rounds.length} color={S.cy} />
+        <StatBox label="Load/Disch/Rest" value={`${loadCount}/${dischCount}/${restCount}`} color={ACC} />
+        <StatBox label="Alarms" value={alarmCount} color={alarmCount>0?S.rd:S.gn} />
+        <StatBox label="Out of Range" value={outOfRange} color={outOfRange>0?S.rd:S.gn} sub=">3°C diff" />
+      </div>
+
+      {/* Form */}
+      <div style={{ background:S.bg2, border:`1px solid ${S.bd2}`, borderRadius:10, padding:'12px 14px', marginBottom:10 }}>
+        <SectionLabel text="New Reefer Round Entry" color={S.cy} />
+
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'0 10px' }}>
+          <Fi label="Date / Time" value={form.ts} onChange={set('ts')} type="datetime-local" />
+          <div style={{ marginBottom:7 }}>
+            <div style={{ color:S.dm, fontSize:S.lb, marginBottom:2 }}>Bay</div>
+            <div style={{ display:'flex', gap:4 }}>
+              <input value={form.bay} onChange={set('bay')} placeholder="e.g. 06"
+                style={{ flex:1, background:S.bg3, color:S.cy, border:`1px solid ${S.bd2}`,
+                  borderRadius:5, padding:'5px 7px', fontSize:S.xs, outline:'none', fontFamily:'monospace' }}/>
+              {reeferBays.length > 0 && (
+                <select onChange={e=>{if(e.target.value) setForm(f=>({...f, bay:e.target.value}));}}
+                  style={{ background:S.bg3, color:S.cy, border:`1px solid ${S.bd2}`, borderRadius:5, padding:'5px 4px', fontSize:S.ti }}>
+                  <option value=''>RF Bays</option>
+                  {reeferBays.map(b=><option key={b} value={b}>Bay {b}</option>)}
+                </select>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <Fi label="Container ID (optional)" value={form.containerId} onChange={set('containerId')} placeholder="e.g. MSCU1234567" />
+
+        <div style={{ marginBottom:7 }}>
+          <div style={{ color:S.dm, fontSize:S.lb, marginBottom:3 }}>Operation Type</div>
+          <div style={{ display:'flex', gap:5 }}>
+            {['Loading','Discharging','Restow','Monitoring'].map(v => (
+              <button key={v} onClick={()=>setForm(f=>({...f,opType:v}))} style={{
+                flex:1, background:form.opType===v?`${ACC}25`:'transparent',
+                border:`1px solid ${form.opType===v?ACC:S.vd}`,
+                color:form.opType===v?ACC:S.dm,
+                borderRadius:5, padding:'5px 3px', fontSize:S.ti, cursor:'pointer', fontWeight:form.opType===v?700:400,
+              }}>{v}</button>
+            ))}
+          </div>
+        </div>
+
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:'0 8px' }}>
+          <Fi label="Set Point" value={form.setPoint} onChange={set('setPoint')} type="number" placeholder="°C" unit="°C" />
+          <Fi label="Supply Temp" value={form.supply} onChange={set('supply')} type="number" placeholder="°C" unit="°C"
+            color={form.setPoint&&form.supply&&Math.abs(parseFloat(form.supply)-parseFloat(form.setPoint))>3?S.rd:S.gn} />
+          <Fi label="Return Temp" value={form.returnTemp} onChange={set('returnTemp')} type="number" placeholder="°C" unit="°C" />
+        </div>
+
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:'0 8px' }}>
+          <Fi label="Humidity" value={form.humidity} onChange={set('humidity')} type="number" placeholder="%" unit="% RH" />
+          <div style={{ marginBottom:7 }}>
+            <div style={{ color:S.dm, fontSize:S.lb, marginBottom:2 }}>Alarm</div>
+            <select value={form.alarm} onChange={set('alarm')}
+              style={{ width:'100%', background:S.bg3, color:form.alarm!=='None'?S.rd:S.gn,
+                border:`1px solid ${S.bd2}`, borderRadius:5, padding:'5px 6px', fontSize:S.xs }}>
+              {['None','High Temp','Low Temp','Defrost Fault','Power Fault','Humidity Alarm','Compressor Fault'].map(a=>(
+                <option key={a}>{a}</option>
+              ))}
             </select>
           </div>
-          <div style={{ marginBottom: 8 }}>
-            <div style={{ color: S.dm, fontSize: S.lb, marginBottom: 3 }}>Alarm Status</div>
-            <select value={form.alarm} onChange={set('alarm')} style={{ width: '100%', background: S.bg3, color: form.alarm === 'None' ? S.gn : S.rd, border: `1px solid ${S.bd2}`, borderRadius: 5, padding: '6px 8px', fontSize: S.xs }}>
-              {['None','High Temp','Low Temp','Defrost Fault','Power Fault','Humidity Alarm'].map(t => <option key={t}>{t}</option>)}
+          <div style={{ marginBottom:7 }}>
+            <div style={{ color:S.dm, fontSize:S.lb, marginBottom:2 }}>Defrost</div>
+            <select value={form.defrost} onChange={set('defrost')}
+              style={{ width:'100%', background:S.bg3, color:S.cy,
+                border:`1px solid ${S.bd2}`, borderRadius:5, padding:'5px 6px', fontSize:S.xs }}>
+              {['No','Yes'].map(a=><option key={a}>{a}</option>)}
             </select>
           </div>
         </div>
-        {form.setPoint && form.supply && <div style={{ background: Math.abs(parseFloat(tempDiff)) <= 2 ? 'rgba(0,255,136,0.08)' : 'rgba(255,71,87,0.08)', border: `1px solid ${Math.abs(parseFloat(tempDiff)) <= 2 ? S.gn : S.rd}44`, borderRadius: 6, padding: '5px 10px', marginBottom: 8 }}>
-          <span style={{ color: S.dm, fontSize: S.xs }}>Δ from set point: </span>
-          <span style={{ color: Math.abs(parseFloat(tempDiff)) <= 2 ? S.gn : S.rd, fontWeight: 700, fontFamily: 'monospace' }}>{parseFloat(tempDiff) > 0 ? '+' : ''}{tempDiff}°C</span>
-        </div>}
-        <Field label="Remarks" value={form.remarks} onChange={set('remarks')} placeholder="Cargo condition, maintenance, actions…" />
-        <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
-          <Btn onClick={add} color={ACC} style={{ flex: 1 }}>+ Add Reading</Btn>
-          <Btn onClick={() => exportLog('Reefer Monitoring Log', entries, COLS)} color={S.dm}>⬇ Export</Btn>
+
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'0 10px' }}>
+          <Fi label="Inspector Name" value={form.inspector} onChange={set('inspector')} placeholder="Officer / Rating" />
+          <Fi label="Remarks" value={form.remarks} onChange={set('remarks')} placeholder="Observations, actions…" />
         </div>
-      </Card>
-      <Card>
-        <SectionLabel text={`Reefer Log (${entries.length})`} color={ACC} />
-        <LogTable entries={entries} columns={COLS} onDelete={del} accent={ACC} />
-      </Card>
+
+        {form.setPoint && form.supply && (() => {
+          const d = parseFloat(form.supply) - parseFloat(form.setPoint);
+          if (isNaN(d)) return null;
+          return (
+            <div style={{ background:Math.abs(d)<=3?'rgba(0,255,136,0.07)':'rgba(255,71,87,0.1)',
+              border:`1px solid ${Math.abs(d)<=3?S.gn:S.rd}44`, borderRadius:6, padding:'5px 10px', marginBottom:7 }}>
+              <span style={{ color:S.dm, fontSize:S.xs }}>Δ from set point: </span>
+              <span style={{ color:Math.abs(d)<=3?S.gn:S.rd, fontWeight:700, fontFamily:'monospace' }}>
+                {d>0?'+':''}{d.toFixed(1)}°C
+              </span>
+              {Math.abs(d) > 3 && <span style={{ color:S.rd, fontSize:S.xs }}> ⚠ OUT OF RANGE</span>}
+            </div>
+          );
+        })()}
+
+        <div style={{ display:'flex', gap:6 }}>
+          <button onClick={add} style={{ flex:1, background:`${S.cy}18`, border:`1px solid ${S.cy}55`,
+            color:S.cy, borderRadius:6, padding:'8px', fontSize:S.xs, cursor:'pointer', fontWeight:700 }}>
+            + Add Round
+          </button>
+          <button onClick={()=>{
+            const txt = ['REEFER ROUNDS LOG','Bay\tContainer\tOp\tSetPt\tSupply\tReturn\tΔ\tAlarm\tTime\tInspector\tRemarks',
+              ...rounds.map(r=>`${r.bay}\t${r.containerId||''}\t${r.opType}\t${r.setPoint}°C\t${r.supply}°C\t${r.returnTemp}°C\t${r.tempDiff}°C\t${r.alarm}\t${r.ts}\t${r.inspector}\t${r.remarks}`)
+            ].join('\n');
+            const a=document.createElement('a');
+            a.href='data:text/plain;charset=utf-8,'+encodeURIComponent(txt);
+            a.download=`Reefer_Rounds_${portOp?.port||'log'}_${new Date().toISOString().slice(0,10)}.txt`;
+            a.click();
+          }} style={{ background:`${S.dm}18`, border:`1px solid ${S.dm}44`, color:S.dm,
+            borderRadius:6, padding:'8px 12px', fontSize:S.xs, cursor:'pointer' }}>
+            ⬇ Export
+          </button>
+        </div>
+      </div>
+
+      {/* Filter */}
+      <div style={{ display:'flex', gap:5, marginBottom:8, flexWrap:'wrap' }}>
+        <input value={filterBay} onChange={e=>setFilterBay(e.target.value)} placeholder="Bay #…"
+          style={{ width:60, background:S.bg3, color:S.cy, border:`1px solid ${S.bd2}`,
+            borderRadius:5, padding:'4px 7px', fontSize:S.xs, outline:'none', fontFamily:'monospace' }}/>
+        {[['all','All'],['Loading','Load'],['Discharging','Disch'],['Restow','Rest'],['Monitoring','Mon']].map(([v,l])=>(
+          <button key={v} onClick={()=>setFilterOp(v)} style={{
+            background:filterOp===v?`${S.cy}15`:'transparent',
+            border:`1px solid ${filterOp===v?S.cy:S.vd}`,
+            color:filterOp===v?S.cy:S.dm,
+            borderRadius:5, padding:'4px 8px', fontSize:S.lb, cursor:'pointer',
+          }}>{l}</button>
+        ))}
+        {rounds.length > 0 && (
+          <Btn onClick={()=>{if(window.confirm('Clear all reefer rounds?')) saveRounds([]);}}
+            color={S.rd} style={{ padding:'4px 8px', fontSize:S.lb, marginLeft:'auto' }}>
+            Clear All
+          </Btn>
+        )}
+      </div>
+
+      {/* Rounds list */}
+      <div style={{ display:'flex', flexDirection:'column', gap:5 }}>
+        {filtered.length === 0
+          ? <div style={{ color:S.vd, fontSize:S.xs, textAlign:'center', padding:'20px 0', fontStyle:'italic' }}>
+              No rounds logged yet
+            </div>
+          : filtered.slice().reverse().map(r => {
+            const diff = parseFloat(r.tempDiff);
+            const outRange = !isNaN(diff) && Math.abs(diff) > 3;
+            return (
+              <div key={r.id} style={{ background:outRange?'rgba(255,71,87,0.06)':S.bg2,
+                border:`1px solid ${outRange?S.rd+'44':S.bd3}`, borderRadius:8, padding:'8px 10px' }}>
+                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:4 }}>
+                  <div style={{ display:'flex', gap:6, alignItems:'center', flexWrap:'wrap' }}>
+                    <span style={{ background:`${ACC}20`, color:ACC, border:`1px solid ${ACC}44`,
+                      borderRadius:4, padding:'1px 7px', fontFamily:'monospace', fontWeight:700, fontSize:S.xs }}>
+                      BAY {r.bay}
+                    </span>
+                    <span style={{ background:r.opType==='Loading'?`${ACC}15`:r.opType==='Discharging'?'rgba(255,140,66,0.15)':r.opType==='Restow'?'rgba(192,132,252,0.15)':'rgba(0,212,255,0.1)',
+                      color:r.opType==='Loading'?ACC:r.opType==='Discharging'?S.or:r.opType==='Restow'?S.pu:S.cy,
+                      border:'none', borderRadius:4, padding:'1px 7px', fontSize:S.lb, fontWeight:700 }}>
+                      {r.opType}
+                    </span>
+                    {r.alarm !== 'None' && (
+                      <span style={{ background:'rgba(255,71,87,0.15)', color:S.rd, borderRadius:4, padding:'1px 6px', fontSize:S.lb, fontWeight:700 }}>
+                        ⚠ {r.alarm}
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ display:'flex', gap:5, alignItems:'center' }}>
+                    <span style={{ color:S.dm, fontSize:S.ti }}>{r.ts}</span>
+                    <button onClick={()=>del(r.id)} style={{ background:'transparent', border:'none', color:S.rd, cursor:'pointer', fontSize:'0.75rem' }}>✕</button>
+                  </div>
+                </div>
+                <div style={{ display:'flex', gap:12, flexWrap:'wrap' }}>
+                  {[
+                    ['Set',r.setPoint?r.setPoint+'°C':'—',S.dm],
+                    ['Supply',r.supply?r.supply+'°C':'—',outRange?S.rd:S.gn],
+                    ['Return',r.returnTemp?r.returnTemp+'°C':'—',S.cy],
+                    ['Δ',r.tempDiff?(r.tempDiff>0?'+':'')+r.tempDiff+'°C':'—',outRange?S.rd:S.gn],
+                    ['RH',r.humidity?r.humidity+'%':'—',S.dm],
+                  ].map(([l,v,c])=>(
+                    <div key={l}>
+                      <span style={{ color:S.dm, fontSize:S.ti }}>{l}: </span>
+                      <span style={{ color:c, fontFamily:'monospace', fontWeight:700, fontSize:S.xs }}>{v}</span>
+                    </div>
+                  ))}
+                  {r.containerId && <div><span style={{ color:S.dm, fontSize:S.ti }}>ID: </span><span style={{ color:S.tx, fontSize:S.ti }}>{r.containerId}</span></div>}
+                  {r.inspector   && <div><span style={{ color:S.dm, fontSize:S.ti }}>By: </span><span style={{ color:S.dm, fontSize:S.ti }}>{r.inspector}</span></div>}
+                </div>
+                {r.remarks && <div style={{ color:S.dm, fontSize:S.ti, marginTop:3, fontStyle:'italic' }}>📝 {r.remarks}</div>}
+              </div>
+            );
+          })}
+      </div>
+
+      {/* Reefer summary */}
+      {rounds.length > 0 && (
+        <div style={{ background:`${S.cy}06`, border:`1px solid ${S.cy}20`, borderRadius:9, padding:'10px 12px', marginTop:10 }}>
+          <SectionLabel text="Reefer Round Summary" color={S.cy} />
+          <div style={{ display:'flex', gap:12, flexWrap:'wrap' }}>
+            {[...new Set(rounds.map(r=>r.bay))].sort().map(bay => {
+              const bayRounds = rounds.filter(r=>r.bay===bay);
+              const lastRound = bayRounds[bayRounds.length-1];
+              const diff = parseFloat(lastRound?.tempDiff);
+              const ok = isNaN(diff) || Math.abs(diff) <= 3;
+              return (
+                <div key={bay} style={{ background:S.bg3, borderRadius:6, padding:'5px 9px', textAlign:'center' }}>
+                  <div style={{ color:ACC, fontFamily:'monospace', fontWeight:700, fontSize:S.xs }}>Bay {bay}</div>
+                  <div style={{ color:S.dm, fontSize:S.ti }}>{bayRounds.length} rounds</div>
+                  <div style={{ color:ok?S.gn:S.rd, fontSize:S.ti, fontWeight:700 }}>
+                    {lastRound?.supply ? lastRound.supply+'°C' : '—'} {ok?'✓':'⚠'}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
+// ─── MAIN EXPORT ─────────────────────────────────────────────────────────────
+function ContainerLiveOps() {
+  const SETUP_KEY = 'cargo_container_port_op';
+  const [portOp, setPortOp] = useState(() => load(SETUP_KEY, null));
+  const [activeTab, setActiveTab] = useState('liveops');
+
+  const handleSave = (op) => { setPortOp(op); save(SETUP_KEY, op); };
+  const handleUpdate = (op) => { setPortOp(op); save(SETUP_KEY, op); };
+  const handleReset = () => {
+    if (!window.confirm('Start a new port operation? Current data will be saved in history.')) return;
+    setPortOp(null); save(SETUP_KEY, null);
+  };
+
+  const TABS = [
+    { id:'liveops',  label:'⚡ Live Ops'      },
+    { id:'reefer',   label:'❄ Reefer Rounds'  },
+  ];
+
+  if (!portOp) {
+    return (
+      <div>
+        <SetupWizard onSave={handleSave} />
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      {/* Tab bar */}
+      <div style={{ display:'flex', gap:4, marginBottom:10, borderBottom:`1px solid ${S.bd2}`, paddingBottom:8 }}>
+        {TABS.map(t => (
+          <button key={t.id} onClick={()=>setActiveTab(t.id)} style={{
+            background:activeTab===t.id?`${ACC}20`:'transparent',
+            border:`1px solid ${activeTab===t.id?ACC:S.vd}`,
+            color:activeTab===t.id?ACC:S.dm,
+            borderRadius:6, padding:'6px 14px', fontSize:S.xs, cursor:'pointer',
+            fontWeight:activeTab===t.id?700:400,
+          }}>{t.label}</button>
+        ))}
+      </div>
+
+      {activeTab === 'liveops' && (
+        <LiveOps portOp={portOp} onUpdate={handleUpdate} onReset={handleReset} />
+      )}
+      {activeTab === 'reefer' && (
+        <ReeferRounds portOp={portOp} onUpdateReefer={handleUpdate} />
+      )}
+    </div>
+  );
+}
 function ContainerOOG() {
   const ACC = VESSEL_COLORS.container.accent;
   const KEY = 'cargo_container_oog';
@@ -1104,8 +1870,7 @@ const VESSEL_TABS = {
     { id: 'msds',    label: '☣ MSDS',            component: TankerMSDS         },
   ],
   container: [
-    { id: 'bayplan', label: '🗺 Bay Plan',        component: ContainerBayPlan   },
-    { id: 'reefer',  label: '❄ Reefer Log',      component: ContainerReefer    },
+    { id: 'liveops', label: '⚡ Live Cargo Ops',  component: ContainerLiveOps   },
     { id: 'oog',     label: '📐 OOG Tracker',     component: ContainerOOG       },
     { id: 'lashing', label: '⚓ Lashing Calc',    component: ContainerLashing   },
   ],
