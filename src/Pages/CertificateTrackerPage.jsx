@@ -105,106 +105,6 @@ async function driveGetBlob(token,fileId) {
   return res.blob();
 }
 
-// ─── IMAGE COMPRESSION ────────────────────────────────────────────────────────
-async function compressImage(file) {
-  if (file.type==='application/pdf'||file.size<800*1024) return file;
-  return new Promise(resolve=>{
-    const img=new Image(),url=URL.createObjectURL(file);
-    img.onload=()=>{
-      URL.revokeObjectURL(url);
-      const canvas=document.createElement('canvas');
-      let{width,height}=img;const MAX=1200;
-      if(width>height&&width>MAX){height=(height/width)*MAX;width=MAX;}
-      else if(height>MAX){width=(width/height)*MAX;height=MAX;}
-      canvas.width=Math.round(width);canvas.height=Math.round(height);
-      canvas.getContext('2d').drawImage(img,0,0,canvas.width,canvas.height);
-      canvas.toBlob(blob=>{
-        const out=new File([blob],file.name.replace(/\.[^.]+$/,'.jpg'),{type:'image/jpeg'});
-        console.info(`[Scanner] ${(file.size/1024).toFixed(0)}KB -> ${(out.size/1024).toFixed(0)}KB`);
-        resolve(out);
-      },'image/jpeg',0.82);
-    };
-    img.onerror=()=>{URL.revokeObjectURL(url);resolve(file);};
-    img.src=url;
-  });
-}
-
-// ─── AI SCANNER ───────────────────────────────────────────────────────────────
-const _key = () => process.env.REACT_APP_GEMINI_API_KEY||'';
-const fileToBase64 = file => new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(r.result.split(',')[1]);r.onerror=reject;r.readAsDataURL(file);});
-
-async function extractCertData(file) {
-  // Calls our own Vercel serverless function /api/scan
-  // Token never touches the browser - handled server-side only
-  if (file.type === 'application/pdf') throw new Error('PDF_NOT_SUPPORTED');
-
-  const base64 = await fileToBase64(file);
-
-  const res = await fetch('/api/scan', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ image: base64, mimeType: file.type === 'image/jpg' ? 'image/jpeg' : file.type }),
-  });
-
-  if (!res.ok) throw new Error(`HTTP_${res.status}`);
-
-  const json = await res.json();
-
-  // Server returned a known error code
-  if (json.error) {
-    console.error('[Scanner] Server error:', json.error, json.status, json.detail || json.message || '');
-    if (json.error === 'NOT_CONFIGURED')   throw new Error('NOT_CONFIGURED');
-    if (json.status === 401 || json.status === 403) throw new Error('INVALID_KEY');
-    if (json.status === 503 || json.status === 429) throw new Error('QUOTA_EXCEEDED');
-    throw new Error(json.error || 'SERVER_ERROR');
-  }
-
-  const data = json.data;
-  const text = Array.isArray(data)
-    ? (data[0]?.generated_text || '')
-    : (data?.generated_text || '');
-
-  if (!text) throw new Error('NO_TEXT_DETECTED');
-
-  // Pattern-match dates and cert number from raw OCR text
-  const dateRegex = /(\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4})|(\d{4}[\-\/]\d{1,2}[\-\/]\d{1,2})/g;
-  const dates     = text.match(dateRegex) || [];
-  const certNoMatch = text.match(/[A-Z]{2,}[\-\/]?\d{4,}/);
-
-  const toISO = (d) => {
-    const parts = d.split(/[\/\-\.]/);
-    if (parts.length !== 3) return null;
-    let [a, b, c] = parts;
-    if (a.length === 4) return `${a}-${b.padStart(2,'0')}-${c.padStart(2,'0')}`;
-    if (c.length === 4) return `${c}-${b.padStart(2,'0')}-${a.padStart(2,'0')}`;
-    return null;
-  };
-
-  return {
-    name:             null,
-    certNo:           certNoMatch ? certNoMatch[0] : null,
-    issueDate:        dates[0] ? toISO(dates[0]) : null,
-    expiryDate:       dates[1] ? toISO(dates[1]) : null,
-    isUnlimited:      false,
-    issuingAuthority: null,
-    holderName:       null,
-    category:         null,
-    notes:            text.slice(0, 200) || null,
-  };
-}
-
-
-
-function scanErrorMessage(code) {
-  if (code==='NOT_CONFIGURED')     return 'Auto-fill is not available right now.';
-  if (code==='INVALID_KEY')        return 'Auto-fill is not available right now.';
-  if (code==='QUOTA_EXCEEDED')     return 'QUOTA_EXCEEDED';
-  if (code==='PDF_NOT_SUPPORTED')  return 'Auto-fill works for photos only — please fill in the details manually for PDF files.';
-  if (code==='NO_TEXT_DETECTED')   return 'Could not detect text in this image — please fill in details manually.';
-  if (code?.includes('NetworkError')||code?.includes('fetch')||code?.includes('HTTP_')) return 'Connection error — please check your internet and try again.';
-  return 'Could not read this file automatically — please fill in details manually.';
-}
-
 // ─── COMPONENT ────────────────────────────────────────────────────────────────
 function CertificateTrackerPage({user,notify}) {
   // Core
@@ -217,6 +117,7 @@ function CertificateTrackerPage({user,notify}) {
   const [customName,setCustomName]           = useState(false);
   const [unlimitedExpiry,setUnlimitedExpiry] = useState(false);
   const [customCategory,setCustomCategory]   = useState(false);
+  const [addFile,setAddFile]     = useState(null);
   // Edit
   const [editId,setEditId]                       = useState(null);
   const [editData,setEditData]                   = useState(null);
@@ -238,32 +139,27 @@ function CertificateTrackerPage({user,notify}) {
   const [uploadingId,setUploadingId]         = useState(null);
   const [connectingDrive,setConnectingDrive] = useState(false);
   const [driveExpired,setDriveExpired]       = useState(false);
-  // AI
-  const [extractModal,setExtractModal]   = useState(null);
-  const [extracting,setExtracting]       = useState(false);
-  const [extractErrMsg,setExtractErrMsg] = useState('');
-  const [addScanFile,setAddScanFile]     = useState(null);
-  const [scanningAdd,setScanningAdd]     = useState(false);
-  const [addAiFields,setAddAiFields]     = useState({});
-  const [addScanErrMsg,setAddScanErrMsg] = useState('');
-  // NEW: Search & Sort
+  // Search & Sort
   const [searchQuery,setSearchQuery] = useState('');
   const [sortBy,setSortBy]           = useState('expiry');
   const [sortDir,setSortDir]         = useState('asc');
-  // NEW: Bulk select
+  // Bulk select
   const [selectMode,setSelectMode]   = useState(false);
   const [selectedIds,setSelectedIds] = useState(new Set());
-  // NEW: Stats
+  // Stats
   const [showStats,setShowStats]     = useState(false);
-  // NEW: Renewal history
+  // Renewal history
   const [showHistory,setShowHistory] = useState(null);
-  // NEW: File preview
+  // File preview
   const [previewFile,setPreviewFile]     = useState(null);
   const [previewLoading,setPreviewLoading]= useState(false);
 
   useEffect(()=>{if(!user)return;loadCerts();initDrive();},[user?.uid]);
 
   const isDriveTokenValid=()=>{const e=localStorage.getItem('nsx_drive_expiry');return e&&Date.now()<parseInt(e);};
+
+  // Detect Android packaged app (set in MainAcitivity.java user-agent string)
+  const isAndroidApp = () => /NaviSphereXApp/.test(navigator.userAgent);
 
   const initDrive=()=>{
     const token=localStorage.getItem('nsx_drive_token');
@@ -274,6 +170,25 @@ function CertificateTrackerPage({user,notify}) {
     } else if(token&&email){
       // Token expired but we know the account — try silent refresh (no popup)
       silentRefreshDrive(email);
+    }
+    // Handle Android redirect flow — token comes back as URL fragment
+    if (window.location.hash.includes('access_token=')) {
+      const params = new URLSearchParams(window.location.hash.slice(1));
+      const accessToken = params.get('access_token');
+      if (accessToken) {
+        fetch('https://www.googleapis.com/oauth2/v3/userinfo',{headers:{Authorization:`Bearer ${accessToken}`}})
+          .then(r=>r.json())
+          .then(info=>{
+            localStorage.setItem('nsx_drive_token',accessToken);
+            localStorage.setItem('nsx_drive_expiry',String(Date.now()+3300000));
+            localStorage.setItem('nsx_drive_email',info.email||'');
+            setDriveToken(accessToken);setDriveConnected(true);setDriveEmail(info.email);setDriveExpired(false);
+            notify('Storage connected','success');
+            // Clean the URL hash so token isn't left visible / re-processed
+            window.history.replaceState(null,'',window.location.pathname+window.location.search);
+          })
+          .catch(()=>{notify('Could not connect storage.','error');});
+      }
     }
   };
 
@@ -313,6 +228,24 @@ function CertificateTrackerPage({user,notify}) {
         const s=document.createElement('script');s.src='https://accounts.google.com/gsi/client';
         s.onload=resolve;s.onerror=()=>reject(new Error('Network error'));document.head.appendChild(s);
       });
+
+      // Android packaged app: GSI popup is blocked by Google in WebView.
+      // Use redirect flow instead — page navigates to Google, comes back
+      // with token in URL fragment, handled in initDrive() above.
+      // Browser/PWA: unchanged popup flow.
+      if (isAndroidApp()) {
+        const client = window.google.accounts.oauth2.initTokenClient({
+          client_id: DRIVE_CLIENT_ID,
+          scope: DRIVE_SCOPE,
+          login_hint: user?.email || '',
+          ux_mode: 'redirect',
+          redirect_uri: window.location.origin + window.location.pathname,
+          callback: () => {} // unused in redirect mode
+        });
+        client.requestAccessToken({prompt:''});
+        return; // page will navigate away
+      }
+
       const token=await new Promise((resolve,reject)=>{
         window.google.accounts.oauth2.initTokenClient({client_id:DRIVE_CLIENT_ID,scope:DRIVE_SCOPE,login_hint:user?.email||'',
           callback:r=>{if(r.error)reject(new Error(r.error_description||r.error));else resolve(r.access_token);}
@@ -360,7 +293,7 @@ function CertificateTrackerPage({user,notify}) {
     }catch(e){console.error('[Drive] Remove:',e);notify('Could not remove file.','error');}
   };
 
-  // NEW: Upload file only (no AI scan)
+  // Upload file to existing certificate
   const uploadFileOnly=async(certId,file)=>{
     if(!driveToken||!isDriveTokenValid()){setDriveExpired(true);notify('Connect storage first','error');return;}
     const allowed=['application/pdf','image/jpeg','image/png','image/jpg'];
@@ -380,7 +313,7 @@ function CertificateTrackerPage({user,notify}) {
     setUploadingId(null);
   };
 
-  // NEW: Preview file from Drive
+  // Preview file from Drive
   const previewDriveFile=async(fileId,fileName)=>{
     const isImage=fileName?.match(/\.(jpg|jpeg|png|gif|webp)$/i);
     if(!isImage){viewDriveFile(fileId);return;}
@@ -392,103 +325,6 @@ function CertificateTrackerPage({user,notify}) {
   };
 
   const closePreview=()=>{if(previewFile?.url)URL.revokeObjectURL(previewFile.url);setPreviewFile(null);};
-
-  // ── AI Extraction ─────────────────────────────────────────────────────────
-  const handleFileUpload=async(certId,file,isRenewal=false)=>{
-    const allowed=['application/pdf','image/jpeg','image/png','image/jpg'];
-    if(!allowed.includes(file.type)){notify('Only PDF, JPG, or PNG files allowed','error');return;}
-    if(file.size>25*1024*1024){notify('File too large — max 25MB','error');return;}
-    setExtractErrMsg('');
-    setExtractModal({certId,file,reviewData:null,isRenewal,detected:null});
-    setExtracting(true);setEditId(null);setQuickId(null);
-    try{
-      const compressed=await compressImage(file);
-      const ext=await extractCertData(compressed);
-      const existing=certs.find(c=>c.id===certId)||{};
-      const reviewData={
-        name:ext.name||existing.name||'',certNo:ext.certNo||existing.certNo||'',
-        issueDate:ext.issueDate||existing.issueDate||'',
-        expiryDate:ext.isUnlimited?'':(ext.expiryDate||existing.expiryDate||''),
-        isUnlimited:ext.isUnlimited||(existing.expiryDate==='unlimited')||false,
-        category:ext.category||existing.category||'Others',
-        issuingAuthority:ext.issuingAuthority||'',holderName:ext.holderName||'',
-        notes:ext.notes||existing.notes||'',
-      };
-      const detected={};
-      if(ext.name)detected.name=true;if(ext.certNo)detected.certNo=true;
-      if(ext.issueDate)detected.issueDate=true;if(ext.expiryDate||ext.isUnlimited)detected.expiryDate=true;
-      if(ext.category)detected.category=true;if(ext.issuingAuthority||ext.notes)detected.notes=true;
-      setExtractModal({certId,file,reviewData,isRenewal,detected});
-    }catch(e){
-      console.error('[Scanner]',e.message);
-      const existing=certs.find(c=>c.id===certId)||{};
-      const errCode=scanErrorMessage(e.message);
-      setExtractErrMsg(errCode);
-      setExtractModal({certId,file,isRenewal,detected:{},extractError:true,quotaError:e.message==='QUOTA_EXCEEDED',
-        reviewData:{name:existing.name||'',certNo:existing.certNo||'',issueDate:existing.issueDate||'',
-          expiryDate:existing.expiryDate==='unlimited'?'':(existing.expiryDate||''),
-          isUnlimited:existing.expiryDate==='unlimited',category:existing.category||'Others',
-          issuingAuthority:'',holderName:'',notes:existing.notes||''}});
-    }
-    setExtracting(false);
-  };
-
-  const retryExtraction=()=>{if(extractModal?.file)handleFileUpload(extractModal.certId,extractModal.file,extractModal.isRenewal);};
-
-  const confirmExtraction=async()=>{
-    if(!extractModal?.reviewData)return;
-    const{certId,file,reviewData,isRenewal}=extractModal;
-    if(!reviewData.name){notify('Please enter certificate name','error');return;}
-    const finalExpiry=reviewData.isUnlimited?'unlimited':reviewData.expiryDate;
-    if(!finalExpiry){notify('Please enter expiry date or select Unlimited','error');return;}
-    setUploadingId(certId);
-    try{
-      let driveFileId=null,driveFileName=null;
-      if(driveToken&&isDriveTokenValid()){
-        const existing=certs.find(c=>c.id===certId);
-        if(isRenewal&&existing?.driveFileId){try{await driveDeleteFile(driveToken,existing.driveFileId);}catch{}}
-        const folderId=await getOrCreateFolder(driveToken);
-        const safeName=reviewData.name.replace(/[^a-zA-Z0-9 ]/g,'');
-        const uploaded=await driveUploadFile(driveToken,folderId,file,`${safeName}_${certId}.${file.name.split('.').pop()}`);
-        driveFileId=uploaded.id;driveFileName=file.name;
-      }
-      const notesText=[reviewData.notes,reviewData.issuingAuthority?`Issued by: ${reviewData.issuingAuthority}`:null,reviewData.holderName?`Holder: ${reviewData.holderName}`:null].filter(Boolean).join(' | ');
-      // NEW: add renewal history entry
-      const existing=certs.find(c=>c.id===certId)||{};
-      const histEntry={date:new Date().toISOString().split('T')[0],certNo:reviewData.certNo,expiryDate:finalExpiry};
-      const history=isRenewal?[...(existing.renewalHistory||[]),histEntry]:(existing.renewalHistory||[]);
-      await saveCerts(certs.map(c=>c.id===certId?{...c,name:reviewData.name,certNo:reviewData.certNo,issueDate:reviewData.issueDate,expiryDate:finalExpiry,category:reviewData.category,notes:notesText,renewalHistory:history,...(driveFileId?{driveFileId,driveFileName}:{})}:c));
-      setExtractModal(null);setExtractErrMsg('');
-      notify(driveFileId?'Certificate updated and file saved':'Certificate details updated','success');
-    }catch(e){console.error('[CertTracker] Save:',e);notify('Could not save. Please try again.','error');}
-    setUploadingId(null);
-  };
-
-  const handleAddFormScan=async(file)=>{
-    const allowed=['application/pdf','image/jpeg','image/png','image/jpg'];
-    if(!allowed.includes(file.type)){notify('Only PDF, JPG, or PNG files allowed','error');return;}
-    setAddScanFile(file);setScanningAdd(true);setAddAiFields({});setAddScanErrMsg('');
-    try{
-      const compressed=await compressImage(file);
-      const ext=await extractCertData(compressed);
-      const detected={},updates={};
-      if(ext.name){updates.name=ext.name;detected.name=true;setCustomName(false);}
-      if(ext.certNo){updates.certNo=ext.certNo;detected.certNo=true;}
-      if(ext.issueDate){updates.issueDate=ext.issueDate;detected.issueDate=true;}
-      if(ext.category){updates.category=ext.category;detected.category=true;}
-      if(ext.isUnlimited){setUnlimitedExpiry(true);detected.expiryDate=true;}
-      else if(ext.expiryDate){updates.expiryDate=ext.expiryDate;detected.expiryDate=true;}
-      if(ext.notes||ext.issuingAuthority){updates.notes=[ext.notes,ext.issuingAuthority?`Issued by: ${ext.issuingAuthority}`:null].filter(Boolean).join(' | ');detected.notes=true;}
-      setNewCert(n=>({...n,...updates}));setAddAiFields(detected);
-      notify(`Scanned — ${Object.keys(detected).length} fields filled. Review below.`,'success');
-    }catch(e){
-      console.error('[Scanner] Add-form:',e.message);
-      setAddScanErrMsg(e.message==='QUOTA_EXCEEDED'?'QUOTA_EXCEEDED':scanErrorMessage(e.message));
-    }
-    setScanningAdd(false);
-  };
-
-  const retryAddScan=()=>{if(addScanFile)handleAddFormScan(addScanFile);};
 
   // ── Core ──────────────────────────────────────────────────────────────────
   const loadCerts=async()=>{
@@ -511,16 +347,16 @@ function CertificateTrackerPage({user,notify}) {
     if(!finalExpiry){notify('Please enter expiry date or select Unlimited','error');return;}
     const id=Date.now().toString();
     let entry={...newCert,expiryDate:finalExpiry,id,renewalHistory:[]};
-    if(addScanFile&&driveToken&&isDriveTokenValid()){
+    if(addFile&&driveToken&&isDriveTokenValid()){
       try{
         const fid=await getOrCreateFolder(driveToken);
-        const up=await driveUploadFile(driveToken,fid,addScanFile,`${newCert.name.replace(/[^a-zA-Z0-9 ]/g,'')}_${id}.${addScanFile.name.split('.').pop()}`);
-        entry={...entry,driveFileId:up.id,driveFileName:addScanFile.name};
+        const up=await driveUploadFile(driveToken,fid,addFile,`${newCert.name.replace(/[^a-zA-Z0-9 ]/g,'')}_${id}.${addFile.name.split('.').pop()}`);
+        entry={...entry,driveFileId:up.id,driveFileName:addFile.name};
       }catch(e){console.error('[Drive] Upload on add:',e);notify('Certificate added but file upload failed.','error');}
     }
     await saveCerts([...certs,entry]);
     setNewCert({...EMPTY_CERT});setShowAdd(false);setCustomName(false);
-    setCustomCategory(false);setUnlimitedExpiry(false);setAddScanFile(null);setAddAiFields({});setAddScanErrMsg('');
+    setCustomCategory(false);setUnlimitedExpiry(false);setAddFile(null);
     notify('Certificate added'+(entry.driveFileId?' and file saved':''),'success');
   };
 
@@ -532,7 +368,7 @@ function CertificateTrackerPage({user,notify}) {
     notify('Deleted','success');
   };
 
-  const startEdit=cert=>{setEditId(cert.id);setEditData({...cert});setEditUnlimited(cert.expiryDate==='unlimited');setEditCustomName(!CERT_TEMPLATES.find(t=>t.name===cert.name));setEditCustomCategory(!KNOWN_CATEGORIES.includes(cert.category));setQuickId(null);setExtractModal(null);};
+  const startEdit=cert=>{setEditId(cert.id);setEditData({...cert});setEditUnlimited(cert.expiryDate==='unlimited');setEditCustomName(!CERT_TEMPLATES.find(t=>t.name===cert.name));setEditCustomCategory(!KNOWN_CATEGORIES.includes(cert.category));setQuickId(null);};
   const cancelEdit=()=>{setEditId(null);setEditData(null);setEditCustomName(false);setEditCustomCategory(false);setEditUnlimited(false);};
   const saveEdit=async()=>{
     if(!editData.name){notify('Enter certificate name','error');return;}
@@ -542,18 +378,16 @@ function CertificateTrackerPage({user,notify}) {
     cancelEdit();notify('Updated','success');
   };
 
-  const startQuick=cert=>{setQuickId(cert.id);setQuickData({certNo:cert.certNo||'',expiryDate:cert.expiryDate==='unlimited'?'':(cert.expiryDate||'')});setQuickUnlimited(cert.expiryDate==='unlimited');setEditId(null);cancelEdit();setExtractModal(null);};
+  const startQuick=cert=>{setQuickId(cert.id);setQuickData({certNo:cert.certNo||'',expiryDate:cert.expiryDate==='unlimited'?'':(cert.expiryDate||'')});setQuickUnlimited(cert.expiryDate==='unlimited');setEditId(null);cancelEdit();};
   const saveQuick=async id=>{
     const fe=quickUnlimited?'unlimited':quickData.expiryDate;
     if(!fe){notify('Enter expiry date','error');return;}
-    // NEW: save renewal history
     const cert=certs.find(c=>c.id===id)||{};
     const histEntry={date:new Date().toISOString().split('T')[0],certNo:quickData.certNo||cert.certNo||'',expiryDate:fe};
     await saveCerts(certs.map(c=>c.id===id?{...c,expiryDate:fe,certNo:quickData.certNo||c.certNo,renewalHistory:[...(c.renewalHistory||[]),histEntry]}:c));
     setQuickId(null);notify('Renewed','success');
   };
 
-  // NEW: Duplicate cert
   const duplicateCert=cert=>{
     setNewCert({name:cert.name,certNo:'',issueDate:'',expiryDate:'',category:cert.category,notes:cert.notes||''});
     setCustomName(!CERT_TEMPLATES.find(t=>t.name===cert.name));
@@ -561,14 +395,12 @@ function CertificateTrackerPage({user,notify}) {
     notify('Duplicated — fill in new dates below','success');
   };
 
-  // NEW: Copy cert details to clipboard
   const copyCertDetails=cert=>{
     const s=STATUS(cert.expiryDate);
     const text=[`Certificate: ${cert.name}`,cert.certNo?`Number: ${cert.certNo}`:null,cert.issueDate?`Issued: ${cert.issueDate}`:null,`Expiry: ${cert.expiryDate==='unlimited'?'Unlimited':(cert.expiryDate||'N/A')}`,`Status: ${s.label}`,cert.notes?`Notes: ${cert.notes}`:null].filter(Boolean).join('\n');
     navigator.clipboard.writeText(text).then(()=>notify('Copied to clipboard','success')).catch(()=>notify('Copy failed','error'));
   };
 
-  // NEW: Export CSV
   const exportCSV=()=>{
     const headers=['Name','Cert No.','Category','Issue Date','Expiry Date','Status','Notes'];
     const rows=certs.map(c=>{const s=STATUS(c.expiryDate);return[c.name,c.certNo||'',c.category,c.issueDate||'',c.expiryDate==='unlimited'?'Unlimited':(c.expiryDate||''),s.label,c.notes||''].map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',');});
@@ -578,7 +410,6 @@ function CertificateTrackerPage({user,notify}) {
     notify('CSV downloaded','success');
   };
 
-  // NEW: Export PDF (print)
   const exportPDF=()=>{
     const rows=certs.map(c=>{const s=STATUS(c.expiryDate);return`<tr><td>${c.name}</td><td>${c.certNo||''}</td><td>${c.category}</td><td>${c.issueDate||''}</td><td>${c.expiryDate==='unlimited'?'Unlimited':(c.expiryDate||'')}</td><td style="color:${s.color==='var(--green)'?'green':s.color==='#ff4757'?'red':'orange'}">${s.label}</td><td>${c.notes||''}</td></tr>`;}).join('');
     const html=`<!DOCTYPE html><html><head><title>NavisphereX Certificates</title><style>body{font-family:Arial,sans-serif;font-size:11px;margin:20px}h2{font-size:16px;margin-bottom:4px}p{font-size:10px;color:#666;margin:0 0 12px}table{width:100%;border-collapse:collapse}th,td{border:1px solid #ddd;padding:5px 7px;text-align:left}th{background:#f5f5f5;font-weight:600}tr:nth-child(even){background:#fafafa}@media print{button{display:none}}</style></head><body><h2>NavisphereX — Certificate Report</h2><p>Generated: ${new Date().toLocaleDateString()} | Total: ${certs.length} certificates</p><table><tr><th>Certificate Name</th><th>Cert No.</th><th>Category</th><th>Issue Date</th><th>Expiry Date</th><th>Status</th><th>Notes</th></tr>${rows}</table><br/><button onclick="window.print()">Print / Save as PDF</button></body></html>`;
@@ -586,7 +417,6 @@ function CertificateTrackerPage({user,notify}) {
     notify('Report opened — use Print to save as PDF','success');
   };
 
-  // NEW: Bulk delete
   const toggleSelectMode=()=>{setSelectMode(s=>!s);setSelectedIds(new Set());};
   const toggleSelect=id=>{setSelectedIds(prev=>{const next=new Set(prev);if(next.has(id))next.delete(id);else next.add(id);return next;});};
   const selectAll=()=>setSelectedIds(new Set(getSortedFiltered().map(c=>c.id)));
@@ -601,7 +431,6 @@ function CertificateTrackerPage({user,notify}) {
 
   const getCertsByTier=tier=>certs.filter(c=>{if(!c.expiryDate||c.expiryDate==='unlimited')return false;return tier.test(Math.floor((new Date(c.expiryDate)-new Date())/86400000));});
 
-  // NEW: Sort + filter computation
   const getSortedFiltered=()=>{
     let result=catFilter==='All'?[...certs]:certs.filter(c=>c.category===catFilter);
     if(searchQuery.trim()){
@@ -612,7 +441,6 @@ function CertificateTrackerPage({user,notify}) {
       if(sortBy==='name')return sortDir==='asc'?a.name.localeCompare(b.name):b.name.localeCompare(a.name);
       if(sortBy==='category')return sortDir==='asc'?a.category.localeCompare(b.category):b.category.localeCompare(a.category);
       if(sortBy==='added')return sortDir==='asc'?parseInt(a.id)-parseInt(b.id):parseInt(b.id)-parseInt(a.id);
-      // Default: sort by expiry
       const da=a.expiryDate==='unlimited'?99999:a.expiryDate?Math.floor((new Date(a.expiryDate)-new Date())/86400000):-9999;
       const db2=b.expiryDate==='unlimited'?99999:b.expiryDate?Math.floor((new Date(b.expiryDate)-new Date())/86400000):-9999;
       return sortDir==='asc'?da-db2:db2-da;
@@ -620,7 +448,6 @@ function CertificateTrackerPage({user,notify}) {
     return result;
   };
 
-  // NEW: Statistics
   const getStats=()=>{
     const total=certs.length;
     const byCat={};
@@ -642,13 +469,12 @@ function CertificateTrackerPage({user,notify}) {
   const filtered=getSortedFiltered();
   const expiring=certs.filter(c=>{if(!c.expiryDate||c.expiryDate==='unlimited')return false;const s=STATUS(c.expiryDate);return s.days!==undefined&&s.days<90;});
 
-  // ── Form renderers ────────────────────────────────────────────────────────
-  const renderFormFields=(data,setData,isCN,setIsCN,isCC,setIsCC,isUnlim,setIsUnlim,aiFields={})=>{
-    const badge=f=>aiFields[f]?<span style={{marginLeft:5,fontSize:'0.58rem',background:'rgba(0,180,216,0.2)',color:'var(--cyan)',borderRadius:10,padding:'1px 5px',fontWeight:700}}>Auto</span>:null;
+  // ── Form renderer ────────────────────────────────────────────────────────
+  const renderFormFields=(data,setData,isCN,setIsCN,isCC,setIsCC,isUnlim,setIsUnlim)=>{
     return(
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
         <div className="ff" style={{gridColumn:'1/-1',margin:0}}>
-          <label className="fl">Name * {badge('name')}</label>
+          <label className="fl">Name *</label>
           <select className="fi" value={isCN?'__custom__':(CERT_TEMPLATES.find(t=>t.name===data.name)?data.name:data.name?'__custom__':'')}
             onChange={e=>{if(e.target.value==='__custom__'){setIsCN(true);setData(n=>({...n,name:''}))}else{const t=CERT_TEMPLATES.find(c=>c.name===e.target.value);setIsCN(false);setData(n=>({...n,name:e.target.value,category:t?.category||n.category}))}}}>
             <option value="">— Select certificate —</option>
@@ -657,9 +483,9 @@ function CertificateTrackerPage({user,notify}) {
           </select>
           {isCN&&<input className="fi" style={{marginTop:6}} placeholder="Type custom name…" value={data.name} onChange={e=>setData(n=>({...n,name:e.target.value}))}/>}
         </div>
-        <div className="ff" style={{margin:0}}><label className="fl">Cert No. {badge('certNo')}</label><input className="fi" placeholder="e.g. INE-12345" value={data.certNo} onChange={e=>setData(n=>({...n,certNo:e.target.value}))}/></div>
+        <div className="ff" style={{margin:0}}><label className="fl">Cert No.</label><input className="fi" placeholder="e.g. INE-12345" value={data.certNo} onChange={e=>setData(n=>({...n,certNo:e.target.value}))}/></div>
         <div className="ff" style={{margin:0}}>
-          <label className="fl">Category {badge('category')}</label>
+          <label className="fl">Category</label>
           {!isCC
             ?<select className="fi" value={data.category} onChange={e=>{if(e.target.value==='__cc__'){setIsCC(true);setData(n=>({...n,category:''}))}else setData(n=>({...n,category:e.target.value}))}}>
                {KNOWN_CATEGORIES.map(c=><option key={c}>{c}</option>)}
@@ -668,39 +494,16 @@ function CertificateTrackerPage({user,notify}) {
             :<div style={{display:'flex',gap:6}}><input className="fi" placeholder="Custom category…" value={data.category} onChange={e=>setData(n=>({...n,category:e.target.value}))}/><button style={{background:'none',border:'1px solid var(--border)',borderRadius:6,color:'var(--text3)',cursor:'pointer',padding:'0 8px'}} onClick={()=>{setIsCC(false);setData(n=>({...n,category:'Others'}))}}>✕</button></div>
           }
         </div>
-        <div className="ff" style={{margin:0}}><label className="fl">Issue Date {badge('issueDate')}</label><input className="fi" type="date" value={data.issueDate} onChange={e=>setData(n=>({...n,issueDate:e.target.value}))}/></div>
+        <div className="ff" style={{margin:0}}><label className="fl">Issue Date</label><input className="fi" type="date" value={data.issueDate} onChange={e=>setData(n=>({...n,issueDate:e.target.value}))}/></div>
         <div className="ff" style={{gridColumn:'1/-1',margin:0}}>
-          <label className="fl">Expiry Date * {badge('expiryDate')}</label>
+          <label className="fl">Expiry Date *</label>
           <label style={{display:'flex',alignItems:'center',gap:6,cursor:'pointer',fontSize:'0.75rem',color:'var(--cyan)',marginBottom:6}}><input type="checkbox" checked={isUnlim} onChange={e=>setIsUnlim(e.target.checked)} style={{accentColor:'var(--cyan)'}}/>∞ No Expiry / Unlimited</label>
           {!isUnlim&&<input className="fi" type="date" value={data.expiryDate} onChange={e=>setData(n=>({...n,expiryDate:e.target.value}))}/>}
         </div>
         <div className="ff" style={{gridColumn:'1/-1',margin:0}}>
-          <label className="fl">Notes {badge('notes')}</label>
-          {/* NEW: textarea for expanded notes */}
+          <label className="fl">Notes</label>
           <textarea className="fi" placeholder="Issuing authority, endorsements, flag state…" value={data.notes} onChange={e=>setData(n=>({...n,notes:e.target.value}))} style={{minHeight:60,resize:'vertical',fontFamily:'inherit',fontSize:'inherit'}}/>
         </div>
-      </div>
-    );
-  };
-
-  const renderExtractionFields=()=>{
-    if(!extractModal?.reviewData)return null;
-    const{reviewData,detected}=extractModal;
-    const sf=(f,v)=>setExtractModal(m=>({...m,reviewData:{...m.reviewData,[f]:v}}));
-    const badge=f=>detected?.[f]?<span style={{marginLeft:5,fontSize:'0.58rem',background:'rgba(0,180,216,0.22)',color:'var(--cyan)',borderRadius:10,padding:'1px 5px',fontWeight:700}}>Auto</span>:null;
-    return(
-      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
-        <div className="ff" style={{gridColumn:'1/-1',margin:0}}><label className="fl">Certificate Name * {badge('name')}</label><input className="fi" value={reviewData.name||''} placeholder="Certificate name…" onChange={e=>sf('name',e.target.value)}/></div>
-        <div className="ff" style={{margin:0}}><label className="fl">Cert No. {badge('certNo')}</label><input className="fi" value={reviewData.certNo||''} placeholder="Cert number…" onChange={e=>sf('certNo',e.target.value)}/></div>
-        <div className="ff" style={{margin:0}}><label className="fl">Category {badge('category')}</label><select className="fi" value={reviewData.category||'Others'} onChange={e=>sf('category',e.target.value)}>{KNOWN_CATEGORIES.map(c=><option key={c}>{c}</option>)}</select></div>
-        <div className="ff" style={{margin:0}}><label className="fl">Issue Date {badge('issueDate')}</label><input className="fi" type="date" value={reviewData.issueDate||''} onChange={e=>sf('issueDate',e.target.value)}/></div>
-        <div className="ff" style={{gridColumn:'1/-1',margin:0}}>
-          <label className="fl">Expiry Date * {badge('expiryDate')}</label>
-          <label style={{display:'flex',alignItems:'center',gap:6,cursor:'pointer',fontSize:'0.74rem',color:'var(--cyan)',marginBottom:6}}><input type="checkbox" checked={!!reviewData.isUnlimited} onChange={e=>sf('isUnlimited',e.target.checked)} style={{accentColor:'var(--cyan)'}}/>∞ No Expiry / Unlimited</label>
-          {!reviewData.isUnlimited&&<input className="fi" type="date" value={reviewData.expiryDate||''} onChange={e=>sf('expiryDate',e.target.value)}/>}
-        </div>
-        <div className="ff" style={{margin:0}}><label className="fl">Issuing Authority {badge('notes')}</label><input className="fi" value={reviewData.issuingAuthority||''} placeholder="Issuing organization…" onChange={e=>sf('issuingAuthority',e.target.value)}/></div>
-        <div className="ff" style={{margin:0}}><label className="fl">Notes</label><textarea className="fi" value={reviewData.notes||''} placeholder="Additional notes…" onChange={e=>sf('notes',e.target.value)} style={{minHeight:50,resize:'vertical',fontFamily:'inherit',fontSize:'inherit'}}/></div>
       </div>
     );
   };
@@ -729,8 +532,7 @@ function CertificateTrackerPage({user,notify}) {
         <div style={{flex:1,minWidth:0}}>
           <div style={{fontSize:'0.76rem',fontWeight:700,color:driveConnected?'var(--green)':'var(--cyan)',fontFamily:'Orbitron,monospace'}}>{driveConnected?'✅ Cloud Storage Connected':'☁️ Connect Cloud Storage'}</div>
           {driveConnected&&driveEmail&&<div style={{fontSize:'0.65rem',color:'var(--text3)',marginTop:2}}>Connected as <strong style={{color:'var(--cyan)'}}>{driveEmail}</strong></div>}
-          <div style={{fontSize:'0.68rem',color:'var(--text3)',marginTop:3,lineHeight:1.5}}>{driveConnected?'Upload certificate photos or PDFs — details filled automatically. Files saved privately in your personal cloud.':'Connect to store certificate copies privately. Upload photos or PDFs and all details are filled in automatically.'}</div>
-          {!driveConnected&&<div style={{fontSize:'0.64rem',color:'var(--text3)',marginTop:4,fontStyle:'italic'}}>ℹ️ Scanning works without storage — connect only when you want to save files</div>}
+          <div style={{fontSize:'0.68rem',color:'var(--text3)',marginTop:3,lineHeight:1.5}}>{driveConnected?'Upload certificate photos or PDFs. Files saved privately in your personal cloud.':'Connect to store certificate copies privately.'}</div>
         </div>
         {driveConnected
           ?<div style={{display:'flex',gap:6,flexShrink:0}}>
@@ -766,7 +568,7 @@ function CertificateTrackerPage({user,notify}) {
         </div>
       )}
 
-      {/* NEW: Statistics Panel */}
+      {/* Statistics Panel */}
       {showStats&&(
         <div style={{background:'var(--card)',border:'1px solid rgba(240,165,0,0.2)',borderRadius:14,padding:'1.2rem',marginBottom:'1.2rem'}}>
           <div style={{fontFamily:'Orbitron,monospace',fontSize:'0.78rem',color:'var(--gold)',marginBottom:'1rem'}}>📊 CERTIFICATE STATISTICS</div>
@@ -832,42 +634,27 @@ function CertificateTrackerPage({user,notify}) {
         <div style={{background:'var(--card)',border:'1px solid rgba(0,180,216,0.3)',borderRadius:14,padding:'1.3rem',marginBottom:'1.2rem'}}>
           <div style={{fontFamily:'Orbitron,monospace',fontSize:'0.78rem',color:'var(--cyan)',marginBottom:'0.8rem'}}>+ Add New Certificate / Document</div>
           <div style={{background:'rgba(0,180,216,0.05)',border:'1px dashed rgba(0,180,216,0.35)',borderRadius:10,padding:'0.9rem',marginBottom:'1rem'}}>
-            <div style={{fontSize:'0.76rem',color:'var(--cyan)',fontWeight:700,marginBottom:3}}>✦ Smart Auto-Fill</div>
-            <div style={{fontSize:'0.68rem',color:'var(--text3)',marginBottom:10,lineHeight:1.5}}>Upload a clear photo of your certificate — we'll try to detect dates and certificate number. Please select the certificate name and category, and verify all details.</div>
             <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
-              <input id="add-scan-input" type="file" accept=".pdf,.jpg,.jpeg,.png" style={{display:'none'}} onChange={e=>{if(e.target.files?.[0])handleAddFormScan(e.target.files[0]);e.target.value='';}}/>
-              <label htmlFor="add-scan-input" style={{display:'inline-flex',alignItems:'center',gap:6,padding:'7px 14px',borderRadius:8,cursor:scanningAdd?'default':'pointer',fontSize:'0.72rem',fontWeight:700,background:'rgba(0,180,216,0.15)',color:'var(--cyan)',border:'1px solid rgba(0,180,216,0.45)',pointerEvents:scanningAdd?'none':'auto',opacity:scanningAdd?0.7:1}}>
-                {scanningAdd?'⏳ Reading…':'📷 Scan Certificate'}
+              <input id="add-file-input" type="file" accept=".pdf,.jpg,.jpeg,.png" style={{display:'none'}} onChange={e=>{if(e.target.files?.[0])setAddFile(e.target.files[0]);e.target.value='';}}/>
+              <label htmlFor="add-file-input" style={{display:'inline-flex',alignItems:'center',gap:6,padding:'7px 14px',borderRadius:8,cursor:'pointer',fontSize:'0.72rem',fontWeight:700,background:'rgba(0,180,216,0.15)',color:'var(--cyan)',border:'1px solid rgba(0,180,216,0.45)'}}>
+                📎 Upload File
               </label>
-              {/* NEW: Upload file only button in add form */}
-              {driveConnected&&addScanFile&&(
-                <span style={{fontSize:'0.68rem',color:'var(--text3)'}}>File ready to upload with certificate</span>
-              )}
-              {addScanErrMsg==='QUOTA_EXCEEDED'&&!scanningAdd&&(
-                <div style={{width:'100%',background:'rgba(255,165,0,0.08)',border:'1px solid rgba(255,165,0,0.3)',borderRadius:8,padding:'8px 10px',marginTop:6}}>
-                  <div style={{fontSize:'0.7rem',color:'#ffa502',marginBottom:6}}>⚠️ Scanning limit reached — you can still upload the file manually and fill details below</div>
-                  <button onClick={retryAddScan} style={{padding:'4px 10px',borderRadius:6,fontSize:'0.68rem',cursor:'pointer',background:'rgba(0,180,216,0.1)',color:'var(--cyan)',border:'1px solid rgba(0,180,216,0.3)'}}>↺ Try Again Later</button>
-                </div>
-              )}
-              {addScanErrMsg&&addScanErrMsg!=='QUOTA_EXCEEDED'&&!scanningAdd&&addScanFile&&<button onClick={retryAddScan} style={{padding:'5px 10px',borderRadius:7,fontSize:'0.7rem',fontWeight:700,cursor:'pointer',background:'rgba(0,180,216,0.1)',color:'var(--cyan)',border:'1px solid rgba(0,180,216,0.35)'}}>↺ Try Again</button>}
-              {addScanFile&&!scanningAdd&&!addScanErrMsg&&(
+              {addFile&&(
                 <span style={{fontSize:'0.68rem',color:'var(--green)',display:'flex',alignItems:'center',gap:6}}>
-                  ✅ {addScanFile.name}
-                  {Object.keys(addAiFields).length>0&&<span style={{background:'rgba(0,180,216,0.15)',color:'var(--cyan)',borderRadius:10,padding:'1px 7px',fontSize:'0.6rem',fontWeight:700}}>{Object.keys(addAiFields).length} fields filled</span>}
-                  <button onClick={()=>{setAddScanFile(null);setAddAiFields({});setAddScanErrMsg('');setNewCert({...EMPTY_CERT});}} style={{background:'none',border:'none',color:'var(--text3)',cursor:'pointer'}}>✕</button>
+                  ✅ {addFile.name}
+                  <button onClick={()=>setAddFile(null)} style={{background:'none',border:'none',color:'var(--text3)',cursor:'pointer'}}>✕</button>
                 </span>
               )}
-              {addScanErrMsg&&addScanErrMsg!=='QUOTA_EXCEEDED'&&!scanningAdd&&<span style={{fontSize:'0.68rem',color:'#ff6b35'}}>{addScanErrMsg}</span>}
-              {!addScanFile&&!addScanErrMsg&&<span style={{fontSize:'0.65rem',color:'var(--text3)'}}>or fill in manually below</span>}
+              {!addFile&&<span style={{fontSize:'0.65rem',color:'var(--text3)'}}>Optional — attach a PDF or photo of the certificate</span>}
             </div>
           </div>
-          {renderFormFields(newCert,setNewCert,customName,setCustomName,customCategory,setCustomCategory,unlimitedExpiry,setUnlimitedExpiry,addAiFields)}
-          {addScanFile&&!driveConnected&&<div style={{fontSize:'0.68rem',color:'var(--text3)',marginTop:8,background:'rgba(255,255,255,0.03)',borderRadius:8,padding:'6px 10px',border:'1px solid rgba(255,255,255,0.08)'}}>ℹ️ Certificate details will be saved. Connect storage above to also save the file.</div>}
+          {renderFormFields(newCert,setNewCert,customName,setCustomName,customCategory,setCustomCategory,unlimitedExpiry,setUnlimitedExpiry)}
+          {addFile&&!driveConnected&&<div style={{fontSize:'0.68rem',color:'var(--text3)',marginTop:8,background:'rgba(255,255,255,0.03)',borderRadius:8,padding:'6px 10px',border:'1px solid rgba(255,255,255,0.08)'}}>ℹ️ Certificate details will be saved. Connect storage above to also save the file.</div>}
           <button className="btn btn-primary" style={{marginTop:10}} onClick={addCert} disabled={saving}>{saving?'Saving…':'✅ Add Certificate'}</button>
         </div>
       )}
 
-      {/* NEW: Search + Sort bar */}
+      {/* Search + Sort bar */}
       <div style={{display:'flex',gap:8,marginBottom:'0.8rem',flexWrap:'wrap',alignItems:'center'}}>
         <input
           placeholder="🔍 Search certificates…"
@@ -900,7 +687,7 @@ function CertificateTrackerPage({user,notify}) {
       {filtered.length>0&&(
         <div style={{display:'grid',gap:'0.7rem'}}>
           {filtered.map(c=>{
-            const s=STATUS(c.expiryDate),isEd=editId===c.id,isQU=quickId===c.id,isUp=uploadingId===c.id,hasDr=!!c.driveFileId,isEx=extractModal?.certId===c.id,isSel=selectedIds.has(c.id);
+            const s=STATUS(c.expiryDate),isEd=editId===c.id,isQU=quickId===c.id,isUp=uploadingId===c.id,hasDr=!!c.driveFileId,isSel=selectedIds.has(c.id);
             return(
             <div key={c.id} style={{background:'var(--card)',border:`1px solid ${selectMode&&isSel?'var(--cyan)':s.color+'33'}`,borderRadius:12,padding:'1rem',display:'flex',flexDirection:'column',gap:0,opacity:selectMode&&!isSel?0.7:1}}>
               <div style={{display:'flex',gap:10,alignItems:'flex-start'}}>
@@ -926,7 +713,7 @@ function CertificateTrackerPage({user,notify}) {
                   </div>
                   {c.notes&&<div style={{fontSize:'0.72rem',color:'var(--text3)',marginTop:4,whiteSpace:'pre-wrap'}}>📝 {c.notes}</div>}
 
-                  {/* NEW: Renewal history */}
+                  {/* Renewal history */}
                   {c.renewalHistory?.length>0&&(
                     <div style={{marginTop:6}}>
                       <button onClick={()=>setShowHistory(showHistory===c.id?null:c.id)}
@@ -953,27 +740,19 @@ function CertificateTrackerPage({user,notify}) {
                     {hasDr?(
                       <>
                         <span style={{fontSize:'0.66rem',color:'var(--green)',background:'rgba(0,200,100,0.08)',border:'1px solid rgba(0,200,100,0.25)',borderRadius:20,padding:'2px 8px',maxWidth:190,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>☁️ {c.driveFileName||'File saved'}</span>
-                        {/* NEW: Preview button */}
                         <button onClick={()=>previewDriveFile(c.driveFileId,c.driveFileName)} disabled={previewLoading} style={mBtn('rgba(100,100,200,0.1)','#a29bfe','1px solid rgba(100,100,200,0.3)')}>{previewLoading?'…':'👁 Preview'}</button>
                         <button onClick={()=>viewDriveFile(c.driveFileId)} style={mBtn('rgba(0,180,216,0.1)','var(--cyan)','1px solid rgba(0,180,216,0.3)')}>📄 View</button>
                         <button onClick={()=>downloadDriveFile(c.driveFileId,c.driveFileName)} style={mBtn('rgba(100,200,100,0.1)','var(--green)','1px solid rgba(100,200,100,0.3)')}>⬇️ Download</button>
-                        {/* Update file — scan + upload */}
-                        <><input id={`upd-${c.id}`} type="file" accept=".pdf,.jpg,.jpeg,.png" style={{display:'none'}} onChange={e=>{if(e.target.files?.[0])handleFileUpload(c.id,e.target.files[0],true);e.target.value='';}}/>
+                        <><input id={`upd-${c.id}`} type="file" accept=".pdf,.jpg,.jpeg,.png" style={{display:'none'}} onChange={e=>{if(e.target.files?.[0])uploadFileOnly(c.id,e.target.files[0]);e.target.value='';}}/>
                         <label htmlFor={`upd-${c.id}`} style={{...mBtn('rgba(240,165,0,0.1)','var(--gold)','1px solid rgba(240,165,0,0.35)'),cursor:'pointer',display:'inline-flex',alignItems:'center'}}>📁 Update</label></>
                         <button onClick={()=>removeDriveFile(c.id)} style={mBtn('none','var(--text3)','1px solid rgba(255,255,255,0.1)')}>✕ Remove</button>
                       </>
                     ):driveConnected?(
                       <>
-                        {/* Scan + upload */}
-                        <input id={`drv-${c.id}`} type="file" accept=".pdf,.jpg,.jpeg,.png" style={{display:'none'}} onChange={e=>{if(e.target.files?.[0])handleFileUpload(c.id,e.target.files[0],false);e.target.value='';}}/>
+                        <input id={`drv-${c.id}`} type="file" accept=".pdf,.jpg,.jpeg,.png" style={{display:'none'}} onChange={e=>{if(e.target.files?.[0])uploadFileOnly(c.id,e.target.files[0]);e.target.value='';}}/>
                         <label htmlFor={`drv-${c.id}`} style={{fontSize:'0.65rem',padding:'3px 10px',borderRadius:6,cursor:isUp?'default':'pointer',background:'rgba(0,180,216,0.07)',color:'var(--cyan)',border:'1px dashed rgba(0,180,216,0.4)',display:'inline-flex',alignItems:'center',gap:5,pointerEvents:isUp?'none':'auto',opacity:isUp?0.6:1}}>
-                          {isUp?'⏳ Uploading…':'📎 Upload & Scan'}
+                          {isUp?'⏳ Uploading…':'📎 Upload File'}
                         </label>
-                        {/* NEW: Upload file only (no scan) */}
-                        <><input id={`ufo-${c.id}`} type="file" accept=".pdf,.jpg,.jpeg,.png" style={{display:'none'}} onChange={e=>{if(e.target.files?.[0])uploadFileOnly(c.id,e.target.files[0]);e.target.value='';}}/>
-                        <label htmlFor={`ufo-${c.id}`} style={{...mBtn('rgba(100,200,100,0.08)','var(--green)','1px dashed rgba(100,200,100,0.35)'),cursor:'pointer',display:'inline-flex',alignItems:'center'}}>
-                          ☁️ Upload Only
-                        </label></>
                       </>
                     ):driveExpired?(
                       <button onClick={connectDrive} style={{fontSize:'0.64rem',padding:'3px 10px',borderRadius:6,cursor:'pointer',background:'rgba(255,107,53,0.08)',color:'#ff6b35',border:'1px solid rgba(255,107,53,0.3)'}}>🔗 Reconnect to upload</button>
@@ -988,48 +767,12 @@ function CertificateTrackerPage({user,notify}) {
                   <div style={{display:'flex',flexDirection:'column',gap:4,flexShrink:0}}>
                     <button onClick={()=>isQU?setQuickId(null):startQuick(c)} style={{background:isQU?'rgba(0,200,100,0.15)':'rgba(0,180,216,0.08)',border:`1px solid ${isQU?'rgba(0,200,100,0.4)':'rgba(0,180,216,0.3)'}`,color:isQU?'var(--green)':'var(--cyan)',borderRadius:6,cursor:'pointer',fontSize:'0.63rem',padding:'4px 7px',fontWeight:700,whiteSpace:'nowrap'}}>🔄 Renew</button>
                     <button onClick={()=>isEd?cancelEdit():startEdit(c)} style={{background:isEd?'rgba(240,165,0,0.15)':'rgba(255,255,255,0.05)',border:`1px solid ${isEd?'rgba(240,165,0,0.5)':'rgba(255,255,255,0.1)'}`,color:isEd?'var(--gold)':'var(--text2)',borderRadius:6,cursor:'pointer',fontSize:'0.63rem',padding:'4px 7px',fontWeight:700}}>✏️ Edit</button>
-                    {/* NEW: Copy details */}
                     <button onClick={()=>copyCertDetails(c)} style={{background:'none',border:'1px solid rgba(255,255,255,0.1)',color:'var(--text3)',borderRadius:6,cursor:'pointer',fontSize:'0.63rem',padding:'4px 7px'}}>📋 Copy</button>
-                    {/* NEW: Duplicate */}
                     <button onClick={()=>duplicateCert(c)} style={{background:'none',border:'1px solid rgba(0,180,216,0.2)',color:'var(--cyan)',borderRadius:6,cursor:'pointer',fontSize:'0.63rem',padding:'4px 7px'}}>⧉ Dupe</button>
                     <button onClick={()=>deleteCert(c.id)} style={{background:'none',border:'1px solid rgba(255,71,87,0.25)',color:'#ff4757',borderRadius:6,cursor:'pointer',fontSize:'0.63rem',padding:'4px 7px'}}>🗑</button>
                   </div>
                 )}
               </div>
-
-              {/* Scan/Extraction panel */}
-              {isEx&&(
-                <div style={{borderTop:'1px solid rgba(0,180,216,0.25)',marginTop:12,paddingTop:12}}>
-                  <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:10,flexWrap:'wrap',gap:6}}>
-                    <div style={{fontFamily:'Orbitron,monospace',fontSize:'0.7rem',color:'var(--cyan)'}}>{extracting?'🔍 READING CERTIFICATE…':'✦ SCANNED DATA — Review & Edit'}</div>
-                    {!extracting&&extractModal?.detected&&Object.keys(extractModal.detected).length>0&&<span style={{fontSize:'0.62rem',color:'var(--green)',background:'rgba(0,200,100,0.1)',borderRadius:10,padding:'2px 8px',fontWeight:700}}>✦ {Object.keys(extractModal.detected).length} fields filled</span>}
-                  </div>
-                  {extracting?<div style={{display:'flex',alignItems:'center',gap:10,padding:'1.5rem',justifyContent:'center'}}><div className="spin"/><span style={{fontSize:'0.75rem',color:'var(--text3)'}}>Analysing certificate…</span></div>
-                  :<>
-                    {/* NEW: Quota fallback message */}
-                    {extractModal?.quotaError&&(
-                      <div style={{background:'rgba(255,165,0,0.08)',border:'1px solid rgba(255,165,0,0.3)',borderRadius:8,padding:'10px',marginBottom:12}}>
-                        <div style={{fontSize:'0.72rem',color:'#ffa502',fontWeight:700,marginBottom:4}}>⚠️ Scanning limit reached</div>
-                        <div style={{fontSize:'0.68rem',color:'var(--text3)',marginBottom:8}}>Auto-fill is temporarily unavailable. You can still fill in the details below and upload the file to your storage.</div>
-                        <button onClick={retryExtraction} style={{padding:'4px 10px',borderRadius:6,fontSize:'0.68rem',cursor:'pointer',background:'rgba(0,180,216,0.1)',color:'var(--cyan)',border:'1px solid rgba(0,180,216,0.3)'}}>↺ Try Scan Again</button>
-                      </div>
-                    )}
-                    {extractModal?.extractError&&!extractModal?.quotaError&&(
-                      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:8,marginBottom:12,background:'rgba(255,107,53,0.08)',borderRadius:8,padding:'8px 10px',border:'1px solid rgba(255,107,53,0.25)'}}>
-                        <span style={{fontSize:'0.7rem',color:'#ff6b35'}}>{extractErrMsg||'Could not read this file — please fill in details below'}</span>
-                        <button onClick={retryExtraction} style={{padding:'4px 10px',borderRadius:6,fontSize:'0.7rem',fontWeight:700,cursor:'pointer',background:'rgba(255,107,53,0.15)',color:'#ff6b35',border:'1px solid rgba(255,107,53,0.4)',whiteSpace:'nowrap'}}>↺ Try Again</button>
-                      </div>
-                    )}
-                    {extractModal?.isRenewal&&<div style={{fontSize:'0.7rem',color:'var(--gold)',marginBottom:10,background:'rgba(240,165,0,0.08)',borderRadius:8,padding:'6px 10px',border:'1px solid rgba(240,165,0,0.25)'}}>📁 Updating — existing file will be replaced in your storage</div>}
-                    {!driveConnected&&!driveExpired&&<div style={{fontSize:'0.68rem',color:'var(--text3)',marginBottom:10,background:'rgba(255,255,255,0.03)',borderRadius:8,padding:'6px 10px'}}>ℹ️ Details will be saved. Connect storage above to also save the file.</div>}
-                    {renderExtractionFields()}
-                    <div style={{display:'flex',gap:6,marginTop:12,flexWrap:'wrap'}}>
-                      <button className="btn btn-primary" style={{fontSize:'0.72rem',padding:'6px 14px'}} onClick={confirmExtraction} disabled={saving||isUp}>{isUp?'⏳ Saving…':driveConnected?'✅ Confirm & Save to Storage':'✅ Confirm & Save Details'}</button>
-                      <button style={{background:'none',border:'1px solid var(--border)',borderRadius:7,color:'var(--text3)',cursor:'pointer',fontSize:'0.72rem',padding:'5px 10px'}} onClick={()=>{setExtractModal(null);setExtractErrMsg('');}}>Cancel</button>
-                    </div>
-                  </>}
-                </div>
-              )}
 
               {/* Quick renew */}
               {isQU&&(
