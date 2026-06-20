@@ -44,7 +44,7 @@ export function recalcWaypoints(wps) {
 }
 
 export function totalRouteNM(wps) {
-  if (!wps || wps.length < 2) return 0;
+  if (!wps || wps.length === 0) return 0;
   return wps[wps.length - 1]?.totalNM || 0;
 }
 
