@@ -614,30 +614,63 @@ function RoutePlannerPage({notify,sheetRoutes=[],portsDb=[]}){
   };
 
   // ── Generate auto route — uses canalPref ──────────────────────────────────
+  // ── Generate auto route — FIXED: validates Render API response ─────────────
   const handleGenerateAutoRoute=async()=>{
     const f=portF,t=portT;
     if(!f||!t)return;
     setIsGenerating(true);setSearchMode('generating');
     setRouteMeta(null);setApiSafetyReport(null);setApiRouteInfo(null);
+
+    // Helper: haversine distance in NM (used to validate API response)
+    const _hvNM=(lat1,lon1,lat2,lon2)=>{
+      const R=3440.065,D=Math.PI/180;
+      const dLat=(lat2-lat1)*D,dLon=(lon2-lon1)*D;
+      const a=Math.sin(dLat/2)**2+Math.cos(lat1*D)*Math.cos(lat2*D)*Math.sin(dLon/2)**2;
+      return R*2*Math.asin(Math.sqrt(a));
+    };
+    const straightNM=_hvNM(f.lat,f.lon,t.lat,t.lon);
+    const minAcceptNM=Math.max(50,straightNM*0.8);
+
     try{
       const url=`${RENDER_API}/route?fromLon=${f.lon}&fromLat=${f.lat}&toLon=${t.lon}&toLat=${t.lat}&draft=${vDraft}&safety=2&beam=${vBeam}&loa=${vLoa}`;
       const res=await fetch(url,{signal:AbortSignal.timeout(35000)});
       if(res.ok){
         const data=await res.json();
-        if(data.waypoints&&data.waypoints.length>=2){
+        const apiNM=data.totalNM||0;
+        if(data.waypoints&&data.waypoints.length>=2&&apiNM>=minAcceptNM){
           const recalced=recalcWaypoints(data.waypoints.map((w,i)=>({lat:w.lat,lon:w.lon,name:`WP${String(i+1).padStart(2,'0')}`})));
           setWaypoints(recalced);setRouteName(`${f.name} → ${t.name}`);
-          const info={totalNM:data.totalNM||0,method:data.method||'api',landCrossing:data.landCrossing||false,tssZones:data.tssZones||[],portApproach:data.portApproach||{},warnings:data.warnings||[],overallSafe:data.overallSafe!==false};
+          const info={totalNM:apiNM,method:data.method||'api',landCrossing:data.landCrossing||false,tssZones:data.tssZones||[],portApproach:data.portApproach||{},warnings:data.warnings||[],overallSafe:data.overallSafe!==false};
           setApiRouteInfo(info);
           if(data.safetyReport)setApiSafetyReport(data.safetyReport);
-          setRouteMeta({totalNM:data.totalNM||0,etaAt12kn:((data.totalNM||0)/12).toFixed(1),etaAt15kn:((data.totalNM||0)/15).toFixed(1),confidence:'HIGH — Render API',routeSource:'render-api',canalInfo:(data.tssZones||[]).map(z=>({canal:z.replace(/_/g,' ').toUpperCase(),status:'OK',reason:'TSS lane followed by API'})),approachStartIdx:recalced.length-1,waypoints:recalced});
+          setRouteMeta({totalNM:apiNM,etaAt12kn:(apiNM/12).toFixed(1),etaAt15kn:(apiNM/15).toFixed(1),confidence:'HIGH — Render API',routeSource:'render-api',canalInfo:(data.tssZones||[]).map(z=>({canal:z.replace(/_/g,' ').toUpperCase(),status:'OK',reason:'TSS lane followed by API'})),approachStartIdx:recalced.length-1,waypoints:recalced});
           setCheckAutoRes([]);setSearchMode('done');
           if(data.warnings?.length>0)data.warnings.slice(0,3).forEach(w=>notify(w,'error'));
-          else notify(`Route ready: ${recalced.length} WPs — ${(data.totalNM||0).toFixed(0)} NM ✅`,'success');
+          else notify(`Route ready: ${recalced.length} WPs — ${apiNM.toFixed(0)} NM ✅`,'success');
           setIsGenerating(false);return;
+        }else{
+          console.warn(`[NavisphereX] Render API rejected: got ${apiNM.toFixed(0)}NM, need >=${minAcceptNM.toFixed(0)}NM. Using V2+MARNET.`);
         }
       }
-    }catch(e){console.warn('[NavisphereX] Render API failed, using V2 graph:',e);}
+    }catch(e){console.warn('[NavisphereX] Render API failed, using V2+MARNET:',e);}
+
+    // ── V2+MARNET routing (new primary) ───────────────────────────────────────
+    const vesselParams={draft:vDraft,beam:vBeam,loa:vLoa,airDraft:vAirDraft,vesselType:vType};
+    const result=await buildProRoute(f,t,vesselParams,canalPref);
+
+    if(result.error||!result.waypoints||result.waypoints.length<2){
+      notify(`Cannot route ${f.name} → ${t.name}: ${result.error||'Route not found'}. Try Manual tab.`,'error');
+      setIsGenerating(false);setSearchMode('choose');return;
+    }
+    setWaypoints(result.waypoints);setRouteName(`${f.name} → ${t.name}`);
+    setRouteMeta(result);setCheckAutoRes([]);setSearchMode('done');
+    const blocked=result.canalInfo?.filter(c=>c.status==='BLOCKED');
+    if(blocked?.length>0)blocked.forEach(c=>notify(`🚫 ${c.canal}: ${c.reason}. ${c.alternative}`,'error'));
+    const srcLabel=result.routeSource==='v2+marnet'?'📡 V2+MARNET (TSS)':result.routeSource==='marnet-astar'?'🌐 MARNET sea graph':'📋 Route table';
+    notify(`${srcLabel}: ${result.waypoints.length} WPs — ${result.totalNM.toFixed(0)} NM ✅`,'success');
+    setIsGenerating(false);
+  };
+
 
     // ── NEW: pass canalPref to buildProRoute ──────────────────────────────
     const vesselParams={draft:vDraft,beam:vBeam,loa:vLoa,airDraft:vAirDraft,vesselType:vType};
