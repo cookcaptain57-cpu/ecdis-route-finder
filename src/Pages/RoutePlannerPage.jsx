@@ -671,24 +671,6 @@ function RoutePlannerPage({notify,sheetRoutes=[],portsDb=[]}){
     setIsGenerating(false);
   };
 
-
-    // ── NEW: pass canalPref to buildProRoute ──────────────────────────────
-    const vesselParams={draft:vDraft,beam:vBeam,loa:vLoa,airDraft:vAirDraft,vesselType:vType};
-    const result=await buildProRoute(f,t,vesselParams,canalPref);
-
-    if(result.error||!result.waypoints||result.waypoints.length<2){
-      notify(`Cannot route ${f.name} → ${t.name}: ${result.error||'Route not found'}. Try Manual tab.`,'error');
-      setIsGenerating(false);setSearchMode('choose');return;
-    }
-    setWaypoints(result.waypoints);setRouteName(`${f.name} → ${t.name}`);
-    setRouteMeta(result);setCheckAutoRes([]);setSearchMode('done');
-    const blocked=result.canalInfo?.filter(c=>c.status==='BLOCKED');
-    if(blocked?.length>0) blocked.forEach(c=>notify(`🚫 ${c.canal}: ${c.reason}. ${c.alternative}`,'error'));
-    const srcLabel=result.routeSource==='v2-direct'?'📡 Real ship routes (TSS)':result.routeSource==='v2-stitched'?'📡 Stitched routes (TSS)':result.routeSource==='marnet-astar'?'🌐 MARNET sea graph':'📋 Route table';
-    notify(`${srcLabel}: ${result.waypoints.length} WPs — ${result.totalNM.toFixed(0)} NM ✅`,'success');
-    setIsGenerating(false);
-  };
-
   const resetSearch=()=>{setSearchMode(null);setPortF(null);setPortT(null);setDbSuggestions([]);setShowManualFrom(false);setShowManualTo(false);};
 
   const handleRTZLoad=(e)=>{
