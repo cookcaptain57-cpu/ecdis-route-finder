@@ -464,19 +464,46 @@ function ChartsPage({ notify, user, setTab, isAdmin: isAdminProp, sheetCharts = 
           </div>
 
           {!selBrand && (
-            <div className="brand-grid">
+            <div
+              className="brand-tabs"
+              style={{
+                display: 'flex',
+                gap: 8,
+                overflowX: 'auto',
+                WebkitOverflowScrolling: 'touch',
+                paddingBottom: 6,
+                scrollbarWidth: 'thin',
+              }}
+            >
               {ECDIS_BRANDS.map(b => {
                 const cnt = sheetCharts.filter(r => {
                   const hay = normalizeStr(Object.values(r).filter(v => v && typeof v === 'string').join(' '));
                   return hay.includes(normalizeStr(b.name)) || hay.includes(b.id.toLowerCase());
                 }).length;
                 return (
-                  <div key={b.id} className="brand-card" style={{ borderColor: b.color + '44' }}
-                    onClick={() => { setSelBrand(b.id); setGlobalQ(''); setGlobalResults([]); setGlobalSearched(false); }}>
-                    <div className="brand-emoji">{b.emoji}</div>
-                    <div className="brand-name" style={{ color: b.color }}>{b.name}</div>
-                    <div className="brand-models">{b.models}</div>
-                    {cnt > 0 && <div style={{ fontSize: '0.62rem', color: 'var(--green)', marginTop: 4, fontWeight: 700 }}>{cnt} charts</div>}
+                  <div
+                    key={b.id}
+                    onClick={() => { setSelBrand(b.id); setGlobalQ(''); setGlobalResults([]); setGlobalSearched(false); }}
+                    style={{
+                      flex: '0 0 auto',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      gap: 2,
+                      minWidth: 78,
+                      padding: '8px 12px',
+                      borderRadius: 10,
+                      border: `1px solid ${b.color}44`,
+                      background: 'rgba(255,255,255,0.02)',
+                      cursor: 'pointer',
+                      transition: 'background 0.15s ease',
+                    }}
+                    onMouseEnter={e => e.currentTarget.style.background = `${b.color}14`}
+                    onMouseLeave={e => e.currentTarget.style.background = 'rgba(255,255,255,0.02)'}
+                  >
+                    <div style={{ fontSize: '1.2rem' }}>{b.emoji}</div>
+                    <div style={{ fontSize: '0.66rem', fontWeight: 700, color: b.color, whiteSpace: 'nowrap' }}>{b.name}</div>
+                    {cnt > 0 && <div style={{ fontSize: '0.58rem', color: 'var(--green)', fontWeight: 700 }}>{cnt}</div>}
                   </div>
                 );
               })}
