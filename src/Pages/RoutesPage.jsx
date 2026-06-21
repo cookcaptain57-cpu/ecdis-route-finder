@@ -113,6 +113,29 @@ const fmtSize = (bytes) => {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 };
 
+// ── Port fragment matching — used by Departure/Arrival search ─────────────
+// Normalizes a filename to strip spaces/dots/dashes/digits so formats like
+// "12.mundratosingapore", "Mundra-Singapore", "mundra to singapore" all
+// reduce to the same comparable string: "mundratosingapore"
+const normalizePortStr = (str) =>
+  normalizeStr(str || '').replace(/[^a-z]/g, '');
+
+// Checks if a normalized filename contains the given port fragment.
+// If fragment looks like a 5-letter UNLOCODE (2-letter country + 3-letter
+// port code, e.g. "inmun"), and the full 5-letter match fails, falls back
+// to matching just the last 3 letters (the port code itself, e.g. "mun"),
+// since many filenames drop the country-code prefix.
+const matchesPortFragment = (normalizedFilename, rawFragment) => {
+  const frag = normalizePortStr(rawFragment);
+  if (!frag) return true; // empty box = no constraint
+  if (normalizedFilename.includes(frag)) return true;
+  if (frag.length === 5) {
+    const last3 = frag.slice(2);
+    if (normalizedFilename.includes(last3)) return true;
+  }
+  return false;
+};
+
 // ── Get top N ports from route data ───────────────────────────────────────
 const getTopPorts = (routes, n = 8) => {
   const freq = {};
@@ -207,6 +230,17 @@ function RoutesPage({ searchQuery, notify, user, setTab, sheetRoutes = [], sheet
 
   // Dynamic quick-filter ports
   const [topPorts, setTopPorts] = useState([]);
+
+  // ── Departure/Arrival port search (additional search system) ────────────
+  const [depPort, setDepPort]           = useState('');
+  const [arrPort, setArrPort]           = useState('');
+  const [portSearchDone, setPortSearchDone] = useState(false);
+  const [portTier1, setPortTier1]       = useState([]); // both fragments match
+  const [portTier2, setPortTier2]       = useState([]); // departure only
+  const [portTier3, setPortTier3]       = useState([]); // arrival only
+  const [portVisible1, setPortVisible1] = useState(PAGE_SIZE);
+  const [portVisible2, setPortVisible2] = useState(PAGE_SIZE);
+  const [portVisible3, setPortVisible3] = useState(PAGE_SIZE);
 
   const debounceRef = useRef(null);
   const isAdmin = user?.email === ADMIN_EMAIL;
@@ -323,6 +357,70 @@ function RoutesPage({ searchQuery, notify, user, setTab, sheetRoutes = [], sheet
     }
   };
 
+  // ── Departure/Arrival port search handler ────────────────────────────────
+  const runPortSearch = useCallback((dep, arr) => {
+    const d = (dep !== undefined ? dep : depPort).trim();
+    const a = (arr !== undefined ? arr : arrPort).trim();
+
+    if (!d && !a) {
+      setPortSearchDone(false);
+      setPortTier1([]); setPortTier2([]); setPortTier3([]);
+      return;
+    }
+
+    setPortSearchDone(true);
+    const tier1 = [], tier2 = [], tier3 = [];
+
+    sheetRoutes.forEach(r => {
+      const fname = getName(r);
+      const norm  = normalizePortStr(fname);
+
+      const matchD = d ? matchesPortFragment(norm, d) : false;
+      const matchA = a ? matchesPortFragment(norm, a) : false;
+
+      if (d && a) {
+        if (matchD && matchA) tier1.push(r);
+        else if (matchD) tier2.push(r);
+        else if (matchA) tier3.push(r);
+      } else if (d && matchD) {
+        tier1.push(r);
+      } else if (a && matchA) {
+        tier1.push(r);
+      }
+    });
+
+    setPortTier1(tier1);
+    setPortTier2(tier2);
+    setPortTier3(tier3);
+    setPortVisible1(PAGE_SIZE);
+    setPortVisible2(PAGE_SIZE);
+    setPortVisible3(PAGE_SIZE);
+  }, [depPort, arrPort, sheetRoutes]);
+
+  const debPortRef = useRef(null);
+  const handleDepChange = e => {
+    const v = e.target.value;
+    setDepPort(v);
+    clearTimeout(debPortRef.current);
+    debPortRef.current = setTimeout(() => runPortSearch(v, arrPort), 250);
+  };
+  const handleArrChange = e => {
+    const v = e.target.value;
+    setArrPort(v);
+    clearTimeout(debPortRef.current);
+    debPortRef.current = setTimeout(() => runPortSearch(depPort, v), 250);
+  };
+  const clearPortSearch = () => {
+    setDepPort(''); setArrPort('');
+    setPortSearchDone(false);
+    setPortTier1([]); setPortTier2([]); setPortTier3([]);
+  };
+
+  // Re-run port search if underlying data loads/changes after a search was made
+  useEffect(() => {
+    if ((depPort || arrPort) && sheetRoutes.length > 0) runPortSearch(depPort, arrPort);
+  }, [sheetRoutes]);
+
   const getName = r => r['Filename'] || r['File Name'] || r.fileName || r['Route Name'] ||
     Object.values(r).find(v => v && typeof v === 'string' && v.length > 2 && !v.startsWith('http')) || 'Route File';
   const getPort = r => r['Portname'] || r['Port Name'] || r.portName || r['From'] || r['Route Description'] || '';
@@ -330,6 +428,48 @@ function RoutesPage({ searchQuery, notify, user, setTab, sheetRoutes = [], sheet
 
   const visibleResults = results.slice(0, visibleCount);
   const hasMore = results.length > visibleCount;
+
+  // ── Shared route card renderer (used by global search + port search) ────
+  const renderRouteCard = (r, i) => {
+    const cardId    = r['Fileid'] || r['Fileurl'] || getName(r);
+    const isLoading = dlLoadingId === cardId;
+    const fname     = getName(r);
+    const alreadyDl = dlHistory.includes(fname);
+    return (
+      <div key={i} className="file-card" style={{ opacity: isLoading ? 0.7 : 1, transition: 'opacity 0.2s' }}>
+        <div className="file-icon">🛤</div>
+        <div className="file-name">{fname}</div>
+        {getPort(r) && <div className="file-port">📍 {getPort(r)}</div>}
+        {getType(r) && (
+          <div style={{ fontSize: '0.65rem', color: 'var(--text3)', marginBottom: 3 }}>
+            🌊 {getType(r)}
+          </div>
+        )}
+        <div className="file-tags">
+          <span className="ftag tag-rtz">Route File</span>
+          <span className="ftag" style={{ background: 'rgba(0,200,100,0.07)', color: 'var(--green)', border: '1px solid rgba(0,200,100,0.2)' }}>Firebase</span>
+          {alreadyDl && (
+            <span className="ftag" style={{ background: 'rgba(0,180,216,0.1)', color: 'var(--cyan)', border: '1px solid rgba(0,180,216,0.25)' }}>✓ Today</span>
+          )}
+        </div>
+        {isLoading && dlProgress !== null && (
+          <div style={{ margin: '6px 0 4px', height: 3, background: 'rgba(255,255,255,0.08)', borderRadius: 3, overflow: 'hidden' }}>
+            <div style={{ height: '100%', background: 'var(--cyan)', width: `${dlProgress}%`, transition: 'width 0.25s ease', borderRadius: 3 }} />
+          </div>
+        )}
+        {user
+          ? <button
+              className="dl-btn"
+              onClick={() => handleDL(r)}
+              disabled={isLoading}
+              style={{ opacity: isLoading ? 0.6 : 1 }}>
+              {isLoading ? '⬇ Downloading…' : '⬇ Download'}
+            </button>
+          : <button className="login-req" onClick={() => setTab('login')}>🔐 Login to Download</button>
+        }
+      </div>
+    );
+  };
 
   return (
     <div className="section">
@@ -408,6 +548,102 @@ function RoutesPage({ searchQuery, notify, user, setTab, sheetRoutes = [], sheet
           </div>
         )}
       </div>
+
+      {/* ── Departure / Arrival Port Search (additional search system) ──── */}
+      <div style={{ background: 'rgba(0,180,216,0.04)', border: '1px solid rgba(0,180,216,0.15)', borderRadius: 10, padding: '12px 14px', marginBottom: '0.8rem' }}>
+        <div style={{ fontSize: '0.7rem', color: 'var(--cyan)', fontWeight: 700, marginBottom: 8, letterSpacing: '0.04em' }}>
+          🧭 Search by Departure / Arrival Port
+        </div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <input
+            className="si"
+            style={{ flex: '1 1 140px', minWidth: 120 }}
+            placeholder="Departure port or code"
+            value={depPort}
+            onChange={handleDepChange}
+            onKeyDown={e => e.key === 'Enter' && runPortSearch(depPort, arrPort)}
+          />
+          <input
+            className="si"
+            style={{ flex: '1 1 140px', minWidth: 120 }}
+            placeholder="Arrival port or code"
+            value={arrPort}
+            onChange={handleArrChange}
+            onKeyDown={e => e.key === 'Enter' && runPortSearch(depPort, arrPort)}
+          />
+          <button className="btn btn-primary" style={{ padding: '0 16px' }} onClick={() => runPortSearch(depPort, arrPort)}>Search</button>
+          {(depPort || arrPort) && <button className="btn btn-secondary" onClick={clearPortSearch}>✕</button>}
+        </div>
+        <div style={{ fontSize: '0.62rem', color: 'var(--text3)', marginTop: 6, lineHeight: 1.4 }}>
+          Search by port name or port code (e.g. Mundra or INMUN). Fill both boxes for an exact route, or just one to browse all routes via that port.
+        </div>
+      </div>
+
+      {portSearchDone && (
+        <div style={{ marginBottom: '1rem' }}>
+          {portTier1.length === 0 && portTier2.length === 0 && portTier3.length === 0 && (
+            <div className="empty">
+              <div className="empty-icon">🔍</div>
+              <div className="empty-t">No Routes Found</div>
+              <div className="empty-d">Try a different port name or code</div>
+            </div>
+          )}
+
+          {portTier1.length > 0 && (
+            <>
+              <div style={{ fontSize: '0.7rem', color: 'var(--green)', fontWeight: 700, margin: '10px 0 8px' }}>
+                ✅ Best Matches ({portTier1.length})
+              </div>
+              <div className="files-grid">
+                {portTier1.slice(0, portVisible1).map((r, i) => renderRouteCard(r, `t1-${i}`))}
+              </div>
+              {portTier1.length > portVisible1 && (
+                <div style={{ textAlign: 'center', marginTop: '0.8rem' }}>
+                  <button className="btn btn-secondary" onClick={() => setPortVisible1(v => v + PAGE_SIZE)} style={{ padding: '10px 28px', fontSize: '0.8rem' }}>
+                    Load More ({portTier1.length - portVisible1} remaining)
+                  </button>
+                </div>
+              )}
+            </>
+          )}
+
+          {portTier2.length > 0 && (
+            <>
+              <div style={{ fontSize: '0.7rem', color: 'var(--cyan)', fontWeight: 700, margin: '14px 0 8px' }}>
+                🛫 Departure Port Matches ({portTier2.length})
+              </div>
+              <div className="files-grid">
+                {portTier2.slice(0, portVisible2).map((r, i) => renderRouteCard(r, `t2-${i}`))}
+              </div>
+              {portTier2.length > portVisible2 && (
+                <div style={{ textAlign: 'center', marginTop: '0.8rem' }}>
+                  <button className="btn btn-secondary" onClick={() => setPortVisible2(v => v + PAGE_SIZE)} style={{ padding: '10px 28px', fontSize: '0.8rem' }}>
+                    Load More ({portTier2.length - portVisible2} remaining)
+                  </button>
+                </div>
+              )}
+            </>
+          )}
+
+          {portTier3.length > 0 && (
+            <>
+              <div style={{ fontSize: '0.7rem', color: 'var(--gold)', fontWeight: 700, margin: '14px 0 8px' }}>
+                🛬 Arrival Port Matches ({portTier3.length})
+              </div>
+              <div className="files-grid">
+                {portTier3.slice(0, portVisible3).map((r, i) => renderRouteCard(r, `t3-${i}`))}
+              </div>
+              {portTier3.length > portVisible3 && (
+                <div style={{ textAlign: 'center', marginTop: '0.8rem' }}>
+                  <button className="btn btn-secondary" onClick={() => setPortVisible3(v => v + PAGE_SIZE)} style={{ padding: '10px 28px', fontSize: '0.8rem' }}>
+                    Load More ({portTier3.length - portVisible3} remaining)
+                  </button>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
 
       {/* Dynamic quick-filter buttons */}
       <div className="fbar" style={{ marginBottom: '0.8rem' }}>
