@@ -38,7 +38,7 @@ import SightReductionPage      from "./Pages/SightReductionPage";
 import EmergencyPage           from "./Pages/EmergencyPage";
 import KnotsRopesMooringPage   from "./Pages/KnotsRopesMooringPage";
 import NavigationBridgePage    from "./Pages/NavigationBridgePage";
-import CrewWelfarePage         from "./Pages/CrewWelfarePage";
+import SeafarerWelfareHub      from "./Pages/SeafarerWelfareHub";
 import CrewJourneyPage         from "./Pages/CrewJourneyPage";
 import PortShorePage           from "./Pages/PortShorePage";
 import InfoPage                from "./Pages/InfoPage";
@@ -734,8 +734,8 @@ export default function App() {
             {tab==='emergency'   && <EmergencyPage portsDb={portsDb} />}
             {tab==='knots'       && <KnotsRopesMooringPage />}
             {tab==='navbridge'   && <NavigationBridgePage />}
-            {/* ── FIX: Pass user and notify to CrewWelfarePage ── */}
-            {tab==='welfare'     && user && <CrewWelfarePage user={user} notify={notify} />}
+            {/* ── Seafarer Welfare Hub (renamed from CrewWelfarePage to resolve build issue) ── */}
+            {tab==='welfare'     && user && <SeafarerWelfareHub user={user} notify={notify} />}
             {tab==='crewjourney' && <CrewJourneyPage user={user} userProfile={userProfile} notify={notify} />}
             {tab==='portshore'   && <PortShorePage user={user} onNavigate={switchTab} />}
             {tab==='seadiary'    && user && <SeaDiaryPage user={user} notify={notify} portsDb={portsDb} />}
