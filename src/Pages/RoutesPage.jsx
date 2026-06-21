@@ -231,6 +231,9 @@ function RoutesPage({ searchQuery, notify, user, setTab, sheetRoutes = [], sheet
   // Dynamic quick-filter ports
   const [topPorts, setTopPorts] = useState([]);
 
+  // ── Live daily limit (for notice text) — fetched from Firestore ─────────
+  const [maxRoutesPerDay, setMaxRoutesPerDay] = useState(10);
+
   // ── Departure/Arrival port search (additional search system) ────────────
   const [depPort, setDepPort]           = useState('');
   const [arrPort, setArrPort]           = useState('');
@@ -251,6 +254,19 @@ function RoutesPage({ searchQuery, notify, user, setTab, sheetRoutes = [], sheet
       setTopPorts(getTopPorts(sheetRoutes, 8));
     }
   }, [sheetRoutes]);
+
+  // ── Fetch live download limit for notice text display ───────────────────
+  useEffect(() => {
+    (async () => {
+      try {
+        const snap = await getDoc(doc(db, 'app_config', 'limits'));
+        if (snap.exists()) {
+          const data = snap.data();
+          setMaxRoutesPerDay(Number(data.maxRoutesPerDay ?? 10));
+        }
+      } catch {}
+    })();
+  }, []);
 
   const liveSearch = useCallback((searchQ) => {
     const sq = (searchQ !== undefined ? searchQ : q).trim();
@@ -490,7 +506,7 @@ function RoutesPage({ searchQuery, notify, user, setTab, sheetRoutes = [], sheet
       {/* Download limit notice */}
       {user && !isAdmin && (
         <div style={{ background: 'rgba(0,180,216,0.06)', border: '1px solid rgba(0,180,216,0.18)', borderRadius: 8, padding: '7px 12px', fontSize: '0.7rem', color: 'var(--text2)', marginBottom: '0.8rem' }}>
-          📥 Free account: up to <strong style={{ color: 'var(--cyan)' }}>10 route downloads per day</strong>. Resets at midnight.
+          📥 Free account: up to <strong style={{ color: 'var(--cyan)' }}>{maxRoutesPerDay} route downloads per day</strong>. Resets at midnight.
         </div>
       )}
       {isAdmin && (
