@@ -392,27 +392,36 @@ export default function App() {
   };
 
   useEffect(() => { loadAppData(); }, []);
-  useEffect(() => { if (!authChecked) return; if (sheetRoutes.length === 0 || portsDb.length === 0) loadAppData(); }, [authChecked]);
+  // FIX: removed duplicate loadAppData() trigger on authChecked — was causing
+  // double-fetch race (ports/routes/charts loaded twice in parallel on cold start)
 
   // Redirect after login — handled entirely by onLogin callback in LoginPage render
   // No useEffect needed here — avoids double-redirect conflicts
 
   useEffect(() => {
-    setPersistence(auth, browserLocalPersistence).catch(() => {});
-    const unsub = onAuthStateChanged(auth, async u => {
-      setUser(u);
-      if (u) {
-        try {
-          const snap = await getDoc(doc(db, 'users', u.uid));
-          if (snap.exists()) {
-            const profile = { id: snap.id, ...snap.data() };
-            if (profile.blocked) { setIsBlocked(true); await signOut(auth); setUser(null); setUserProfile(null); setAuthChecked(true); return; }
-            setIsBlocked(false); setUserProfile(profile);
-          } else { setIsBlocked(false); setUserProfile(null); }
-        } catch { setUserProfile(null); setIsBlocked(false); }
-      } else { setUserProfile(null); }
-      setAuthChecked(true);
-    });
+    let unsub = () => {};
+    // FIX: await setPersistence BEFORE attaching the auth listener.
+    // Previously this raced with onAuthStateChanged, which on some browsers
+    // caused Firebase to fall back to session-only persistence — logging
+    // the user out on every refresh.
+    setPersistence(auth, browserLocalPersistence)
+      .catch(() => {})
+      .finally(() => {
+        unsub = onAuthStateChanged(auth, async u => {
+          setUser(u);
+          if (u) {
+            try {
+              const snap = await getDoc(doc(db, 'users', u.uid));
+              if (snap.exists()) {
+                const profile = { id: snap.id, ...snap.data() };
+                if (profile.blocked) { setIsBlocked(true); await signOut(auth); setUser(null); setUserProfile(null); setAuthChecked(true); return; }
+                setIsBlocked(false); setUserProfile(profile);
+              } else { setIsBlocked(false); setUserProfile(null); }
+            } catch { setUserProfile(null); setIsBlocked(false); }
+          } else { setUserProfile(null); }
+          setAuthChecked(true);
+        });
+      });
     return () => unsub();
   }, []);
 
