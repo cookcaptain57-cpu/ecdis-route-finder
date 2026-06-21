@@ -737,28 +737,18 @@ const StatBox = ({ label, value, color, sub }) => (
 function SetupWizard({ onSave }) {
   const [port,     setPort]     = useState('');
   const [vessel,   setVessel]   = useState('');
-  const [bayFrom,  setBayFrom]  = useState(1);
-  const [bayTo,    setBayTo]    = useState(55);
+  const [bayFrom,  setBayFrom]  = useState('1');
+  const [bayTo,    setBayTo]    = useState('55');
   const [bayType,  setBayType]  = useState('all');
-  const [gantries, setGantries] = useState(2);
-  const [movesPerHr, setMovesPerHr] = useState(25);
+  const [gantries, setGantries] = useState('2');
+  const [movesPerHr, setMovesPerHr] = useState('25');
   const [totalLoad, setTotalLoad]   = useState('');
   const [totalDisch, setTotalDisch] = useState('');
   const [totalRest,  setTotalRest]  = useState('');
 
-  const Fi = ({ label, value, onChange, type='text', placeholder='', unit='' }) => (
-    <div style={{ marginBottom:8 }}>
-      <div style={{ color:S.dm, fontSize:S.lb, marginBottom:3 }}>{label}</div>
-      <div style={{ display:'flex', alignItems:'center', gap:5 }}>
-        <input type={type} value={value} onChange={onChange} placeholder={placeholder}
-          style={{ flex:1, background:S.bg3, color:S.cy, border:`1px solid ${S.bd2}`, borderRadius:5,
-            padding:'7px 9px', fontSize:S.xs, outline:'none', fontFamily:'monospace' }} />
-        {unit && <span style={{ color:S.dm, fontSize:S.lb }}>{unit}</span>}
-      </div>
-    </div>
-  );
-
-  const bayCount = generateBays(bayFrom, bayTo, bayType).length;
+  const bayFromNum = parseInt(bayFrom) || 1;
+  const bayToNum   = parseInt(bayTo)   || 1;
+  const bayCount = generateBays(bayFromNum, bayToNum, bayType).length;
 
   return (
     <div style={{ padding:'16px 0' }}>
@@ -768,14 +758,14 @@ function SetupWizard({ onSave }) {
         <div style={{ color:S.dm, fontSize:S.xs }}>Configure vessel and bay range for this port operation</div>
       </div>
 
-      <Fi label="Port Name" value={port} onChange={e=>setPort(e.target.value)} placeholder="e.g. Singapore, SGSIN" />
-      <Fi label="Vessel Name" value={vessel} onChange={e=>setVessel(e.target.value)} placeholder="e.g. MV EVER GIVEN" />
+      <Field label="Port Name" value={port} onChange={e=>setPort(e.target.value)} placeholder="e.g. Singapore, SGSIN" />
+      <Field label="Vessel Name" value={vessel} onChange={e=>setVessel(e.target.value)} placeholder="e.g. MV EVER GIVEN" />
 
       <div style={{ background:S.bg3, borderRadius:8, padding:'10px 12px', marginBottom:10 }}>
         <SectionLabel text="Bay Range Configuration" color={ACC} />
         <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'0 10px' }}>
-          <Fi label="From Bay" value={bayFrom} onChange={e=>setBayFrom(parseInt(e.target.value)||1)} type="number" />
-          <Fi label="To Bay"   value={bayTo}   onChange={e=>setBayTo(parseInt(e.target.value)||1)}   type="number" />
+          <Field label="From Bay" value={bayFrom} onChange={e=>setBayFrom(e.target.value)} type="number" />
+          <Field label="To Bay"   value={bayTo}   onChange={e=>setBayTo(e.target.value)}   type="number" />
         </div>
         <div style={{ marginBottom:8 }}>
           <div style={{ color:S.dm, fontSize:S.lb, marginBottom:5 }}>Bay Type</div>
@@ -791,23 +781,25 @@ function SetupWizard({ onSave }) {
           </div>
         </div>
         <div style={{ color:S.gn, fontSize:S.xs, marginTop:4 }}>
-          ✓ {bayCount} bays will be created (Bay {clPad(bayFrom)} → Bay {clPad(bayTo)})
+          ✓ {bayCount} bays will be created (Bay {clPad(bayFromNum)} → Bay {clPad(bayToNum)})
         </div>
       </div>
 
       <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'0 10px' }}>
-        <Fi label="Number of Gantry Cranes" value={gantries} onChange={e=>setGantries(parseInt(e.target.value)||1)} type="number" />
-        <Fi label="Moves per Hour / Gantry" value={movesPerHr} onChange={e=>setMovesPerHr(parseInt(e.target.value)||25)} type="number" unit="mvs" />
-        <Fi label="Total Planned Load" value={totalLoad} onChange={e=>setTotalLoad(e.target.value)} type="number" placeholder="0" unit="mvs" />
-        <Fi label="Total Planned Discharge" value={totalDisch} onChange={e=>setTotalDisch(e.target.value)} type="number" placeholder="0" unit="mvs" />
+        <Field label="Number of Gantry Cranes" value={gantries} onChange={e=>setGantries(e.target.value)} type="number" />
+        <Field label="Moves per Hour / Gantry" value={movesPerHr} onChange={e=>setMovesPerHr(e.target.value)} type="number" unit="mvs" />
+        <Field label="Total Planned Load" value={totalLoad} onChange={e=>setTotalLoad(e.target.value)} type="number" placeholder="0" unit="mvs" />
+        <Field label="Total Planned Discharge" value={totalDisch} onChange={e=>setTotalDisch(e.target.value)} type="number" placeholder="0" unit="mvs" />
       </div>
-      <Fi label="Total Planned Restow" value={totalRest} onChange={e=>setTotalRest(e.target.value)} type="number" placeholder="0" unit="mvs" />
+      <Field label="Total Planned Restow" value={totalRest} onChange={e=>setTotalRest(e.target.value)} type="number" placeholder="0" unit="mvs" />
 
       <Btn onClick={() => {
         if (!port) return;
-        const bays = generateBays(bayFrom, bayTo, bayType);
+        const bays = generateBays(bayFromNum, bayToNum, bayType);
         onSave({
-          port, vessel, bayType, bayFrom, bayTo, gantries, movesPerHr,
+          port, vessel, bayType, bayFrom: bayFromNum, bayTo: bayToNum,
+          gantries: parseInt(gantries) || 1,
+          movesPerHr: parseInt(movesPerHr) || 25,
           totalLoad: parseInt(totalLoad)||0,
           totalDisch: parseInt(totalDisch)||0,
           totalRest: parseInt(totalRest)||0,
@@ -1323,18 +1315,6 @@ function ReeferRounds({ portOp, onUpdateReefer }) {
   const restCount  = rounds.filter(r => r.opType === 'Restow').length;
   const outOfRange = rounds.filter(r => Math.abs(parseFloat(r.tempDiff)||0) > 3).length;
 
-  const Fi = ({ label, value, onChange, type='text', placeholder='', unit='', color }) => (
-    <div style={{ marginBottom:7 }}>
-      <div style={{ color:S.dm, fontSize:S.lb, marginBottom:2 }}>{label}</div>
-      <div style={{ display:'flex', alignItems:'center', gap:4 }}>
-        <input type={type} value={value} onChange={onChange} placeholder={placeholder}
-          style={{ flex:1, background:S.bg3, color:color||S.cy, border:`1px solid ${S.bd2}`,
-            borderRadius:5, padding:'5px 7px', fontSize:S.xs, outline:'none', fontFamily:'monospace' }}/>
-        {unit && <span style={{ color:S.dm, fontSize:S.lb }}>{unit}</span>}
-      </div>
-    </div>
-  );
-
   return (
     <div>
       {/* Stats */}
@@ -1350,7 +1330,7 @@ function ReeferRounds({ portOp, onUpdateReefer }) {
         <SectionLabel text="New Reefer Round Entry" color={S.cy} />
 
         <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'0 10px' }}>
-          <Fi label="Date / Time" value={form.ts} onChange={set('ts')} type="datetime-local" />
+          <Field label="Date / Time" value={form.ts} onChange={set('ts')} type="datetime-local" />
           <div style={{ marginBottom:7 }}>
             <div style={{ color:S.dm, fontSize:S.lb, marginBottom:2 }}>Bay</div>
             <div style={{ display:'flex', gap:4 }}>
@@ -1368,7 +1348,7 @@ function ReeferRounds({ portOp, onUpdateReefer }) {
           </div>
         </div>
 
-        <Fi label="Container ID (optional)" value={form.containerId} onChange={set('containerId')} placeholder="e.g. MSCU1234567" />
+        <Field label="Container ID (optional)" value={form.containerId} onChange={set('containerId')} placeholder="e.g. MSCU1234567" />
 
         <div style={{ marginBottom:7 }}>
           <div style={{ color:S.dm, fontSize:S.lb, marginBottom:3 }}>Operation Type</div>
@@ -1385,14 +1365,14 @@ function ReeferRounds({ portOp, onUpdateReefer }) {
         </div>
 
         <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:'0 8px' }}>
-          <Fi label="Set Point" value={form.setPoint} onChange={set('setPoint')} type="number" placeholder="°C" unit="°C" />
-          <Fi label="Supply Temp" value={form.supply} onChange={set('supply')} type="number" placeholder="°C" unit="°C"
+          <Field label="Set Point" value={form.setPoint} onChange={set('setPoint')} type="number" placeholder="°C" unit="°C" />
+          <Field label="Supply Temp" value={form.supply} onChange={set('supply')} type="number" placeholder="°C" unit="°C"
             color={form.setPoint&&form.supply&&Math.abs(parseFloat(form.supply)-parseFloat(form.setPoint))>3?S.rd:S.gn} />
-          <Fi label="Return Temp" value={form.returnTemp} onChange={set('returnTemp')} type="number" placeholder="°C" unit="°C" />
+          <Field label="Return Temp" value={form.returnTemp} onChange={set('returnTemp')} type="number" placeholder="°C" unit="°C" />
         </div>
 
         <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:'0 8px' }}>
-          <Fi label="Humidity" value={form.humidity} onChange={set('humidity')} type="number" placeholder="%" unit="% RH" />
+          <Field label="Humidity" value={form.humidity} onChange={set('humidity')} type="number" placeholder="%" unit="% RH" />
           <div style={{ marginBottom:7 }}>
             <div style={{ color:S.dm, fontSize:S.lb, marginBottom:2 }}>Alarm</div>
             <select value={form.alarm} onChange={set('alarm')}
@@ -1414,8 +1394,8 @@ function ReeferRounds({ portOp, onUpdateReefer }) {
         </div>
 
         <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'0 10px' }}>
-          <Fi label="Inspector Name" value={form.inspector} onChange={set('inspector')} placeholder="Officer / Rating" />
-          <Fi label="Remarks" value={form.remarks} onChange={set('remarks')} placeholder="Observations, actions…" />
+          <Field label="Inspector Name" value={form.inspector} onChange={set('inspector')} placeholder="Officer / Rating" />
+          <Field label="Remarks" value={form.remarks} onChange={set('remarks')} placeholder="Observations, actions…" />
         </div>
 
         {form.setPoint && form.supply && (() => {
