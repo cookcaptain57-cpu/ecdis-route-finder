@@ -258,7 +258,7 @@ function CertificateTrackerPage({user,notify}) {
       localStorage.setItem('nsx_drive_email',info.email||'');
       setDriveToken(token);setDriveConnected(true);setDriveEmail(info.email);setDriveExpired(false);
       notify('Storage connected','success');
-    }catch(e){console.error('[Drive]',e);if(!e.message?.includes('popup_closed')&&!e.message?.includes('access_denied'))notify('Could not connect storage.','error');}
+    }catch(e){console.error('[Drive]',e);notify('DEBUG: '+(e.message||e.toString()||'unknown error'),'error');}
     setConnectingDrive(false);
   };
 
