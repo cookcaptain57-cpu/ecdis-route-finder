@@ -467,12 +467,9 @@ function ChartsPage({ notify, user, setTab, isAdmin: isAdminProp, sheetCharts = 
             <div
               className="brand-tabs"
               style={{
-                display: 'flex',
+                display: 'grid',
+                gridTemplateColumns: '1fr 1fr',
                 gap: 8,
-                overflowX: 'auto',
-                WebkitOverflowScrolling: 'touch',
-                paddingBottom: 6,
-                scrollbarWidth: 'thin',
               }}
             >
               {ECDIS_BRANDS.map(b => {
@@ -485,13 +482,11 @@ function ChartsPage({ notify, user, setTab, isAdmin: isAdminProp, sheetCharts = 
                     key={b.id}
                     onClick={() => { setSelBrand(b.id); setGlobalQ(''); setGlobalResults([]); setGlobalSearched(false); }}
                     style={{
-                      flex: '0 0 auto',
                       display: 'flex',
                       flexDirection: 'column',
                       alignItems: 'center',
                       gap: 2,
-                      minWidth: 78,
-                      padding: '8px 12px',
+                      padding: '10px 8px',
                       borderRadius: 10,
                       border: `1px solid ${b.color}44`,
                       background: 'rgba(255,255,255,0.02)',
@@ -502,8 +497,8 @@ function ChartsPage({ notify, user, setTab, isAdmin: isAdminProp, sheetCharts = 
                     onMouseLeave={e => e.currentTarget.style.background = 'rgba(255,255,255,0.02)'}
                   >
                     <div style={{ fontSize: '1.2rem' }}>{b.emoji}</div>
-                    <div style={{ fontSize: '0.66rem', fontWeight: 700, color: b.color, whiteSpace: 'nowrap' }}>{b.name}</div>
-                    {cnt > 0 && <div style={{ fontSize: '0.58rem', color: 'var(--green)', fontWeight: 700 }}>{cnt}</div>}
+                    <div style={{ fontSize: '0.7rem', fontWeight: 700, color: b.color, textAlign: 'center' }}>{b.name}</div>
+                    {cnt > 0 && <div style={{ fontSize: '0.6rem', color: 'var(--green)', fontWeight: 700 }}>{cnt}</div>}
                   </div>
                 );
               })}
