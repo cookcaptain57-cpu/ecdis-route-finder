@@ -693,6 +693,7 @@ function TankerMSDS() {
 const clPad = n => String(n).padStart(2, '0');
 const clNow = () => new Date().toTimeString().slice(0,5);
 const clNowFull = () => new Date().toISOString().slice(0,16).replace('T',' ');
+const ACC = VESSEL_COLORS.container.accent;
 
 function generateBays(from, to, type) {
   const bays = [];
@@ -1016,7 +1017,7 @@ function BayCard({ bay, idx, gantries, onUpdate, movesPerHr }) {
           </div>
           <div>
             <div style={{ color:S.dm, fontSize:S.lb, marginBottom:3 }}>Notes</div>
-            <input value={bay.notes} onChange={e=>upd(idx,'notes',e.target.value)}
+            <input value={bay.notes} onChange={e=>upd('notes',e.target.value)}
               placeholder="Damage, skip, special instruction…"
               style={{ width:'100%', background:S.bg3, color:S.tx, border:`1px solid ${S.bd2}`,
                 borderRadius:5, padding:'5px 7px', fontSize:S.xs, outline:'none' }}/>
