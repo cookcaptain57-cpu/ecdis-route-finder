@@ -23,12 +23,14 @@ function calcBearing(lat1,lon1,lat2,lon2){
   return((Math.atan2(y,x)/DEG)+360)%360;
 }
 export function recalcWaypoints(wps){
+  let total=0;
   return wps.map((wp,i)=>{
     if(i===0)return{...wp,distance:0,bearing:0,totalNM:0};
     const p=wps[i-1];
     const dist=haversine(p.lat,p.lon,wp.lat,wp.lon);
     const bear=calcBearing(p.lat,p.lon,wp.lat,wp.lon);
-    return{...wp,distance:+dist.toFixed(2),bearing:+bear.toFixed(1),totalNM:+((p.totalNM||0)+dist).toFixed(2)};
+    total+=dist;
+    return{...wp,distance:+dist.toFixed(2),bearing:+bear.toFixed(1),totalNM:+total.toFixed(2)};
   });
 }
 function simplifyRoute(wps,minDistNM=5){
