@@ -314,38 +314,7 @@ function CertificateTrackerPage({user,notify}) {
     setConnectingDrive(false);
   };
 
-      // Android packaged app: GSI popup is blocked by Google in WebView.
-      // Use redirect flow instead — page navigates to Google, comes back
-      // with token in URL fragment, handled in initDrive() above.
-      // Browser/PWA: unchanged popup flow.
-      if (isAndroidApp()) {
-        const client = window.google.accounts.oauth2.initTokenClient({
-          client_id: DRIVE_CLIENT_ID,
-          scope: DRIVE_SCOPE,
-          login_hint: user?.email || '',
-          ux_mode: 'redirect',
-          redirect_uri: window.location.origin + window.location.pathname,
-          callback: () => {} // unused in redirect mode
-        });
-        client.requestAccessToken({prompt:''});
-        return; // page will navigate away
-      }
-
-      const token=await new Promise((resolve,reject)=>{
-        window.google.accounts.oauth2.initTokenClient({client_id:DRIVE_CLIENT_ID,scope:DRIVE_SCOPE,login_hint:user?.email||'',
-          callback:r=>{if(r.error)reject(new Error(r.error_description||r.error));else resolve(r.access_token);}
-        }).requestAccessToken({prompt:''});
-      });
-      const info=await fetch('https://www.googleapis.com/oauth2/v3/userinfo',{headers:{Authorization:`Bearer ${token}`}}).then(r=>r.json());
-      if(info.email&&user?.email&&info.email.toLowerCase()!==user.email.toLowerCase()){notify(`Please use ${user.email} to connect.`,'error');setConnectingDrive(false);return;}
-      localStorage.setItem('nsx_drive_token',token);
-      localStorage.setItem('nsx_drive_expiry',String(Date.now()+3300000));
-      localStorage.setItem('nsx_drive_email',info.email||'');
-      setDriveToken(token);setDriveConnected(true);setDriveEmail(info.email);setDriveExpired(false);
-      notify('Storage connected','success');
-    }catch(e){console.error('[Drive]',e);notify('DEBUG: '+(e.message||e.toString()||'unknown error'),'error');}
-    setConnectingDrive(false);
-  };
+      
 
   const disconnectDrive=()=>{
     ['nsx_drive_token','nsx_drive_expiry','nsx_drive_email'].forEach(k=>localStorage.removeItem(k));
