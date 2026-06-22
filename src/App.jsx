@@ -250,10 +250,26 @@ export default function App() {
   const [searchQ, setSearchQ]             = useState('');
   const [notif, setNotif]                 = useState(null);
   const [menuOpen, setMenuOpen]           = useState(false);
-  const [user, setUser]                   = useState(null);
-  const [userProfile, setUserProfile]     = useState(null);
+  // FIX: optimistically restore last-known user/profile from localStorage so
+  // the UI can render as "logged in" instantly on slow/2G connections, instead
+  // of waiting for a fresh Firebase round-trip. Firebase's real auth state
+  // still confirms/corrects this in the background via onAuthStateChanged.
+  const [user, setUser]                   = useState(() => {
+    try { return JSON.parse(localStorage.getItem('nx_cached_user') || 'null'); }
+    catch { return null; }
+  });
+  const [userProfile, setUserProfile]     = useState(() => {
+    try { return JSON.parse(localStorage.getItem('nx_cached_profile') || 'null'); }
+    catch { return null; }
+  });
   const [isBlocked, setIsBlocked]         = useState(false);
-  const [authChecked, setAuthChecked]     = useState(false);
+  // FIX: if we have a cached user, treat auth as "checked" immediately so the
+  // boot splash never blocks the UI on slow connections. Firebase still
+  // verifies in the background and corrects state if needed.
+  const [authChecked, setAuthChecked]     = useState(() => {
+    try { return !!localStorage.getItem('nx_cached_user'); }
+    catch { return false; }
+  });
   const [routes, setRoutes]               = useState([]);
   const [charts, setCharts]               = useState([]);
   const [sheetRoutes, setSheetRoutes]     = useState([]);
@@ -304,6 +320,10 @@ export default function App() {
   };
 
   const loadAppData = async () => {
+    // ── STEP 1: Render from IndexedDB cache IMMEDIATELY, no network wait. ──
+    // This is what makes the app usable instantly on 2G/offline — sailors
+    // see their last-synced routes/charts/ports right away.
+    let allCached = false;
     try {
       const [idbPortsEarly, idbRoutesEarly, idbChartsEarly] = await Promise.all([
         idbGet('ports_d'), idbGet('routes_d'), idbGet('charts_d'),
@@ -311,41 +331,61 @@ export default function App() {
       if (Array.isArray(idbRoutesEarly) && idbRoutesEarly.length > 0) setSheetRoutes(idbRoutesEarly);
       if (Array.isArray(idbChartsEarly) && idbChartsEarly.length > 0) setSheetCharts(idbChartsEarly);
       if (Array.isArray(idbPortsEarly)  && idbPortsEarly.length  > 0) applyPortData(idbPortsEarly);
-      const allCached = idbRoutesEarly?.length > 0 && idbChartsEarly?.length > 0 && idbPortsEarly?.length > 0;
-      if (!allCached) setSyncBanner('syncing');
-      const meta = await getFirestoreMeta();
-      if (meta) {
-        const [cachedRv, cachedCv, cachedPv] = await Promise.all([
-          idbGet('routes_v'), idbGet('charts_v'), idbGet('ports_v'),
-        ]);
-        await Promise.all([
-          (async () => {
-            if (meta.rv && cachedRv === meta.rv) { const d = await idbGet('routes_d'); if (d?.length > 0) { setSheetRoutes(d); return; } }
-            if (meta.rv && meta.rc) { const d = await loadRoutesFromFirestore(meta.rc); setSheetRoutes(d); await idbSet('routes_d', d); await idbSet('routes_v', meta.rv); }
-            else { const d = await fetchRouteSheet(); if (Array.isArray(d) && d.length > 0) { setSheetRoutes(d); await idbSet('routes_d', d); } }
-          })(),
-          (async () => {
-            if (meta.cv && cachedCv === meta.cv) { const d = await idbGet('charts_d'); if (d?.length > 0) { setSheetCharts(d); return; } }
-            if (meta.cv && meta.cc) { const d = await loadChartsFromFirestore(meta.cc); setSheetCharts(d); await idbSet('charts_d', d); await idbSet('charts_v', meta.cv); }
-            else { const d = await fetchChartSheet(); if (Array.isArray(d) && d.length > 0) { setSheetCharts(d); await idbSet('charts_d', d); } }
-          })(),
-          (async () => {
-            if (meta.pv && cachedPv === meta.pv) { const d = await idbGet('ports_d'); if (d?.length > 0) { applyPortData(d); return; } }
-            if (meta.pv && meta.pc) { const d = await loadPortsFromFirestore(meta.pc); applyPortData(d); await idbSet('ports_d', d); await idbSet('ports_v', meta.pv); }
-            else { const d = await fetchPortsFromSheet(); if (Array.isArray(d) && d.length > 0) { applyPortData(d); await idbSet('ports_d', d); } }
-          })(),
-        ]);
-      } else {
-        const [d1, d2, d3] = await Promise.all([fetchRouteSheet(), fetchChartSheet(), fetchPortsFromSheet()]);
-        if (Array.isArray(d1) && d1.length > 0) setSheetRoutes(d1);
-        if (Array.isArray(d2) && d2.length > 0) setSheetCharts(d2);
-        applyPortData(d3);
+      allCached = idbRoutesEarly?.length > 0 && idbChartsEarly?.length > 0 && idbPortsEarly?.length > 0;
+    } catch (e) { console.warn('loadAppData cache-read error:', e); }
+
+    if (!allCached) setSyncBanner('syncing');
+
+    // ── STEP 2: Background network refresh — fire-and-forget, timeout-protected. ──
+    // This NEVER blocks the UI. If the network is slow/offline, the cached
+    // data from Step 1 just stays as-is and the sync banner clears quietly.
+    const withTimeout = (promise, ms) =>
+      Promise.race([
+        promise,
+        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), ms)),
+      ]);
+
+    (async () => {
+      try {
+        const meta = await withTimeout(getFirestoreMeta(), 8000);
+        if (meta) {
+          const [cachedRv, cachedCv, cachedPv] = await Promise.all([
+            idbGet('routes_v'), idbGet('charts_v'), idbGet('ports_v'),
+          ]);
+          await Promise.allSettled([
+            (async () => {
+              if (meta.rv && cachedRv === meta.rv) { const d = await idbGet('routes_d'); if (d?.length > 0) { setSheetRoutes(d); return; } }
+              if (meta.rv && meta.rc) { const d = await loadRoutesFromFirestore(meta.rc); setSheetRoutes(d); await idbSet('routes_d', d); await idbSet('routes_v', meta.rv); }
+              else { const d = await fetchRouteSheet(); if (Array.isArray(d) && d.length > 0) { setSheetRoutes(d); await idbSet('routes_d', d); } }
+            })(),
+            (async () => {
+              if (meta.cv && cachedCv === meta.cv) { const d = await idbGet('charts_d'); if (d?.length > 0) { setSheetCharts(d); return; } }
+              if (meta.cv && meta.cc) { const d = await loadChartsFromFirestore(meta.cc); setSheetCharts(d); await idbSet('charts_d', d); await idbSet('charts_v', meta.cv); }
+              else { const d = await fetchChartSheet(); if (Array.isArray(d) && d.length > 0) { setSheetCharts(d); await idbSet('charts_d', d); } }
+            })(),
+            (async () => {
+              if (meta.pv && cachedPv === meta.pv) { const d = await idbGet('ports_d'); if (d?.length > 0) { applyPortData(d); return; } }
+              if (meta.pv && meta.pc) { const d = await loadPortsFromFirestore(meta.pc); applyPortData(d); await idbSet('ports_d', d); await idbSet('ports_v', meta.pv); }
+              else { const d = await fetchPortsFromSheet(); if (Array.isArray(d) && d.length > 0) { applyPortData(d); await idbSet('ports_d', d); } }
+            })(),
+          ]);
+        } else if (!allCached) {
+          // No metadata system available and nothing cached yet — last resort
+          // direct fetch, but still doesn't block initial render since we're
+          // already inside this fire-and-forget IIFE.
+          const [d1, d2, d3] = await Promise.allSettled([fetchRouteSheet(), fetchChartSheet(), fetchPortsFromSheet()]);
+          if (d1.status === 'fulfilled' && Array.isArray(d1.value) && d1.value.length > 0) setSheetRoutes(d1.value);
+          if (d2.status === 'fulfilled' && Array.isArray(d2.value) && d2.value.length > 0) setSheetCharts(d2.value);
+          if (d3.status === 'fulfilled') applyPortData(d3.value);
+        }
+      } catch (e) {
+        console.warn('loadAppData background sync error/timeout:', e.message);
       }
-    } catch (e) { console.warn('loadAppData error:', e); }
-    setSyncBanner(prev => {
-      if (prev === 'syncing') { setTimeout(() => setSyncBanner(null), 4000); return 'done'; }
-      return null;
-    });
+      setSyncBanner(prev => {
+        if (prev === 'syncing') { setTimeout(() => setSyncBanner(null), 4000); return 'done'; }
+        return null;
+      });
+    })();
   };
 
   const refreshRoutes = async () => {
@@ -408,21 +448,52 @@ export default function App() {
       .catch(() => {})
       .finally(() => {
         unsub = onAuthStateChanged(auth, async u => {
-          setUser(u);
           if (u) {
+            setUser(u);
+            // FIX: cache minimal user info so next load can render as
+            // "logged in" instantly, even before Firebase responds.
+            try {
+              localStorage.setItem('nx_cached_user', JSON.stringify({
+                uid: u.uid, email: u.email, displayName: u.displayName,
+              }));
+            } catch {}
             try {
               const snap = await getDoc(doc(db, 'users', u.uid));
               if (snap.exists()) {
                 const profile = { id: snap.id, ...snap.data() };
-                if (profile.blocked) { setIsBlocked(true); await signOut(auth); setUser(null); setUserProfile(null); setAuthChecked(true); return; }
+                if (profile.blocked) {
+                  setIsBlocked(true); await signOut(auth);
+                  setUser(null); setUserProfile(null); setAuthChecked(true);
+                  try { localStorage.removeItem('nx_cached_user'); localStorage.removeItem('nx_cached_profile'); } catch {}
+                  return;
+                }
                 setIsBlocked(false); setUserProfile(profile);
-              } else { setIsBlocked(false); setUserProfile(null); }
-            } catch { setUserProfile(null); setIsBlocked(false); }
-          } else { setUserProfile(null); }
+                try { localStorage.setItem('nx_cached_profile', JSON.stringify(profile)); } catch {}
+              } else {
+                setIsBlocked(false); setUserProfile(null);
+              }
+            } catch {
+              // FIX: profile fetch failed (likely slow/dropped 2G connection) —
+              // keep whatever cached profile we already have instead of wiping it.
+              setIsBlocked(false);
+            }
+          } else {
+            // FIX: Firebase explicitly confirms no user — this is a real
+            // sign-out, safe to clear everything.
+            setUser(null); setUserProfile(null);
+            try { localStorage.removeItem('nx_cached_user'); localStorage.removeItem('nx_cached_profile'); } catch {}
+          }
           setAuthChecked(true);
         });
       });
-    return () => unsub();
+
+    // FIX: safety net — if Firebase hasn't responded within 6s (e.g. very
+    // slow 2G), stop blocking on it. The optimistic cached user (if any) is
+    // already showing; for a brand-new device with no cache, this just lets
+    // the public parts of the app render instead of an infinite splash.
+    const failSafe = setTimeout(() => setAuthChecked(true), 6000);
+
+    return () => { unsub(); clearTimeout(failSafe); };
   }, []);
 
   useEffect(() => { if (!sessionStorage.getItem('disclaimer_ok')) setShowDisclaimer(true); }, []);
