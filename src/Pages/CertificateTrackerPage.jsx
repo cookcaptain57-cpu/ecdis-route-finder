@@ -222,12 +222,97 @@ function CertificateTrackerPage({user,notify}) {
 
   const connectDrive=async()=>{
     setConnectingDrive(true);setDriveExpired(false);
+
+    // Android app: GSI script blocked by ORB in WebView.
+    // Use direct OAuth authorize URL with custom scheme redirect.
+    // Token returned via navispherex://oauth and injected by MainAcitivity.java
+    if(isAndroidApp()){
+      // Register callback for when Android injects the token
+      window.onAndroidOAuthToken=(token)=>{
+        fetch('https://www.googleapis.com/oauth2/v3/userinfo',
+          {headers:{Authorization:`Bearer ${token}`}})
+          .then(r=>r.json())
+          .then(info=>{
+            if(info.email&&user?.email&&
+               info.email.toLowerCase()!==user.email.toLowerCase()){
+              notify(`Please use ${user.email} to connect.`,'error');
+              return;
+            }
+            localStorage.setItem('nsx_drive_email',info.email||'');
+            setDriveToken(token);
+            setDriveConnected(true);
+            setDriveEmail(info.email);
+            setDriveExpired(false);
+            notify('Storage connected','success');
+          })
+          .catch(()=>notify('Could not verify account.','error'));
+        setConnectingDrive(false);
+        window.onAndroidOAuthToken=null;
+      };
+
+      // Build Google OAuth URL using Android client ID
+      const ANDROID_CLIENT_ID=
+        '636056685819-hnuu041ug678nghdasii96lpgmmjbf5r.apps.googleusercontent.com';
+      const params=new URLSearchParams({
+        client_id:ANDROID_CLIENT_ID,
+        redirect_uri:'navispherex://oauth',
+        response_type:'token',
+        scope:DRIVE_SCOPE,
+        include_granted_scopes:'true',
+        login_hint:user?.email||''
+      });
+      // Navigate to Google OAuth — Android intercepts navispherex://oauth on return
+      window.location.href=
+        'https://accounts.google.com/o/oauth2/v2/auth?'+params.toString();
+      return;
+    }
+
+    // Browser/PWA: unchanged popup flow
     try{
       await new Promise((resolve,reject)=>{
         if(window.google?.accounts?.oauth2){resolve();return;}
-        const s=document.createElement('script');s.src='https://accounts.google.com/gsi/client';
-        s.onload=resolve;s.onerror=()=>reject(new Error('Network error'));document.head.appendChild(s);
+        const s=document.createElement('script');
+        s.src='https://accounts.google.com/gsi/client';
+        s.onload=resolve;
+        s.onerror=()=>reject(new Error('Network error'));
+        document.head.appendChild(s);
       });
+      const token=await new Promise((resolve,reject)=>{
+        window.google.accounts.oauth2.initTokenClient({
+          client_id:DRIVE_CLIENT_ID,
+          scope:DRIVE_SCOPE,
+          login_hint:user?.email||'',
+          callback:r=>{
+            if(r.error)reject(new Error(r.error_description||r.error));
+            else resolve(r.access_token);
+          }
+        }).requestAccessToken({prompt:''});
+      });
+      const info=await fetch(
+        'https://www.googleapis.com/oauth2/v3/userinfo',
+        {headers:{Authorization:`Bearer ${token}`}}).then(r=>r.json());
+      if(info.email&&user?.email&&
+         info.email.toLowerCase()!==user.email.toLowerCase()){
+        notify(`Please use ${user.email} to connect.`,'error');
+        setConnectingDrive(false);
+        return;
+      }
+      localStorage.setItem('nsx_drive_token',token);
+      localStorage.setItem('nsx_drive_expiry',String(Date.now()+3300000));
+      localStorage.setItem('nsx_drive_email',info.email||'');
+      setDriveToken(token);
+      setDriveConnected(true);
+      setDriveEmail(info.email);
+      setDriveExpired(false);
+      notify('Storage connected','success');
+    }catch(e){
+      console.error('[Drive]',e);
+      if(!e.message?.includes('popup_closed')&&
+         !e.message?.includes('access_denied'))
+        notify('Could not connect storage.','error');
+    }
+    setConnectingDrive(false);
+  };
 
       // Android packaged app: GSI popup is blocked by Google in WebView.
       // Use redirect flow instead — page navigates to Google, comes back
