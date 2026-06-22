@@ -470,23 +470,36 @@ export async function buildProRoute(from,to,vesselParams={},canalPref='auto'){
 
   const canalInfo=checkCanalPassage(fromObj,toObj,{draft,beam,loa,airDraft});
 
-  // ── 1. V2 port approach + MARNET ocean crossing ────────────────────────────
+  // ── 1. Hardcoded route table — proven correct for major routes ───────────────
+  // Must be FIRST: covers MUM-SIN, ROT-SIN, etc with correct realistic paths
+  {
+    const wps=buildAutoRoute(fromObj.id,toObj.id);
+    if(wps&&wps.length>1){
+      const result2={waypoints:wps,totalNM:wps[wps.length-1]?.totalNM||0,source:'route-table'};
+      // Anchor exact coords
+      result2.waypoints[0]={...result2.waypoints[0],lat:fromObj.lat,lon:fromObj.lon,name:fromObj.name};
+      result2.waypoints[result2.waypoints.length-1]={...result2.waypoints[result2.waypoints.length-1],lat:toObj.lat,lon:toObj.lon,name:toObj.name};
+      const wp2=recalcWaypoints(result2.waypoints);
+      const nm2=wp2[wp2.length-1]?.totalNM||0;
+      if(nm2>50){
+        const canalInfo2=checkCanalPassage(fromObj,toObj,{draft,beam,loa,airDraft});
+        const canalMsgs2=canalInfo2.map(c=>c.status==='OK'?'✅ '+c.canal+': vessel fits':'🚫 '+c.canal+': BLOCKED — '+c.reason+' — '+c.alternative);
+        return{waypoints:wp2,totalNM:nm2,canalInfo:canalInfo2,confidence:'HIGH — validated route table',routeSource:'route-table',approachStartIdx:wp2.length-1,warnings:['⚠ Route NOT certified for navigation. Verify with official ENC.',...canalMsgs2],via:canalPref,vesselParams:{draft,beam,loa,airDraft,vesselType},etaAt12kn:(nm2/12).toFixed(1),etaAt15kn:(nm2/15).toFixed(1)};
+      }
+    }
+  }
+
+  // ── 2. V2 port approach + MARNET ocean crossing ────────────────────────────
   let result=await buildGraphRoute(fromObj,toObj,canalPref);
 
-  // ── 2. Pure MARNET A* ──────────────────────────────────────────────────────
+  // ── 3. Pure MARNET A* ──────────────────────────────────────────────────────
   if(!result||!result.waypoints||result.waypoints.length<2){
     result=await _routeViaMarnet(fromObj.lat,fromObj.lon,toObj.lat,toObj.lon,canalPref);
   }
 
-  // ── 3. Render API ──────────────────────────────────────────────────────────
+  // ── 4. Render API ──────────────────────────────────────────────────────────
   if(!result||!result.waypoints||result.waypoints.length<2){
     result=await _routeViaAPI(fromObj.lat,fromObj.lon,toObj.lat,toObj.lon);
-  }
-
-  // ── 4. Hardcoded route table ───────────────────────────────────────────────
-  if(!result||!result.waypoints||result.waypoints.length<2){
-    const wps=buildAutoRoute(fromObj.id,toObj.id);
-    if(wps&&wps.length>1)result={waypoints:wps,totalNM:wps[wps.length-1]?.totalNM||0,source:'route-table'};
   }
 
   // ── 5. Waypoint graph ─────────────────────────────────────────────────────
