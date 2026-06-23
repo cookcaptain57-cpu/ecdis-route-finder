@@ -241,52 +241,48 @@ const S = `
 `;
 
 export default function App() {
-  const [tab, setTab]                     = useState(() => {
-    // Clear any stale navigation state on fresh app load
+  const [tab, setTab] = useState(() => {
     sessionStorage.removeItem('intendedTab');
     sessionStorage.removeItem('info_section');
     return 'home';
   });
-  const [searchQ, setSearchQ]             = useState('');
-  const [notif, setNotif]                 = useState(null);
-  const [menuOpen, setMenuOpen]           = useState(false);
-  // FIX: optimistically restore last-known user/profile from localStorage so
-  // the UI can render as "logged in" instantly on slow/2G connections, instead
-  // of waiting for a fresh Firebase round-trip. Firebase's real auth state
-  // still confirms/corrects this in the background via onAuthStateChanged.
-  const [user, setUser]                   = useState(() => {
+  const [searchQ, setSearchQ]           = useState('');
+  const [notif, setNotif]               = useState(null);
+  const [menuOpen, setMenuOpen]         = useState(false);
+  const [user, setUser]                 = useState(() => {
     try { return JSON.parse(localStorage.getItem('nx_cached_user') || 'null'); }
     catch { return null; }
   });
-  const [userProfile, setUserProfile]     = useState(() => {
+  const [userProfile, setUserProfile]   = useState(() => {
     try { return JSON.parse(localStorage.getItem('nx_cached_profile') || 'null'); }
     catch { return null; }
   });
-  const [isBlocked, setIsBlocked]         = useState(false);
-  // FIX: if we have a cached user, treat auth as "checked" immediately so the
-  // boot splash never blocks the UI on slow connections. Firebase still
-  // verifies in the background and corrects state if needed.
-  const [authChecked, setAuthChecked]     = useState(() => {
+  const [isBlocked, setIsBlocked]       = useState(false);
+  const [authChecked, setAuthChecked]   = useState(() => {
     try { return !!localStorage.getItem('nx_cached_user'); }
     catch { return false; }
   });
-  const [routes, setRoutes]               = useState([]);
-  const [charts, setCharts]               = useState([]);
-  const [sheetRoutes, setSheetRoutes]     = useState([]);
-  const [sheetCharts, setSheetCharts]     = useState([]);
-  const [portsDb, setPortsDb]             = useState([]);
-  const [syncBanner, setSyncBanner]       = useState(null);
-  const hasRetriedRef                     = { current: false };
-  const [showDisclaimer, setShowDisclaimer] = useState(false);
-  const [navDiscBanner, setNavDiscBanner]   = useState(false);
-  const [welcomePopup, setWelcomePopup]     = useState(null);
-  const [authProgress, setAuthProgress]     = useState(0);
-  const [isOnline, setIsOnline]             = useState(navigator.onLine);
-  const [theme, setTheme]                   = useState(() => localStorage.getItem('nav_theme') || 'dark');
-  const [prevTab, setPrevTab]               = useState(null);
-  const [showNotifPanel, setShowNotifPanel] = useState(false);
-  const [notifications, setNotifications]   = useState([]);
-  const [readNotifIds, setReadNotifIds]     = useState(() => {
+  const [routes, setRoutes]             = useState([]);
+  const [charts, setCharts]             = useState([]);
+  const [sheetRoutes, setSheetRoutes]   = useState([]);
+  const [sheetCharts, setSheetCharts]   = useState([]);
+  const [portsDb, setPortsDb]           = useState([]);
+  const [syncBanner, setSyncBanner]     = useState(null);
+  const hasRetriedRef                   = { current: false };
+  const [showDisclaimer, setShowDisclaimer]   = useState(false);
+  const [navDiscBanner, setNavDiscBanner]     = useState(false);
+  const [welcomePopup, setWelcomePopup]       = useState(null);
+  const [authProgress, setAuthProgress]       = useState(0);
+  const [isOnline, setIsOnline]               = useState(navigator.onLine);
+  const [theme, setTheme]                     = useState(() => localStorage.getItem('nav_theme') || 'dark');
+
+  // ── PWA Install prompt ──────────────────────────────────────────────────
+  const [installPrompt, setInstallPrompt]     = useState(null);
+
+  const [prevTab, setPrevTab]                 = useState(null);
+  const [showNotifPanel, setShowNotifPanel]   = useState(false);
+  const [notifications, setNotifications]     = useState([]);
+  const [readNotifIds, setReadNotifIds]       = useState(() => {
     try { return new Set(JSON.parse(localStorage.getItem('notif_read') || '[]')); }
     catch { return new Set(); }
   });
@@ -300,7 +296,6 @@ export default function App() {
   const isAdmin = user?.email === ADMIN_EMAIL;
   const notify  = (msg, type = 'success') => setNotif({ msg, type, key: Date.now() });
 
-  // ── FIX: 'info' and 'welfare' are public tabs ──
   const PUBLIC_TABS = new Set(['home', 'login', 'info']);
 
   const applyPortData = (d3) => {
@@ -320,9 +315,6 @@ export default function App() {
   };
 
   const loadAppData = async () => {
-    // ── STEP 1: Render from IndexedDB cache IMMEDIATELY, no network wait. ──
-    // This is what makes the app usable instantly on 2G/offline — sailors
-    // see their last-synced routes/charts/ports right away.
     let allCached = false;
     try {
       const [idbPortsEarly, idbRoutesEarly, idbChartsEarly] = await Promise.all([
@@ -336,9 +328,6 @@ export default function App() {
 
     if (!allCached) setSyncBanner('syncing');
 
-    // ── STEP 2: Background network refresh — fire-and-forget, timeout-protected. ──
-    // This NEVER blocks the UI. If the network is slow/offline, the cached
-    // data from Step 1 just stays as-is and the sync banner clears quietly.
     const withTimeout = (promise, ms) =>
       Promise.race([
         promise,
@@ -370,9 +359,6 @@ export default function App() {
             })(),
           ]);
         } else if (!allCached) {
-          // No metadata system available and nothing cached yet — last resort
-          // direct fetch, but still doesn't block initial render since we're
-          // already inside this fire-and-forget IIFE.
           const [d1, d2, d3] = await Promise.allSettled([fetchRouteSheet(), fetchChartSheet(), fetchPortsFromSheet()]);
           if (d1.status === 'fulfilled' && Array.isArray(d1.value) && d1.value.length > 0) setSheetRoutes(d1.value);
           if (d2.status === 'fulfilled' && Array.isArray(d2.value) && d2.value.length > 0) setSheetCharts(d2.value);
@@ -432,26 +418,15 @@ export default function App() {
   };
 
   useEffect(() => { loadAppData(); }, []);
-  // FIX: removed duplicate loadAppData() trigger on authChecked — was causing
-  // double-fetch race (ports/routes/charts loaded twice in parallel on cold start)
-
-  // Redirect after login — handled entirely by onLogin callback in LoginPage render
-  // No useEffect needed here — avoids double-redirect conflicts
 
   useEffect(() => {
     let unsub = () => {};
-    // FIX: await setPersistence BEFORE attaching the auth listener.
-    // Previously this raced with onAuthStateChanged, which on some browsers
-    // caused Firebase to fall back to session-only persistence — logging
-    // the user out on every refresh.
     setPersistence(auth, browserLocalPersistence)
       .catch(() => {})
       .finally(() => {
         unsub = onAuthStateChanged(auth, async u => {
           if (u) {
             setUser(u);
-            // FIX: cache minimal user info so next load can render as
-            // "logged in" instantly, even before Firebase responds.
             try {
               localStorage.setItem('nx_cached_user', JSON.stringify({
                 uid: u.uid, email: u.email, displayName: u.displayName,
@@ -473,13 +448,9 @@ export default function App() {
                 setIsBlocked(false); setUserProfile(null);
               }
             } catch {
-              // FIX: profile fetch failed (likely slow/dropped 2G connection) —
-              // keep whatever cached profile we already have instead of wiping it.
               setIsBlocked(false);
             }
           } else {
-            // FIX: Firebase explicitly confirms no user — this is a real
-            // sign-out, safe to clear everything.
             setUser(null); setUserProfile(null);
             try { localStorage.removeItem('nx_cached_user'); localStorage.removeItem('nx_cached_profile'); } catch {}
           }
@@ -487,21 +458,42 @@ export default function App() {
         });
       });
 
-    // FIX: safety net — if Firebase hasn't responded within 6s (e.g. very
-    // slow 2G), stop blocking on it. The optimistic cached user (if any) is
-    // already showing; for a brand-new device with no cache, this just lets
-    // the public parts of the app render instead of an infinite splash.
     const failSafe = setTimeout(() => setAuthChecked(true), 6000);
-
     return () => { unsub(); clearTimeout(failSafe); };
   }, []);
 
   useEffect(() => { if (!sessionStorage.getItem('disclaimer_ok')) setShowDisclaimer(true); }, []);
+
   useEffect(() => {
     const on = () => setIsOnline(true); const off = () => setIsOnline(false);
     window.addEventListener('online', on); window.addEventListener('offline', off);
     return () => { window.removeEventListener('online', on); window.removeEventListener('offline', off); };
   }, []);
+
+  // ── PWA install prompt listener ─────────────────────────────────────────
+  useEffect(() => {
+    const handler = (e) => {
+      e.preventDefault();
+      setInstallPrompt(e);
+    };
+    window.addEventListener('beforeinstallprompt', handler);
+    window.addEventListener('appinstalled', () => setInstallPrompt(null));
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handler);
+      window.removeEventListener('appinstalled', () => setInstallPrompt(null));
+    };
+  }, []);
+
+  const handleInstallApp = async () => {
+    if (!installPrompt) return;
+    installPrompt.prompt();
+    const { outcome } = await installPrompt.userChoice;
+    if (outcome === 'accepted') {
+      setInstallPrompt(null);
+      notify('✅ App installed successfully!', 'success');
+    }
+  };
+
   useEffect(() => { document.documentElement.setAttribute('data-theme', theme); localStorage.setItem('nav_theme', theme); }, [theme]);
   const toggleTheme = () => setTheme(t => t === 'dark' ? 'light' : 'dark');
 
@@ -626,6 +618,19 @@ export default function App() {
             </div>
             <div className="nav-controls">
               <div className="sd" />
+
+              {/* ── PWA Install Button ── */}
+              {installPrompt && (
+                <button onClick={handleInstallApp}
+                  style={{ background:'linear-gradient(135deg,var(--cyan),var(--blue))',
+                    border:'none', borderRadius:8, padding:'5px 10px', cursor:'pointer',
+                    fontSize:'0.7rem', fontWeight:700, color:'white',
+                    fontFamily:"'Exo 2',sans-serif", display:'flex',
+                    alignItems:'center', gap:4, whiteSpace:'nowrap' }}>
+                  📲 Install
+                </button>
+              )}
+
               {user && (
                 <button onClick={() => { setShowNotifPanel(p => !p); markAllRead(); }}
                   style={{ position:'relative', background:'rgba(255,255,255,0.06)', border:'1px solid var(--border)',
@@ -663,6 +668,15 @@ export default function App() {
               <span style={{ fontSize:'1rem' }}>{t.i}</span> {t.l}
             </button>
           ))}
+          {/* Install button in mobile menu too */}
+          {installPrompt && (
+            <button className="mtab mtab-full"
+              style={{ background:'linear-gradient(135deg,rgba(0,180,216,0.15),rgba(21,101,192,0.15))',
+                borderColor:'rgba(0,180,216,0.3)', color:'var(--cyan)', fontWeight:700 }}
+              onClick={handleInstallApp}>
+              📲 Install NavisphereX App
+            </button>
+          )}
           {user
             ? <button className="mtab mtab-full" onClick={() => { signOut(auth); notify('Logged out','info'); setMenuOpen(false); }}>
                 🚪 Logout ({userProfile?.name?.split(' ')[0] || user.email.split('@')[0]})
@@ -795,7 +809,6 @@ export default function App() {
               </div>
             )}
 
-            {/* ── All Pages ── */}
             {tab==='home'        && <HomePage routes={routes} charts={charts} onSearch={handleSearch} setTab={switchTab} user={user} portsDb={portsDb} userProfile={userProfile} />}
             {tab==='routes'      && <RoutesPage searchQuery={searchQ} notify={notify} user={user} setTab={switchTab} sheetRoutes={sheetRoutes} sheetLoading={routesLoading} />}
             {tab==='charts'      && <ChartsPage notify={notify} user={user} setTab={switchTab} isAdmin={isAdmin} sheetCharts={sheetCharts} sheetLoading={chartsLoading} />}
@@ -814,7 +827,6 @@ export default function App() {
             {tab==='emergency'   && <EmergencyPage portsDb={portsDb} />}
             {tab==='knots'       && <KnotsRopesMooringPage />}
             {tab==='navbridge'   && <NavigationBridgePage />}
-            {/* ── Seafarer Welfare Hub (renamed from CrewWelfarePage to resolve build issue) ── */}
             {tab==='welfare'     && user && <SeafarerWelfareHub user={user} notify={notify} />}
             {tab==='crewjourney' && <CrewJourneyPage user={user} userProfile={userProfile} notify={notify} />}
             {tab==='portshore'   && <PortShorePage user={user} onNavigate={switchTab} />}
@@ -836,11 +848,8 @@ export default function App() {
                   chartsSyncProgress={chartsSyncProgress} portsSyncProgress={portsSyncProgress} />
               : <div className="section"><div className="empty"><div className="empty-icon">🔒</div><div className="empty-t">Admin Access Only</div></div></div>
             )}
-
-            {/* ── FIX: Info is now fully public — no login wall ── */}
             {tab==='info' && <InfoPage notify={notify} user={user} setTab={switchTab} />}
 
-            {/* ── Generic login wall for all other protected tabs ── */}
             {authChecked && !user && tab!=='home' && tab!=='login' && !PUBLIC_TABS.has(tab) && (
               <div style={{ display:'flex', flex:1, alignItems:'center', justifyContent:'center', padding:'2rem' }}>
                 <div style={{ maxWidth:380, width:'100%', background:'var(--card)', border:'1px solid var(--border2)', borderRadius:16, padding:'2rem', textAlign:'center' }}>
@@ -855,7 +864,6 @@ export default function App() {
               </div>
             )}
 
-            {/* ── Footer only on homepage ── */}
             {tab === 'home' && <Footer setTab={switchTab} />}
 
           </div>
@@ -896,4 +904,4 @@ export default function App() {
       </div>
     </>
   );
-}
+            }
