@@ -1,5 +1,5 @@
 /* eslint-disable */
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 
 // ─── THEME ────────────────────────────────────────────────────────────────────
 const S = {
@@ -18,9 +18,77 @@ const VESSEL_COLORS = {
   gas:       { accent: '#8B5CF6', light: 'rgba(139,92,246,0.15)', label: '💨 GAS CARRIER'     },
 };
 
-// ─── STORAGE HELPERS ─────────────────────────────────────────────────────────
+// ─── STORAGE HELPERS (localStorage — used for small config items) ───────────
 const load  = (k, def) => { try { return JSON.parse(localStorage.getItem(k) ?? 'null') ?? def; } catch { return def; } };
 const save  = (k, v)   => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
+
+// ─── INDEXEDDB HELPER (used for the live port-operation object, which can be
+// large with many bay records — avoids synchronous JSON.stringify into
+// localStorage on every keystroke, which was contributing to UI hangs) ──────
+const CARGO_IDB_NAME    = 'navispherex_cargo_ops';
+const CARGO_IDB_VERSION = 1;
+const CARGO_IDB_STORE   = 'kv';
+
+let _cargoIdbPromise = null;
+function openCargoIdb() {
+  if (_cargoIdbPromise) return _cargoIdbPromise;
+  _cargoIdbPromise = new Promise((resolve, reject) => {
+    if (typeof indexedDB === 'undefined') { reject(new Error('no idb')); return; }
+    const req = indexedDB.open(CARGO_IDB_NAME, CARGO_IDB_VERSION);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(CARGO_IDB_STORE)) db.createObjectStore(CARGO_IDB_STORE);
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror   = () => reject(req.error);
+  });
+  return _cargoIdbPromise;
+}
+
+async function idbGetCargo(key, fallback) {
+  try {
+    const db = await openCargoIdb();
+    return await new Promise((resolve) => {
+      const tx = db.transaction(CARGO_IDB_STORE, 'readonly');
+      const rq = tx.objectStore(CARGO_IDB_STORE).get(key);
+      rq.onsuccess = () => resolve(rq.result !== undefined ? rq.result : fallback);
+      rq.onerror   = () => resolve(fallback);
+    });
+  } catch {
+    // Fallback to localStorage if IndexedDB unavailable
+    return load(key, fallback);
+  }
+}
+
+async function idbSetCargo(key, value) {
+  try {
+    const db = await openCargoIdb();
+    return await new Promise((resolve) => {
+      const tx = db.transaction(CARGO_IDB_STORE, 'readwrite');
+      tx.objectStore(CARGO_IDB_STORE).put(value, key);
+      tx.oncomplete = () => resolve(true);
+      tx.onerror    = () => resolve(false);
+    });
+  } catch {
+    save(key, value);
+    return false;
+  }
+}
+
+async function idbDeleteCargo(key) {
+  try {
+    const db = await openCargoIdb();
+    return await new Promise((resolve) => {
+      const tx = db.transaction(CARGO_IDB_STORE, 'readwrite');
+      tx.objectStore(CARGO_IDB_STORE).delete(key);
+      tx.oncomplete = () => resolve(true);
+      tx.onerror    = () => resolve(false);
+    });
+  } catch {
+    localStorage.removeItem(key);
+    return false;
+  }
+}
 
 // ─── SHARED UI PRIMITIVES ────────────────────────────────────────────────────
 const Card = ({ children, style }) => (
@@ -695,12 +763,32 @@ const clNow = () => new Date().toTimeString().slice(0,5);
 const clNowFull = () => new Date().toISOString().slice(0,16).replace('T',' ');
 const ACC = VESSEL_COLORS.container.accent;
 
-function generateBays(from, to, type) {
+// Real-world container vessel bay numbering:
+// - 'odd'  : 20ft bay slots only, step 2  (e.g. 01,03,05...95)
+// - 'even2': 40ft bay slots, step 2       (e.g. 02,04,06...96) - rare, dense 40ft-capable layout
+// - 'even4': 40ft bay slots, step 4       (e.g. 02,06,10,14...82) - MOST COMMON on modern container ships
+// - 'all'  : every integer, step 1        (e.g. 01,02,03...) - small feeders only
+// - 'custom': user-defined step
+function generateBays(from, to, type, customStep) {
   const bays = [];
-  for (let i = from; i <= to; i++) {
-    if (type === 'odd'  && i % 2 !== 0) bays.push(clPad(i));
-    if (type === 'even' && i % 2 === 0) bays.push(clPad(i));
-    if (type === 'all') bays.push(clPad(i));
+  let step = 1;
+  let startParity = null; // null = no parity filter
+
+  if (type === 'odd')    { step = 2; startParity = 1; }
+  else if (type === 'even2') { step = 2; startParity = 0; }
+  else if (type === 'even4') { step = 4; startParity = 0; }
+  else if (type === 'all')   { step = 1; startParity = null; }
+  else if (type === 'custom') { step = Math.max(1, parseInt(customStep) || 4); startParity = null; }
+
+  // Align start to the correct parity/step so we don't skip the first valid bay
+  let i = from;
+  if (startParity !== null) {
+    while (i % 2 !== startParity) i++;
+  }
+  // For step>2 with a parity requirement (even4), walk forward in steps of `step`
+  // starting from the first valid even number >= from.
+  for (; i <= to; i += step) {
+    bays.push(clPad(i));
   }
   return bays;
 }
@@ -739,7 +827,8 @@ function SetupWizard({ onSave }) {
   const [vessel,   setVessel]   = useState('');
   const [bayFrom,  setBayFrom]  = useState('1');
   const [bayTo,    setBayTo]    = useState('55');
-  const [bayType,  setBayType]  = useState('all');
+  const [bayType,  setBayType]  = useState('even4');
+  const [customStep, setCustomStep] = useState('4');
   const [gantries, setGantries] = useState('2');
   const [movesPerHr, setMovesPerHr] = useState('25');
   const [totalLoad, setTotalLoad]   = useState('');
@@ -748,7 +837,8 @@ function SetupWizard({ onSave }) {
 
   const bayFromNum = parseInt(bayFrom) || 1;
   const bayToNum   = parseInt(bayTo)   || 1;
-  const bayCount = generateBays(bayFromNum, bayToNum, bayType).length;
+  const bayCount = generateBays(bayFromNum, bayToNum, bayType, customStep).length;
+  const previewBays = generateBays(bayFromNum, bayToNum, bayType, customStep);
 
   return (
     <div style={{ padding:'16px 0' }}>
@@ -768,21 +858,39 @@ function SetupWizard({ onSave }) {
           <Field label="To Bay"   value={bayTo}   onChange={e=>setBayTo(e.target.value)}   type="number" />
         </div>
         <div style={{ marginBottom:8 }}>
-          <div style={{ color:S.dm, fontSize:S.lb, marginBottom:5 }}>Bay Type</div>
-          <div style={{ display:'flex', gap:6 }}>
-            {[['all','All (20ft+40ft)'],['odd','Odd only (20ft)'],['even','Even only (40ft)']].map(([v,l]) => (
+          <div style={{ color:S.dm, fontSize:S.lb, marginBottom:5 }}>Bay Numbering Scheme</div>
+          <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
+            {[
+              ['even4','40ft step 4 (02,06,10…82)'],
+              ['odd','20ft step 2 (01,03,05…)'],
+              ['even2','40ft step 2 (02,04,06…)'],
+              ['all','Every bay (step 1)'],
+              ['custom','Custom step'],
+            ].map(([v,l]) => (
               <button key={v} onClick={()=>setBayType(v)} style={{
-                flex:1, background:bayType===v?`${ACC}20`:'transparent',
+                flex:'1 1 calc(50% - 6px)', minWidth:130, background:bayType===v?`${ACC}20`:'transparent',
                 border:`1px solid ${bayType===v?ACC:S.vd}`,
-                color:bayType===v?ACC:S.dm, borderRadius:6, padding:'5px 4px',
+                color:bayType===v?ACC:S.dm, borderRadius:6, padding:'6px 4px',
                 fontSize:S.lb, cursor:'pointer', fontWeight:bayType===v?700:400,
               }}>{l}</button>
             ))}
           </div>
+          {bayType === 'custom' && (
+            <div style={{ marginTop:6 }}>
+              <Field label="Custom Step (e.g. 4 = every 4th bay)" value={customStep}
+                onChange={e=>setCustomStep(e.target.value)} type="number" placeholder="4" />
+            </div>
+          )}
         </div>
-        <div style={{ color:S.gn, fontSize:S.xs, marginTop:4 }}>
-          ✓ {bayCount} bays will be created (Bay {clPad(bayFromNum)} → Bay {clPad(bayToNum)})
+        <div style={{ color:bayCount>60?S.gd:S.gn, fontSize:S.xs, marginTop:4 }}>
+          ✓ {bayCount} bays will be created
+          {previewBays.length > 0 && <span style={{ color:S.dm }}> ({previewBays[0]} → {previewBays[previewBays.length-1]})</span>}
         </div>
+        {bayCount > 60 && (
+          <div style={{ background:'rgba(255,179,0,0.1)', border:`1px solid ${S.gd}44`, borderRadius:6, padding:'6px 9px', marginTop:6, color:S.gd, fontSize:S.xs }}>
+            ⚠ {bayCount} bays is a lot — double check your numbering scheme. Most container vessels have 15-50 bays total. If this number looks too high, try "40ft step 4" instead of "Every bay".
+          </div>
+        )}
       </div>
 
       <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'0 10px' }}>
@@ -795,10 +903,15 @@ function SetupWizard({ onSave }) {
 
       <Btn onClick={() => {
         if (!port) return;
-        const bays = generateBays(bayFromNum, bayToNum, bayType);
+        const bays = generateBays(bayFromNum, bayToNum, bayType, customStep);
+        if (bays.length > 200) {
+          alert(`${bays.length} bays would be created — that's too many and may cause the app to slow down. Please check your bay range or numbering scheme.`);
+          return;
+        }
         onSave({
-          port, vessel, bayType, bayFrom: bayFromNum, bayTo: bayToNum,
-          gantries: parseInt(gantries) || 1,
+          port, vessel, bayType, customStep: parseInt(customStep)||4,
+          bayFrom: bayFromNum, bayTo: bayToNum,
+          gantries: Math.min(12, parseInt(gantries) || 1),
           movesPerHr: parseInt(movesPerHr) || 25,
           totalLoad: parseInt(totalLoad)||0,
           totalDisch: parseInt(totalDisch)||0,
@@ -1021,6 +1134,173 @@ function BayCard({ bay, idx, gantries, onUpdate, movesPerHr }) {
 }
 
 // ─── LIVE OPS MAIN ────────────────────────────────────────────────────────────
+// ─── OPS DASHBOARD ────────────────────────────────────────────────────────────
+function OpsDashboard({ portOp, onGoToLiveOps, onReset }) {
+  const bays = portOp.bays || [];
+  const [activeGantries, setActiveGantries] = useState(portOp.gantries);
+
+  const total  = bays.length;
+  const done   = bays.filter(b => b.status === 'completed').length;
+  const inProg = bays.filter(b => b.status === 'inprogress').length;
+  const onHold = bays.filter(b => b.status === 'hold').length;
+  const idle   = bays.filter(b => b.status === 'idle').length;
+
+  const totalPlanMoves = bays.reduce((s,b) => s + b.planLoad + b.planDisch + b.planRest, 0);
+  const totalDoneMoves = bays.reduce((s,b) => s + b.doneLoad + b.doneDisch + b.doneRest, 0);
+  const totalRemMoves  = Math.max(0, totalPlanMoves - totalDoneMoves);
+  const overallPct     = totalPlanMoves > 0 ? Math.round((totalDoneMoves / totalPlanMoves) * 100) : 0;
+
+  const gantryOutput = activeGantries * portOp.movesPerHr;
+  const etcHrs = gantryOutput > 0 ? totalRemMoves / gantryOutput : 0;
+  const etcH   = Math.floor(etcHrs);
+  const etcM   = Math.round((etcHrs % 1) * 60);
+  const etcStr = totalRemMoves === 0 ? 'COMPLETE' : `${etcH}h ${etcM}m`;
+  const etaTime = (() => {
+    if (totalRemMoves === 0) return '—';
+    const eta = new Date(Date.now() + etcHrs * 3600000);
+    return `${clPad(eta.getHours())}:${clPad(eta.getMinutes())}`;
+  })();
+
+  const activeBaysWithCranes = bays.filter(b => b.status === 'inprogress' && b.crane);
+  const craneUtilization = portOp.gantries > 0 ? Math.round((activeBaysWithCranes.length / activeGantries) * 100) : 0;
+
+  const dgBays     = bays.filter(b=>b.isDG).length;
+  const reeferBays = bays.filter(b=>b.isReefer).length;
+  const lashingPending = bays.filter(b=>!b.lashingDone && b.status !== 'idle').length;
+
+  return (
+    <div>
+      {/* Header */}
+      <div style={{ background:`${ACC}10`, border:`1px solid ${ACC}30`, borderRadius:10,
+        padding:'10px 13px', marginBottom:10, display:'flex', justifyContent:'space-between', alignItems:'flex-start', flexWrap:'wrap', gap:6 }}>
+        <div>
+          <div style={{ color:ACC, fontWeight:700, fontSize:S.sm }}>📦 {portOp.port}</div>
+          <div style={{ color:S.dm, fontSize:S.xs }}>{portOp.vessel} · Started {portOp.createdAt}</div>
+        </div>
+        <Btn onClick={onReset} color={S.rd} style={{ padding:'3px 8px', fontSize:S.ti }}>⟳ New Port</Btn>
+      </div>
+
+      {/* Big overall progress ring/bar */}
+      <div style={{ background:S.bg2, border:`1px solid ${S.bd2}`, borderRadius:12, padding:'16px', marginBottom:10, textAlign:'center' }}>
+        <div style={{ color:S.dm, fontSize:S.xs, marginBottom:6 }}>OVERALL OPERATION PROGRESS</div>
+        <div style={{ color:overallPct===100?S.gn:ACC, fontFamily:'monospace', fontWeight:900, fontSize:'2.2rem', lineHeight:1 }}>
+          {overallPct}%
+        </div>
+        <div style={{ marginTop:8 }}>
+          <ProgressBar pct={overallPct} color={overallPct===100?S.gn:ACC} height={12} />
+        </div>
+        <div style={{ color:S.dm, fontSize:S.xs, marginTop:6 }}>
+          {totalDoneMoves.toLocaleString()} / {totalPlanMoves.toLocaleString()} moves completed
+        </div>
+      </div>
+
+      {/* Key stats grid */}
+      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:6, marginBottom:10 }}>
+        <StatBox label="Bays Completed" value={`${done}/${total}`} color={S.gn} />
+        <StatBox label="Bays Active" value={inProg} color={S.gd} sub={onHold>0?`${onHold} on hold`:undefined} />
+        <StatBox label="Remaining Moves" value={totalRemMoves.toLocaleString()} color={totalRemMoves===0?S.gn:S.gd} />
+        <StatBox label="Time to Finish" value={etcStr} color={totalRemMoves===0?S.gn:ACC} sub={`ETA ${etaTime}`} />
+      </div>
+
+      {/* Gantry panel */}
+      <div style={{ background:S.bg2, border:`1px solid ${S.bd2}`, borderRadius:10, padding:'12px 14px', marginBottom:10 }}>
+        <SectionLabel text="Gantry Crane Status" color={ACC} />
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>
+          <div>
+            <div style={{ color:S.dm, fontSize:S.lb }}>Working Gantries Right Now</div>
+            <div style={{ display:'flex', gap:3, marginTop:4 }}>
+              {Array.from({length: 12}, (_,i)=>i+1).slice(0, Math.max(portOp.gantries, activeGantries) + 1).map(n => (
+                <button key={n} onClick={()=>setActiveGantries(n)} style={{
+                  background:activeGantries===n?`${ACC}25`:'transparent',
+                  border:`1px solid ${activeGantries===n?ACC:S.vd}`,
+                  color:activeGantries===n?ACC:S.dm,
+                  borderRadius:5, padding:'4px 9px', fontSize:S.xs, cursor:'pointer', fontWeight:activeGantries===n?700:400,
+                }}>{n}</button>
+              ))}
+            </div>
+          </div>
+          <div style={{ textAlign:'right' }}>
+            <div style={{ color:S.dm, fontSize:S.lb }}>Combined Output</div>
+            <div style={{ color:S.cy, fontFamily:'monospace', fontWeight:700, fontSize:'1rem' }}>{gantryOutput} mvs/hr</div>
+          </div>
+        </div>
+        <div style={{ display:'flex', gap:12, flexWrap:'wrap' }}>
+          <div style={{ fontSize:S.xs }}>
+            <span style={{ color:S.dm }}>Cranes assigned to active bays: </span>
+            <span style={{ color:ACC, fontWeight:700 }}>{activeBaysWithCranes.length}</span>
+          </div>
+          <div style={{ fontSize:S.xs }}>
+            <span style={{ color:S.dm }}>Configured fleet size: </span>
+            <span style={{ color:S.dm, fontWeight:700 }}>{portOp.gantries} (max 12)</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Move type breakdown */}
+      <div style={{ background:S.bg2, border:`1px solid ${S.bd2}`, borderRadius:10, padding:'12px 14px', marginBottom:10 }}>
+        <SectionLabel text="Move Type Breakdown" color={ACC} />
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:6 }}>
+          {[
+            ['Load', bays.reduce((s,b)=>s+b.doneLoad,0), bays.reduce((s,b)=>s+b.planLoad,0), ACC],
+            ['Discharge', bays.reduce((s,b)=>s+b.doneDisch,0), bays.reduce((s,b)=>s+b.planDisch,0), S.or],
+            ['Restow', bays.reduce((s,b)=>s+b.doneRest,0), bays.reduce((s,b)=>s+b.planRest,0), S.pu],
+          ].map(([l,d,p,c]) => {
+            const pct = p > 0 ? Math.round((d/p)*100) : 0;
+            return (
+              <div key={l} style={{ background:S.bg3, borderRadius:7, padding:'8px 9px' }}>
+                <div style={{ color:S.dm, fontSize:S.lb, marginBottom:3 }}>{l}</div>
+                <div style={{ color:c, fontFamily:'monospace', fontWeight:700, fontSize:S.sm, marginBottom:4 }}>{d}/{p}</div>
+                <ProgressBar pct={pct} color={c} height={4} />
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Special cargo flags */}
+      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:6, marginBottom:10 }}>
+        <StatBox label="DG Bays" value={dgBays} color={dgBays>0?S.rd:S.dm} />
+        <StatBox label="Reefer Bays" value={reeferBays} color={reeferBays>0?S.cy:S.dm} />
+        <StatBox label="Lashing Pending" value={lashingPending} color={lashingPending>0?S.or:S.gn} />
+      </div>
+
+      {/* Bay status lists */}
+      <div style={{ background:`${S.gn}08`, border:`1px solid ${S.gn}25`, borderRadius:10, padding:'12px 14px', marginBottom:10 }}>
+        <SectionLabel text="Which Bays Are Where" color={S.gn} />
+        {done > 0 && (
+          <div style={{ marginBottom:6 }}>
+            <span style={{ color:S.gn, fontSize:S.xs, fontWeight:700 }}>✅ Finished ({done}): </span>
+            <span style={{ color:S.tx, fontSize:S.xs }}>{bays.filter(b=>b.status==='completed').map(b=>b.bay).join(', ')}</span>
+          </div>
+        )}
+        {inProg > 0 && (
+          <div style={{ marginBottom:6 }}>
+            <span style={{ color:S.gd, fontSize:S.xs, fontWeight:700 }}>▶ In Progress ({inProg}): </span>
+            <span style={{ color:S.tx, fontSize:S.xs }}>{bays.filter(b=>b.status==='inprogress').map(b=>`${b.bay}${b.crane?'('+b.crane+')':''}`).join(', ')}</span>
+          </div>
+        )}
+        {onHold > 0 && (
+          <div style={{ marginBottom:6 }}>
+            <span style={{ color:S.rd, fontSize:S.xs, fontWeight:700 }}>⏸ On Hold ({onHold}): </span>
+            <span style={{ color:S.tx, fontSize:S.xs }}>{bays.filter(b=>b.status==='hold').map(b=>b.bay).join(', ')}</span>
+          </div>
+        )}
+        {idle > 0 && (
+          <div>
+            <span style={{ color:S.dm, fontSize:S.xs, fontWeight:700 }}>⏳ Not Started ({idle}): </span>
+            <span style={{ color:S.dm, fontSize:S.xs }}>{bays.filter(b=>b.status==='idle').map(b=>b.bay).join(', ')}</span>
+          </div>
+        )}
+        {total === 0 && <div style={{ color:S.vd, fontSize:S.xs, fontStyle:'italic' }}>No bays configured</div>}
+      </div>
+
+      <Btn onClick={onGoToLiveOps} color={ACC} style={{ width:'100%', padding:'10px', fontSize:S.sm }}>
+        ⚡ Open Live Ops to Update Progress
+      </Btn>
+    </div>
+  );
+}
+
 function LiveOps({ portOp, onUpdate, onReset }) {
   const [search,    setSearch]    = useState('');
   const [filter,    setFilter]    = useState('all');
@@ -1056,7 +1336,7 @@ function LiveOps({ portOp, onUpdate, onReset }) {
   const etaTime = (() => {
     if (totalRemMoves === 0) return '—';
     const ms  = etcHrs * 3600000;
-    const eta = new Date(Date.clNow() + ms);
+    const eta = new Date(Date.now() + ms);
     return `${clPad(eta.getHours())}:${clPad(eta.getMinutes())}`;
   })();
 
@@ -1116,7 +1396,7 @@ function LiveOps({ portOp, onUpdate, onReset }) {
         <div style={{ display:'flex', gap:5, alignItems:'center' }}>
           <div style={{ color:S.dm, fontSize:S.lb }}>Active Gantries:</div>
           <div style={{ display:'flex', gap:3 }}>
-            {[1,2,3,4,5,6,7,8].slice(0, portOp.gantries + 2).map(n => (
+            {Array.from({length: 12}, (_,i)=>i+1).slice(0, Math.min(12, portOp.gantries + 2)).map(n => (
               <button key={n} onClick={()=>setExtraGantries(n)} style={{
                 background:extraGantries===n?`${ACC}25`:'transparent',
                 border:`1px solid ${extraGantries===n?ACC:S.vd}`,
@@ -1295,7 +1575,7 @@ function ReeferRounds({ portOp, onUpdateReefer }) {
   const add = () => {
     if (!form.bay || !form.supply) return;
     const diff = parseFloat(form.supply) - parseFloat(form.setPoint);
-    const entry = { ...form, tempDiff: isNaN(diff) ? '' : diff.toFixed(1), id: Date.clNow() };
+    const entry = { ...form, tempDiff: isNaN(diff) ? '' : diff.toFixed(1), id: Date.now() };
     saveRounds([...rounds, entry]);
     setForm(f => ({ ...f, ts: new Date().toISOString().slice(0,16), supply: '', returnTemp: '', humidity: '', remarks: '' }));
   };
@@ -1540,20 +1820,60 @@ function ReeferRounds({ portOp, onUpdateReefer }) {
 // ─── MAIN EXPORT ─────────────────────────────────────────────────────────────
 function ContainerLiveOps() {
   const SETUP_KEY = 'cargo_container_port_op';
-  const [portOp, setPortOp] = useState(() => load(SETUP_KEY, null));
-  const [activeTab, setActiveTab] = useState('liveops');
+  const [portOp, setPortOp] = useState(null);
+  const [loaded, setLoaded] = useState(false);
+  const [activeTab, setActiveTab] = useState('dashboard');
+  const writeTimerRef = useRef(null);
 
-  const handleSave = (op) => { setPortOp(op); save(SETUP_KEY, op); };
-  const handleUpdate = (op) => { setPortOp(op); save(SETUP_KEY, op); };
+  // Load from IndexedDB on mount (falls back to localStorage automatically inside idbGetCargo)
+  useEffect(() => {
+    let mounted = true;
+    idbGetCargo(SETUP_KEY, null).then(data => {
+      if (!mounted) return;
+      setPortOp(data);
+      setLoaded(true);
+    });
+    return () => { mounted = false; };
+  }, []);
+
+  // Debounced write — avoids hammering IndexedDB/localStorage on every
+  // rapid tap of +/- counters, which was a contributor to the UI hang.
+  const persist = useCallback((op) => {
+    setPortOp(op);
+    if (writeTimerRef.current) clearTimeout(writeTimerRef.current);
+    writeTimerRef.current = setTimeout(() => {
+      idbSetCargo(SETUP_KEY, op);
+    }, 300);
+  }, []);
+
+  useEffect(() => () => { if (writeTimerRef.current) clearTimeout(writeTimerRef.current); }, []);
+
+  const handleSave = (op) => {
+    setPortOp(op);
+    idbSetCargo(SETUP_KEY, op); // immediate write on initial setup, no debounce needed
+    setActiveTab('dashboard');
+  };
+  const handleUpdate = (op) => persist(op);
   const handleReset = () => {
-    if (!window.confirm('Start a new port operation? Current data will be saved in history.')) return;
-    setPortOp(null); save(SETUP_KEY, null);
+    if (!window.confirm('Start a new port operation? Current data will be cleared.')) return;
+    if (writeTimerRef.current) clearTimeout(writeTimerRef.current);
+    setPortOp(null);
+    idbDeleteCargo(SETUP_KEY);
   };
 
   const TABS = [
-    { id:'liveops',  label:'⚡ Live Ops'      },
-    { id:'reefer',   label:'❄ Reefer Rounds'  },
+    { id:'dashboard', label:'📊 Dashboard'    },
+    { id:'liveops',   label:'⚡ Live Ops'     },
+    { id:'reefer',    label:'❄ Reefer Rounds' },
   ];
+
+  if (!loaded) {
+    return (
+      <div style={{ display:'flex', alignItems:'center', justifyContent:'center', padding:'40px 0', color:S.dm, fontSize:S.xs }}>
+        Loading port operation data…
+      </div>
+    );
+  }
 
   if (!portOp) {
     return (
@@ -1578,6 +1898,9 @@ function ContainerLiveOps() {
         ))}
       </div>
 
+      {activeTab === 'dashboard' && (
+        <OpsDashboard portOp={portOp} onGoToLiveOps={()=>setActiveTab('liveops')} onReset={handleReset} />
+      )}
       {activeTab === 'liveops' && (
         <LiveOps portOp={portOp} onUpdate={handleUpdate} onReset={handleReset} />
       )}
