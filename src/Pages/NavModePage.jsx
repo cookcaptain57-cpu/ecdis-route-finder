@@ -294,15 +294,15 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
 
   const loadSCSEnc=useCallback(async()=>{
     if(!leafRef.current||!window.L||scsEncLayerRef.current)return;
-    notify('⏳ Loading South China Sea ENC…','error');
+    notify('⏳ Loading Indonesia Karimata ENC…','error');
     try{
-      const res=await fetch('https://raw.githubusercontent.com/cookcaptain57-cpu/ecdis-route-finder/main/public/EA200004_SCS.geojson');
+      const res=await fetch('https://raw.githubusercontent.com/cookcaptain57-cpu/ecdis-route-finder/main/public/EA200004_Indonesia_Karimata.geojson');
       if(!res.ok)throw new Error(`HTTP ${res.status}`);
       const geojson=await res.json();
       const L=window.L,m=leafRef.current;
-      if(!m.getPane('scsPane')){const cp=m.createPane('scsPane');cp.style.zIndex='444';cp.style.pointerEvents='none';}
+      if(!m.getPane('karimataPane')){const cp=m.createPane('karimataPane');cp.style.zIndex='444';cp.style.pointerEvents='none';}
       const layer=L.geoJSON(geojson,{
-        pane:'scsPane',
+        pane:'karimataPane',
         style:ft=>{
           const t=ft.properties?.type||'';
           if(t==='depth_area'||t==='Depth area (meta)')return{color:'#0066CC',weight:0,fillColor:'#99CCFF',fillOpacity:0.15};
@@ -338,8 +338,8 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
       }).addTo(m);
       scsEncLayerRef.current=layer;
       const count=geojson.features?.length||0;
-      notify(`✓ SCS ENC loaded (${count} features — depth contours, TSS, fairways)`,'error');
-    }catch(e){notify(`SCS ENC: ${e.message}`,'error');}
+      notify(`✓ Indonesia Karimata ENC (${count} features — depth contours, soundings, TSS)`,'error');
+    }catch(e){notify(`Karimata ENC: ${e.message}`,'error');}
   },[]);
 
   const loadChartLayer=(ov)=>{if(!ov||!leafRef.current||!window.L)return;const L=window.L,m=leafRef.current;if(!m.getPane('chartPane')){const cp=m.createPane('chartPane');cp.style.zIndex='450';cp.style.pointerEvents='none';}const cc=colorsRef.current.chart||'#FF2020';const layer=L.geoJSON(ov.data,{pane:'chartPane',style:ft=>{const p=ft.properties,dg=p.checkDanger,da=p.lineType===2?'8 5':p.lineType===3?'3 5':null;return{color:dg?'#FF2020':cc,weight:3,opacity:1,dashArray:da,fillColor:dg?'#FF2020':cc,fillOpacity:0.12};},pointToLayer:(ft,ll)=>{const p=ft.properties;if(p.featureType==='label')return L.marker(ll,{icon:L.divIcon({html:`<div style="background:rgba(0,0,20,0.8);color:${cc};font-size:11px;font-weight:700;white-space:nowrap;font-family:monospace;padding:1px 4px;border-radius:3px;pointer-events:none;">${p.labelText||''}</div>`,className:'',iconAnchor:[0,8]}),interactive:false,zIndexOffset:300});return L.circleMarker(ll,{radius:6,color:cc,fillOpacity:0.85,weight:2}).bindPopup(`<b>${p.name||''}</b>`);},onEachFeature:(ft,l)=>{if(ft.properties.name&&ft.properties.featureType!=='label')l.bindPopup(`<b>${ft.properties.name}</b>`);}}).addTo(m);layer.bringToFront();chartLayersRef.current.push({id:ov.name,layer});try{const b=layer.getBounds();if(b.isValid())m.fitBounds(b,{padding:[40,40]});}catch{}};
@@ -685,33 +685,88 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
   },[activeRoute,mapReady,colors,xtdNM,routeLabelZoomBand]);
 
   // ETA
-  // ETA — throttled, only recalculate when position meaningfully changes
+  // ETA — correct remaining distance calculation
+  // Remaining = distance along route from current position to FINAL waypoint
+  // Method: project ship onto each leg, find best match, sum remaining leg + all subsequent legs
   const etaThrottleRef=useRef(0);
   useEffect(()=>{
     if(!livePos||!activeRoute?.waypoints?.length){setEtaResult(null);return;}
     if(livePos.sog<0.2){setEtaResult(null);return;}
-    // Only recalculate ETA every 5 seconds max
     const now=Date.now();
     if(now-etaThrottleRef.current<2000)return;
     etaThrottleRef.current=now;
-    const wps=activeRoute.waypoints,ti=Math.min(Math.max(selectedWpIdx,0),wps.length-1);
-    const legSum=(a,b)=>{let d=0;for(let i=a;i<b;i++)d+=distNM(wps[i].lat,wps[i].lon,wps[i+1].lat,wps[i+1].lon);return d;};
-    const totalRouteDist=legSum(0,wps.length-1);
-    let rem=Infinity;
+
+    const wps=activeRoute.waypoints;
+    const finalIdx=wps.length-1;
+    const ti=Math.min(Math.max(selectedWpIdx,0),finalIdx);
+
+    // Sum of haversine leg distances from wp index a to wp index b
+    const legSum=(a,b)=>{
+      let d=0;
+      for(let i=a;i<b&&i<wps.length-1;i++)
+        d+=distNM(wps[i].lat,wps[i].lon,wps[i+1].lat,wps[i+1].lon);
+      return d;
+    };
+    const totalRouteDist=legSum(0,finalIdx);
+
+    // Project ship onto every leg, pick the leg that gives minimum remaining
+    let remToFinal=Infinity;
+    let remToTarget=Infinity;
+
     for(let i=0;i<wps.length-1;i++){
       const legBrg=brg(wps[i].lat,wps[i].lon,wps[i+1].lat,wps[i+1].lon);
       const shipBrg=brg(wps[i].lat,wps[i].lon,livePos.lat,livePos.lon);
       const shipDist=distNM(wps[i].lat,wps[i].lon,livePos.lat,livePos.lon);
+      // Angle between leg direction and ship bearing from leg start
       const angle=((legBrg-shipBrg)+540)%360-180;
+      // How far along the leg the ship's projected position falls
       const along=shipDist*Math.cos(angle*Math.PI/180);
       const legLen=distNM(wps[i].lat,wps[i].lon,wps[i+1].lat,wps[i+1].lon);
-      if(along>=0&&along<=legLen+0.1){const d=Math.max(0,legLen-along)+legSum(i+1,ti);if(d<rem)rem=d;}
+      // Only consider if projection lands on (or just past) this leg
+      if(along>=-0.5&&along<=legLen+0.5){
+        const remainOnThisLeg=Math.max(0,legLen-along);
+        // Total remaining = rest of this leg + all subsequent legs to final WP
+        const dToFinal=remainOnThisLeg+legSum(i+1,finalIdx);
+        if(dToFinal<remToFinal){
+          remToFinal=dToFinal;
+          // Remaining to selected target WP (only count if target is ahead)
+          remToTarget=i<ti
+            ? remainOnThisLeg+legSum(i+1,ti)
+            : i===ti
+            ? remainOnThisLeg
+            : 0; // already past selected WP
+        }
+      }
     }
-    if(rem===Infinity)rem=distNM(livePos.lat,livePos.lon,wps[ti].lat,wps[ti].lon);
-    const hrs=rem/livePos.sog,h=Math.floor(hrs),mn=Math.round((hrs%1)*60);
-    const arr=new Date(Date.now()+hrs*3600000),pd=n=>String(n).padStart(2,'0');
+
+    // Fallback: ship far off-track — straight line to nearest upcoming WP then route
+    if(remToFinal===Infinity){
+      let minD=Infinity,nearestI=0;
+      for(let i=0;i<wps.length;i++){
+        const d=distNM(livePos.lat,livePos.lon,wps[i].lat,wps[i].lon);
+        if(d<minD){minD=d;nearestI=i;}
+      }
+      remToFinal=minD+legSum(nearestI,finalIdx);
+      remToTarget=distNM(livePos.lat,livePos.lon,wps[ti].lat,wps[ti].lon);
+    }
+
+    const hrs=remToFinal/livePos.sog;
+    const h=Math.floor(hrs),mn=Math.round((hrs%1)*60);
+    const arr=new Date(Date.now()+hrs*3600000);
+    const pd=n=>String(n).padStart(2,'0');
     const mo=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][arr.getMonth()];
-    setEtaResult({remainNM:rem.toFixed(1),totalNM:totalRouteDist.toFixed(1),hrs:h,mins:mn,wpName:wps[ti].name||`WP${String(ti+1).padStart(2,'0')}`,arrivalStr:`${pd(arr.getDate())} ${mo} ${arr.getFullYear()} ${pd(arr.getHours())}:${pd(arr.getMinutes())} LT`});
+    const sailed=Math.max(0,totalRouteDist-remToFinal);
+
+    setEtaResult({
+      remainNM:remToFinal.toFixed(1),
+      remainToTargetNM:remToTarget.toFixed(1),
+      totalNM:totalRouteDist.toFixed(1),
+      sailedNM:sailed.toFixed(1),
+      hrs:h,mins:mn,
+      wpName:wps[ti].name||`WP${String(ti+1).padStart(2,'0')}`,
+      finalWpName:wps[finalIdx].name||`WP${String(finalIdx+1).padStart(2,'0')}`,
+      arrivalStr:`${pd(arr.getDate())} ${mo} ${arr.getFullYear()} ${pd(arr.getHours())}:${pd(arr.getMinutes())} LT`,
+    });
   },[livePos,activeRoute,selectedWpIdx]);
 
   // Map bearing — only needs to update when mode changes, not every GPS tick
@@ -1050,8 +1105,13 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
             </div>
             {!hudCollapsed&&(<div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'3px 8px',marginTop:3}}>{[['HDG',`${(livePos.heading||livePos.cog||0).toFixed(0)}°`,S.gd],['ACC',`${(livePos.acc||0).toFixed(0)}m`,S.gd]].map(([k,v,c])=>(<div key={k}><div style={{color:S.dm,fontSize:S.lb}}>{k}</div><div style={{color:c,fontFamily:'monospace',fontSize:'0.82rem',fontWeight:700}}>{v}</div></div>))}</div>)}
             {!hudCollapsed&&etaResult&&(<div style={{marginTop:5,borderTop:'1px solid rgba(0,255,136,0.15)',paddingTop:4}}>
-              <div style={{display:'flex',justifyContent:'space-between'}}>{[['TOTAL',etaResult.totalNM+' NM'],['REMAIN',etaResult.remainNM+' NM'],['ETA',etaResult.hrs+'h '+etaResult.mins+'m']].map(([k,v])=>(<div key={k}><div style={{color:S.dm,fontSize:S.lb}}>{k}</div><div style={{color:S.gn,fontFamily:'monospace',fontSize:'0.8rem',fontWeight:700}}>{v}</div></div>))}</div>
-              <div style={{color:S.dm,fontSize:'0.58rem',marginTop:2}}>→ {etaResult.wpName}</div>
+              <div style={{display:'flex',justifyContent:'space-between',gap:4}}>
+                {[['TOTAL',etaResult.totalNM+' NM'],['SAILED',etaResult.sailedNM+' NM'],['REMAIN',etaResult.remainNM+' NM']].map(([k,v])=>(<div key={k}><div style={{color:S.dm,fontSize:S.lb}}>{k}</div><div style={{color:S.gn,fontFamily:'monospace',fontSize:'0.75rem',fontWeight:700}}>{v}</div></div>))}
+              </div>
+              <div style={{display:'flex',justifyContent:'space-between',gap:4,marginTop:3}}>
+                {[['ETA',etaResult.hrs+'h '+etaResult.mins+'m'],['→ DEST',etaResult.finalWpName]].map(([k,v])=>(<div key={k}><div style={{color:S.dm,fontSize:S.lb}}>{k}</div><div style={{color:S.gn,fontFamily:'monospace',fontSize:'0.72rem',fontWeight:700,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',maxWidth:80}}>{v}</div></div>))}
+              </div>
+              {etaResult.wpName!==etaResult.finalWpName&&<div style={{color:S.dm,fontSize:'0.58rem',marginTop:2}}>→ {etaResult.wpName}: <span style={{color:S.cy,fontFamily:'monospace'}}>{etaResult.remainToTargetNM} NM</span></div>}
               {etaResult.arrivalStr&&<div style={{color:S.gd,fontFamily:'monospace',fontSize:'0.62rem',marginTop:2}}>🕐 {etaResult.arrivalStr}</div>}
             </div>)}
           </div>):(gpsOn?<div style={{color:S.dm,fontSize:S.sm,fontStyle:'italic'}}>Acquiring GPS…</div>:<div style={{color:S.vd,fontSize:S.xs}}>Enable GPS to track vessel</div>)}
@@ -1078,7 +1138,12 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
               <select value={selectedWpIdx} onChange={e=>setSelectedWpIdx(Number(e.target.value))} style={{width:'100%',background:'#060F1C',color:S.cy,border:`1px solid ${S.vd}`,borderRadius:5,padding:'5px',fontSize:S.xs,marginBottom:4}}>
                 {activeRoute.waypoints.map((w,i)=><option key={i} value={i}>WP{String(i+1).padStart(2,'0')}{w.name?' '+w.name:''}</option>)}
               </select>
-              {etaResult&&(<div style={{background:'#020810',borderRadius:5,padding:'6px 8px',border:'1px solid rgba(0,255,136,0.18)',marginBottom:4}}><div style={{display:'flex',justifyContent:'space-between'}}>{[['REMAIN',etaResult.remainNM+' NM'],['ETA',etaResult.hrs+'h '+etaResult.mins+'m']].map(([k,v])=>(<div key={k}><div style={{color:S.dm,fontSize:'0.5rem'}}>{k}</div><div style={{color:S.gn,fontFamily:'monospace',fontSize:'0.82rem',fontWeight:700}}>{v}</div></div>))}</div>{etaResult.arrivalStr&&<div style={{color:S.gd,fontFamily:'monospace',fontSize:'0.62rem',marginTop:3}}>🕐 {etaResult.arrivalStr}</div>}</div>)}
+              {etaResult&&(<div style={{background:'#020810',borderRadius:5,padding:'6px 8px',border:'1px solid rgba(0,255,136,0.18)',marginBottom:4}}>
+                <div style={{display:'flex',justifyContent:'space-between',gap:4}}>{[['REMAIN',etaResult.remainNM+' NM'],['ETA',etaResult.hrs+'h '+etaResult.mins+'m']].map(([k,v])=>(<div key={k}><div style={{color:S.dm,fontSize:'0.5rem'}}>{k}</div><div style={{color:S.gn,fontFamily:'monospace',fontSize:'0.82rem',fontWeight:700}}>{v}</div></div>))}</div>
+                <div style={{color:S.dm,fontSize:'0.52rem',marginTop:2}}>→ {etaResult.finalWpName}</div>
+                {etaResult.wpName!==etaResult.finalWpName&&<div style={{color:S.dm,fontSize:'0.52rem'}}>Next WP: <span style={{color:S.cy}}>{etaResult.wpName}</span> <span style={{color:S.gn,fontFamily:'monospace'}}>{etaResult.remainToTargetNM} NM</span></div>}
+                {etaResult.arrivalStr&&<div style={{color:S.gd,fontFamily:'monospace',fontSize:'0.62rem',marginTop:3}}>🕐 {etaResult.arrivalStr}</div>}
+              </div>)}
               <button onClick={()=>{setActiveRoute(null);setEtaResult(null);setSelectedWpIdx(0);}} style={{width:'100%',background:'transparent',border:'1px solid rgba(255,71,87,0.45)',color:S.rd,borderRadius:5,padding:'5px',fontSize:S.xs,cursor:'pointer'}}>✕ Clear Route</button>
             </div>)}
             <div style={{borderTop:'1px solid rgba(0,212,255,0.12)',paddingTop:5}}>
@@ -1110,7 +1175,7 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
             <div style={{color:S.dm,fontSize:S.lb,marginBottom:2}}>ENC DEPTH LAYERS</div>
             {DEPTH_SOURCES.map(d=>{const on=depthSources.has(d.id);return(<button key={d.id} onClick={()=>toggleDepth(d.id)} title={d.desc} style={{display:'flex',alignItems:'center',gap:5,background:on?'rgba(0,212,255,0.15)':'transparent',border:`1px solid ${on?S.cy:S.vd}`,color:on?S.cy:S.dm,borderRadius:5,padding:'4px 7px',fontSize:'0.65rem',cursor:'pointer',textAlign:'left',width:'100%'}}><span>{d.emoji}</span><span style={{flex:1}}>{d.label}</span>{on&&<span style={{color:S.cy,fontSize:'0.65rem'}}>✓</span>}</button>);})}
             {/* South China Sea ENC — added directly, not in shared DEPTH_SOURCES constant */}
-            <button onClick={()=>toggleDepth('scs')} title="S-57 ENC: South China Sea / Indonesia / Malacca Strait — depth contours, soundings, TSS, fairways" style={{display:'flex',alignItems:'center',gap:5,background:depthSources.has('scs')?'rgba(0,212,255,0.15)':'transparent',border:`1px solid ${depthSources.has('scs')?S.cy:S.vd}`,color:depthSources.has('scs')?S.cy:S.dm,borderRadius:5,padding:'4px 7px',fontSize:'0.65rem',cursor:'pointer',textAlign:'left',width:'100%'}}><span>🇨🇳</span><span style={{flex:1}}>South China Sea ENC</span>{depthSources.has('scs')&&<span style={{color:S.cy,fontSize:'0.65rem'}}>✓</span>}</button>
+            <button onClick={()=>toggleDepth('scs')} title="S-57 ENC: Karimata Strait / Bangka Belitung — 580 features: depth contours, soundings, buoys, pipelines" style={{display:'flex',alignItems:'center',gap:5,background:depthSources.has('scs')?'rgba(0,212,255,0.15)':'transparent',border:`1px solid ${depthSources.has('scs')?S.cy:S.vd}`,color:depthSources.has('scs')?S.cy:S.dm,borderRadius:5,padding:'4px 7px',fontSize:'0.65rem',cursor:'pointer',textAlign:'left',width:'100%'}}><span>🇮🇩</span><span style={{flex:1}}>Indonesia Karimata ENC</span>{depthSources.has('scs')&&<span style={{color:S.cy,fontSize:'0.65rem'}}>✓</span>}</button>
             {depthSources.size>0&&<button onClick={()=>setDepthSources(new Set())} style={{background:'transparent',border:`1px solid rgba(255,71,87,0.4)`,color:S.rd,borderRadius:5,padding:'4px',fontSize:S.xs,cursor:'pointer'}}>⭕ Clear All</button>}
           </div>)}
 
@@ -1136,7 +1201,23 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
           </div>)}
 
           {activePanel==='eta'&&(<div style={{display:'flex',flexDirection:'column',gap:6}}>
-            {activeRoute?.waypoints?.length>0?(<>{etaResult&&(<div style={{background:'#020810',borderRadius:6,padding:'8px',border:'1px solid rgba(0,255,136,0.2)',marginBottom:4}}><div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'4px 8px',marginBottom:4}}><div><div style={{color:S.dm,fontSize:S.lb}}>TOTAL</div><div style={{color:S.gd,fontFamily:'monospace',fontSize:'0.85rem',fontWeight:700}}>{etaResult.totalNM} NM</div></div><div><div style={{color:S.dm,fontSize:S.lb}}>REMAIN</div><div style={{color:S.gn,fontFamily:'monospace',fontSize:'0.85rem',fontWeight:700}}>{etaResult.remainNM} NM</div></div><div><div style={{color:S.dm,fontSize:S.lb}}>ETA</div><div style={{color:S.gn,fontFamily:'monospace',fontSize:'0.85rem',fontWeight:700}}>{etaResult.hrs}h {etaResult.mins}m</div></div><div><div style={{color:S.dm,fontSize:S.lb}}>TO WP</div><div style={{color:S.cy,fontFamily:'monospace',fontSize:'0.72rem',fontWeight:700,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{etaResult.wpName}</div></div></div>{etaResult.arrivalStr&&<div style={{color:S.gd,fontFamily:'monospace',fontSize:'0.62rem',borderTop:'1px solid rgba(255,215,0,0.15)',paddingTop:4}}>🕐 {etaResult.arrivalStr}</div>}</div>)}<ETACalculator totalNM={etaResult?.totalNM?parseFloat(etaResult.totalNM):routeTotalNM(activeRoute?.waypoints||[])}/></>):<div style={{color:S.dm,fontSize:S.sm,fontStyle:'italic',textAlign:'center',padding:'16px 0'}}>Load a route first</div>}
+            {activeRoute?.waypoints?.length>0?(<>{etaResult&&(<div style={{background:'#020810',borderRadius:6,padding:'8px',border:'1px solid rgba(0,255,136,0.2)',marginBottom:4}}>
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'4px 8px',marginBottom:4}}>
+                <div><div style={{color:S.dm,fontSize:S.lb}}>TOTAL ROUTE</div><div style={{color:S.gd,fontFamily:'monospace',fontSize:'0.85rem',fontWeight:700}}>{etaResult.totalNM} NM</div></div>
+                <div><div style={{color:S.dm,fontSize:S.lb}}>SAILED</div><div style={{color:S.cy,fontFamily:'monospace',fontSize:'0.85rem',fontWeight:700}}>{etaResult.sailedNM} NM</div></div>
+                <div><div style={{color:S.dm,fontSize:S.lb}}>REMAINING</div><div style={{color:S.gn,fontFamily:'monospace',fontSize:'0.85rem',fontWeight:700}}>{etaResult.remainNM} NM</div></div>
+                <div><div style={{color:S.dm,fontSize:S.lb}}>ETA</div><div style={{color:S.gn,fontFamily:'monospace',fontSize:'0.85rem',fontWeight:700}}>{etaResult.hrs}h {etaResult.mins}m</div></div>
+              </div>
+              <div style={{borderTop:'1px solid rgba(0,212,255,0.12)',paddingTop:4,marginBottom:3}}>
+                <div style={{color:S.dm,fontSize:S.lb}}>DESTINATION</div>
+                <div style={{color:S.cy,fontFamily:'monospace',fontSize:'0.72rem',fontWeight:700}}>{etaResult.finalWpName}</div>
+              </div>
+              {etaResult.wpName!==etaResult.finalWpName&&<div style={{background:'rgba(0,212,255,0.06)',borderRadius:4,padding:'4px 6px',marginBottom:4}}>
+                <div style={{color:S.dm,fontSize:S.lb}}>→ NEXT TARGET ({etaResult.wpName})</div>
+                <div style={{color:S.cy,fontFamily:'monospace',fontSize:'0.78rem',fontWeight:700}}>{etaResult.remainToTargetNM} NM</div>
+              </div>}
+              {etaResult.arrivalStr&&<div style={{color:S.gd,fontFamily:'monospace',fontSize:'0.62rem',borderTop:'1px solid rgba(255,215,0,0.15)',paddingTop:4}}>🕐 {etaResult.arrivalStr}</div>}
+            </div>)}<ETACalculator totalNM={etaResult?.totalNM?parseFloat(etaResult.totalNM):routeTotalNM(activeRoute?.waypoints||[])}/></>):<div style={{color:S.dm,fontSize:S.sm,fontStyle:'italic',textAlign:'center',padding:'16px 0'}}>Load a route first</div>}
           </div>)}
 
           {activePanel==='zones'&&(<div style={{display:'flex',flexDirection:'column',gap:5}}>
