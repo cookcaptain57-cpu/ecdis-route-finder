@@ -90,6 +90,7 @@ function MaritimeAIWidget() {
     if (isOpen) setTimeout(() => inputRef.current?.focus(), 100);
   }, [isOpen]);
 
+  // ── sendMessage — OpenRouter API (DIAGNOSTIC MODE: shows real error) ────────
   const sendMessage = async (text) => {
     const question = (text || input).trim();
     if (!question || loading) return;
@@ -99,7 +100,13 @@ function MaritimeAIWidget() {
     setMessages(newHistory);
     setLoading(true);
     setStreamText('');
+
     try {
+      // DIAGNOSTIC: check if key even exists on the client
+      if (!_K) {
+        throw new Error('REACT_APP_OR_KEY is undefined in the browser bundle. Env var was not injected at build time.');
+      }
+
       const response = await fetch(_U, {
         method:'POST',
         headers:{ 'Content-Type':'application/json', 'Authorization':`Bearer ${_K}` },
@@ -111,7 +118,14 @@ function MaritimeAIWidget() {
           ],
         }),
       });
-      if (!response.ok) throw new Error(`${response.status}`);
+
+      // DIAGNOSTIC: surface real HTTP status + body instead of swallowing it
+      if (!response.ok) {
+        let errBody = '';
+        try { errBody = await response.text(); } catch {}
+        throw new Error(`HTTP ${response.status} ${response.statusText} — ${errBody.slice(0, 300)}`);
+      }
+
       const reader  = response.body.getReader();
       const decoder = new TextDecoder();
       let fullText  = '';
@@ -131,8 +145,9 @@ function MaritimeAIWidget() {
       }
       setMessages(prev => [...prev, { role:'assistant', content: fullText || 'No response. Please try again.' }]);
       setStreamText('');
-    } catch {
-      setMessages(prev => [...prev, { role:'assistant', content:'⚠️ Could not connect. Please check your connection and try again.' }]);
+    } catch (err) {
+      // DIAGNOSTIC: show the real error message instead of generic text
+      setMessages(prev => [...prev, { role:'assistant', content: `⚠️ DEBUG ERROR: ${err.message}` }]);
       setStreamText('');
     } finally { setLoading(false); }
   };
@@ -373,7 +388,6 @@ export default function HomePage({ routes, charts, onSearch, setTab, user, ports
     {icon:'ℹ️',label:'HELP & INFO',     desc:'Contact, About, Legal, FAQ.',               tab:'info',      color:'#00B4D8',bg:'linear-gradient(135deg,#00B4D8,#1565C0)'},
   ].filter((f,i,arr)=>arr.findIndex(x=>x.tab===f.tab)===i);
 
-  // ── Safety: filter out any saved tab keys that no longer exist in ALL_FEATURES ──
   const validTabKeys = new Set(ALL_FEATURES.map(f=>f.tab));
   const safePinnedTabs = pinnedTabs.filter(k => validTabKeys.has(k));
   const FEATURES = ALL_FEATURES.filter(f=>safePinnedTabs.includes(f.tab));
@@ -394,16 +408,14 @@ export default function HomePage({ routes, charts, onSearch, setTab, user, ports
   return (
     <div style={{background:'var(--bg)',minHeight:'calc(100vh - 56px)',display:'flex',flexDirection:'column'}}>
 
-      {/* ── HERO — FIX: removed overflow:hidden, no height constraint ── */}
+      {/* ── HERO ── */}
       <div style={{position:'relative',background:'linear-gradient(135deg,#020810 0%,#040C1A 40%,#071428 70%,#0a1e3a 100%)',padding:'1.5rem 1.2rem 2rem',borderBottom:'1px solid var(--border)',flexShrink:0}}>
         <div style={{position:'absolute',inset:0,opacity:0.15,backgroundImage:'linear-gradient(rgba(0,180,216,0.3) 1px,transparent 1px),linear-gradient(90deg,rgba(0,180,216,0.3) 1px,transparent 1px)',backgroundSize:'40px 40px',pointerEvents:'none'}}/>
 
-        {/* Live badge */}
         <div style={{position:'absolute',top:12,right:12,display:'flex',alignItems:'center',gap:5,fontSize:'0.65rem',color:'var(--green)',zIndex:1}}>
           <span style={{width:7,height:7,borderRadius:'50%',background:'var(--green)',boxShadow:'0 0 6px var(--green)',animation:'pulse 2s infinite',display:'inline-block'}}/>Live
         </div>
 
-        {/* Port notice */}
         {portNotice && (
           <div onClick={()=>setTab('notices')} style={{background:'rgba(255,107,53,0.1)',border:'1px solid rgba(255,107,53,0.3)',borderRadius:8,padding:'7px 10px',marginBottom:'0.9rem',cursor:'pointer',display:'flex',alignItems:'center',gap:7,fontSize:'0.72rem',position:'relative',zIndex:1}}>
             <span>⚠️</span>
@@ -412,7 +424,6 @@ export default function HomePage({ routes, charts, onSearch, setTab, user, ports
           </div>
         )}
 
-        {/* Title block — relative zIndex so it shows above grid bg */}
         <div style={{position:'relative',zIndex:1}}>
           <div style={{fontSize:'0.58rem',color:'var(--text3)',letterSpacing:'0.16em',marginBottom:'0.4rem',textTransform:'uppercase'}}>
             SMART NAVIGATION · ROUTES · CHARTS · PORTS
@@ -425,7 +436,6 @@ export default function HomePage({ routes, charts, onSearch, setTab, user, ports
             {user&&<span style={{color:'var(--cyan)'}}> Welcome{userProfile?.rank?`, ${userProfile.rank} `:', '}{userProfile?.name?.split(' ')[0]||user.email.split('@')[0]}!</span>}
           </p>
 
-          {/* Search bar */}
           <div ref={searchRef} style={{position:'relative',maxWidth:540,marginBottom:'0.9rem'}}>
             <div style={{display:'flex',gap:8}}>
               <div className="siw" style={{flex:1}}>
@@ -463,7 +473,6 @@ export default function HomePage({ routes, charts, onSearch, setTab, user, ports
             )}
           </div>
 
-          {/* Weather strip */}
           <div ref={weatherRef} style={{background:'rgba(7,20,40,0.75)',border:'1px solid rgba(0,180,216,0.22)',borderRadius:12,padding:'0.65rem 0.9rem',backdropFilter:'blur(10px)',maxWidth:540}}>
             <div style={{display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}}>
               <div style={{display:'flex',alignItems:'center',gap:5,flexShrink:0}}>
@@ -510,11 +519,9 @@ export default function HomePage({ routes, charts, onSearch, setTab, user, ports
       </div>
       {/* ── END HERO ── */}
 
-      {/* ── SCROLLABLE CONTENT ── */}
       <div style={{flex:1,overflowY:'auto'}}>
         <div style={{padding:'1.2rem 1rem',maxWidth:1100,margin:'0 auto',width:'100%'}}>
 
-          {/* Personal widgets */}
           {user&&(seaTimeDays!==null||expCerts.length>0||isOffline)&&(
             <div style={{display:'flex',gap:8,flexWrap:'wrap',marginBottom:'1.2rem'}}>
               {seaTimeDays!==null&&(
@@ -538,14 +545,12 @@ export default function HomePage({ routes, charts, onSearch, setTab, user, ports
             </div>
           )}
 
-          {/* Explore header */}
           <div style={{marginBottom:'0.6rem',display:'flex',alignItems:'center',gap:10}}>
             <div style={{width:4,height:22,background:'linear-gradient(180deg,var(--cyan),var(--blue))',borderRadius:2}}/>
             <div style={{fontFamily:'Orbitron,monospace',fontSize:'0.76rem',fontWeight:700,letterSpacing:'0.06em',flex:1}}>Explore NavisphereX Marine</div>
             <button onClick={()=>setShowTabSettings(true)} style={{background:'rgba(0,180,216,0.08)',border:'1px solid rgba(0,180,216,0.25)',borderRadius:7,padding:'4px 8px',cursor:'pointer',fontSize:'0.7rem',color:'var(--cyan)',display:'flex',alignItems:'center',gap:4,fontFamily:'Exo 2,sans-serif'}}>⚙️ Customise</button>
           </div>
 
-          {/* Customise modal */}
           {showTabSettings&&(
             <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.65)',zIndex:9990,display:'flex',alignItems:'flex-end',justifyContent:'center'}} onClick={e=>e.target===e.currentTarget&&setShowTabSettings(false)}>
               <div style={{background:'var(--card)',border:'1px solid var(--border)',borderRadius:'18px 18px 0 0',padding:'1.4rem',width:'100%',maxWidth:600,maxHeight:'80vh',overflowY:'auto'}}>
@@ -574,7 +579,6 @@ export default function HomePage({ routes, charts, onSearch, setTab, user, ports
             </div>
           )}
 
-          {/* Feature cards */}
           <div className="hp-features-grid" style={{marginBottom:'1.2rem'}}>
             {FEATURES.map((f,i)=>(
               <div key={i} onClick={()=>setTab(f.tab)}
@@ -593,7 +597,6 @@ export default function HomePage({ routes, charts, onSearch, setTab, user, ports
             ))}
           </div>
 
-          {/* My Account */}
           {user&&(
             <div onClick={()=>setTab('account')} style={{background:'linear-gradient(135deg,var(--card) 0%,#0F2444 100%)',border:'1px solid rgba(0,180,216,0.2)',borderRadius:14,padding:'1rem',cursor:'pointer',display:'flex',alignItems:'center',gap:14,marginBottom:'1.2rem',transition:'all 0.2s'}}
               onMouseEnter={e=>{e.currentTarget.style.borderColor='rgba(0,180,216,0.4)';e.currentTarget.style.boxShadow='0 6px 20px rgba(0,0,0,0.4)';}}
@@ -607,7 +610,6 @@ export default function HomePage({ routes, charts, onSearch, setTab, user, ports
             </div>
           )}
 
-          {/* Quick Actions */}
           <div style={{marginBottom:'0.6rem',display:'flex',alignItems:'center',gap:10}}>
             <div style={{width:4,height:20,background:'linear-gradient(180deg,var(--gold),var(--gold2))',borderRadius:2}}/>
             <div style={{fontFamily:'Orbitron,monospace',fontSize:'0.74rem',fontWeight:700,letterSpacing:'0.06em'}}>Quick Actions</div>
@@ -629,7 +631,6 @@ export default function HomePage({ routes, charts, onSearch, setTab, user, ports
             ))}
           </div>
 
-          {/* Knowledge Hub */}
           <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'0.7rem'}}>
             <div style={{display:'flex',alignItems:'center',gap:8}}>
               <div style={{width:4,height:20,background:'linear-gradient(180deg,#A78BFA,#7C3AED)',borderRadius:2}}/>
@@ -649,10 +650,8 @@ export default function HomePage({ routes, charts, onSearch, setTab, user, ports
             ))}
           </div>
 
-          {/* AI Widget */}
           <MaritimeAIWidget />
 
-          {/* Tip of the Day */}
           <div style={{marginBottom:'1.2rem'}}>
             <div style={{background:'var(--card)',border:'1px solid var(--border)',borderRadius:13,padding:'1rem'}}>
               <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:'0.5rem'}}>
@@ -667,7 +666,6 @@ export default function HomePage({ routes, charts, onSearch, setTab, user, ports
 
         </div>
       </div>
-      {/* ── END SCROLLABLE CONTENT ── */}
 
       <style>{`
         @keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}
