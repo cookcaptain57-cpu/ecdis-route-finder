@@ -763,6 +763,15 @@ const clNow = () => new Date().toTimeString().slice(0,5);
 const clNowFull = () => new Date().toISOString().slice(0,16).replace('T',' ');
 const ACC = VESSEL_COLORS.container.accent;
 
+// ── Per-container model constants (Step 1 addition) ──
+// Used by the new ContainerEntryForm / ContainerListInBay / ContainerSearch
+// components below. These are additive — they do not alter any existing
+// bay-level aggregate field or calculation.
+const DG_CLASSES = ['', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
+const HOLD_DECK_OPTIONS = ['Deck', 'Hold'];
+const CONTAINER_SIZE_OPTIONS = ['20', '40', '45'];
+const CONTAINER_TYPE_OPTIONS = ['GP', 'HC', 'RF', 'OT', 'FR', 'TK'];
+
 // Real-world container vessel bay numbering:
 // - 'odd'  : 20ft bay slots only, step 2  (e.g. 01,03,05...95)
 // - 'even2': 40ft bay slots, step 2       (e.g. 02,04,06...96) - rare, dense 40ft-capable layout
@@ -928,11 +937,110 @@ function SetupWizard({ onSave }) {
             isDG: false, isReefer: false,
             startTime: '', endTime: '', notes: '',
             lashingDone: false,
+            containers: [], // Step 1 addition: optional per-container records for this bay (search/DG/OOG/reefer)
           })),
         });
       }} color={ACC} style={{ width:'100%', marginTop:8, padding:'10px', fontSize:S.sm }}>
         🚀 Start Port Operation
       </Btn>
+    </div>
+  );
+}
+
+// ─── CONTAINER ENTRY FORM (Step 1 addition) ──────────────────────────────────
+// Small inline form for adding a single container record to a bay.
+// Lives inside BayCard's expanded view. Writes via the same onUpdate(idx,'containers',arr)
+// path that every other BayCard field already uses — no new prop wiring needed.
+function ContainerEntryForm({ bay, onAddContainer }) {
+  const [form, setForm] = useState({
+    id: '', weight: '', pod: '', pol: '', size: '20', type: 'GP',
+    dgClass: '', reefer: false, oog: false, holdDeck: 'Deck',
+  });
+  const set = k => e => setForm(f => ({ ...f, [k]: e.target.value }));
+  const toggle = k => setForm(f => ({ ...f, [k]: !f[k] }));
+
+  const submit = () => {
+    if (!form.id.trim()) return;
+    onAddContainer({
+      ...form,
+      id: form.id.trim().toUpperCase(),
+      weight: parseFloat(form.weight) || 0,
+      addedAt: clNowFull(),
+    });
+    setForm({ id: '', weight: '', pod: '', pol: '', size: '20', type: 'GP', dgClass: '', reefer: false, oog: false, holdDeck: 'Deck' });
+  };
+
+  return (
+    <div style={{ background:S.bg3, borderRadius:7, padding:'8px 10px', marginBottom:6 }}>
+      <SectionLabel text="Add Container" color={S.dm} />
+      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'0 8px' }}>
+        <Field label="Container ID" value={form.id} onChange={set('id')} placeholder="MSCU1234567" color={ACC} />
+        <Field label="Weight" value={form.weight} onChange={set('weight')} type="number" placeholder="0" unit="kg" />
+        <Field label="POD" value={form.pod} onChange={set('pod')} placeholder="Port of Discharge" />
+        <Field label="POL" value={form.pol} onChange={set('pol')} placeholder="Port of Loading" />
+        <div style={{ marginBottom:8 }}>
+          <div style={{ color:S.dm, fontSize:S.lb, marginBottom:3 }}>Size (ft)</div>
+          <select value={form.size} onChange={set('size')} style={{ width:'100%', background:S.bg2, color:S.cy, border:`1px solid ${S.bd2}`, borderRadius:5, padding:'5px 6px', fontSize:S.xs }}>
+            {CONTAINER_SIZE_OPTIONS.map(s => <option key={s} value={s}>{s}'</option>)}
+          </select>
+        </div>
+        <div style={{ marginBottom:8 }}>
+          <div style={{ color:S.dm, fontSize:S.lb, marginBottom:3 }}>Type</div>
+          <select value={form.type} onChange={set('type')} style={{ width:'100%', background:S.bg2, color:S.cy, border:`1px solid ${S.bd2}`, borderRadius:5, padding:'5px 6px', fontSize:S.xs }}>
+            {CONTAINER_TYPE_OPTIONS.map(t => <option key={t} value={t}>{t}</option>)}
+          </select>
+        </div>
+        <div style={{ marginBottom:8 }}>
+          <div style={{ color:S.dm, fontSize:S.lb, marginBottom:3 }}>DG Class</div>
+          <select value={form.dgClass} onChange={set('dgClass')} style={{ width:'100%', background:S.bg2, color:form.dgClass?S.rd:S.dm, border:`1px solid ${S.bd2}`, borderRadius:5, padding:'5px 6px', fontSize:S.xs }}>
+            {DG_CLASSES.map(c => <option key={c} value={c}>{c ? `Class ${c}` : '— None —'}</option>)}
+          </select>
+        </div>
+        <div style={{ marginBottom:8 }}>
+          <div style={{ color:S.dm, fontSize:S.lb, marginBottom:3 }}>Hold / Deck</div>
+          <select value={form.holdDeck} onChange={set('holdDeck')} style={{ width:'100%', background:S.bg2, color:S.cy, border:`1px solid ${S.bd2}`, borderRadius:5, padding:'5px 6px', fontSize:S.xs }}>
+            {HOLD_DECK_OPTIONS.map(h => <option key={h} value={h}>{h}</option>)}
+          </select>
+        </div>
+      </div>
+      <div style={{ display:'flex', gap:5, marginBottom:8 }}>
+        {[['reefer','❄ Reefer',S.cy],['oog','📐 OOG',S.or]].map(([k,l,c]) => (
+          <button key={k} onClick={()=>toggle(k)} style={{
+            flex:1, background:form[k]?`${c}20`:'transparent',
+            border:`1px solid ${form[k]?c:S.vd}`, color:form[k]?c:S.dm,
+            borderRadius:5, padding:'5px 4px', fontSize:S.ti, cursor:'pointer', fontWeight:form[k]?700:400,
+          }}>{l}</button>
+        ))}
+      </div>
+      <Btn onClick={submit} color={ACC} style={{ width:'100%' }}>+ Add Container to Bay {bay.bay}</Btn>
+    </div>
+  );
+}
+
+// ─── CONTAINER LIST IN BAY (Step 1 addition) ─────────────────────────────────
+// Displays containers already recorded for this bay, with delete.
+function ContainerListInBay({ bay, onDeleteContainer }) {
+  const containers = bay.containers || [];
+  if (containers.length === 0) {
+    return <div style={{ color:S.vd, fontSize:S.ti, fontStyle:'italic', padding:'4px 2px', marginBottom:6 }}>No containers recorded for this bay yet</div>;
+  }
+  return (
+    <div style={{ marginBottom:6 }}>
+      <SectionLabel text={`Containers in Bay (${containers.length})`} color={S.dm} />
+      <div style={{ maxHeight:160, overflowY:'auto' }}>
+        {containers.map((c, i) => (
+          <div key={c.id + i} style={{ display:'flex', alignItems:'center', gap:6, background:S.bg2, borderRadius:5, padding:'5px 7px', marginBottom:3 }}>
+            <span style={{ color:ACC, fontFamily:'monospace', fontWeight:700, fontSize:S.ti, minWidth:88 }}>{c.id}</span>
+            <span style={{ color:S.dm, fontSize:S.ti }}>{c.size}'{c.type}</span>
+            <span style={{ color:S.dm, fontSize:S.ti }}>{c.holdDeck}</span>
+            {c.dgClass && <Badge text={`DG${c.dgClass}`} color={S.rd} />}
+            {c.reefer && <Badge text="RF" color={S.cy} />}
+            {c.oog && <Badge text="OOG" color={S.or} />}
+            <span style={{ color:S.dm, fontSize:S.ti, marginLeft:'auto' }}>{c.pol||'—'}→{c.pod||'—'}</span>
+            <button onClick={()=>onDeleteContainer(i)} style={{ background:'transparent', border:'none', color:S.rd, cursor:'pointer', fontSize:'0.7rem', flexShrink:0 }}>✕</button>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -957,6 +1065,17 @@ function BayCard({ bay, idx, gantries, onUpdate, movesPerHr }) {
     const cur = bay[key] || 0;
     const next = Math.max(0, cur + delta);
     onUpdate(idx, key, next);
+  };
+
+  // Step 1 additions: add/delete container records for this bay.
+  // Both go through the existing onUpdate(idx, key, val) signature — no new prop.
+  const addContainer = (container) => {
+    const next = [...(bay.containers || []), container];
+    upd('containers', next);
+  };
+  const deleteContainer = (cIdx) => {
+    const next = (bay.containers || []).filter((_, j) => j !== cIdx);
+    upd('containers', next);
   };
 
   const isBg = bay.status === 'inprogress' ? `${S.gd}08`
@@ -987,6 +1106,7 @@ function BayCard({ bay, idx, gantries, onUpdate, movesPerHr }) {
               {bay.isDG     && <span style={{ background:'rgba(255,71,87,0.2)',   color:S.rd, border:`1px solid ${S.rd}44`, borderRadius:3, padding:'0 4px', fontSize:S.ti, fontWeight:700 }}>DG</span>}
               {bay.isReefer && <span style={{ background:'rgba(0,212,255,0.15)', color:S.cy, border:`1px solid ${S.cy}44`, borderRadius:3, padding:'0 4px', fontSize:S.ti, fontWeight:700 }}>RF</span>}
               {bay.crane && <span style={{ color:S.dm, fontSize:S.ti }}>🏗 {bay.crane}</span>}
+              {(bay.containers && bay.containers.length > 0) && <span style={{ color:S.dm, fontSize:S.ti }}>📦 {bay.containers.length}</span>}
             </div>
             <span style={{ color:S.dm, fontSize:S.ti }}>{totalDone}/{totalPlan} mvs</span>
           </div>
@@ -1120,13 +1240,17 @@ function BayCard({ bay, idx, gantries, onUpdate, movesPerHr }) {
               </div>
             ))}
           </div>
-          <div>
+          <div style={{ marginBottom:10 }}>
             <div style={{ color:S.dm, fontSize:S.lb, marginBottom:3 }}>Notes</div>
             <input value={bay.notes} onChange={e=>upd('notes',e.target.value)}
               placeholder="Damage, skip, special instruction…"
               style={{ width:'100%', background:S.bg3, color:S.tx, border:`1px solid ${S.bd2}`,
                 borderRadius:5, padding:'5px 7px', fontSize:S.xs, outline:'none' }}/>
           </div>
+
+          {/* ── Step 1 addition: per-container records for this bay ── */}
+          <ContainerListInBay bay={bay} onDeleteContainer={deleteContainer} />
+          <ContainerEntryForm bay={bay} onAddContainer={addContainer} />
         </div>
       )}
     </div>
@@ -2021,6 +2145,486 @@ function ContainerLashing() {
   );
 }
 
+
+// ─── CONTAINER SEARCH (Step 1 addition) ──────────────────────────────────────
+// Read-only search across all containers recorded across all bays in the
+// current port operation. Reads portOp via the same IndexedDB key used by
+// ContainerLiveOps, since this is a sibling tab rather than a nested child.
+function ContainerSearch() {
+  const SETUP_KEY = 'cargo_container_port_op'; // same key ContainerLiveOps uses — must stay identical
+  const [portOp, setPortOp] = useState(null);
+  const [loaded, setLoaded] = useState(false);
+
+  const [q,        setQ]        = useState('');
+  const [filterBay, setFilterBay] = useState('');
+  const [filterPod, setFilterPod] = useState('');
+  const [filterPol, setFilterPol] = useState('');
+  const [filterDg,  setFilterDg]  = useState('');
+  const [filterReefer, setFilterReefer] = useState(false);
+  const [filterOOG,    setFilterOOG]    = useState(false);
+
+  useEffect(() => {
+    let mounted = true;
+    idbGetCargo(SETUP_KEY, null).then(data => {
+      if (!mounted) return;
+      setPortOp(data);
+      setLoaded(true);
+    });
+    return () => { mounted = false; };
+  }, []);
+
+  if (!loaded) {
+    return (
+      <div style={{ display:'flex', alignItems:'center', justifyContent:'center', padding:'40px 0', color:S.dm, fontSize:S.xs }}>
+        Loading container records…
+      </div>
+    );
+  }
+
+  if (!portOp) {
+    return (
+      <Card>
+        <div style={{ color:S.vd, fontSize:S.xs, textAlign:'center', padding:'16px 0' }}>
+          No port operation set up yet. Configure one under "⚡ Live Cargo Ops" first.
+        </div>
+      </Card>
+    );
+  }
+
+  // Flatten containers across all bays, attaching parent bay/status context.
+  const allContainers = (portOp.bays || []).flatMap(b =>
+    (b.containers || []).map(c => ({ ...c, bay: b.bay, bayStatus: b.status }))
+  );
+
+  const filtered = allContainers.filter(c => {
+    if (q && !c.id.includes(q.toUpperCase())) return false;
+    if (filterBay && c.bay !== filterBay) return false;
+    if (filterPod && !(c.pod || '').toLowerCase().includes(filterPod.toLowerCase())) return false;
+    if (filterPol && !(c.pol || '').toLowerCase().includes(filterPol.toLowerCase())) return false;
+    if (filterDg && c.dgClass !== filterDg) return false;
+    if (filterReefer && !c.reefer) return false;
+    if (filterOOG && !c.oog) return false;
+    return true;
+  });
+
+  const bayOptions = [...new Set((portOp.bays || []).map(b => b.bay))].sort();
+
+  return (
+    <div>
+      <Card style={{ marginBottom: 10 }}>
+        <SectionLabel text="Container Search" color={ACC} />
+        <Field label="Container ID" value={q} onChange={e=>setQ(e.target.value)} placeholder="e.g. MSCU1234567" color={ACC} />
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'0 10px' }}>
+          <div style={{ marginBottom:8 }}>
+            <div style={{ color:S.dm, fontSize:S.lb, marginBottom:3 }}>Bay</div>
+            <select value={filterBay} onChange={e=>setFilterBay(e.target.value)} style={{ width:'100%', background:S.bg3, color:S.cy, border:`1px solid ${S.bd2}`, borderRadius:5, padding:'6px 8px', fontSize:S.xs }}>
+              <option value=''>— Any Bay —</option>
+              {bayOptions.map(b => <option key={b} value={b}>Bay {b}</option>)}
+            </select>
+          </div>
+          <div style={{ marginBottom:8 }}>
+            <div style={{ color:S.dm, fontSize:S.lb, marginBottom:3 }}>DG Class</div>
+            <select value={filterDg} onChange={e=>setFilterDg(e.target.value)} style={{ width:'100%', background:S.bg3, color:filterDg?S.rd:S.cy, border:`1px solid ${S.bd2}`, borderRadius:5, padding:'6px 8px', fontSize:S.xs }}>
+              <option value=''>— Any Class —</option>
+              {DG_CLASSES.filter(c => c).map(c => <option key={c} value={c}>Class {c}</option>)}
+            </select>
+          </div>
+          <Field label="POL" value={filterPol} onChange={e=>setFilterPol(e.target.value)} placeholder="Port of Loading" />
+          <Field label="POD" value={filterPod} onChange={e=>setFilterPod(e.target.value)} placeholder="Port of Discharge" />
+        </div>
+        <div style={{ display:'flex', gap:6 }}>
+          {[['reefer','❄ Reefer Only', filterReefer, setFilterReefer, S.cy],['oog','📐 OOG Only', filterOOG, setFilterOOG, S.or]].map(([k,l,val,setter,c]) => (
+            <button key={k} onClick={()=>setter(v=>!v)} style={{
+              flex:1, background:val?`${c}20`:'transparent',
+              border:`1px solid ${val?c:S.vd}`, color:val?c:S.dm,
+              borderRadius:5, padding:'6px 4px', fontSize:S.xs, cursor:'pointer', fontWeight:val?700:400,
+            }}>{l}</button>
+          ))}
+        </div>
+      </Card>
+
+      <div style={{ color:S.dm, fontSize:S.ti, marginBottom:6 }}>
+        {filtered.length} of {allContainers.length} container record{allContainers.length === 1 ? '' : 's'} match
+      </div>
+
+      <Card>
+        {filtered.length === 0
+          ? <div style={{ color:S.vd, fontSize:S.xs, textAlign:'center', padding:'16px 0', fontStyle:'italic' }}>
+              No containers match these filters
+            </div>
+          : (
+            <div style={{ display:'flex', flexDirection:'column', gap:5 }}>
+              {filtered.map((c, i) => (
+                <div key={c.id + i} style={{ background:S.bg3, borderRadius:7, padding:'8px 10px' }}>
+                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:4, flexWrap:'wrap', gap:4 }}>
+                    <span style={{ color:ACC, fontFamily:'monospace', fontWeight:700, fontSize:S.xs }}>{c.id}</span>
+                    <div style={{ display:'flex', gap:4 }}>
+                      <Badge text={`BAY ${c.bay}`} color={STATUS_COLOR[c.bayStatus] || S.dm} />
+                      {c.dgClass && <Badge text={`DG${c.dgClass}`} color={S.rd} />}
+                      {c.reefer && <Badge text="RF" color={S.cy} />}
+                      {c.oog && <Badge text="OOG" color={S.or} />}
+                    </div>
+                  </div>
+                  <div style={{ display:'flex', gap:14, flexWrap:'wrap', fontSize:S.ti }}>
+                    <div><span style={{ color:S.dm }}>Size: </span><span style={{ color:S.tx }}>{c.size}'{c.type}</span></div>
+                    <div><span style={{ color:S.dm }}>Pos: </span><span style={{ color:S.tx }}>{c.holdDeck}</span></div>
+                    <div><span style={{ color:S.dm }}>Wt: </span><span style={{ color:S.tx }}>{c.weight || 0} kg</span></div>
+                    <div><span style={{ color:S.dm }}>POL: </span><span style={{ color:S.tx }}>{c.pol || '—'}</span></div>
+                    <div><span style={{ color:S.dm }}>POD: </span><span style={{ color:S.tx }}>{c.pod || '—'}</span></div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+      </Card>
+    </div>
+  );
+}
+
+// ─── BAPLIE EDIFACT IMPORT (Step 1.5 addition) ───────────────────────────────
+// Parses a real UN/EDIFACT BAPLIE (D.95B / SMDG 2.2.1) bay-plan message into
+// the bay.containers[] model. Field mapping was derived and verified against
+// a real MSC BAPLIE file plus the official SMDG BAPLIE 2.2.1 user manual.
+// This section is purely additive — it does not alter any existing function.
+
+// BAPLIE segments are terminated by "'" (not newlines). Strip CR/LF first.
+function baplieSplitSegments(rawText) {
+  const cleaned = rawText.replace(/[\r\n]/g, '');
+  return cleaned.split("'").map(s => s.trim()).filter(Boolean);
+}
+
+// Stowage cell code per SMDG ISO-format: BBBRRTT = bay(3) + row(2) + tier(2).
+// Confirmed against real data: tier is always even; tier <=22 => Hold,
+// tier >=70 => Deck (clean gap, no values fall between 23-69).
+function baplieDecodeStowage(code) {
+  const clean = code.split(':')[0];
+  if (clean.length < 7) return null;
+  const bay = clean.substring(0, 3);
+  const row = clean.substring(3, 5);
+  const tier = clean.substring(5, 7);
+  const tierNum = parseInt(tier, 10);
+  const holdDeck = tierNum >= 70 ? 'Deck' : 'Hold';
+  return { bay, row, tier, holdDeck };
+}
+
+// ISO 6346 size/type code, e.g. "45G1", "22R1", "4530".
+function baplieDecodeIsoSizeType(code) {
+  if (!code) return { size: '', type: '' };
+  const lengthChar = code[0];
+  const sizeMap = { '2': '20', '4': '40', 'L': '45', 'M': '45' };
+  const size = sizeMap[lengthChar] || '';
+  const typeChars = code.substring(2, 4);
+  let type = 'GP';
+  if (typeChars.startsWith('R')) type = 'RF';
+  else if (typeChars.startsWith('T')) type = 'TK';
+  else if (typeChars.startsWith('U')) type = 'OT';
+  else if (typeChars.startsWith('P')) type = 'FR';
+  else if (typeChars.startsWith('G')) type = 'GP';
+  return { size, type };
+}
+
+// Main BAPLIE parser. Pure function: text in, structured result out.
+function parseBaplie(rawText) {
+  const segments = baplieSplitSegments(rawText);
+  const containers = [];
+  const warnings = [];
+  let currentPort = '';
+  let nextPort = '';
+  let vesselName = '';
+  let cur = null;
+
+  const pushCur = () => {
+    if (cur && cur.id) containers.push(cur);
+    cur = null;
+  };
+
+  for (const seg of segments) {
+    const fields = seg.split('+');
+    const tag = fields[0];
+
+    if (tag === 'TDT') {
+      const last = fields[fields.length - 1] || '';
+      const parts = last.split(':');
+      vesselName = parts[2] || parts[0] || '';
+    } else if (tag === 'LOC') {
+      const qualifier = fields[1];
+      const locField = fields[2] || '';
+      const locCode = locField.split(':')[0];
+
+      if (qualifier === '5') {
+        currentPort = locCode; // Place of Departure = current port for this snapshot
+      } else if (qualifier === '61') {
+        nextPort = locCode; // Next port of call
+      } else if (qualifier === '147') {
+        pushCur();
+        const pos = baplieDecodeStowage(locField);
+        if (!pos) {
+          warnings.push(`Unparseable stowage code: ${locField}`);
+          cur = { id: '', _skip: true };
+        } else {
+          cur = {
+            id: '', weight: 0, pol: '', pod: '', originalPol: '', finalDestination: '',
+            size: '', type: '', dgClass: '', dgClasses: [], reefer: false, reeferSetTemp: '',
+            reeferRangeMin: '', reeferRangeMax: '', oog: false, oogDims: [],
+            holdDeck: pos.holdDeck, bay: pos.bay, row: pos.row, tier: pos.tier,
+            verifiedWeight: false, fullEmpty: 'full',
+          };
+        }
+      } else if (cur) {
+        if (qualifier === '9' && !cur.pol) cur.pol = locCode;       // Port of Loading
+        else if (qualifier === '11' && !cur.pod) cur.pod = locCode; // Port of Discharge
+        else if (qualifier === '76') cur.originalPol = locCode;     // Original Port of Loading
+        else if (qualifier === '83') cur.finalDestination = locCode; // Place of Delivery
+      }
+    } else if (tag === 'MEA' && cur) {
+      const qual = fields[1]; // 'VGM' = verified gross mass, 'WT' = unverified
+      const valuePart = fields[fields.length - 1] || '';
+      const kg = parseFloat(valuePart.split(':')[1] || valuePart.split(':')[0]);
+      if (!isNaN(kg)) {
+        cur.weight = kg;
+        cur.verifiedWeight = qual === 'VGM';
+      }
+    } else if (tag === 'EQD' && cur) {
+      const id = fields[2];
+      const isoCode = fields[3] || '';
+      const flag = fields[fields.length - 1];
+      cur.id = (id || '').trim().toUpperCase();
+      const st = baplieDecodeIsoSizeType(isoCode);
+      cur.size = st.size;
+      cur.type = st.type;
+      cur.fullEmpty = flag === '4' ? 'empty' : 'full'; // 5=Full, 4=Empty
+    } else if (tag === 'DGS' && cur) {
+      const hazardField = fields[2] || '';
+      const dgClass = hazardField.split(':')[0];
+      const unNoField = fields[3] || '';
+      const unNo = unNoField.split(':')[0];
+      if (dgClass) {
+        cur.dgClasses.push({ class: dgClass, unNo });
+        if (!cur.dgClass) cur.dgClass = dgClass; // primary class = first DGS encountered
+      }
+    } else if (tag === 'TMP' && cur) {
+      const tempField = fields[2] || '';
+      cur.reefer = true;
+      cur.reeferSetTemp = tempField.split(':')[0];
+    } else if (tag === 'RNG' && cur) {
+      const parts = (fields[2] || '').split(':');
+      cur.reeferRangeMin = parts[1] || '';
+      cur.reeferRangeMax = parts[2] || '';
+    } else if (tag === 'DIM' && cur) {
+      const qual = fields[1]; // qualifiers 5-9 = over-length/width/height (OOG)
+      if (['5', '6', '7', '8', '9'].includes(qual)) {
+        cur.oog = true;
+        cur.oogDims.push({ qualifier: qual, raw: fields[2] || '' });
+      }
+    }
+  }
+  pushCur();
+
+  const skipped = containers.filter(c => c._skip).length;
+  const clean = containers.filter(c => !c._skip && c.id);
+
+  return {
+    containers: clean,
+    currentPort,
+    nextPort,
+    vesselName,
+    warnings,
+    skippedCount: skipped,
+    totalParsed: clean.length,
+  };
+}
+
+// Builds a portOp object (same shape SetupWizard produces) from parsed BAPLIE
+// containers. Auto-creates one bay entry per unique bay code found, and sets
+// planLoad/planDisch from containers whose pol/pod match the BAPLIE's current
+// port (LOC+5), per the confirmed import behavior. doneLoad/doneDisch start
+// at 0 — actual progress is still ticked manually as before.
+function buildPortOpFromBaplie(parsed, portName, vesselNameOverride) {
+  const byBay = {};
+  for (const c of parsed.containers) {
+    if (!byBay[c.bay]) byBay[c.bay] = [];
+    byBay[c.bay].push(c);
+  }
+
+  const bayList = Object.keys(byBay).sort().map(bayCode => {
+    const list = byBay[bayCode];
+    const planLoad = list.filter(c => c.pol === parsed.currentPort).length;
+    const planDisch = list.filter(c => c.pod === parsed.currentPort).length;
+    const isDG = list.some(c => c.dgClass);
+    const isReefer = list.some(c => c.reefer);
+    const deckLoad = list.filter(c => c.holdDeck === 'Deck' && c.pol === parsed.currentPort).length;
+    const holdLoad = list.filter(c => c.holdDeck === 'Hold' && c.pol === parsed.currentPort).length;
+    const deckDisch = list.filter(c => c.holdDeck === 'Deck' && c.pod === parsed.currentPort).length;
+    const holdDisch = list.filter(c => c.holdDeck === 'Hold' && c.pod === parsed.currentPort).length;
+
+    return {
+      bay: bayCode,
+      status: 'idle',
+      crane: '',
+      planLoad, planDisch, planRest: 0,
+      doneLoad: 0, doneDisch: 0, doneRest: 0,
+      deckLoad, deckDisch, holdLoad, holdDisch,
+      isDG, isReefer,
+      startTime: '', endTime: '', notes: '',
+      lashingDone: false,
+      containers: list,
+    };
+  });
+
+  return {
+    port: portName || parsed.currentPort || 'Imported Port',
+    vessel: vesselNameOverride || parsed.vesselName || '',
+    bayType: 'custom', customStep: 1,
+    bayFrom: 0, bayTo: 0,
+    gantries: 2, movesPerHr: 25,
+    totalLoad: bayList.reduce((s, b) => s + b.planLoad, 0),
+    totalDisch: bayList.reduce((s, b) => s + b.planDisch, 0),
+    totalRest: 0,
+    createdAt: clNowFull(),
+    bays: bayList,
+  };
+}
+
+// ─── BAPLIE IMPORT UI ─────────────────────────────────────────────────────────
+function BaplieImport() {
+  const SETUP_KEY = 'cargo_container_port_op'; // same key ContainerLiveOps/ContainerSearch use
+  const [fileName, setFileName] = useState('');
+  const [parsed, setParsed] = useState(null);
+  const [error, setError] = useState('');
+  const [importing, setImporting] = useState(false);
+  const [imported, setImported] = useState(false);
+  const fileInputRef = useRef(null);
+
+  const handleFile = (file) => {
+    setError('');
+    setParsed(null);
+    setImported(false);
+    setFileName(file.name);
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const text = e.target.result;
+        const result = parseBaplie(text);
+        if (result.totalParsed === 0) {
+          setError('No containers could be parsed from this file. Is it a valid BAPLIE (.edi/.txt) file?');
+          return;
+        }
+        setParsed(result);
+      } catch (err) {
+        setError('Failed to parse file: ' + (err?.message || String(err)));
+      }
+    };
+    reader.onerror = () => setError('Could not read the file.');
+    reader.readAsText(file);
+  };
+
+  const onFileInputChange = (e) => {
+    const file = e.target.files?.[0];
+    if (file) handleFile(file);
+  };
+
+  const onDrop = (e) => {
+    e.preventDefault();
+    const file = e.dataTransfer.files?.[0];
+    if (file) handleFile(file);
+  };
+
+  const confirmImport = async () => {
+    if (!parsed) return;
+    setImporting(true);
+    const op = buildPortOpFromBaplie(parsed, parsed.currentPort, parsed.vesselName);
+    await idbSetCargo(SETUP_KEY, op); // Replace, per confirmed import behavior
+    setImporting(false);
+    setImported(true);
+  };
+
+  const dgCount = parsed ? parsed.containers.filter(c => c.dgClass).length : 0;
+  const reeferCount = parsed ? parsed.containers.filter(c => c.reefer).length : 0;
+  const oogCount = parsed ? parsed.containers.filter(c => c.oog).length : 0;
+  const emptyCount = parsed ? parsed.containers.filter(c => c.fullEmpty === 'empty').length : 0;
+  const bayCount = parsed ? new Set(parsed.containers.map(c => c.bay)).size : 0;
+  const planLoadCount = parsed ? parsed.containers.filter(c => c.pol === parsed.currentPort).length : 0;
+  const planDischCount = parsed ? parsed.containers.filter(c => c.pod === parsed.currentPort).length : 0;
+
+  return (
+    <div>
+      <Card style={{ marginBottom: 10 }}>
+        <SectionLabel text="Import BAPLIE EDI File" color={ACC} />
+        <div style={{ color: S.dm, fontSize: S.xs, marginBottom: 10, lineHeight: 1.6 }}>
+          Upload a UN/EDIFACT BAPLIE (.edi or .txt) loading plan from your planner.
+          This will replace the current port operation entirely — all bays and
+          containers will be rebuilt from the imported file.
+        </div>
+
+        <div
+          onDrop={onDrop}
+          onDragOver={(e) => e.preventDefault()}
+          onClick={() => fileInputRef.current?.click()}
+          style={{
+            border: `2px dashed ${S.bd2}`, borderRadius: 8, padding: '24px 12px',
+            textAlign: 'center', cursor: 'pointer', background: S.bg3, marginBottom: 10,
+          }}
+        >
+          <div style={{ color: S.cy, fontSize: S.sm, fontWeight: 700, marginBottom: 4 }}>📥 Drop BAPLIE file here, or tap to browse</div>
+          <div style={{ color: S.dm, fontSize: S.ti }}>{fileName || '.edi or .txt'}</div>
+          <input ref={fileInputRef} type="file" accept=".edi,.txt" onChange={onFileInputChange} style={{ display: 'none' }} />
+        </div>
+
+        {error && (
+          <div style={{ background: 'rgba(255,71,87,0.12)', border: `1px solid ${S.rd}`, borderRadius: 6, padding: '8px 10px', color: S.rd, fontSize: S.xs, marginBottom: 8 }}>
+            ⚠ {error}
+          </div>
+        )}
+      </Card>
+
+      {parsed && !imported && (
+        <Card style={{ marginBottom: 10 }}>
+          <SectionLabel text="Parse Summary — Review Before Import" color={S.gd} />
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6, marginBottom: 10 }}>
+            <StatBox label="Containers" value={parsed.totalParsed} color={ACC} />
+            <StatBox label="Bays Found" value={bayCount} color={S.cy} />
+            <StatBox label="Current Port" value={parsed.currentPort || '—'} color={S.gn} />
+            <StatBox label="DG Containers" value={dgCount} color={dgCount > 0 ? S.rd : S.dm} />
+            <StatBox label="Reefer" value={reeferCount} color={reeferCount > 0 ? S.cy : S.dm} />
+            <StatBox label="OOG" value={oogCount} color={oogCount > 0 ? S.or : S.dm} />
+            <StatBox label="Empty Units" value={emptyCount} color={S.dm} />
+            <StatBox label="Loading Here" value={planLoadCount} color={ACC} sub="will set planLoad" />
+            <StatBox label="Discharging Here" value={planDischCount} color={S.or} sub="will set planDisch" />
+          </div>
+          {parsed.vesselName && (
+            <div style={{ color: S.dm, fontSize: S.xs, marginBottom: 6 }}>Vessel: <span style={{ color: S.tx, fontWeight: 600 }}>{parsed.vesselName}</span></div>
+          )}
+          {parsed.nextPort && (
+            <div style={{ color: S.dm, fontSize: S.xs, marginBottom: 6 }}>Next port of call: <span style={{ color: S.tx, fontWeight: 600 }}>{parsed.nextPort}</span></div>
+          )}
+          {parsed.warnings.length > 0 && (
+            <div style={{ background: 'rgba(255,179,0,0.1)', border: `1px solid ${S.gd}44`, borderRadius: 6, padding: '8px 10px', color: S.gd, fontSize: S.xs, marginBottom: 8 }}>
+              ⚠ {parsed.warnings.length} warning(s) during parsing — {parsed.warnings.slice(0, 3).join('; ')}
+            </div>
+          )}
+          <div style={{ background: 'rgba(255,71,87,0.08)', border: `1px solid ${S.rd}44`, borderRadius: 6, padding: '8px 10px', color: S.rd, fontSize: S.xs, marginBottom: 10 }}>
+            ⚠ Importing will REPLACE your current port operation (all existing bays and containers will be cleared and rebuilt from this file).
+          </div>
+          <Btn onClick={confirmImport} color={S.gn} style={{ width: '100%', padding: '10px' }}>
+            {importing ? 'Importing…' : `✓ Confirm Import — Replace Current Port Operation`}
+          </Btn>
+        </Card>
+      )}
+
+      {imported && (
+        <Card>
+          <div style={{ color: S.gn, fontSize: S.sm, fontWeight: 700, textAlign: 'center', padding: '10px 0' }}>
+            ✅ Import complete — {parsed.totalParsed} containers across {bayCount} bays loaded.
+          </div>
+          <div style={{ color: S.dm, fontSize: S.xs, textAlign: 'center' }}>
+            Switch to "⚡ Live Cargo Ops" to view the dashboard, or "🔍 Container Search" to look up containers.
+          </div>
+        </Card>
+      )}
+    </div>
+  );
+}
+
 // ══════════════════════════════════════════════════════════════════════════════
 // GAS CARRIER TABS
 // ══════════════════════════════════════════════════════════════════════════════
@@ -2171,6 +2775,8 @@ const VESSEL_TABS = {
   ],
   container: [
     { id: 'liveops', label: '⚡ Live Cargo Ops',  component: ContainerLiveOps   },
+    { id: 'import',  label: '📥 Import BAPLIE',   component: BaplieImport       },
+    { id: 'search',  label: '🔍 Container Search', component: ContainerSearch  },
     { id: 'oog',     label: '📐 OOG Tracker',     component: ContainerOOG       },
     { id: 'lashing', label: '⚓ Lashing Calc',    component: ContainerLashing   },
   ],
@@ -2252,4 +2858,4 @@ export default function CargoOpsPage({ notify }) {
 
     </div>
   );
-}
+          }
