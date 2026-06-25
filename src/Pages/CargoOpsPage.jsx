@@ -830,6 +830,150 @@ const StatBox = ({ label, value, color, sub }) => (
   </div>
 );
 
+// ─── BAY GRID VIEW (visual row/tier plan, additive) ──────────────────────────
+// Renders a bay's containers as a real row×tier grid, split Deck/Hold, matching
+// the layout convention confirmed from research: tiers >=70 = Deck (sorted
+// high-to-low so the top tier renders at the top), tiers <=22 = Hold (same
+// sort). Rows are whatever values are actually present in the data, sorted to
+// radiate outward from the centerline (00, then 01/02, 03/04, ...).
+// Pure function — no side effects, easy to verify independent of rendering.
+function groupContainersForGrid(containers) {
+  const list = containers || [];
+  const deckList = list.filter(c => parseInt(c.tier, 10) >= 70 || c.holdDeck === 'Deck');
+  const holdList = list.filter(c => !(parseInt(c.tier, 10) >= 70 || c.holdDeck === 'Deck'));
+
+  const buildSection = (items) => {
+    const tiers = [...new Set(items.map(c => c.tier).filter(Boolean))]
+      .sort((a, b) => parseInt(b, 10) - parseInt(a, 10)); // high tier at top
+    const rows = [...new Set(items.map(c => c.row).filter(Boolean))]
+      .sort((a, b) => parseInt(a, 10) - parseInt(b, 10)); // radiate outward (00 first)
+    const cellMap = {};
+    items.forEach(c => { cellMap[`${c.row}_${c.tier}`] = c; });
+    return { tiers, rows, cellMap, items };
+  };
+
+  return { deck: buildSection(deckList), hold: buildSection(holdList) };
+}
+
+const GRID_FILTERS = [
+  ['all', 'All', S.dm],
+  ['dg', 'DG', S.rd],
+  ['reefer', 'Reefer', S.cy],
+  ['oog', 'OOG', S.or],
+];
+
+function GridFilterBar({ active, onChange }) {
+  return (
+    <div style={{ display:'flex', gap:5, marginBottom:8 }}>
+      {GRID_FILTERS.map(([key, label, color]) => (
+        <button key={key} onClick={()=>onChange(key)} style={{
+          flex:1, background:active===key?`${color}20`:'transparent',
+          border:`1px solid ${active===key?color:S.vd}`, color:active===key?color:S.dm,
+          borderRadius:5, padding:'5px 4px', fontSize:S.ti, cursor:'pointer', fontWeight:active===key?700:400,
+        }}>{label}</button>
+      ))}
+    </div>
+  );
+}
+
+function gridCellMatchesFilter(container, filter) {
+  if (!container) return false;
+  if (filter === 'all') return true;
+  if (filter === 'dg') return !!container.dgClass;
+  if (filter === 'reefer') return !!container.reefer;
+  if (filter === 'oog') return !!container.oog;
+  return true;
+}
+
+function gridCellColor(container) {
+  if (!container) return null;
+  if (container.dgClass) return S.rd;
+  if (container.reefer) return S.cy;
+  if (container.oog) return S.or;
+  return ACC;
+}
+
+function BayGridSection({ title, section, filter }) {
+  if (section.tiers.length === 0 || section.rows.length === 0) {
+    return (
+      <div style={{ marginBottom:10 }}>
+        <SectionLabel text={title} color={S.dm} />
+        <div style={{ color:S.vd, fontSize:S.ti, fontStyle:'italic', padding:'6px 0' }}>No {title.toLowerCase()} containers in this bay</div>
+      </div>
+    );
+  }
+  return (
+    <div style={{ marginBottom:10 }}>
+      <SectionLabel text={`${title} (${section.items.length})`} color={S.dm} />
+      <div style={{ overflowX:'auto' }}>
+        <div style={{ display:'inline-block', minWidth:'100%' }}>
+          {/* Row header */}
+          <div style={{ display:'flex', gap:2, marginBottom:2 }}>
+            <div style={{ width:34, flexShrink:0 }} />
+            {section.rows.map(r => (
+              <div key={r} style={{ width:34, flexShrink:0, textAlign:'center', color:S.dm, fontSize:S.ti, fontFamily:'monospace' }}>{r}</div>
+            ))}
+          </div>
+          {/* Tier rows, top (highest tier) to bottom */}
+          {section.tiers.map(tier => (
+            <div key={tier} style={{ display:'flex', gap:2, marginBottom:2 }}>
+              <div style={{ width:34, flexShrink:0, textAlign:'right', color:S.dm, fontSize:S.ti, fontFamily:'monospace', paddingRight:4 }}>{tier}</div>
+              {section.rows.map(r => {
+                const c = section.cellMap[`${r}_${tier}`];
+                const matches = gridCellMatchesFilter(c, filter);
+                const color = gridCellColor(c);
+                return (
+                  <div key={r} title={c ? `${c.id} (${c.size}'${c.type})` : ''} style={{
+                    width:34, height:30, flexShrink:0, borderRadius:4,
+                    background: c ? (matches ? `${color}25` : `${color}08`) : S.bg3,
+                    border: `1px solid ${c ? (matches ? color : S.vd) : S.vd}`,
+                    opacity: c && !matches ? 0.35 : 1,
+                    display:'flex', alignItems:'center', justifyContent:'center',
+                    fontSize:'0.5rem', color: c ? color : S.vd, fontFamily:'monospace', fontWeight:700,
+                    overflow:'hidden',
+                  }}>
+                    {c ? c.id.slice(-4) : ''}
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function BayGridView({ bay }) {
+  const [filter, setFilter] = useState('all');
+  const containers = bay.containers || [];
+
+  if (containers.length === 0) {
+    return (
+      <div style={{ background:S.bg3, borderRadius:7, padding:'16px 12px', textAlign:'center', marginBottom:6 }}>
+        <div style={{ color:S.vd, fontSize:S.xs, fontStyle:'italic' }}>
+          No container-level data — import a BAPLIE or add containers manually to see the grid
+        </div>
+      </div>
+    );
+  }
+
+  const grouped = groupContainersForGrid(containers);
+
+  return (
+    <div style={{ background:S.bg3, borderRadius:7, padding:'10px', marginBottom:6 }}>
+      <GridFilterBar active={filter} onChange={setFilter} />
+      <BayGridSection title="Deck" section={grouped.deck} filter={filter} />
+      <BayGridSection title="Hold" section={grouped.hold} filter={filter} />
+      <div style={{ display:'flex', gap:10, flexWrap:'wrap', marginTop:4 }}>
+        {[['DG',S.rd],['Reefer',S.cy],['OOG',S.or],['Standard',ACC]].map(([l,c])=>(
+          <span key={l} style={{ fontSize:S.ti, color:c }}>■ {l}</span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ─── SETUP WIZARD ────────────────────────────────────────────────────────────
 function SetupWizard({ onSave }) {
   const [port,     setPort]     = useState('');
@@ -1048,6 +1192,7 @@ function ContainerListInBay({ bay, onDeleteContainer }) {
 // ─── BAY CARD ────────────────────────────────────────────────────────────────
 function BayCard({ bay, idx, gantries, onUpdate, movesPerHr }) {
   const [expanded, setExpanded] = useState(false);
+  const [viewMode, setViewMode] = useState('counters'); // 'counters' | 'grid' — additive, default unchanged behavior
   const col = STATUS_COLOR[bay.status] || S.vd;
   const totalPlan = bay.planLoad + bay.planDisch + bay.planRest;
   const totalDone = bay.doneLoad + bay.doneDisch + bay.doneRest;
@@ -1152,6 +1297,21 @@ function BayCard({ bay, idx, gantries, onUpdate, movesPerHr }) {
             ))}
           </div>
 
+          {/* View mode toggle: Counters (existing) vs Grid (visual row/tier plan) */}
+          <div style={{ display:'flex', gap:4, marginBottom:8 }}>
+            {[['counters','📋 Counters'],['grid','🗺 Grid View']].map(([v,l]) => (
+              <button key={v} onClick={()=>setViewMode(v)} style={{
+                flex:1, background:viewMode===v?`${ACC}20`:'transparent',
+                border:`1px solid ${viewMode===v?ACC:S.vd}`, color:viewMode===v?ACC:S.dm,
+                borderRadius:5, padding:'5px 4px', fontSize:S.ti, cursor:'pointer', fontWeight:viewMode===v?700:400,
+              }}>{l}</button>
+            ))}
+          </div>
+
+          {viewMode === 'grid' && <BayGridView bay={bay} />}
+
+          {viewMode === 'counters' && (
+            <>
           {/* Crane + flags */}
           <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'0 10px', marginBottom:6 }}>
             <div>
@@ -1251,6 +1411,8 @@ function BayCard({ bay, idx, gantries, onUpdate, movesPerHr }) {
           {/* ── Step 1 addition: per-container records for this bay ── */}
           <ContainerListInBay bay={bay} onDeleteContainer={deleteContainer} />
           <ContainerEntryForm bay={bay} onAddContainer={addContainer} />
+            </>
+          )}
         </div>
       )}
     </div>
@@ -2858,4 +3020,4 @@ export default function CargoOpsPage({ notify }) {
 
     </div>
   );
-          }
+                   }
