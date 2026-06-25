@@ -44,6 +44,8 @@ import PortShorePage           from "./Pages/PortShorePage";
 import InfoPage                from "./Pages/InfoPage";
 import SeaDiaryPage            from "./Pages/SeaDiaryPage";
 import CargoOpsPage            from "./Pages/CargoOpsPage";
+// ── NEW ──────────────────────────────────────────────────────────────────────
+import OLPAssistantPage        from "./Pages/OLPAssistantPage";
 
 const S = `
   @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700;900&family=Exo+2:wght@300;400;500;600&display=swap');
@@ -276,13 +278,8 @@ export default function App() {
   const [isOnline, setIsOnline]               = useState(navigator.onLine);
   const [theme, setTheme]                     = useState(() => localStorage.getItem('nav_theme') || 'dark');
 
-  // ── PWA Install prompt ──────────────────────────────────────────────────
   const [installPrompt, setInstallPrompt]     = useState(null);
 
-  // ── FIX: proper navigation history STACK instead of a single prevTab. ──
-  // Every tab visited (except duplicates of the current top) gets pushed.
-  // Back pops the last entry and navigates there. When the stack empties,
-  // Back has nothing left to do and the button hides — user is at Dashboard.
   const [tabHistory, setTabHistory]           = useState([]);
 
   const [showNotifPanel, setShowNotifPanel]   = useState(false);
@@ -301,7 +298,8 @@ export default function App() {
   const isAdmin = user?.email === ADMIN_EMAIL;
   const notify  = (msg, type = 'success') => setNotif({ msg, type, key: Date.now() });
 
-  const PUBLIC_TABS = new Set(['home', 'login', 'info']);
+  // ── 'olp' added to PUBLIC_TABS — no login required ──
+  const PUBLIC_TABS = new Set(['home', 'login', 'info', 'olp']);
 
   const applyPortData = (d3) => {
     if (!Array.isArray(d3) || d3.length === 0) return;
@@ -475,7 +473,6 @@ export default function App() {
     return () => { window.removeEventListener('online', on); window.removeEventListener('offline', off); };
   }, []);
 
-  // ── PWA install prompt listener ─────────────────────────────────────────
   useEffect(() => {
     const handler = (e) => {
       e.preventDefault();
@@ -551,6 +548,8 @@ export default function App() {
     { k:'portshore',   i:'🏖', l:'Port & Shore' },
     { k:'seadiary',    i:'📔', l:'Sea Diary' },
     { k:'cargoops',    i:'🚢', l:'Cargo Ops' },
+    // ── NEW ──────────────────────────────────────────────────────────────
+    { k:'olp',         i:'🎓', l:'OLP Assistant' },
     ...(user ? [{ k:'account', i:'👤', l:'My Account' }] : []),
     ...(isAdmin ? [{ k:'admin', i:'🛡', l:'Admin' }] : []),
     { k:'info', i:'ℹ️', l:'Help & Info' },
@@ -558,9 +557,6 @@ export default function App() {
 
   const handleSearch = (q) => { setSearchQ(q); setTab('routes'); setMenuOpen(false); };
 
-  // ── FIX: switchTab now pushes onto a real history stack. ──
-  // Navigating to 'home' explicitly clears the stack (Dashboard is the root).
-  // Navigating to the SAME tab you're already on does not push a duplicate.
   const switchTab = k => {
     if (!user && !PUBLIC_TABS.has(k) && k !== 'login') {
       setTab('login'); setMenuOpen(false);
@@ -582,10 +578,6 @@ export default function App() {
     }
   };
 
-  // ── FIX: goBack pops the history stack one step at a time. ──
-  // Each click walks back through the actual path taken (Charts -> Planner ->
-  // Routes -> Dashboard), not bouncing between just the last two tabs.
-  // Once the stack is empty, this lands on / stays at 'home'.
   const goBack = () => {
     setTabHistory(h => {
       if (h.length === 0) { setTab('home'); return h; }
@@ -649,7 +641,6 @@ export default function App() {
             <div className="nav-controls">
               <div className="sd" />
 
-              {/* ── PWA Install Button ── */}
               {installPrompt && (
                 <button onClick={handleInstallApp}
                   style={{ background:'linear-gradient(135deg,var(--cyan),var(--blue))',
@@ -698,7 +689,6 @@ export default function App() {
               <span style={{ fontSize:'1rem' }}>{t.i}</span> {t.l}
             </button>
           ))}
-          {/* Install button in mobile menu too */}
           {installPrompt && (
             <button className="mtab mtab-full"
               style={{ background:'linear-gradient(135deg,rgba(0,180,216,0.15),rgba(21,101,192,0.15))',
@@ -747,6 +737,8 @@ export default function App() {
                 {t.k==='sights'   && <span style={{ marginLeft:'auto', padding:'1px 5px', borderRadius:4, fontSize:'0.5rem', background:'rgba(240,165,0,0.15)', color:'var(--gold)', border:'1px solid rgba(240,165,0,0.25)', fontWeight:700, flexShrink:0 }}>NEW</span>}
                 {t.k==='seadiary' && <span style={{ marginLeft:'auto', padding:'1px 5px', borderRadius:4, fontSize:'0.5rem', background:'rgba(0,180,216,0.15)', color:'var(--cyan)', border:'1px solid rgba(0,180,216,0.25)', fontWeight:700, flexShrink:0 }}>NEW</span>}
                 {t.k==='cargoops' && <span style={{ marginLeft:'auto', padding:'1px 5px', borderRadius:4, fontSize:'0.5rem', background:'rgba(245,158,11,0.15)', color:'#F59E0B', border:'1px solid rgba(245,158,11,0.25)', fontWeight:700, flexShrink:0 }}>NEW</span>}
+                {/* ── NEW badge for OLP ── */}
+                {t.k==='olp'      && <span style={{ marginLeft:'auto', padding:'1px 5px', borderRadius:4, fontSize:'0.5rem', background:'rgba(124,58,237,0.15)', color:'#a78bfa', border:'1px solid rgba(124,58,237,0.3)', fontWeight:700, flexShrink:0 }}>NEW</span>}
               </button>
             ))}
             {user && (
@@ -801,8 +793,6 @@ export default function App() {
               </div>
             )}
 
-            {/* ── FIX: Back button now uses goBack() (history stack) instead
-                of switchTab(prevTab). Shows whenever there's history to pop. ── */}
             {tab!=='home' && tabHistory.length>0 && (
               <div style={{ padding:'8px 16px 0', flexShrink:0 }}>
                 <button className="btn btn-secondary" style={{ padding:'5px 12px', fontSize:'0.72rem', display:'flex', alignItems:'center', gap:6 }}
@@ -841,7 +831,7 @@ export default function App() {
               </div>
             )}
 
-            {tab==='home' && <HomePage routes={routes} charts={charts} onSearch={handleSearch} setTab={switchTab} user={user} portsDb={portsDb} userProfile={userProfile} installPrompt={installPrompt} onInstallApp={handleInstallApp} />}
+            {tab==='home'        && <HomePage routes={routes} charts={charts} onSearch={handleSearch} setTab={switchTab} user={user} portsDb={portsDb} userProfile={userProfile} installPrompt={installPrompt} onInstallApp={handleInstallApp} />}
             {tab==='routes'      && <RoutesPage searchQuery={searchQ} notify={notify} user={user} setTab={switchTab} sheetRoutes={sheetRoutes} sheetLoading={routesLoading} />}
             {tab==='charts'      && <ChartsPage notify={notify} user={user} setTab={switchTab} isAdmin={isAdmin} sheetCharts={sheetCharts} sheetLoading={chartsLoading} />}
             {tab==='planner'     && <RoutePlannerPage notify={notify} sheetRoutes={[...routes,...sheetRoutes]} portsDb={portsDb} />}
@@ -864,6 +854,8 @@ export default function App() {
             {tab==='portshore'   && <PortShorePage user={user} onNavigate={switchTab} />}
             {tab==='seadiary'    && user && <SeaDiaryPage user={user} notify={notify} portsDb={portsDb} />}
             {tab==='cargoops'    && user && <CargoOpsPage notify={notify} />}
+            {/* ── NEW OLP Assistant ── */}
+            {tab==='olp'         && <OLPAssistantPage />}
             {tab==='login'       && <LoginPage notify={notify} onLogin={(u, redirectTo, isNew, userName, userRank) => {
               setUser(u); setTab(redirectTo || 'home');
               if (!sessionStorage.getItem('welcome_shown')) {
