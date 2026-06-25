@@ -279,7 +279,12 @@ export default function App() {
   // ── PWA Install prompt ──────────────────────────────────────────────────
   const [installPrompt, setInstallPrompt]     = useState(null);
 
-  const [prevTab, setPrevTab]                 = useState(null);
+  // ── FIX: proper navigation history STACK instead of a single prevTab. ──
+  // Every tab visited (except duplicates of the current top) gets pushed.
+  // Back pops the last entry and navigates there. When the stack empties,
+  // Back has nothing left to do and the button hides — user is at Dashboard.
+  const [tabHistory, setTabHistory]           = useState([]);
+
   const [showNotifPanel, setShowNotifPanel]   = useState(false);
   const [notifications, setNotifications]     = useState([]);
   const [readNotifIds, setReadNotifIds]       = useState(() => {
@@ -553,18 +558,43 @@ export default function App() {
 
   const handleSearch = (q) => { setSearchQ(q); setTab('routes'); setMenuOpen(false); };
 
+  // ── FIX: switchTab now pushes onto a real history stack. ──
+  // Navigating to 'home' explicitly clears the stack (Dashboard is the root).
+  // Navigating to the SAME tab you're already on does not push a duplicate.
   const switchTab = k => {
     if (!user && !PUBLIC_TABS.has(k) && k !== 'login') {
       setTab('login'); setMenuOpen(false);
       sessionStorage.setItem('intendedTab', k); return;
     }
-    setPrevTab(tab); setTab(k); setMenuOpen(false);
+    if (k !== tab) {
+      if (k === 'home') {
+        setTabHistory([]);
+      } else {
+        setTabHistory(h => [...h, tab]);
+      }
+    }
+    setTab(k); setMenuOpen(false);
     const navTabs = ['routes', 'planner', 'navmode'];
     if (navTabs.includes(k) && !sessionStorage.getItem(`navdisc_${k}`)) {
       sessionStorage.setItem(`navdisc_${k}`, '1');
       setNavDiscBanner(true);
       setTimeout(() => setNavDiscBanner(false), 7000);
     }
+  };
+
+  // ── FIX: goBack pops the history stack one step at a time. ──
+  // Each click walks back through the actual path taken (Charts -> Planner ->
+  // Routes -> Dashboard), not bouncing between just the last two tabs.
+  // Once the stack is empty, this lands on / stays at 'home'.
+  const goBack = () => {
+    setTabHistory(h => {
+      if (h.length === 0) { setTab('home'); return h; }
+      const next = [...h];
+      const target = next.pop();
+      setTab(target);
+      return next;
+    });
+    setMenuOpen(false);
   };
 
   const isPlannerFull = tab === 'planner' || tab === 'navmode';
@@ -771,10 +801,12 @@ export default function App() {
               </div>
             )}
 
-            {tab!=='home' && prevTab && (
+            {/* ── FIX: Back button now uses goBack() (history stack) instead
+                of switchTab(prevTab). Shows whenever there's history to pop. ── */}
+            {tab!=='home' && tabHistory.length>0 && (
               <div style={{ padding:'8px 16px 0', flexShrink:0 }}>
                 <button className="btn btn-secondary" style={{ padding:'5px 12px', fontSize:'0.72rem', display:'flex', alignItems:'center', gap:6 }}
-                  onClick={() => switchTab(prevTab)}>← Back</button>
+                  onClick={goBack}>← Back</button>
               </div>
             )}
 
@@ -904,4 +936,4 @@ export default function App() {
       </div>
     </>
   );
-            }
+}
