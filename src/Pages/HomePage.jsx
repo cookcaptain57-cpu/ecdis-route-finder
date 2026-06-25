@@ -90,7 +90,7 @@ function MaritimeAIWidget() {
     if (isOpen) setTimeout(() => inputRef.current?.focus(), 100);
   }, [isOpen]);
 
-  // ── sendMessage — OpenRouter API (DIAGNOSTIC MODE: shows real error) ────────
+  // ── sendMessage — OpenRouter API ──────────────────────────────────────────
   const sendMessage = async (text) => {
     const question = (text || input).trim();
     if (!question || loading) return;
@@ -102,11 +102,6 @@ function MaritimeAIWidget() {
     setStreamText('');
 
     try {
-      // DIAGNOSTIC: check if key even exists on the client
-      if (!_K) {
-        throw new Error('REACT_APP_OR_KEY is undefined in the browser bundle. Env var was not injected at build time.');
-      }
-
       const response = await fetch(_U, {
         method:'POST',
         headers:{ 'Content-Type':'application/json', 'Authorization':`Bearer ${_K}` },
@@ -119,12 +114,7 @@ function MaritimeAIWidget() {
         }),
       });
 
-      // DIAGNOSTIC: surface real HTTP status + body instead of swallowing it
-      if (!response.ok) {
-        let errBody = '';
-        try { errBody = await response.text(); } catch {}
-        throw new Error(`HTTP ${response.status} ${response.statusText} — ${errBody.slice(0, 300)}`);
-      }
+      if (!response.ok) throw new Error(`${response.status}`);
 
       const reader  = response.body.getReader();
       const decoder = new TextDecoder();
@@ -145,9 +135,8 @@ function MaritimeAIWidget() {
       }
       setMessages(prev => [...prev, { role:'assistant', content: fullText || 'No response. Please try again.' }]);
       setStreamText('');
-    } catch (err) {
-      // DIAGNOSTIC: show the real error message instead of generic text
-      setMessages(prev => [...prev, { role:'assistant', content: `⚠️ DEBUG ERROR: ${err.message}` }]);
+    } catch {
+      setMessages(prev => [...prev, { role:'assistant', content:'⚠️ Could not connect. Please check your connection and try again.' }]);
       setStreamText('');
     } finally { setLoading(false); }
   };
