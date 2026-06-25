@@ -473,20 +473,44 @@ export async function buildProRoute(from,to,vesselParams={},canalPref='auto'){
   const canalInfo=checkCanalPassage(fromObj,toObj,{draft,beam,loa,airDraft});
 
   // ── 1. Hardcoded route table — proven correct for major routes ───────────────
-  // Must be FIRST: covers MUM-SIN, ROT-SIN, etc with correct realistic paths
+  // Tries direct ID match first, then proximity-based ID resolution
   {
-    const wps=buildAutoRoute(fromObj.id,toObj.id);
-    if(wps&&wps.length>1){
-      const result2={waypoints:wps,totalNM:wps[wps.length-1]?.totalNM||0,source:'route-table'};
-      // Anchor exact coords
-      result2.waypoints[0]={...result2.waypoints[0],lat:fromObj.lat,lon:fromObj.lon,name:fromObj.name};
-      result2.waypoints[result2.waypoints.length-1]={...result2.waypoints[result2.waypoints.length-1],lat:toObj.lat,lon:toObj.lon,name:toObj.name};
-      const wp2=recalcWaypoints(result2.waypoints);
-      const nm2=wp2[wp2.length-1]?.totalNM||0;
-      if(nm2>50){
-        const canalInfo2=checkCanalPassage(fromObj,toObj,{draft,beam,loa,airDraft});
-        const canalMsgs2=canalInfo2.map(c=>c.status==='OK'?'✅ '+c.canal+': vessel fits':'🚫 '+c.canal+': BLOCKED — '+c.reason+' — '+c.alternative);
-        return{waypoints:wp2,totalNM:nm2,canalInfo:canalInfo2,confidence:'HIGH — validated route table',routeSource:'route-table',approachStartIdx:wp2.length-1,warnings:['⚠ Route NOT certified for navigation. Verify with official ENC.',...canalMsgs2],via:canalPref,vesselParams:{draft,beam,loa,airDraft,vesselType},etaAt12kn:(nm2/12).toFixed(1),etaAt15kn:(nm2/15).toFixed(1)};
+    // Known port coordinates for route table ID resolution
+    const _RT_PORTS={
+      SIN:{lat:1.29,lon:103.85},ROT:{lat:51.92,lon:4.48},MUM:{lat:18.93,lon:72.83},
+      DXB:{lat:25.05,lon:55.13},SHA:{lat:31.23,lon:121.47},HKG:{lat:22.29,lon:114.16},
+      YOK:{lat:35.45,lon:139.65},NYK:{lat:40.65,lon:-74.07},BUS:{lat:35.10,lon:129.04},
+      CHE:{lat:13.08,lon:80.29},KAR:{lat:24.86,lon:67.01},COL:{lat:6.94,lon:79.85},
+      JAK:{lat:-6.11,lon:106.88},SYD:{lat:-33.86,lon:151.21},PSD:{lat:31.26,lon:32.31},
+      MOM:{lat:-4.05,lon:39.67},LAX:{lat:33.74,lon:-118.27},SHA:{lat:31.23,lon:121.47},
+    };
+    // Resolve port obj to route table ID (by direct ID or by proximity)
+    const _resolveId=(portObj)=>{
+      if(_RT_PORTS[portObj.id])return portObj.id;
+      // Find nearest known port within 60NM
+      let bestId=null,bestDist=60;
+      for(const[id,pos] of Object.entries(_RT_PORTS)){
+        const d=haversine(portObj.lat,portObj.lon,pos.lat,pos.lon);
+        if(d<bestDist){bestDist=d;bestId=id;}
+      }
+      return bestId;
+    };
+    const fromId=_resolveId(fromObj);
+    const toId=_resolveId(toObj);
+    if(fromId&&toId){
+      const wps=buildAutoRoute(fromId,toId);
+      if(wps&&wps.length>1){
+        const wp2First={...wps[0],lat:fromObj.lat,lon:fromObj.lon,name:fromObj.name};
+        const wp2Last={...wps[wps.length-1],lat:toObj.lat,lon:toObj.lon,name:toObj.name};
+        const wp2arr=[wp2First,...wps.slice(1,-1),wp2Last];
+        const wp2=recalcWaypoints(wp2arr);
+        const nm2=wp2[wp2.length-1]?.totalNM||0;
+        if(nm2>50){
+          const canalInfo2=checkCanalPassage(fromObj,toObj,{draft,beam,loa,airDraft});
+          const canalMsgs2=canalInfo2.map(c=>c.status==='OK'?'✅ '+c.canal+': vessel fits':'🚫 '+c.canal+': BLOCKED — '+c.reason+' — '+c.alternative);
+          console.log('[Router] Route table: '+fromId+'->'+toId+' ('+nm2.toFixed(0)+' NM)');
+          return{waypoints:wp2,totalNM:nm2,canalInfo:canalInfo2,confidence:'HIGH — validated route table',routeSource:'route-table',approachStartIdx:wp2.length-1,warnings:['⚠ Route NOT certified for navigation. Verify with official ENC.',...canalMsgs2],via:canalPref,vesselParams:{draft,beam,loa,airDraft,vesselType},etaAt12kn:(nm2/12).toFixed(1),etaAt15kn:(nm2/15).toFixed(1)};
+        }
       }
     }
   }
