@@ -764,7 +764,7 @@ const clNowFull = () => new Date().toISOString().slice(0,16).replace('T',' ');
 const ACC = VESSEL_COLORS.container.accent;
 
 // ── Per-container model constants (Step 1 addition) ──
-// Used by the new ContainerEntryForm / ContainerListInBay / ContainerSearch
+// Used by ContainerSearch, BayGridView, and the lashing/reefer/OOG status views.
 // components below. These are additive — they do not alter any existing
 // bay-level aggregate field or calculation.
 const DG_CLASSES = ['', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
@@ -837,6 +837,47 @@ const StatBox = ({ label, value, color, sub }) => (
 // sort). Rows are whatever values are actually present in the data, sorted to
 // radiate outward from the centerline (00, then 01/02, 03/04, ...).
 // Pure function — no side effects, easy to verify independent of rendering.
+// ─── MASTER-BAY GROUPING (shared across grid, lashing, reefer, OOG) ─────────
+// Real container vessels: even bay numbers are 40ft slots; the odd bays
+// immediately before/after share the same physical deck space (e.g. bay 22
+// is one 40ft slot occupying the same footprint as 20ft bays 21 + 23).
+// This groups the flat bay list into "master bay" units keyed by the even
+// (40ft) bay number, each holding its own bay plus up to two 20ft neighbors.
+// Bays that don't fit this odd/even adjacency (e.g. unusual numbering from
+// an import) are kept as their own single-bay group so nothing is dropped.
+function groupBaysByMasterBay(bays) {
+  const byNumber = {};
+  bays.forEach(b => { byNumber[parseInt(b.bay, 10)] = b; });
+
+  const used = new Set();
+  const groups = [];
+
+  // Pass 1: even bays with odd neighbors present become a master group.
+  bays.forEach(b => {
+    const n = parseInt(b.bay, 10);
+    if (isNaN(n) || n % 2 !== 0) return; // only even (40ft) bays anchor a group
+    if (used.has(b.bay)) return;
+    const oddBefore = byNumber[n - 1];
+    const oddAfter = byNumber[n + 1];
+    const members = [b];
+    if (oddBefore) members.push(oddBefore);
+    if (oddAfter) members.push(oddAfter);
+    members.forEach(m => used.add(m.bay));
+    groups.push({ masterBay: b.bay, fortyFt: b, twentyFt: [oddBefore, oddAfter].filter(Boolean), members });
+  });
+
+  // Pass 2: anything left over (odd bays with no even neighbor, or odd-only
+  // numbering schemes) becomes its own single-bay group.
+  bays.forEach(b => {
+    if (used.has(b.bay)) return;
+    used.add(b.bay);
+    groups.push({ masterBay: b.bay, fortyFt: null, twentyFt: [b], members: [b] });
+  });
+
+  groups.sort((a, b) => parseInt(a.masterBay, 10) - parseInt(b.masterBay, 10));
+  return groups;
+}
+
 function groupContainersForGrid(containers) {
   const list = containers || [];
   const deckList = list.filter(c => parseInt(c.tier, 10) >= 70 || c.holdDeck === 'Deck');
@@ -893,7 +934,7 @@ function gridCellColor(container) {
   return ACC;
 }
 
-function BayGridSection({ title, section, filter }) {
+function BayGridSection({ title, section, filter, onCellClick }) {
   if (section.tiers.length === 0 || section.rows.length === 0) {
     return (
       <div style={{ marginBottom:10 }}>
@@ -922,17 +963,21 @@ function BayGridSection({ title, section, filter }) {
                 const c = section.cellMap[`${r}_${tier}`];
                 const matches = gridCellMatchesFilter(c, filter);
                 const color = gridCellColor(c);
+                // Cell shows the container's POD code (real destination port), not the container ID.
+                const podLabel = c ? (c.pod || '—') : '';
                 return (
-                  <div key={r} title={c ? `${c.id} (${c.size}'${c.type})` : ''} style={{
+                  <div key={r} title={c ? `${c.id} → POD ${c.pod || '—'} (${c.size}'${c.type})` : ''}
+                    onClick={() => c && onCellClick && onCellClick(c)}
+                    style={{
                     width:34, height:30, flexShrink:0, borderRadius:4,
                     background: c ? (matches ? `${color}25` : `${color}08`) : S.bg3,
                     border: `1px solid ${c ? (matches ? color : S.vd) : S.vd}`,
                     opacity: c && !matches ? 0.35 : 1,
                     display:'flex', alignItems:'center', justifyContent:'center',
-                    fontSize:'0.5rem', color: c ? color : S.vd, fontFamily:'monospace', fontWeight:700,
-                    overflow:'hidden',
+                    fontSize:'0.42rem', color: c ? color : S.vd, fontFamily:'monospace', fontWeight:700,
+                    overflow:'hidden', cursor: c ? 'pointer' : 'default',
                   }}>
-                    {c ? c.id.slice(-4) : ''}
+                    {podLabel}
                   </div>
                 );
               })}
@@ -944,7 +989,7 @@ function BayGridSection({ title, section, filter }) {
   );
 }
 
-function BayGridView({ bay }) {
+function BayGridView({ bay, onCellClick }) {
   const [filter, setFilter] = useState('all');
   const containers = bay.containers || [];
 
@@ -952,7 +997,7 @@ function BayGridView({ bay }) {
     return (
       <div style={{ background:S.bg3, borderRadius:7, padding:'16px 12px', textAlign:'center', marginBottom:6 }}>
         <div style={{ color:S.vd, fontSize:S.xs, fontStyle:'italic' }}>
-          No container-level data — import a BAPLIE or add containers manually to see the grid
+          No container-level data for this bay yet — import a loading plan (BAPLIE or MSC XML) to see the grid
         </div>
       </div>
     );
@@ -963,8 +1008,8 @@ function BayGridView({ bay }) {
   return (
     <div style={{ background:S.bg3, borderRadius:7, padding:'10px', marginBottom:6 }}>
       <GridFilterBar active={filter} onChange={setFilter} />
-      <BayGridSection title="Deck" section={grouped.deck} filter={filter} />
-      <BayGridSection title="Hold" section={grouped.hold} filter={filter} />
+      <BayGridSection title="Deck" section={grouped.deck} filter={filter} onCellClick={onCellClick} />
+      <BayGridSection title="Hold" section={grouped.hold} filter={filter} onCellClick={onCellClick} />
       <div style={{ display:'flex', gap:10, flexWrap:'wrap', marginTop:4 }}>
         {[['DG',S.rd],['Reefer',S.cy],['OOG',S.or],['Standard',ACC]].map(([l,c])=>(
           <span key={l} style={{ fontSize:S.ti, color:c }}>■ {l}</span>
@@ -1091,136 +1136,120 @@ function SetupWizard({ onSave }) {
   );
 }
 
-// ─── CONTAINER ENTRY FORM (Step 1 addition) ──────────────────────────────────
-// Small inline form for adding a single container record to a bay.
-// Lives inside BayCard's expanded view. Writes via the same onUpdate(idx,'containers',arr)
-// path that every other BayCard field already uses — no new prop wiring needed.
-function ContainerEntryForm({ bay, onAddContainer }) {
-  const [form, setForm] = useState({
-    id: '', weight: '', pod: '', pol: '', size: '20', type: 'GP',
-    dgClass: '', reefer: false, oog: false, holdDeck: 'Deck',
-  });
-  const set = k => e => setForm(f => ({ ...f, [k]: e.target.value }));
-  const toggle = k => setForm(f => ({ ...f, [k]: !f[k] }));
-
-  const submit = () => {
-    if (!form.id.trim()) return;
-    onAddContainer({
-      ...form,
-      id: form.id.trim().toUpperCase(),
-      weight: parseFloat(form.weight) || 0,
-      addedAt: clNowFull(),
-    });
-    setForm({ id: '', weight: '', pod: '', pol: '', size: '20', type: 'GP', dgClass: '', reefer: false, oog: false, holdDeck: 'Deck' });
-  };
-
+// ─── CONTAINER DETAIL MODAL ───────────────────────────────────────────────────
+// Shown when a grid cell is tapped. Read-only — full info for one container.
+function ContainerDetailModal({ container, onClose }) {
+  if (!container) return null;
+  const c = container;
   return (
-    <div style={{ background:S.bg3, borderRadius:7, padding:'8px 10px', marginBottom:6 }}>
-      <SectionLabel text="Add Container" color={S.dm} />
-      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'0 8px' }}>
-        <Field label="Container ID" value={form.id} onChange={set('id')} placeholder="MSCU1234567" color={ACC} />
-        <Field label="Weight" value={form.weight} onChange={set('weight')} type="number" placeholder="0" unit="kg" />
-        <Field label="POD" value={form.pod} onChange={set('pod')} placeholder="Port of Discharge" />
-        <Field label="POL" value={form.pol} onChange={set('pol')} placeholder="Port of Loading" />
-        <div style={{ marginBottom:8 }}>
-          <div style={{ color:S.dm, fontSize:S.lb, marginBottom:3 }}>Size (ft)</div>
-          <select value={form.size} onChange={set('size')} style={{ width:'100%', background:S.bg2, color:S.cy, border:`1px solid ${S.bd2}`, borderRadius:5, padding:'5px 6px', fontSize:S.xs }}>
-            {CONTAINER_SIZE_OPTIONS.map(s => <option key={s} value={s}>{s}'</option>)}
-          </select>
+    <div onClick={onClose} style={{
+      position:'fixed', inset:0, background:'rgba(0,0,0,0.6)', zIndex:1000,
+      display:'flex', alignItems:'center', justifyContent:'center', padding:16,
+    }}>
+      <div onClick={e=>e.stopPropagation()} style={{
+        background:S.bg2, border:`1px solid ${S.bd}`, borderRadius:10,
+        padding:'16px', maxWidth:340, width:'100%', maxHeight:'80vh', overflowY:'auto',
+      }}>
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:10 }}>
+          <span style={{ color:ACC, fontFamily:'monospace', fontWeight:900, fontSize:S.sm }}>{c.id}</span>
+          <button onClick={onClose} style={{ background:'transparent', border:'none', color:S.dm, fontSize:'1rem', cursor:'pointer' }}>✕</button>
         </div>
-        <div style={{ marginBottom:8 }}>
-          <div style={{ color:S.dm, fontSize:S.lb, marginBottom:3 }}>Type</div>
-          <select value={form.type} onChange={set('type')} style={{ width:'100%', background:S.bg2, color:S.cy, border:`1px solid ${S.bd2}`, borderRadius:5, padding:'5px 6px', fontSize:S.xs }}>
-            {CONTAINER_TYPE_OPTIONS.map(t => <option key={t} value={t}>{t}</option>)}
-          </select>
+        <div style={{ display:'flex', gap:5, flexWrap:'wrap', marginBottom:10 }}>
+          {c.dgClass && <Badge text={`DG Class ${c.dgClass}`} color={S.rd} />}
+          {c.reefer && <Badge text="Reefer" color={S.cy} />}
+          {c.oog && <Badge text="OOG" color={S.or} />}
+          {c.fullEmpty === 'empty' && <Badge text="Empty" color={S.dm} />}
         </div>
-        <div style={{ marginBottom:8 }}>
-          <div style={{ color:S.dm, fontSize:S.lb, marginBottom:3 }}>DG Class</div>
-          <select value={form.dgClass} onChange={set('dgClass')} style={{ width:'100%', background:S.bg2, color:form.dgClass?S.rd:S.dm, border:`1px solid ${S.bd2}`, borderRadius:5, padding:'5px 6px', fontSize:S.xs }}>
-            {DG_CLASSES.map(c => <option key={c} value={c}>{c ? `Class ${c}` : '— None —'}</option>)}
-          </select>
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8 }}>
+          {[
+            ['Bay / Row / Tier', `${c.bay} / ${c.row} / ${c.tier}`],
+            ['Hold or Deck', c.holdDeck],
+            ['Size / Type', `${c.size||'—'}'${c.type||''}`],
+            ['Weight', `${c.weight||0} kg`],
+            ['POL', c.pol || '—'],
+            ['POD', c.pod || '—'],
+            ['Original POL', c.originalPol || '—'],
+            ['Final Destination', c.finalDestination || '—'],
+            ['Verified Weight', c.verifiedWeight ? 'Yes (VGM)' : 'No'],
+          ].map(([l,v]) => (
+            <div key={l}>
+              <div style={{ color:S.dm, fontSize:S.ti }}>{l}</div>
+              <div style={{ color:S.tx, fontSize:S.xs, fontWeight:600 }}>{v}</div>
+            </div>
+          ))}
         </div>
-        <div style={{ marginBottom:8 }}>
-          <div style={{ color:S.dm, fontSize:S.lb, marginBottom:3 }}>Hold / Deck</div>
-          <select value={form.holdDeck} onChange={set('holdDeck')} style={{ width:'100%', background:S.bg2, color:S.cy, border:`1px solid ${S.bd2}`, borderRadius:5, padding:'5px 6px', fontSize:S.xs }}>
-            {HOLD_DECK_OPTIONS.map(h => <option key={h} value={h}>{h}</option>)}
-          </select>
-        </div>
-      </div>
-      <div style={{ display:'flex', gap:5, marginBottom:8 }}>
-        {[['reefer','❄ Reefer',S.cy],['oog','📐 OOG',S.or]].map(([k,l,c]) => (
-          <button key={k} onClick={()=>toggle(k)} style={{
-            flex:1, background:form[k]?`${c}20`:'transparent',
-            border:`1px solid ${form[k]?c:S.vd}`, color:form[k]?c:S.dm,
-            borderRadius:5, padding:'5px 4px', fontSize:S.ti, cursor:'pointer', fontWeight:form[k]?700:400,
-          }}>{l}</button>
-        ))}
-      </div>
-      <Btn onClick={submit} color={ACC} style={{ width:'100%' }}>+ Add Container to Bay {bay.bay}</Btn>
-    </div>
-  );
-}
-
-// ─── CONTAINER LIST IN BAY (Step 1 addition) ─────────────────────────────────
-// Displays containers already recorded for this bay, with delete.
-function ContainerListInBay({ bay, onDeleteContainer }) {
-  const containers = bay.containers || [];
-  if (containers.length === 0) {
-    return <div style={{ color:S.vd, fontSize:S.ti, fontStyle:'italic', padding:'4px 2px', marginBottom:6 }}>No containers recorded for this bay yet</div>;
-  }
-  return (
-    <div style={{ marginBottom:6 }}>
-      <SectionLabel text={`Containers in Bay (${containers.length})`} color={S.dm} />
-      <div style={{ maxHeight:160, overflowY:'auto' }}>
-        {containers.map((c, i) => (
-          <div key={c.id + i} style={{ display:'flex', alignItems:'center', gap:6, background:S.bg2, borderRadius:5, padding:'5px 7px', marginBottom:3 }}>
-            <span style={{ color:ACC, fontFamily:'monospace', fontWeight:700, fontSize:S.ti, minWidth:88 }}>{c.id}</span>
-            <span style={{ color:S.dm, fontSize:S.ti }}>{c.size}'{c.type}</span>
-            <span style={{ color:S.dm, fontSize:S.ti }}>{c.holdDeck}</span>
-            {c.dgClass && <Badge text={`DG${c.dgClass}`} color={S.rd} />}
-            {c.reefer && <Badge text="RF" color={S.cy} />}
-            {c.oog && <Badge text="OOG" color={S.or} />}
-            <span style={{ color:S.dm, fontSize:S.ti, marginLeft:'auto' }}>{c.pol||'—'}→{c.pod||'—'}</span>
-            <button onClick={()=>onDeleteContainer(i)} style={{ background:'transparent', border:'none', color:S.rd, cursor:'pointer', fontSize:'0.7rem', flexShrink:0 }}>✕</button>
+        {c.dgClasses && c.dgClasses.length > 0 && (
+          <div style={{ marginTop:10, background:S.bg3, borderRadius:6, padding:'8px 10px' }}>
+            <div style={{ color:S.rd, fontSize:S.ti, fontWeight:700, marginBottom:4 }}>Hazardous Cargo</div>
+            {c.dgClasses.map((d,i) => (
+              <div key={i} style={{ color:S.tx, fontSize:S.ti }}>Class {d.class} — UN {d.unNo || '—'}</div>
+            ))}
           </div>
-        ))}
+        )}
+        {c.reefer && (
+          <div style={{ marginTop:10, background:S.bg3, borderRadius:6, padding:'8px 10px' }}>
+            <div style={{ color:S.cy, fontSize:S.ti, fontWeight:700, marginBottom:4 }}>Reefer Settings</div>
+            <div style={{ color:S.tx, fontSize:S.ti }}>Set point: {c.reeferSetTemp || '—'}°C</div>
+          </div>
+        )}
       </div>
     </div>
   );
 }
+
+// ─── MASTER BAY GROUP ─────────────────────────────────────────────────────────
+// Wraps one 40ft bay + its 20ft neighbors (or a standalone bay) under a shared
+// header, per the real-world convention that bay 22 (40ft) occupies the same
+// physical deck space as bays 21+23 (20ft). Each member bay still renders its
+// own full BayCard with independent status/progress — this is a display
+// grouping only, not a data merge.
+function MasterBayGroup({ group, gantries, movesPerHr, onUpdate, bayIndexMap }) {
+  const totalContainers = group.members.reduce((s, b) => s + (b.containers ? b.containers.length : 0), 0);
+  const label = group.members.length > 1
+    ? `Bay ${group.members.map(b => b.bay).sort((a, b) => parseInt(a, 10) - parseInt(b, 10)).join(' / ')}`
+    : `Bay ${group.masterBay}`;
+
+  return (
+    <div style={{ border:`1px solid ${S.bd2}`, borderRadius:10, padding:'8px', marginBottom:8, background:'rgba(255,255,255,0.01)' }}>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:6, padding:'0 4px' }}>
+        <span style={{ color:S.dm, fontSize:S.ti, fontWeight:700, letterSpacing:0.5 }}>{label}</span>
+        {totalContainers > 0 && <span style={{ color:S.dm, fontSize:S.ti }}>📦 {totalContainers} total</span>}
+      </div>
+      {group.members.map(b => (
+        <BayCard key={b.bay} bay={b} idx={bayIndexMap[b.bay]}
+          gantries={gantries} movesPerHr={movesPerHr}
+          onUpdate={onUpdate} />
+      ))}
+    </div>
+  );
+}
+
 
 // ─── BAY CARD ────────────────────────────────────────────────────────────────
+// rendered from LiveOps (one heading per 40ft bay + its 20ft neighbors), but
+// each individual bay (40ft or 20ft) still tracks its own status/progress —
+// the merge is a display grouping, not a data merge.
 function BayCard({ bay, idx, gantries, onUpdate, movesPerHr }) {
   const [expanded, setExpanded] = useState(false);
-  const [viewMode, setViewMode] = useState('counters'); // 'counters' | 'grid' — additive, default unchanged behavior
+  const [selectedContainer, setSelectedContainer] = useState(null);
   const col = STATUS_COLOR[bay.status] || S.vd;
-  const totalPlan = bay.planLoad + bay.planDisch + bay.planRest;
-  const totalDone = bay.doneLoad + bay.doneDisch + bay.doneRest;
-  const pct = totalPlan > 0 ? Math.round((totalDone / totalPlan) * 100) : 0;
 
-  const upd = (key, val) => onUpdate(idx, key, val);
+  const planLoadDisch = bay.planLoad + bay.planDisch;
+  const doneLoadDisch = bay.doneLoad + bay.doneDisch;
+  const pct = planLoadDisch > 0 ? Math.round((doneLoadDisch / planLoadDisch) * 100) : 0;
+
+  // Deck/Hold percentage split, derived from existing deckLoad/holdLoad/deckDisch/holdDisch
+  // fields plus overall done-vs-plan ratio (we don't track separate done-deck/done-hold
+  // counters, so we apply the overall completion ratio proportionally to each section's plan).
+  const deckPlan = bay.deckLoad + bay.deckDisch;
+  const holdPlan = bay.holdLoad + bay.holdDisch;
+  const deckPct = deckPlan > 0 ? Math.min(100, Math.round((doneLoadDisch / planLoadDisch) * 100)) : 0;
+  const holdPct = holdPlan > 0 ? Math.min(100, Math.round((doneLoadDisch / planLoadDisch) * 100)) : 0;
 
   const setStatus = (s) => {
     onUpdate(idx, 'status', s);
     if (s === 'inprogress' && !bay.startTime) onUpdate(idx, 'startTime', clNow());
     if (s === 'completed')  onUpdate(idx, 'endTime',   clNow());
-  };
-
-  const incr = (key, delta) => {
-    const cur = bay[key] || 0;
-    const next = Math.max(0, cur + delta);
-    onUpdate(idx, key, next);
-  };
-
-  // Step 1 additions: add/delete container records for this bay.
-  // Both go through the existing onUpdate(idx, key, val) signature — no new prop.
-  const addContainer = (container) => {
-    const next = [...(bay.containers || []), container];
-    upd('containers', next);
-  };
-  const deleteContainer = (cIdx) => {
-    const next = (bay.containers || []).filter((_, j) => j !== cIdx);
-    upd('containers', next);
   };
 
   const isBg = bay.status === 'inprogress' ? `${S.gd}08`
@@ -1253,12 +1282,24 @@ function BayCard({ bay, idx, gantries, onUpdate, movesPerHr }) {
               {bay.crane && <span style={{ color:S.dm, fontSize:S.ti }}>🏗 {bay.crane}</span>}
               {(bay.containers && bay.containers.length > 0) && <span style={{ color:S.dm, fontSize:S.ti }}>📦 {bay.containers.length}</span>}
             </div>
-            <span style={{ color:S.dm, fontSize:S.ti }}>{totalDone}/{totalPlan} mvs</span>
-          </div>
-          <ProgressBar pct={pct} color={col} />
-          <div style={{ display:'flex', justifyContent:'space-between', marginTop:2 }}>
-            <span style={{ color:S.dm, fontSize:S.ti }}>L:{bay.doneLoad} D:{bay.doneDisch} R:{bay.doneRest}</span>
             <span style={{ color:col, fontSize:S.ti, fontWeight:700 }}>{pct}%</span>
+          </div>
+          {/* Deck / Hold progress bars, side by side */}
+          <div style={{ display:'flex', gap:6, alignItems:'center' }}>
+            <div style={{ flex:1 }}>
+              <div style={{ display:'flex', justifyContent:'space-between' }}>
+                <span style={{ color:S.dm, fontSize:'0.5rem' }}>DECK</span>
+                <span style={{ color:S.dm, fontSize:'0.5rem' }}>{deckPlan > 0 ? `${deckPct}%` : '—'}</span>
+              </div>
+              <ProgressBar pct={deckPct} color={ACC} height={4} />
+            </div>
+            <div style={{ flex:1 }}>
+              <div style={{ display:'flex', justifyContent:'space-between' }}>
+                <span style={{ color:S.dm, fontSize:'0.5rem' }}>HOLD</span>
+                <span style={{ color:S.dm, fontSize:'0.5rem' }}>{holdPlan > 0 ? `${holdPct}%` : '—'}</span>
+              </div>
+              <ProgressBar pct={holdPct} color={S.pu} height={4} />
+            </div>
           </div>
         </div>
 
@@ -1281,11 +1322,12 @@ function BayCard({ bay, idx, gantries, onUpdate, movesPerHr }) {
         </div>
       </div>
 
-      {/* ── EXPANDED DETAIL ── */}
+      {/* ── EXPANDED DETAIL: grid view only (counters/manual-add removed — data comes from import) ── */}
       {expanded && (
         <div style={{ padding:'0 10px 10px', borderTop:`1px solid ${col}20` }}>
-
-          {/* Status buttons */}
+          <div style={{ marginTop:8 }}>
+            {['idle','inprogress','completed','hold'].map(s => null) /* status buttons kept below for explicit control */}
+          </div>
           <div style={{ display:'flex', gap:4, marginBottom:8, marginTop:8 }}>
             {['idle','inprogress','completed','hold'].map(s => (
               <button key={s} onClick={()=>setStatus(s)} style={{
@@ -1297,124 +1339,11 @@ function BayCard({ bay, idx, gantries, onUpdate, movesPerHr }) {
             ))}
           </div>
 
-          {/* View mode toggle: Counters (existing) vs Grid (visual row/tier plan) */}
-          <div style={{ display:'flex', gap:4, marginBottom:8 }}>
-            {[['counters','📋 Counters'],['grid','🗺 Grid View']].map(([v,l]) => (
-              <button key={v} onClick={()=>setViewMode(v)} style={{
-                flex:1, background:viewMode===v?`${ACC}20`:'transparent',
-                border:`1px solid ${viewMode===v?ACC:S.vd}`, color:viewMode===v?ACC:S.dm,
-                borderRadius:5, padding:'5px 4px', fontSize:S.ti, cursor:'pointer', fontWeight:viewMode===v?700:400,
-              }}>{l}</button>
-            ))}
-          </div>
-
-          {viewMode === 'grid' && <BayGridView bay={bay} />}
-
-          {viewMode === 'counters' && (
-            <>
-          {/* Crane + flags */}
-          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'0 10px', marginBottom:6 }}>
-            <div>
-              <div style={{ color:S.dm, fontSize:S.lb, marginBottom:3 }}>Crane / Gantry</div>
-              <select value={bay.crane} onChange={e=>upd('crane',e.target.value)}
-                style={{ width:'100%', background:S.bg3, color:S.cy, border:`1px solid ${S.bd2}`,
-                  borderRadius:5, padding:'5px 7px', fontSize:S.xs }}>
-                <option value=''>— Unassigned —</option>
-                {Array.from({length: gantries}, (_,i) => (
-                  <option key={i+1} value={`G${i+1}`}>Gantry {i+1}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <div style={{ color:S.dm, fontSize:S.lb, marginBottom:3 }}>Bay Type</div>
-              <div style={{ display:'flex', gap:5, marginTop:2 }}>
-                {[['isDG','DG',S.rd],['isReefer','RF',S.cy],['lashingDone','⚓LSH',S.gn]].map(([k,l,c]) => (
-                  <button key={k} onClick={()=>upd(k,!bay[k])} style={{
-                    flex:1, background:bay[k]?`${c}20`:'transparent',
-                    border:`1px solid ${bay[k]?c:S.vd}`, color:bay[k]?c:S.dm,
-                    borderRadius:5, padding:'4px 2px', fontSize:S.ti, cursor:'pointer', fontWeight:bay[k]?700:400,
-                  }}>{l}</button>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          {/* Planned moves */}
-          <div style={{ background:S.bg3, borderRadius:7, padding:'8px 10px', marginBottom:6 }}>
-            <SectionLabel text="Planned Moves" color={S.dm} />
-            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:'0 8px' }}>
-              {[['planLoad','Load',ACC],['planDisch','Disch',S.or],['planRest','Restow',S.pu]].map(([k,l,c]) => (
-                <div key={k}>
-                  <div style={{ color:S.dm, fontSize:S.ti, marginBottom:2 }}>{l}</div>
-                  <input type="number" value={bay[k]} min={0}
-                    onChange={e=>upd(k,parseInt(e.target.value)||0)}
-                    style={{ width:'100%', background:S.bg2, color:c, border:`1px solid ${S.bd2}`,
-                      borderRadius:4, padding:'4px 6px', fontSize:S.xs, outline:'none', fontFamily:'monospace' }} />
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Completed moves — counter buttons */}
-          <div style={{ background:S.bg3, borderRadius:7, padding:'8px 10px', marginBottom:6 }}>
-            <SectionLabel text="Completed Moves" color={S.gn} />
-            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:'0 8px' }}>
-              {[['doneLoad','planLoad','Load',ACC],['doneDisch','planDisch','Disch',S.or],['doneRest','planRest','Restow',S.pu]].map(([dk,pk,l,c]) => (
-                <div key={dk}>
-                  <div style={{ color:S.dm, fontSize:S.ti, marginBottom:3 }}>{l} ({bay[dk]}/{bay[pk]})</div>
-                  <div style={{ display:'flex', gap:3, alignItems:'center' }}>
-                    <button onClick={()=>incr(dk,-1)} style={{ background:`${S.rd}15`, border:`1px solid ${S.rd}44`, color:S.rd, borderRadius:4, padding:'2px 7px', fontSize:'0.8rem', cursor:'pointer', fontWeight:700 }}>−</button>
-                    <div style={{ flex:1, textAlign:'center', color:c, fontFamily:'monospace', fontWeight:700, fontSize:S.sm }}>{bay[dk]}</div>
-                    <button onClick={()=>incr(dk,+1)} style={{ background:`${S.gn}15`, border:`1px solid ${S.gn}44`, color:S.gn, borderRadius:4, padding:'2px 7px', fontSize:'0.8rem', cursor:'pointer', fontWeight:700 }}>+</button>
-                  </div>
-                  <ProgressBar pct={bay[pk]>0?(bay[dk]/bay[pk])*100:0} color={c} height={4} />
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Deck / Hold split */}
-          <div style={{ background:S.bg3, borderRadius:7, padding:'8px 10px', marginBottom:6 }}>
-            <SectionLabel text="Deck / Hold Split" color={S.dm} />
-            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr 1fr', gap:'0 6px' }}>
-              {[['deckLoad','Deck Load',ACC],['holdLoad','Hold Load',S.te],['deckDisch','Deck Disch',S.or],['holdDisch','Hold Disch',S.pu]].map(([k,l,c])=>(
-                <div key={k}>
-                  <div style={{ color:S.dm, fontSize:S.ti, marginBottom:2 }}>{l}</div>
-                  <input type="number" value={bay[k]} min={0}
-                    onChange={e=>upd(k,parseInt(e.target.value)||0)}
-                    style={{ width:'100%', background:S.bg2, color:c, border:`1px solid ${S.bd2}`,
-                      borderRadius:4, padding:'4px 5px', fontSize:S.ti, outline:'none', fontFamily:'monospace' }}/>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Time + notes */}
-          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'0 10px', marginBottom:4 }}>
-            {[['startTime','Start Time'],['endTime','End Time']].map(([k,l])=>(
-              <div key={k}>
-                <div style={{ color:S.dm, fontSize:S.lb, marginBottom:3 }}>{l}</div>
-                <input type="time" value={bay[k]} onChange={e=>upd(k,e.target.value)}
-                  style={{ width:'100%', background:S.bg3, color:S.gd, border:`1px solid ${S.bd2}`,
-                    borderRadius:5, padding:'5px 7px', fontSize:S.xs, outline:'none', fontFamily:'monospace' }}/>
-              </div>
-            ))}
-          </div>
-          <div style={{ marginBottom:10 }}>
-            <div style={{ color:S.dm, fontSize:S.lb, marginBottom:3 }}>Notes</div>
-            <input value={bay.notes} onChange={e=>upd('notes',e.target.value)}
-              placeholder="Damage, skip, special instruction…"
-              style={{ width:'100%', background:S.bg3, color:S.tx, border:`1px solid ${S.bd2}`,
-                borderRadius:5, padding:'5px 7px', fontSize:S.xs, outline:'none' }}/>
-          </div>
-
-          {/* ── Step 1 addition: per-container records for this bay ── */}
-          <ContainerListInBay bay={bay} onDeleteContainer={deleteContainer} />
-          <ContainerEntryForm bay={bay} onAddContainer={addContainer} />
-            </>
-          )}
+          <BayGridView bay={bay} onCellClick={setSelectedContainer} />
         </div>
       )}
+
+      <ContainerDetailModal container={selectedContainer} onClose={()=>setSelectedContainer(null)} />
     </div>
   );
 }
@@ -1794,15 +1723,20 @@ function LiveOps({ portOp, onUpdate, onReset }) {
         </div>
       )}
 
-      {/* ── BAY LIST ── */}
+      {/* ── BAY LIST (grouped by master/40ft bay, per real vessel convention) ── */}
       <div style={{ fontSize:S.ti, color:S.dm, marginBottom:5 }}>
         Showing {filtered.length} of {total} bays
       </div>
-      {filtered.map(b => (
-        <BayCard key={b.bay} bay={b} idx={b._idx}
-          gantries={portOp.gantries} movesPerHr={portOp.movesPerHr}
-          onUpdate={updateBay} />
-      ))}
+      {(() => {
+        const bayIndexMap = {};
+        bays.forEach((b, i) => { bayIndexMap[b.bay] = i; });
+        const groups = groupBaysByMasterBay(filtered);
+        return groups.map(g => (
+          <MasterBayGroup key={g.masterBay} group={g}
+            gantries={portOp.gantries} movesPerHr={portOp.movesPerHr}
+            onUpdate={updateBay} bayIndexMap={bayIndexMap} />
+        ));
+      })()}
 
       {/* ── OPERATION SUMMARY ── */}
       <div style={{ background:`${S.gn}08`, border:`1px solid ${S.gn}25`, borderRadius:10,
@@ -1838,267 +1772,97 @@ function LiveOps({ portOp, onUpdate, onReset }) {
   );
 }
 
-// ─── REEFER ROUNDS ────────────────────────────────────────────────────────────
-function ReeferRounds({ portOp, onUpdateReefer }) {
-  const KEY = `cargo_reefer_rounds_${portOp?.port || 'default'}`;
-  const [rounds, setRounds] = useState(() => load(KEY, []));
-  const [form, setForm] = useState({
-    ts: new Date().toISOString().slice(0,16),
-    bay: '', containerId: '', opType: 'Loading',
-    setPoint: '', supply: '', returnTemp: '',
-    humidity: '', alarm: 'None', defrost: 'No',
-    inspector: '', remarks: '',
-  });
-  const [filterBay, setFilterBay] = useState('');
-  const [filterOp,  setFilterOp]  = useState('all');
-  const set = k => e => setForm(f => ({ ...f, [k]: e.target.value }));
+// ─── REEFER STATUS ────────────────────────────────────────────────────────────
+// Replaces temperature-round logging with a simple load/discharge checklist.
+// Mode toggle (Load/Discharge) shows bays with planned reefer containers for
+// that mode, with a two-step tick: Loaded -> Checked, per bay. Uses two new
+// additive bay fields (reeferLoadStatus, reeferDischStatus) following the
+// same pattern as the existing lashingDone field.
+function ReeferStatus({ portOp, onUpdateReefer }) {
+  const [mode, setMode] = useState('load'); // 'load' | 'discharge'
 
-  // Get reefer bays from port op for quick select
-  const reeferBays = portOp?.bays?.filter(b => b.isReefer).map(b => b.bay) || [];
+  const bays = portOp?.bays || [];
 
-  const saveRounds = (r) => { setRounds(r); save(KEY, r); };
-
-  const add = () => {
-    if (!form.bay || !form.supply) return;
-    const diff = parseFloat(form.supply) - parseFloat(form.setPoint);
-    const entry = { ...form, tempDiff: isNaN(diff) ? '' : diff.toFixed(1), id: Date.now() };
-    saveRounds([...rounds, entry]);
-    setForm(f => ({ ...f, ts: new Date().toISOString().slice(0,16), supply: '', returnTemp: '', humidity: '', remarks: '' }));
+  const reeferCountForBay = (b, m) => {
+    if (b.containers && b.containers.length > 0) {
+      return b.containers.filter(c => c.reefer && (m === 'load' ? c.pol === portOp.port : c.pod === portOp.port)).length;
+    }
+    return 0;
   };
 
-  const del = (id) => saveRounds(rounds.filter(r => r.id !== id));
+  const relevantBays = bays.filter(b => b.isReefer && reeferCountForBay(b, mode) > 0);
+  const groups = groupBaysByMasterBay(relevantBays);
 
-  const filtered = rounds.filter(r => {
-    if (filterBay && !r.bay.includes(filterBay)) return false;
-    if (filterOp !== 'all' && r.opType !== filterOp) return false;
-    return true;
-  });
+  const statusKey = mode === 'load' ? 'reeferLoadStatus' : 'reeferDischStatus';
 
-  // Stats
-  const alarmCount = rounds.filter(r => r.alarm !== 'None').length;
-  const loadCount  = rounds.filter(r => r.opType === 'Loading').length;
-  const dischCount = rounds.filter(r => r.opType === 'Discharging').length;
-  const restCount  = rounds.filter(r => r.opType === 'Restow').length;
-  const outOfRange = rounds.filter(r => Math.abs(parseFloat(r.tempDiff)||0) > 3).length;
+  const setBayStatus = (bayNumber, status) => {
+    const updatedBays = portOp.bays.map(b => b.bay === bayNumber ? { ...b, [statusKey]: status } : b);
+    onUpdateReefer({ ...portOp, bays: updatedBays });
+  };
+
+  const totalReefers = relevantBays.reduce((s, b) => s + reeferCountForBay(b, mode), 0);
+  const loadedCount = relevantBays.filter(b => b[statusKey] === 'loaded' || b[statusKey] === 'checked').length;
+  const checkedCount = relevantBays.filter(b => b[statusKey] === 'checked').length;
 
   return (
     <div>
-      {/* Stats */}
-      <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:5, marginBottom:10 }}>
-        <StatBox label="Total Rounds" value={rounds.length} color={S.cy} />
-        <StatBox label="Load/Disch/Rest" value={`${loadCount}/${dischCount}/${restCount}`} color={ACC} />
-        <StatBox label="Alarms" value={alarmCount} color={alarmCount>0?S.rd:S.gn} />
-        <StatBox label="Out of Range" value={outOfRange} color={outOfRange>0?S.rd:S.gn} sub=">3°C diff" />
-      </div>
+      <Card style={{ marginBottom: 10 }}>
+        <SectionLabel text="Reefer Status" color={S.cy} />
+        <div style={{ display:'flex', gap:5, marginBottom:10 }}>
+          {[['load','📥 Load'],['discharge','📤 Discharge']].map(([v,l]) => (
+            <button key={v} onClick={()=>setMode(v)} style={{
+              flex:1, background:mode===v?`${S.cy}20`:'transparent',
+              border:`1px solid ${mode===v?S.cy:S.vd}`, color:mode===v?S.cy:S.dm,
+              borderRadius:5, padding:'7px 4px', fontSize:S.xs, cursor:'pointer', fontWeight:mode===v?700:400,
+            }}>{l}</button>
+          ))}
+        </div>
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:6 }}>
+          <StatBox label="Reefer Bays" value={relevantBays.length} color={S.cy} />
+          <StatBox label="Total Reefers" value={totalReefers} color={ACC} sub={mode === 'load' ? 'planned to load' : 'planned to discharge'} />
+          <StatBox label="Checked" value={`${checkedCount}/${relevantBays.length}`} color={checkedCount===relevantBays.length && relevantBays.length>0 ? S.gn : S.gd} />
+        </div>
+      </Card>
 
-      {/* Form */}
-      <div style={{ background:S.bg2, border:`1px solid ${S.bd2}`, borderRadius:10, padding:'12px 14px', marginBottom:10 }}>
-        <SectionLabel text="New Reefer Round Entry" color={S.cy} />
+      {groups.length === 0 && (
+        <Card><div style={{ color:S.vd, fontSize:S.xs, textAlign:'center', padding:'16px 0' }}>
+          No bays with reefer containers planned for {mode === 'load' ? 'loading' : 'discharge'} at this port
+        </div></Card>
+      )}
 
-        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'0 10px' }}>
-          <Field label="Date / Time" value={form.ts} onChange={set('ts')} type="datetime-local" />
-          <div style={{ marginBottom:7 }}>
-            <div style={{ color:S.dm, fontSize:S.lb, marginBottom:2 }}>Bay</div>
-            <div style={{ display:'flex', gap:4 }}>
-              <input value={form.bay} onChange={set('bay')} placeholder="e.g. 06"
-                style={{ flex:1, background:S.bg3, color:S.cy, border:`1px solid ${S.bd2}`,
-                  borderRadius:5, padding:'5px 7px', fontSize:S.xs, outline:'none', fontFamily:'monospace' }}/>
-              {reeferBays.length > 0 && (
-                <select onChange={e=>{if(e.target.value) setForm(f=>({...f, bay:e.target.value}));}}
-                  style={{ background:S.bg3, color:S.cy, border:`1px solid ${S.bd2}`, borderRadius:5, padding:'5px 4px', fontSize:S.ti }}>
-                  <option value=''>RF Bays</option>
-                  {reeferBays.map(b=><option key={b} value={b}>Bay {b}</option>)}
-                </select>
-              )}
-            </div>
+      {groups.map(g => (
+        <Card key={g.masterBay} style={{ marginBottom: 8 }}>
+          <div style={{ color:S.dm, fontSize:S.ti, fontWeight:700, marginBottom:6 }}>
+            Bay {g.members.map(b=>b.bay).sort((a,b)=>parseInt(a,10)-parseInt(b,10)).join(' / ')}
           </div>
-        </div>
-
-        <Field label="Container ID (optional)" value={form.containerId} onChange={set('containerId')} placeholder="e.g. MSCU1234567" />
-
-        <div style={{ marginBottom:7 }}>
-          <div style={{ color:S.dm, fontSize:S.lb, marginBottom:3 }}>Operation Type</div>
-          <div style={{ display:'flex', gap:5 }}>
-            {['Loading','Discharging','Restow','Monitoring'].map(v => (
-              <button key={v} onClick={()=>setForm(f=>({...f,opType:v}))} style={{
-                flex:1, background:form.opType===v?`${ACC}25`:'transparent',
-                border:`1px solid ${form.opType===v?ACC:S.vd}`,
-                color:form.opType===v?ACC:S.dm,
-                borderRadius:5, padding:'5px 3px', fontSize:S.ti, cursor:'pointer', fontWeight:form.opType===v?700:400,
-              }}>{v}</button>
-            ))}
-          </div>
-        </div>
-
-        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:'0 8px' }}>
-          <Field label="Set Point" value={form.setPoint} onChange={set('setPoint')} type="number" placeholder="°C" unit="°C" />
-          <Field label="Supply Temp" value={form.supply} onChange={set('supply')} type="number" placeholder="°C" unit="°C"
-            color={form.setPoint&&form.supply&&Math.abs(parseFloat(form.supply)-parseFloat(form.setPoint))>3?S.rd:S.gn} />
-          <Field label="Return Temp" value={form.returnTemp} onChange={set('returnTemp')} type="number" placeholder="°C" unit="°C" />
-        </div>
-
-        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:'0 8px' }}>
-          <Field label="Humidity" value={form.humidity} onChange={set('humidity')} type="number" placeholder="%" unit="% RH" />
-          <div style={{ marginBottom:7 }}>
-            <div style={{ color:S.dm, fontSize:S.lb, marginBottom:2 }}>Alarm</div>
-            <select value={form.alarm} onChange={set('alarm')}
-              style={{ width:'100%', background:S.bg3, color:form.alarm!=='None'?S.rd:S.gn,
-                border:`1px solid ${S.bd2}`, borderRadius:5, padding:'5px 6px', fontSize:S.xs }}>
-              {['None','High Temp','Low Temp','Defrost Fault','Power Fault','Humidity Alarm','Compressor Fault'].map(a=>(
-                <option key={a}>{a}</option>
-              ))}
-            </select>
-          </div>
-          <div style={{ marginBottom:7 }}>
-            <div style={{ color:S.dm, fontSize:S.lb, marginBottom:2 }}>Defrost</div>
-            <select value={form.defrost} onChange={set('defrost')}
-              style={{ width:'100%', background:S.bg3, color:S.cy,
-                border:`1px solid ${S.bd2}`, borderRadius:5, padding:'5px 6px', fontSize:S.xs }}>
-              {['No','Yes'].map(a=><option key={a}>{a}</option>)}
-            </select>
-          </div>
-        </div>
-
-        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'0 10px' }}>
-          <Field label="Inspector Name" value={form.inspector} onChange={set('inspector')} placeholder="Officer / Rating" />
-          <Field label="Remarks" value={form.remarks} onChange={set('remarks')} placeholder="Observations, actions…" />
-        </div>
-
-        {form.setPoint && form.supply && (() => {
-          const d = parseFloat(form.supply) - parseFloat(form.setPoint);
-          if (isNaN(d)) return null;
-          return (
-            <div style={{ background:Math.abs(d)<=3?'rgba(0,255,136,0.07)':'rgba(255,71,87,0.1)',
-              border:`1px solid ${Math.abs(d)<=3?S.gn:S.rd}44`, borderRadius:6, padding:'5px 10px', marginBottom:7 }}>
-              <span style={{ color:S.dm, fontSize:S.xs }}>Δ from set point: </span>
-              <span style={{ color:Math.abs(d)<=3?S.gn:S.rd, fontWeight:700, fontFamily:'monospace' }}>
-                {d>0?'+':''}{d.toFixed(1)}°C
-              </span>
-              {Math.abs(d) > 3 && <span style={{ color:S.rd, fontSize:S.xs }}> ⚠ OUT OF RANGE</span>}
-            </div>
-          );
-        })()}
-
-        <div style={{ display:'flex', gap:6 }}>
-          <button onClick={add} style={{ flex:1, background:`${S.cy}18`, border:`1px solid ${S.cy}55`,
-            color:S.cy, borderRadius:6, padding:'8px', fontSize:S.xs, cursor:'pointer', fontWeight:700 }}>
-            + Add Round
-          </button>
-          <button onClick={()=>{
-            const txt = ['REEFER ROUNDS LOG','Bay\tContainer\tOp\tSetPt\tSupply\tReturn\tΔ\tAlarm\tTime\tInspector\tRemarks',
-              ...rounds.map(r=>`${r.bay}\t${r.containerId||''}\t${r.opType}\t${r.setPoint}°C\t${r.supply}°C\t${r.returnTemp}°C\t${r.tempDiff}°C\t${r.alarm}\t${r.ts}\t${r.inspector}\t${r.remarks}`)
-            ].join('\n');
-            const a=document.createElement('a');
-            a.href='data:text/plain;charset=utf-8,'+encodeURIComponent(txt);
-            a.download=`Reefer_Rounds_${portOp?.port||'log'}_${new Date().toISOString().slice(0,10)}.txt`;
-            a.click();
-          }} style={{ background:`${S.dm}18`, border:`1px solid ${S.dm}44`, color:S.dm,
-            borderRadius:6, padding:'8px 12px', fontSize:S.xs, cursor:'pointer' }}>
-            ⬇ Export
-          </button>
-        </div>
-      </div>
-
-      {/* Filter */}
-      <div style={{ display:'flex', gap:5, marginBottom:8, flexWrap:'wrap' }}>
-        <input value={filterBay} onChange={e=>setFilterBay(e.target.value)} placeholder="Bay #…"
-          style={{ width:60, background:S.bg3, color:S.cy, border:`1px solid ${S.bd2}`,
-            borderRadius:5, padding:'4px 7px', fontSize:S.xs, outline:'none', fontFamily:'monospace' }}/>
-        {[['all','All'],['Loading','Load'],['Discharging','Disch'],['Restow','Rest'],['Monitoring','Mon']].map(([v,l])=>(
-          <button key={v} onClick={()=>setFilterOp(v)} style={{
-            background:filterOp===v?`${S.cy}15`:'transparent',
-            border:`1px solid ${filterOp===v?S.cy:S.vd}`,
-            color:filterOp===v?S.cy:S.dm,
-            borderRadius:5, padding:'4px 8px', fontSize:S.lb, cursor:'pointer',
-          }}>{l}</button>
-        ))}
-        {rounds.length > 0 && (
-          <Btn onClick={()=>{if(window.confirm('Clear all reefer rounds?')) saveRounds([]);}}
-            color={S.rd} style={{ padding:'4px 8px', fontSize:S.lb, marginLeft:'auto' }}>
-            Clear All
-          </Btn>
-        )}
-      </div>
-
-      {/* Rounds list */}
-      <div style={{ display:'flex', flexDirection:'column', gap:5 }}>
-        {filtered.length === 0
-          ? <div style={{ color:S.vd, fontSize:S.xs, textAlign:'center', padding:'20px 0', fontStyle:'italic' }}>
-              No rounds logged yet
-            </div>
-          : filtered.slice().reverse().map(r => {
-            const diff = parseFloat(r.tempDiff);
-            const outRange = !isNaN(diff) && Math.abs(diff) > 3;
+          {g.members.filter(b => b.isReefer && reeferCountForBay(b, mode) > 0).map(b => {
+            const status = b[statusKey] || 'pending';
+            const count = reeferCountForBay(b, mode);
             return (
-              <div key={r.id} style={{ background:outRange?'rgba(255,71,87,0.06)':S.bg2,
-                border:`1px solid ${outRange?S.rd+'44':S.bd3}`, borderRadius:8, padding:'8px 10px' }}>
-                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:4 }}>
-                  <div style={{ display:'flex', gap:6, alignItems:'center', flexWrap:'wrap' }}>
-                    <span style={{ background:`${ACC}20`, color:ACC, border:`1px solid ${ACC}44`,
-                      borderRadius:4, padding:'1px 7px', fontFamily:'monospace', fontWeight:700, fontSize:S.xs }}>
-                      BAY {r.bay}
-                    </span>
-                    <span style={{ background:r.opType==='Loading'?`${ACC}15`:r.opType==='Discharging'?'rgba(255,140,66,0.15)':r.opType==='Restow'?'rgba(192,132,252,0.15)':'rgba(0,212,255,0.1)',
-                      color:r.opType==='Loading'?ACC:r.opType==='Discharging'?S.or:r.opType==='Restow'?S.pu:S.cy,
-                      border:'none', borderRadius:4, padding:'1px 7px', fontSize:S.lb, fontWeight:700 }}>
-                      {r.opType}
-                    </span>
-                    {r.alarm !== 'None' && (
-                      <span style={{ background:'rgba(255,71,87,0.15)', color:S.rd, borderRadius:4, padding:'1px 6px', fontSize:S.lb, fontWeight:700 }}>
-                        ⚠ {r.alarm}
-                      </span>
-                    )}
-                  </div>
-                  <div style={{ display:'flex', gap:5, alignItems:'center' }}>
-                    <span style={{ color:S.dm, fontSize:S.ti }}>{r.ts}</span>
-                    <button onClick={()=>del(r.id)} style={{ background:'transparent', border:'none', color:S.rd, cursor:'pointer', fontSize:'0.75rem' }}>✕</button>
-                  </div>
+              <div key={b.bay} style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'6px 4px', borderTop:`1px solid ${S.bd2}`, flexWrap:'wrap', gap:6 }}>
+                <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                  <span style={{ color:S.cy, fontFamily:'monospace', fontWeight:700, fontSize:S.xs }}>Bay {b.bay}</span>
+                  <span style={{ color:S.dm, fontSize:S.ti }}>❄ {count} reefer{count===1?'':'s'}</span>
                 </div>
-                <div style={{ display:'flex', gap:12, flexWrap:'wrap' }}>
-                  {[
-                    ['Set',r.setPoint?r.setPoint+'°C':'—',S.dm],
-                    ['Supply',r.supply?r.supply+'°C':'—',outRange?S.rd:S.gn],
-                    ['Return',r.returnTemp?r.returnTemp+'°C':'—',S.cy],
-                    ['Δ',r.tempDiff?(r.tempDiff>0?'+':'')+r.tempDiff+'°C':'—',outRange?S.rd:S.gn],
-                    ['RH',r.humidity?r.humidity+'%':'—',S.dm],
-                  ].map(([l,v,c])=>(
-                    <div key={l}>
-                      <span style={{ color:S.dm, fontSize:S.ti }}>{l}: </span>
-                      <span style={{ color:c, fontFamily:'monospace', fontWeight:700, fontSize:S.xs }}>{v}</span>
-                    </div>
-                  ))}
-                  {r.containerId && <div><span style={{ color:S.dm, fontSize:S.ti }}>ID: </span><span style={{ color:S.tx, fontSize:S.ti }}>{r.containerId}</span></div>}
-                  {r.inspector   && <div><span style={{ color:S.dm, fontSize:S.ti }}>By: </span><span style={{ color:S.dm, fontSize:S.ti }}>{r.inspector}</span></div>}
+                <div style={{ display:'flex', gap:4 }}>
+                  <button onClick={()=>setBayStatus(b.bay, status === 'loaded' || status === 'checked' ? 'pending' : 'loaded')} style={{
+                    background: (status==='loaded'||status==='checked') ? `${S.gd}20` : 'transparent',
+                    border:`1px solid ${(status==='loaded'||status==='checked') ? S.gd : S.vd}`,
+                    color:(status==='loaded'||status==='checked') ? S.gd : S.dm,
+                    borderRadius:5, padding:'5px 10px', fontSize:S.ti, cursor:'pointer', fontWeight:700,
+                  }}>{mode==='load' ? 'Loaded' : 'Discharged'}</button>
+                  <button onClick={()=>setBayStatus(b.bay, status === 'checked' ? 'loaded' : 'checked')} disabled={status==='pending'} style={{
+                    background: status==='checked' ? `${S.gn}20` : 'transparent',
+                    border:`1px solid ${status==='checked' ? S.gn : S.vd}`,
+                    color: status==='checked' ? S.gn : (status==='pending' ? S.vd : S.dm),
+                    borderRadius:5, padding:'5px 10px', fontSize:S.ti, cursor: status==='pending' ? 'default' : 'pointer', fontWeight:700,
+                  }}>✅ Checked</button>
                 </div>
-                {r.remarks && <div style={{ color:S.dm, fontSize:S.ti, marginTop:3, fontStyle:'italic' }}>📝 {r.remarks}</div>}
               </div>
             );
           })}
-      </div>
-
-      {/* Reefer summary */}
-      {rounds.length > 0 && (
-        <div style={{ background:`${S.cy}06`, border:`1px solid ${S.cy}20`, borderRadius:9, padding:'10px 12px', marginTop:10 }}>
-          <SectionLabel text="Reefer Round Summary" color={S.cy} />
-          <div style={{ display:'flex', gap:12, flexWrap:'wrap' }}>
-            {[...new Set(rounds.map(r=>r.bay))].sort().map(bay => {
-              const bayRounds = rounds.filter(r=>r.bay===bay);
-              const lastRound = bayRounds[bayRounds.length-1];
-              const diff = parseFloat(lastRound?.tempDiff);
-              const ok = isNaN(diff) || Math.abs(diff) <= 3;
-              return (
-                <div key={bay} style={{ background:S.bg3, borderRadius:6, padding:'5px 9px', textAlign:'center' }}>
-                  <div style={{ color:ACC, fontFamily:'monospace', fontWeight:700, fontSize:S.xs }}>Bay {bay}</div>
-                  <div style={{ color:S.dm, fontSize:S.ti }}>{bayRounds.length} rounds</div>
-                  <div style={{ color:ok?S.gn:S.rd, fontSize:S.ti, fontWeight:700 }}>
-                    {lastRound?.supply ? lastRound.supply+'°C' : '—'} {ok?'✓':'⚠'}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
+        </Card>
+      ))}
     </div>
   );
 }
@@ -2150,7 +1914,7 @@ function ContainerLiveOps() {
   const TABS = [
     { id:'dashboard', label:'📊 Dashboard'    },
     { id:'liveops',   label:'⚡ Live Ops'     },
-    { id:'reefer',    label:'❄ Reefer Rounds' },
+    { id:'reefer',    label:'❄ Reefer Status' },
   ];
 
   if (!loaded) {
@@ -2191,118 +1955,188 @@ function ContainerLiveOps() {
         <LiveOps portOp={portOp} onUpdate={handleUpdate} onReset={handleReset} />
       )}
       {activeTab === 'reefer' && (
-        <ReeferRounds portOp={portOp} onUpdateReefer={handleUpdate} />
+        <ReeferStatus portOp={portOp} onUpdateReefer={handleUpdate} />
       )}
     </div>
   );
 }
+
+// ─── OOG STATUS (auto-populated, read-only) ─────────────────────────────────
+// Replaces manual OOG entry. Pulls OOG containers directly from bay.containers
+// (populated by BAPLIE/MSC XML import) — no manual form needed. Reads the
+// live portOp via the same IndexedDB key as ContainerSearch/BaplieImport.
 function ContainerOOG() {
-  const ACC = VESSEL_COLORS.container.accent;
-  const KEY = 'cargo_container_oog';
-  const [entries, setEntries] = useState(() => load(KEY, []));
-  const [form, setForm] = useState({ containerId: '', bay: '', overHeight: '', overWidth: '', overLength: '', weight: '', lashingPts: '', airDraftClear: 'Yes', remarks: '' });
-  const set = k => e => setForm(f => ({ ...f, [k]: e.target.value }));
-  const add = () => { if (!form.containerId) return; const e = [...entries, { ...form, ts: new Date().toISOString().slice(0,10) }]; setEntries(e); save(KEY, e); setForm({ containerId: '', bay: '', overHeight: '', overWidth: '', overLength: '', weight: '', lashingPts: '', airDraftClear: 'Yes', remarks: '' }); };
-  const del = i => { const e = entries.filter((_, j) => j !== i); setEntries(e); save(KEY, e); };
-  const COLS = [
-    { key: 'ts', label: 'Date', w: 80 }, { key: 'containerId', label: 'Container', w: 100 },
-    { key: 'bay', label: 'Bay', w: 35 }, { key: 'overHeight', label: 'O/H (m)', w: 60 },
-    { key: 'overWidth', label: 'O/W (m)', w: 60 }, { key: 'weight', label: 'Wt (kg)', w: 65 },
-    { key: 'airDraftClear', label: 'Air Draft', w: 65 }, { key: 'remarks', label: 'Remarks', w: 100 },
-  ];
+  const SETUP_KEY = 'cargo_container_port_op';
+  const [portOp, setPortOp] = useState(null);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    let mounted = true;
+    idbGetCargo(SETUP_KEY, null).then(data => {
+      if (!mounted) return;
+      setPortOp(data);
+      setLoaded(true);
+    });
+    return () => { mounted = false; };
+  }, []);
+
+  if (!loaded) {
+    return <div style={{ textAlign:'center', padding:'30px 0', color:S.dm, fontSize:S.xs }}>Loading…</div>;
+  }
+  if (!portOp) {
+    return <Card><div style={{ color:S.vd, fontSize:S.xs, textAlign:'center', padding:'16px 0' }}>No port operation set up yet. Import a loading plan first.</div></Card>;
+  }
+
+  const bays = portOp.bays || [];
+  const oogByBay = bays
+    .map(b => ({ bay: b.bay, containers: (b.containers || []).filter(c => c.oog) }))
+    .filter(x => x.containers.length > 0);
+
+  const totalOOG = oogByBay.reduce((s, x) => s + x.containers.length, 0);
+  const bayObjects = oogByBay.map(x => bays.find(b => b.bay === x.bay)).filter(Boolean);
+  const groups = groupBaysByMasterBay(bayObjects);
+
   return (
     <div>
       <Card style={{ marginBottom: 10 }}>
-        <SectionLabel text="OOG Cargo Tracker" color={ACC} />
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 10px' }}>
-          <Field label="Container ID" value={form.containerId} onChange={set('containerId')} placeholder="MSCU1234567" color={ACC} />
-          <Field label="Bay Position" value={form.bay} onChange={set('bay')} placeholder="e.g. 04" />
-          <Field label="Over Height" value={form.overHeight} onChange={set('overHeight')} type="number" placeholder="0.00" unit="m" color={S.gd} />
-          <Field label="Over Width (each side)" value={form.overWidth} onChange={set('overWidth')} type="number" placeholder="0.00" unit="m" color={S.gd} />
-          <Field label="Over Length" value={form.overLength} onChange={set('overLength')} type="number" placeholder="0.00" unit="m" color={S.gd} />
-          <Field label="Gross Weight" value={form.weight} onChange={set('weight')} type="number" placeholder="kg" unit="kg" />
-          <Field label="Lashing Points" value={form.lashingPts} onChange={set('lashingPts')} placeholder="e.g. 4 points" />
-          <div style={{ marginBottom: 8 }}>
-            <div style={{ color: S.dm, fontSize: S.lb, marginBottom: 3 }}>Air Draft Clearance Verified</div>
-            <select value={form.airDraftClear} onChange={set('airDraftClear')} style={{ width: '100%', background: S.bg3, color: form.airDraftClear === 'Yes' ? S.gn : S.rd, border: `1px solid ${S.bd2}`, borderRadius: 5, padding: '6px 8px', fontSize: S.xs }}>
-              {['Yes','No','Pending Check'].map(t => <option key={t}>{t}</option>)}
-            </select>
-          </div>
+        <SectionLabel text="OOG Tracker" color={ACC} />
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:6 }}>
+          <StatBox label="OOG Bays" value={oogByBay.length} color={S.or} />
+          <StatBox label="Total OOG Containers" value={totalOOG} color={S.or} />
         </div>
-        <Field label="Remarks / Special Instructions" value={form.remarks} onChange={set('remarks')} placeholder="Bridge clearances, lashing notes, cargo sensitivity…" />
-        <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
-          <Btn onClick={add} color={ACC} style={{ flex: 1 }}>+ Add OOG Entry</Btn>
-          <Btn onClick={() => exportLog('OOG Cargo Log', entries, COLS)} color={S.dm}>⬇ Export</Btn>
-        </div>
+        <div style={{ color:S.dm, fontSize:S.ti, marginTop:8 }}>Auto-populated from the imported loading plan — no manual entry needed.</div>
       </Card>
-      <Card>
-        <SectionLabel text={`OOG Tracker (${entries.length})`} color={ACC} />
-        <LogTable entries={entries} columns={COLS} onDelete={del} accent={ACC} />
-      </Card>
+
+      {oogByBay.length === 0 && (
+        <Card><div style={{ color:S.vd, fontSize:S.xs, textAlign:'center', padding:'16px 0' }}>No OOG containers found in the current loading plan</div></Card>
+      )}
+
+      {groups.map(g => {
+        const groupOOG = g.members.flatMap(b => (b.containers || []).filter(c => c.oog).map(c => ({ ...c, bay: b.bay })));
+        if (groupOOG.length === 0) return null;
+        return (
+          <Card key={g.masterBay} style={{ marginBottom: 8 }}>
+            <div style={{ color:S.dm, fontSize:S.ti, fontWeight:700, marginBottom:6 }}>
+              Bay {g.members.map(b=>b.bay).sort((a,b)=>parseInt(a,10)-parseInt(b,10)).join(' / ')}
+            </div>
+            {groupOOG.map((c, i) => (
+              <div key={c.id + i} style={{ display:'flex', alignItems:'center', gap:8, padding:'6px 4px', borderTop:`1px solid ${S.bd2}`, flexWrap:'wrap' }}>
+                <span style={{ color:S.or, fontFamily:'monospace', fontWeight:700, fontSize:S.xs }}>{c.id}</span>
+                <span style={{ color:S.dm, fontSize:S.ti }}>Bay {c.bay} · {c.holdDeck}</span>
+                <span style={{ color:S.dm, fontSize:S.ti }}>{c.size}'{c.type}</span>
+                <span style={{ color:S.dm, fontSize:S.ti }}>{c.weight||0} kg</span>
+                <span style={{ color:S.dm, fontSize:S.ti, marginLeft:'auto' }}>{c.pol||'—'} → {c.pod||'—'}</span>
+                {c.oogDims && c.oogDims.length > 0 && (
+                  <span style={{ color:S.or, fontSize:S.ti }}>📐 {c.oogDims.length} dim flag{c.oogDims.length===1?'':'s'}</span>
+                )}
+              </div>
+            ))}
+          </Card>
+        );
+      })}
     </div>
   );
 }
 
-function ContainerLashing() {
-  const ACC = VESSEL_COLORS.container.accent;
-  const [bays, setBays] = useState([
-    { bay: '01', tiers: 6, stackWeight: 0, lashBridgeCap: 800 },
-    { bay: '03', tiers: 6, stackWeight: 0, lashBridgeCap: 800 },
-    { bay: '05', tiers: 6, stackWeight: 0, lashBridgeCap: 900 },
-    { bay: '07', tiers: 6, stackWeight: 0, lashBridgeCap: 900 },
-  ]);
-  const [windSpeed, setWindSpeed] = useState(28);
-  const [seaState,  setSeaState]  = useState(4);
-  const upd = (i, k, v) => setBays(b => b.map((x, j) => j === i ? { ...x, [k]: parseFloat(v) || 0 } : x));
-  const getLashForce = (sw, ws, ss) => {
-    const windF  = 0.5 * 1.225 * Math.pow(ws * 0.514, 2) * 25 / 1000;
-    const seaF   = ss * 0.8 * sw * 0.01;
-    return windF + seaF;
+// ─── LASHING STATUS ───────────────────────────────────────────────────────────
+// Replaces the old wind/sea-state lashing force calculator. This is a simple
+// per-bay Completed/Remaining tracker for deck lashing, reusing the existing
+// bay.lashingDone field (no new data model needed). Reads/writes the live
+// portOp via the same IndexedDB key as ContainerLiveOps/ContainerSearch.
+function LashingStatus() {
+  const SETUP_KEY = 'cargo_container_port_op';
+  const [portOp, setPortOp] = useState(null);
+  const [loaded, setLoaded] = useState(false);
+  const [filter, setFilter] = useState('40ft'); // '40ft' | 'loaded' | 'all'
+
+  useEffect(() => {
+    let mounted = true;
+    idbGetCargo(SETUP_KEY, null).then(data => {
+      if (!mounted) return;
+      setPortOp(data);
+      setLoaded(true);
+    });
+    return () => { mounted = false; };
+  }, []);
+
+  const toggleLashing = async (bayNumber) => {
+    if (!portOp) return;
+    const updatedBays = portOp.bays.map(b => b.bay === bayNumber ? { ...b, lashingDone: !b.lashingDone } : b);
+    const updated = { ...portOp, bays: updatedBays };
+    setPortOp(updated);
+    await idbSetCargo(SETUP_KEY, updated);
   };
+
+  if (!loaded) {
+    return <div style={{ textAlign:'center', padding:'30px 0', color:S.dm, fontSize:S.xs }}>Loading…</div>;
+  }
+  if (!portOp) {
+    return <Card><div style={{ color:S.vd, fontSize:S.xs, textAlign:'center', padding:'16px 0' }}>No port operation set up yet. Import a loading plan first.</div></Card>;
+  }
+
+  const bays = portOp.bays || [];
+
+  // Deck-only: only bays with at least one deck container, or deckLoad/deckDisch > 0
+  // for bays without per-container data, are relevant for lashing.
+  const hasDeckCargo = (b) => {
+    if (b.containers && b.containers.length > 0) return b.containers.some(c => c.holdDeck === 'Deck');
+    return (b.deckLoad + b.deckDisch) > 0;
+  };
+
+  let visibleBays = bays.filter(hasDeckCargo);
+  if (filter === '40ft') visibleBays = visibleBays.filter(b => parseInt(b.bay, 10) % 2 === 0);
+  else if (filter === 'loaded') visibleBays = visibleBays.filter(b => b.status === 'completed' || b.doneLoad > 0);
+  // 'all' keeps everything with deck cargo, including 20ft bays
+
+  const groups = groupBaysByMasterBay(visibleBays);
+  const completedCount = visibleBays.filter(b => b.lashingDone).length;
+
   return (
     <div>
       <Card style={{ marginBottom: 10 }}>
-        <SectionLabel text="Environmental Parameters" color={ACC} />
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 10px' }}>
-          <Field label="Wind Speed" value={windSpeed} onChange={e => setWindSpeed(parseFloat(e.target.value)||0)} type="number" unit="kn" />
-          <div style={{ marginBottom: 8 }}>
-            <div style={{ color: S.dm, fontSize: S.lb, marginBottom: 3 }}>Sea State (Douglas)</div>
-            <select value={seaState} onChange={e => setSeaState(parseFloat(e.target.value))} style={{ width: '100%', background: S.bg3, color: S.cy, border: `1px solid ${S.bd2}`, borderRadius: 5, padding: '6px 8px', fontSize: S.xs }}>
-              {[1,2,3,4,5,6,7,8,9].map(n => <option key={n} value={n}>{n}</option>)}
-            </select>
+        <SectionLabel text="Lashing Status" color={ACC} />
+        <div style={{ display:'flex', gap:5, marginBottom:10 }}>
+          {[['40ft','40ft Bays'],['loaded','Loaded Bays'],['all','All Bays']].map(([v,l]) => (
+            <button key={v} onClick={()=>setFilter(v)} style={{
+              flex:1, background:filter===v?`${ACC}20`:'transparent',
+              border:`1px solid ${filter===v?ACC:S.vd}`, color:filter===v?ACC:S.dm,
+              borderRadius:5, padding:'6px 4px', fontSize:S.xs, cursor:'pointer', fontWeight:filter===v?700:400,
+            }}>{l}</button>
+          ))}
+        </div>
+        <div style={{ display:'flex', justifyContent:'space-between', color:S.dm, fontSize:S.xs }}>
+          <span>Deck bays shown: {visibleBays.length}</span>
+          <span style={{ color:completedCount===visibleBays.length && visibleBays.length>0 ? S.gn : S.gd, fontWeight:700 }}>{completedCount}/{visibleBays.length} completed</span>
+        </div>
+      </Card>
+
+      {groups.length === 0 && (
+        <Card><div style={{ color:S.vd, fontSize:S.xs, textAlign:'center', padding:'16px 0' }}>No deck bays match this filter</div></Card>
+      )}
+
+      {groups.map(g => (
+        <Card key={g.masterBay} style={{ marginBottom: 8 }}>
+          <div style={{ color:S.dm, fontSize:S.ti, fontWeight:700, marginBottom:6 }}>
+            Bay {g.members.map(b=>b.bay).sort((a,b)=>parseInt(a,10)-parseInt(b,10)).join(' / ')}
           </div>
-        </div>
-      </Card>
-      <Card style={{ marginBottom: 10 }}>
-        <SectionLabel text="Bay Stack Assessment" color={ACC} />
-        <div style={{ display: 'grid', gridTemplateColumns: '45px 1fr 1fr 1fr', gap: 4, marginBottom: 4 }}>
-          {['Bay','Stack Wt (t)','Bridge Cap (t)','Status'].map(h => <div key={h} style={{ color: S.dm, fontSize: S.lb }}>{h}</div>)}
-        </div>
-        {bays.map((b, i) => {
-          const force = getLashForce(b.stackWeight, windSpeed, seaState);
-          const util  = b.lashBridgeCap > 0 ? (force / b.lashBridgeCap * 100) : 0;
-          const col   = util < 70 ? S.gn : util < 90 ? S.gd : S.rd;
-          return (
-            <div key={i} style={{ display: 'grid', gridTemplateColumns: '45px 1fr 1fr 1fr', gap: 4, marginBottom: 6, alignItems: 'center' }}>
-              <div style={{ color: ACC, fontWeight: 700, fontSize: S.xs }}>B{b.bay}</div>
-              <input type="number" value={b.stackWeight} onChange={e => upd(i,'stackWeight',e.target.value)} style={{ background: S.bg2, color: ACC, border: `1px solid ${S.bd2}`, borderRadius: 4, padding: '4px 6px', fontSize: S.lb, outline: 'none', fontFamily: 'monospace' }}/>
-              <input type="number" value={b.lashBridgeCap} onChange={e => upd(i,'lashBridgeCap',e.target.value)} style={{ background: S.bg3, color: S.dm, border: `1px solid ${S.vd}`, borderRadius: 4, padding: '4px 6px', fontSize: S.lb, outline: 'none', fontFamily: 'monospace' }}/>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                <div style={{ background: S.bg3, borderRadius: 3, height: 6, overflow: 'hidden' }}>
-                  <div style={{ background: col, height: '100%', width: `${Math.min(util, 100)}%`, transition: 'width 0.3s' }} />
-                </div>
-                <span style={{ color: col, fontSize: S.lb, fontFamily: 'monospace' }}>{util.toFixed(0)}%</span>
+          {g.members.map(b => (
+            <div key={b.bay} style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'6px 4px', borderTop:`1px solid ${S.bd2}` }}>
+              <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                <span style={{ color:ACC, fontFamily:'monospace', fontWeight:700, fontSize:S.xs }}>Bay {b.bay}</span>
+                <span style={{ color:S.dm, fontSize:S.ti }}>{parseInt(b.bay,10)%2===0 ? '40ft' : '20ft'}</span>
               </div>
+              <button onClick={()=>toggleLashing(b.bay)} style={{
+                background: b.lashingDone ? `${S.gn}20` : `${S.gd}15`,
+                border: `1px solid ${b.lashingDone ? S.gn : S.gd}`,
+                color: b.lashingDone ? S.gn : S.gd,
+                borderRadius:6, padding:'5px 12px', fontSize:S.xs, cursor:'pointer', fontWeight:700,
+              }}>
+                {b.lashingDone ? '✓ Completed' : 'Remaining'}
+              </button>
             </div>
-          );
-        })}
-      </Card>
-      <Card>
-        <div style={{ color: S.dm, fontSize: S.lb, lineHeight: 1.7 }}>
-          ℹ Force estimation based on simplified wind + sea state loading.<br/>
-          ⚠ Always verify with CSS Code lashing calculation software for actual securing operations.
-        </div>
-      </Card>
+          ))}
+        </Card>
+      ))}
     </div>
   );
 }
@@ -2749,13 +2583,26 @@ function parseMscBayPlanXml(rawText) {
 // ─── BAPLIE IMPORT UI ─────────────────────────────────────────────────────────
 function BaplieImport() {
   const SETUP_KEY = 'cargo_container_port_op'; // same key ContainerLiveOps/ContainerSearch use
+  const SAVED_PLANS_KEY = 'cargo_container_saved_plans'; // array of {id, fileName, format, importedAt, summary, portOp}
   const [fileName, setFileName] = useState('');
   const [parsed, setParsed] = useState(null);
   const [detectedFormat, setDetectedFormat] = useState('');
   const [error, setError] = useState('');
   const [importing, setImporting] = useState(false);
   const [imported, setImported] = useState(false);
+  const [savedPlans, setSavedPlans] = useState([]);
+  const [savedPlansLoaded, setSavedPlansLoaded] = useState(false);
   const fileInputRef = useRef(null);
+
+  useEffect(() => {
+    let mounted = true;
+    idbGetCargo(SAVED_PLANS_KEY, []).then(list => {
+      if (!mounted) return;
+      setSavedPlans(Array.isArray(list) ? list : []);
+      setSavedPlansLoaded(true);
+    });
+    return () => { mounted = false; };
+  }, []);
 
   const handleFile = (file) => {
     setError('');
@@ -2802,8 +2649,40 @@ function BaplieImport() {
     setImporting(true);
     const op = buildPortOpFromBaplie(parsed, parsed.currentPort, parsed.vesselName);
     await idbSetCargo(SETUP_KEY, op); // Replace, per confirmed import behavior
+
+    // Save this import to history so the user can reload it later without
+    // re-uploading the file, alongside other previously imported plans.
+    const record = {
+      id: Date.now(),
+      fileName,
+      format: detectedFormat,
+      importedAt: clNowFull(),
+      port: op.port,
+      vessel: op.vessel,
+      totalContainers: parsed.totalParsed,
+      bayCount: op.bays.length,
+      portOp: op,
+    };
+    const updatedPlans = [record, ...savedPlans].slice(0, 20); // keep last 20
+    setSavedPlans(updatedPlans);
+    await idbSetCargo(SAVED_PLANS_KEY, updatedPlans);
+
     setImporting(false);
     setImported(true);
+  };
+
+  const reloadSavedPlan = async (record) => {
+    await idbSetCargo(SETUP_KEY, record.portOp);
+    setImported(true);
+    setParsed({ totalParsed: record.totalContainers, currentPort: record.port, vesselName: record.vessel, containers: record.portOp.bays.flatMap(b => b.containers || []), warnings: [] });
+    setDetectedFormat(record.format);
+    setFileName(record.fileName);
+  };
+
+  const deleteSavedPlan = async (id) => {
+    const updated = savedPlans.filter(p => p.id !== id);
+    setSavedPlans(updated);
+    await idbSetCargo(SAVED_PLANS_KEY, updated);
   };
 
   const dgCount = parsed ? parsed.containers.filter(c => c.dgClass).length : 0;
@@ -2884,15 +2763,42 @@ function BaplieImport() {
       )}
 
       {imported && (
-        <Card>
+        <Card style={{ marginBottom: 10 }}>
           <div style={{ color: S.gn, fontSize: S.sm, fontWeight: 700, textAlign: 'center', padding: '10px 0' }}>
-            ✅ Import complete — {parsed.totalParsed} containers across {bayCount} bays loaded.
+            ✅ {fileName ? 'Loaded' : 'Import complete'} — {parsed.totalParsed} containers across {bayCount} bays.
           </div>
           <div style={{ color: S.dm, fontSize: S.xs, textAlign: 'center' }}>
             Switch to "⚡ Live Cargo Ops" to view the dashboard, or "🔍 Container Search" to look up containers.
           </div>
         </Card>
       )}
+
+      {/* ── SAVED PLANS ── */}
+      <Card>
+        <SectionLabel text={`Saved Plans (${savedPlans.length})`} color={S.dm} />
+        {!savedPlansLoaded ? (
+          <div style={{ color: S.dm, fontSize: S.xs, textAlign: 'center', padding: '10px 0' }}>Loading…</div>
+        ) : savedPlans.length === 0 ? (
+          <div style={{ color: S.vd, fontSize: S.xs, fontStyle: 'italic', textAlign: 'center', padding: '10px 0' }}>
+            No saved plans yet — successful imports are saved here automatically.
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {savedPlans.map(p => (
+              <div key={p.id} style={{ background: S.bg3, borderRadius: 7, padding: '8px 10px', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <div style={{ flex: 1, minWidth: 140 }}>
+                  <div style={{ color: S.tx, fontSize: S.xs, fontWeight: 600 }}>{p.fileName}</div>
+                  <div style={{ color: S.dm, fontSize: S.ti }}>
+                    {p.format} · {p.totalContainers} containers · {p.bayCount} bays · {p.vessel || '—'} · {p.importedAt}
+                  </div>
+                </div>
+                <Btn onClick={() => reloadSavedPlan(p)} color={ACC} style={{ padding: '5px 10px', fontSize: S.ti }}>↺ Reload</Btn>
+                <button onClick={() => deleteSavedPlan(p.id)} style={{ background: 'transparent', border: 'none', color: S.rd, cursor: 'pointer', fontSize: '0.8rem' }}>✕</button>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
     </div>
   );
 }
@@ -3050,7 +2956,7 @@ const VESSEL_TABS = {
     { id: 'import',  label: '📥 Import Plan',    component: BaplieImport       },
     { id: 'search',  label: '🔍 Container Search', component: ContainerSearch  },
     { id: 'oog',     label: '📐 OOG Tracker',     component: ContainerOOG       },
-    { id: 'lashing', label: '⚓ Lashing Calc',    component: ContainerLashing   },
+    { id: 'lashing', label: '⚓ Lashing Status',  component: LashingStatus      },
   ],
   gas: [
     { id: 'bog',     label: '🔥 Boil-Off Calc',  component: GasBoilOff         },
@@ -3130,4 +3036,4 @@ export default function CargoOpsPage({ notify }) {
 
     </div>
   );
-            }
+              }
