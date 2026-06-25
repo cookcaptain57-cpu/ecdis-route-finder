@@ -87,7 +87,6 @@ const MARITIME_RANKS = [
   'Shore-based / Other',
 ];
 
-// ─── ADDED: Legal Modal content ───────────────────────────────────────────────
 function LegalModal({ tab, onClose }) {
   const isTC = tab === 'tc';
   return (
@@ -102,18 +101,14 @@ function LegalModal({ tab, onClose }) {
         borderRadius: 16, padding: '1.4rem', maxWidth: 520, width: '100%',
         maxHeight: '80vh', overflowY: 'auto',
       }} onClick={e => e.stopPropagation()}>
-        {/* Header */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
           <div style={{ fontFamily: 'Orbitron,monospace', fontSize: '0.84rem', fontWeight: 700, color: 'var(--cyan)' }}>
             {isTC ? '📋 Terms & Conditions' : '🔒 Privacy Policy'}
           </div>
           <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--text3)', cursor: 'pointer', fontSize: '1.2rem' }}>✕</button>
         </div>
-
         <div style={{ fontSize: '0.64rem', color: 'var(--text3)', marginBottom: '1rem' }}>Last updated: June 2026</div>
-
         {isTC ? (
-          // ── Terms & Conditions ──
           <div style={{ fontSize: '0.76rem', color: 'var(--text2)', lineHeight: 1.9 }}>
             {[
               { title: '1. Who Can Use This App', body: 'NavisphereX Marine is for maritime professionals, students, and shore staff aged 16 or older. By registering, you confirm you meet these criteria.' },
@@ -133,7 +128,6 @@ function LegalModal({ tab, onClose }) {
             ))}
           </div>
         ) : (
-          // ── Privacy Policy ──
           <div style={{ fontSize: '0.76rem', color: 'var(--text2)', lineHeight: 1.9 }}>
             {[
               { title: '1. What We Collect', body: 'Name, email, phone, rank, ship name, sea time entries, certificate records, and usage data you voluntarily provide.' },
@@ -151,7 +145,6 @@ function LegalModal({ tab, onClose }) {
             ))}
           </div>
         )}
-
         <button className="btn btn-primary" style={{ width: '100%', justifyContent: 'center', marginTop: '1rem' }} onClick={onClose}>
           ✅ I Understand — Close
         </button>
@@ -159,12 +152,11 @@ function LegalModal({ tab, onClose }) {
     </div>
   );
 }
-// ─── END ADDED ────────────────────────────────────────────────────────────────
 
 function CountryCodePicker({ value, onChange }) {
-  const [open, setOpen]         = useState(false);
-  const [search, setSearch]     = useState('');
-  const [manual, setManual]     = useState(false);
+  const [open, setOpen]           = useState(false);
+  const [search, setSearch]       = useState('');
+  const [manual, setManual]       = useState(false);
   const [manualVal, setManualVal] = useState('');
   const ref = useRef();
 
@@ -177,7 +169,6 @@ function CountryCodePicker({ value, onChange }) {
   const filtered = COUNTRY_CODES.filter(c =>
     !search || c.name.toLowerCase().includes(search.toLowerCase()) || c.dial.includes(search)
   );
-
   const selected = COUNTRY_CODES.find(c => c.dial === value);
 
   return (
@@ -198,7 +189,6 @@ function CountryCodePicker({ value, onChange }) {
           <span style={{ color: 'var(--text3)', fontSize: '0.7rem' }}>▾</span>
         </button>
       )}
-
       {open && !manual && (
         <div style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, zIndex: 500, width: 240,
           background: 'var(--card)', border: '1px solid var(--border2)', borderRadius: 10,
@@ -233,27 +223,25 @@ function CountryCodePicker({ value, onChange }) {
   );
 }
 
-function LoginPage({ notify, onLogin }) {
-  const [mode, setMode]             = useState('login');
-  const [email, setEmail]           = useState('');
-  const [pass, setPass]             = useState('');
-  const [name, setName]             = useState('');
-  const [phone, setPhone]           = useState('');
+// ── UPDATED: added installPrompt and onInstallApp props ──────────────────────
+function LoginPage({ notify, onLogin, installPrompt=null, onInstallApp=null }) {
+  const [mode, setMode]               = useState('login');
+  const [email, setEmail]             = useState('');
+  const [pass, setPass]               = useState('');
+  const [name, setName]               = useState('');
+  const [phone, setPhone]             = useState('');
   const [countryCode, setCountryCode] = useState('+91');
-  const [rank, setRank]             = useState('');
-  const [customRank, setCustomRank] = useState('');
+  const [rank, setRank]               = useState('');
+  const [customRank, setCustomRank]   = useState('');
   const [showCustomRank, setShowCustomRank] = useState(false);
-  const [tier, setTier]             = useState('free');
-  const [agreeTerms, setAgreeTerms] = useState(false);
-  const [loading, setLoading]       = useState(false);
-  const [err, setErr]               = useState('');
-  const [ok, setOk]                 = useState('');
-  // ─── ADDED: legal modal state ─────────────────────────────────────────────
-  const [legalModal, setLegalModal] = useState(null); // 'tc' | 'pp' | null
-  // ─────────────────────────────────────────────────────────────────────────
+  const [tier, setTier]               = useState('free');
+  const [agreeTerms, setAgreeTerms]   = useState(false);
+  const [loading, setLoading]         = useState(false);
+  const [err, setErr]                 = useState('');
+  const [ok, setOk]                   = useState('');
+  const [legalModal, setLegalModal]   = useState(null);
 
   const resetForm = m => { setMode(m); setErr(''); setOk(''); setAgreeTerms(false); };
-
   const finalRank = showCustomRank ? customRank : rank;
 
   const doLogin = async () => {
@@ -350,9 +338,7 @@ function LoginPage({ notify, onLogin }) {
 
   return (
     <>
-      {/* ─── ADDED: Legal Modal ─────────────────────────────────────────── */}
       {legalModal && <LegalModal tab={legalModal} onClose={() => setLegalModal(null)} />}
-      {/* ─── END ADDED ──────────────────────────────────────────────────── */}
 
       <div className="auth-wrap"><div className="auth-card">
         <div className="auth-logo">
@@ -368,14 +354,43 @@ function LoginPage({ notify, onLogin }) {
           </div>
         )}
 
-        <div className="info-box" style={{ fontSize: '0.74rem' }}>🆓 Free account · Access all RTZ routes &amp; ECDIS charts</div>
+        {/* ── UPDATED: Install button replaces info-box, falls back to info-box if not available ── */}
+        {installPrompt && onInstallApp ? (
+          <button onClick={onInstallApp}
+            style={{width:'100%',padding:'10px 14px',borderRadius:10,
+              border:'1px solid rgba(0,180,216,0.4)',
+              background:'linear-gradient(135deg,rgba(0,180,216,0.12),rgba(21,101,192,0.12))',
+              cursor:'pointer',display:'flex',alignItems:'center',gap:10,marginBottom:'1rem',
+              fontFamily:"'Exo 2',sans-serif",transition:'all 0.2s'}}
+            onMouseEnter={e=>{e.currentTarget.style.borderColor='rgba(0,180,216,0.7)';e.currentTarget.style.background='linear-gradient(135deg,rgba(0,180,216,0.2),rgba(21,101,192,0.2))';}}
+            onMouseLeave={e=>{e.currentTarget.style.borderColor='rgba(0,180,216,0.4)';e.currentTarget.style.background='linear-gradient(135deg,rgba(0,180,216,0.12),rgba(21,101,192,0.12))';}}>
+            <div style={{width:34,height:34,borderRadius:9,
+              background:'linear-gradient(135deg,var(--cyan),var(--blue))',
+              display:'flex',alignItems:'center',justifyContent:'center',
+              fontSize:'1.1rem',flexShrink:0,
+              boxShadow:'0 3px 10px rgba(0,180,216,0.4)'}}>📲</div>
+            <div style={{flex:1,textAlign:'left'}}>
+              <div style={{fontFamily:'Orbitron,monospace',fontSize:'0.68rem',
+                fontWeight:700,color:'var(--cyan)',marginBottom:1}}>
+                Install NavisphereX App
+              </div>
+              <div style={{fontSize:'0.62rem',color:'var(--text2)'}}>
+                Add to home screen for faster access
+              </div>
+            </div>
+            <div style={{fontSize:'0.72rem',color:'var(--cyan)',fontWeight:700}}>Install →</div>
+          </button>
+        ) : (
+          <div className="info-box" style={{ fontSize: '0.74rem' }}>
+            🆓 Free account · Access all RTZ routes &amp; ECDIS charts
+          </div>
+        )}
 
         {mode === 'signup' && (<>
           <div className="ff">
             <label className="fl">Full Name *</label>
             <input className="fi" placeholder="e.g. Manish Bharti" value={name} onChange={e => setName(e.target.value)} />
           </div>
-
           <div className="ff">
             <label className="fl">Phone Number *</label>
             <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
@@ -387,7 +402,6 @@ function LoginPage({ notify, onLogin }) {
               Code: <strong style={{ color: 'var(--cyan)' }}>{countryCode}</strong>
             </div>
           </div>
-
           <div className="ff">
             <label className="fl">Rank / Designation *</label>
             <select className="fi" value={showCustomRank ? '__other__' : rank}
@@ -405,7 +419,6 @@ function LoginPage({ notify, onLogin }) {
                 value={customRank} onChange={e => setCustomRank(e.target.value)} />
             )}
           </div>
-
           <div className="ff">
             <label className="fl">Access Tier *</label>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
@@ -421,27 +434,20 @@ function LoginPage({ notify, onLogin }) {
                 </div>
               ))}
             </div>
-            {/* ─── ADDED: Paid tier trial notice ────────────────────────── */}
             {tier === 'paid' && (
-              <div style={{
-                marginTop: 10, padding: '10px 12px',
-                background: 'rgba(240,165,0,0.08)',
-                border: '1px solid rgba(240,165,0,0.3)',
-                borderRadius: 9, fontSize: '0.72rem',
-                color: 'var(--gold)', lineHeight: 1.6,
-              }}>
+              <div style={{ marginTop: 10, padding: '10px 12px',
+                background: 'rgba(240,165,0,0.08)', border: '1px solid rgba(240,165,0,0.3)',
+                borderRadius: 9, fontSize: '0.72rem', color: 'var(--gold)', lineHeight: 1.6 }}>
                 ⭐ <strong>Note:</strong> You are currently enrolling on the <strong>Free tier</strong>.
                 All premium features are available on a <strong>trial basis</strong>.
                 A paid upgrade plan will be introduced in a future update.
               </div>
             )}
-            {/* ─── END ADDED ────────────────────────────────────────────── */}
           </div>
         </>)}
 
         <div className="ff">
           <label className="fl">Email</label>
-          {/* ─── CHANGED: placeholder updated to navispherex@gmail.com ─── */}
           <input className="fi" type="email" placeholder="e.g. navispherex@gmail.com" value={email}
             onChange={e => setEmail(e.target.value)}
             onKeyDown={e => e.key==='Enter'&&(mode==='login'?doLogin():mode==='signup'?doSignup():doReset())} />
@@ -467,20 +473,16 @@ function LoginPage({ notify, onLogin }) {
             </div>
             <span style={{ fontSize:'0.72rem', color:'var(--text2)', lineHeight:1.5 }}>
               I agree to the{' '}
-              {/* ─── CHANGED: T&C and PP now open modal ──────────────────── */}
-              <span
-                style={{ color:'var(--cyan)', cursor:'pointer', textDecoration:'underline' }}
+              <span style={{ color:'var(--cyan)', cursor:'pointer', textDecoration:'underline' }}
                 onClick={e => { e.stopPropagation(); setLegalModal('tc'); }}>
                 Terms &amp; Conditions
               </span>
               {' '}and{' '}
-              <span
-                style={{ color:'var(--cyan)', cursor:'pointer', textDecoration:'underline' }}
+              <span style={{ color:'var(--cyan)', cursor:'pointer', textDecoration:'underline' }}
                 onClick={e => { e.stopPropagation(); setLegalModal('pp'); }}>
                 Privacy Policy
               </span>.
               {' '}Content not for sole navigation use.
-              {/* ─── END CHANGED ──────────────────────────────────────────── */}
             </span>
           </div>
         )}
