@@ -180,6 +180,9 @@ function ChartsPage({ notify, user, setTab, isAdmin: isAdminProp, sheetCharts = 
   // Download history
   const [dlHistory, setDlHistory] = useState(() => getTodayHistory());
 
+  // ── Live daily limit (for notice text) — fetched from Firestore ─────────
+  const [maxChartsPerDay, setMaxChartsPerDay] = useState(10);
+
   const debounceRef = useRef(null);
   const debRef2     = useRef(null);
 
@@ -208,6 +211,19 @@ function ChartsPage({ notify, user, setTab, isAdmin: isAdminProp, sheetCharts = 
     clearTimeout(debounceRef.current);
     if (v.trim().length >= 2) debounceRef.current = setTimeout(() => doGlobalSearch(v), 200);
   };
+
+  // ── Fetch live download limit for notice text display ───────────────────
+  useEffect(() => {
+    (async () => {
+      try {
+        const snap = await getDoc(doc(db, 'app_config', 'limits'));
+        if (snap.exists()) {
+          const data = snap.data();
+          setMaxChartsPerDay(Number(data.maxChartsPerDay ?? 10));
+        }
+      } catch {}
+    })();
+  }, []);
 
   const doBrandSearch = (sq, brand) => {
     const s = (sq !== undefined ? sq : q).trim();
@@ -376,7 +392,7 @@ function ChartsPage({ notify, user, setTab, isAdmin: isAdminProp, sheetCharts = 
       {/* Download limit notice */}
       {user && !isAdmin && (
         <div style={{ background: 'rgba(240,165,0,0.06)', border: '1px solid rgba(240,165,0,0.2)', borderRadius: 8, padding: '7px 12px', fontSize: '0.7rem', color: 'var(--text2)', marginBottom: '0.8rem' }}>
-          📥 Free account: up to <strong style={{ color: 'var(--gold)' }}>10 chart downloads per day</strong>. Resets at midnight.
+          📥 Free account: up to <strong style={{ color: 'var(--gold)' }}>{maxChartsPerDay} chart downloads per day</strong>. Resets at midnight.
         </div>
       )}
       {isAdmin && (
@@ -465,16 +481,10 @@ function ChartsPage({ notify, user, setTab, isAdmin: isAdminProp, sheetCharts = 
 
           {!selBrand && (
             <div
-              className="brand-tabs"
               style={{
-                display: 'flex',
+                display: 'grid',
+                gridTemplateColumns: '1fr 1fr',
                 gap: 8,
-                overflowX: 'auto',
-                overflowY: 'hidden',
-                WebkitOverflowScrolling: 'touch',
-                touchAction: 'pan-x',
-                paddingBottom: 6,
-                scrollbarWidth: 'thin',
               }}
             >
               {ECDIS_BRANDS.map(b => {
@@ -487,26 +497,25 @@ function ChartsPage({ notify, user, setTab, isAdmin: isAdminProp, sheetCharts = 
                     key={b.id}
                     onClick={() => { setSelBrand(b.id); setGlobalQ(''); setGlobalResults([]); setGlobalSearched(false); }}
                     style={{
-                      flex: '0 0 auto',
                       display: 'flex',
-                      flexDirection: 'column',
+                      flexDirection: 'row',
                       alignItems: 'center',
-                      gap: 2,
-                      minWidth: 78,
-                      padding: '8px 12px',
+                      gap: 10,
+                      padding: '10px 14px',
                       borderRadius: 10,
                       border: `1px solid ${b.color}44`,
                       background: 'rgba(255,255,255,0.02)',
                       cursor: 'pointer',
-                      transition: 'background 0.15s ease',
-                      touchAction: 'pan-x',
+                      transition: 'background 0.15s ease, border-color 0.15s ease',
                     }}
-                    onMouseEnter={e => e.currentTarget.style.background = `${b.color}14`}
-                    onMouseLeave={e => e.currentTarget.style.background = 'rgba(255,255,255,0.02)'}
+                    onMouseEnter={e => { e.currentTarget.style.background = `${b.color}18`; e.currentTarget.style.borderColor = `${b.color}88`; }}
+                    onMouseLeave={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.02)'; e.currentTarget.style.borderColor = `${b.color}44`; }}
                   >
-                    <div style={{ fontSize: '1.2rem' }}>{b.emoji}</div>
-                    <div style={{ fontSize: '0.66rem', fontWeight: 700, color: b.color, whiteSpace: 'nowrap' }}>{b.name}</div>
-                    {cnt > 0 && <div style={{ fontSize: '0.58rem', color: 'var(--green)', fontWeight: 700 }}>{cnt}</div>}
+                    <div style={{ fontSize: '1.3rem', flexShrink: 0 }}>{b.emoji}</div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: '0.72rem', fontWeight: 700, color: b.color, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{b.name}</div>
+                      {cnt > 0 && <div style={{ fontSize: '0.6rem', color: 'var(--green)', fontWeight: 700, marginTop: 1 }}>{cnt} charts</div>}
+                    </div>
                   </div>
                 );
               })}
