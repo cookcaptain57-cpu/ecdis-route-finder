@@ -92,6 +92,17 @@ export default function AboutPage({ setTab }) {
           to solve real problems faced by seafarers onboard and ashore. From planning routes to tracking
           sea time, from searching ports to managing certificates — everything a navigator needs,
           in one place.
+          NavisphereX Marine supports:
+          ✅ Android phones and tablets
+          ✅ Apple Iphones and Ipads
+          ✅ Windows laptops  
+          ✅ MacBook
+
+           For AIS connectivity, 
+         NavisphereX Bridge app required
+        (Android/Windows/Mac — free download)
+
+         iOS coming soon via hardware adapter.
           <br /><br />
           Unlike generic apps, NavisphereX is built by someone who actually uses it at sea. Every feature
           comes from a real need encountered onboard, making it <strong style={{ color: 'var(--cyan)' }}>practical, accurate, and constantly evolving</strong>.
