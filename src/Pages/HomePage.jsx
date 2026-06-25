@@ -90,7 +90,6 @@ function MaritimeAIWidget() {
     if (isOpen) setTimeout(() => inputRef.current?.focus(), 100);
   }, [isOpen]);
 
-  // ── sendMessage — OpenRouter API ──────────────────────────────────────────
   const sendMessage = async (text) => {
     const question = (text || input).trim();
     if (!question || loading) return;
@@ -100,7 +99,6 @@ function MaritimeAIWidget() {
     setMessages(newHistory);
     setLoading(true);
     setStreamText('');
-
     try {
       const response = await fetch(_U, {
         method:'POST',
@@ -113,9 +111,7 @@ function MaritimeAIWidget() {
           ],
         }),
       });
-
       if (!response.ok) throw new Error(`${response.status}`);
-
       const reader  = response.body.getReader();
       const decoder = new TextDecoder();
       let fullText  = '';
@@ -270,7 +266,8 @@ function MaritimeAIWidget() {
   );
 }
 
-export default function HomePage({ routes, charts, onSearch, setTab, user, portsDb=[], userProfile=null }) {
+// ── Only change: added installPrompt and onInstallApp props ──────────────────
+export default function HomePage({ routes, charts, onSearch, setTab, user, portsDb=[], userProfile=null, installPrompt=null, onInstallApp=null }) {
   const [q,              setQ]             = useState('');
   const [qResults,       setQResults]      = useState([]);
   const [tipIndex,       setTipIndex]      = useState(() => Math.floor(Date.now()/86400000) % MARITIME_TIPS.length);
@@ -425,6 +422,7 @@ export default function HomePage({ routes, charts, onSearch, setTab, user, ports
             {user&&<span style={{color:'var(--cyan)'}}> Welcome{userProfile?.rank?`, ${userProfile.rank} `:', '}{userProfile?.name?.split(' ')[0]||user.email.split('@')[0]}!</span>}
           </p>
 
+          {/* Search bar */}
           <div ref={searchRef} style={{position:'relative',maxWidth:540,marginBottom:'0.9rem'}}>
             <div style={{display:'flex',gap:8}}>
               <div className="siw" style={{flex:1}}>
@@ -462,6 +460,7 @@ export default function HomePage({ routes, charts, onSearch, setTab, user, ports
             )}
           </div>
 
+          {/* Weather strip */}
           <div ref={weatherRef} style={{background:'rgba(7,20,40,0.75)',border:'1px solid rgba(0,180,216,0.22)',borderRadius:12,padding:'0.65rem 0.9rem',backdropFilter:'blur(10px)',maxWidth:540}}>
             <div style={{display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}}>
               <div style={{display:'flex',alignItems:'center',gap:5,flexShrink:0}}>
@@ -504,10 +503,29 @@ export default function HomePage({ routes, charts, onSearch, setTab, user, ports
               {!weather&&!weatherLoading&&<span style={{fontSize:'0.62rem',color:'var(--text3)',flexShrink:0}}>or search a port →</span>}
             </div>
           </div>
+
+          {/* ── PWA Install Button — below weather widget ── */}
+          {installPrompt && onInstallApp && (
+            <div style={{marginTop:'0.8rem',maxWidth:540}}>
+              <button onClick={onInstallApp}
+                style={{width:'100%',padding:'11px 16px',borderRadius:12,border:'1px solid rgba(0,180,216,0.4)',background:'linear-gradient(135deg,rgba(0,180,216,0.12),rgba(21,101,192,0.12))',cursor:'pointer',display:'flex',alignItems:'center',gap:12,fontFamily:"'Exo 2',sans-serif",backdropFilter:'blur(10px)',transition:'all 0.2s'}}
+                onMouseEnter={e=>{e.currentTarget.style.borderColor='rgba(0,180,216,0.7)';e.currentTarget.style.background='linear-gradient(135deg,rgba(0,180,216,0.2),rgba(21,101,192,0.2))';}}
+                onMouseLeave={e=>{e.currentTarget.style.borderColor='rgba(0,180,216,0.4)';e.currentTarget.style.background='linear-gradient(135deg,rgba(0,180,216,0.12),rgba(21,101,192,0.12))';}}>
+                <div style={{width:38,height:38,borderRadius:10,background:'linear-gradient(135deg,var(--cyan),var(--blue))',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'1.3rem',flexShrink:0,boxShadow:'0 4px 14px rgba(0,180,216,0.4)'}}>📲</div>
+                <div style={{flex:1,textAlign:'left'}}>
+                  <div style={{fontFamily:'Orbitron,monospace',fontSize:'0.72rem',fontWeight:700,color:'var(--cyan)',marginBottom:2}}>Install NavisphereX App</div>
+                  <div style={{fontSize:'0.66rem',color:'var(--text2)'}}>Add to home screen for faster access & offline use</div>
+                </div>
+                <div style={{fontSize:'0.8rem',color:'var(--cyan)',flexShrink:0,fontWeight:700}}>Install →</div>
+              </button>
+            </div>
+          )}
+
         </div>
       </div>
       {/* ── END HERO ── */}
 
+      {/* ── SCROLLABLE CONTENT ── */}
       <div style={{flex:1,overflowY:'auto'}}>
         <div style={{padding:'1.2rem 1rem',maxWidth:1100,margin:'0 auto',width:'100%'}}>
 
@@ -655,6 +673,7 @@ export default function HomePage({ routes, charts, onSearch, setTab, user, ports
 
         </div>
       </div>
+      {/* ── END SCROLLABLE CONTENT ── */}
 
       <style>{`
         @keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}
@@ -663,4 +682,4 @@ export default function HomePage({ routes, charts, onSearch, setTab, user, ports
       `}</style>
     </div>
   );
-}
+               }
