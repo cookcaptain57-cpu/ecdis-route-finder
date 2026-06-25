@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef, useEffect } from "react";
+import { useState, useMemo, useRef } from "react";
 import olpData from "../data/olpData.json";
 
 // ── helpers ──────────────────────────────────────────────────────────────────
