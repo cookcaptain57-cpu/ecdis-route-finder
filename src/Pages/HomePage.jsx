@@ -6,7 +6,7 @@ import { idbGet } from "../sheets";
 
 const _K = process.env.REACT_APP_OR_KEY;
 const _U = "https://openrouter.ai/api/v1/chat/completions";
-const _M = "meta-llama/llama-3.3-70b-instruct:free";
+const _M = "openrouter/free";
 
 const MARITIME_TIPS = [
   "⚓ Always maintain a safe speed to allow adequate time to take avoiding action.",
