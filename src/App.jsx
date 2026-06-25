@@ -44,7 +44,6 @@ import PortShorePage           from "./Pages/PortShorePage";
 import InfoPage                from "./Pages/InfoPage";
 import SeaDiaryPage            from "./Pages/SeaDiaryPage";
 import CargoOpsPage            from "./Pages/CargoOpsPage";
-// ── NEW ──────────────────────────────────────────────────────────────────────
 import OLPAssistantPage        from "./Pages/OLPAssistantPage";
 
 const S = `
@@ -100,11 +99,11 @@ const S = `
   .si-icon{font-size:1.05rem;width:22px;text-align:center;flex-shrink:0;}
   .mob-menu{
     display:none;
-    position:fixed;top:56px;left:0;right:0;
+    position:fixed;top:56px;left:0;right:0;bottom:0;
     background:rgba(4,12,26,0.98);backdrop-filter:blur(20px);
-    border-bottom:1px solid var(--border);z-index:99;padding:0.7rem;
-    height:calc(100vh - 56px);
-    overflow-y:scroll;
+    border-bottom:1px solid var(--border);z-index:99;
+    padding:0.7rem 0.7rem 3rem;
+    overflow-y:auto;
     -webkit-overflow-scrolling:touch;
     overscroll-behavior:contain;
   }
@@ -277,11 +276,8 @@ export default function App() {
   const [authProgress, setAuthProgress]       = useState(0);
   const [isOnline, setIsOnline]               = useState(navigator.onLine);
   const [theme, setTheme]                     = useState(() => localStorage.getItem('nav_theme') || 'dark');
-
   const [installPrompt, setInstallPrompt]     = useState(null);
-
   const [tabHistory, setTabHistory]           = useState([]);
-
   const [showNotifPanel, setShowNotifPanel]   = useState(false);
   const [notifications, setNotifications]     = useState([]);
   const [readNotifIds, setReadNotifIds]       = useState(() => {
@@ -298,7 +294,6 @@ export default function App() {
   const isAdmin = user?.email === ADMIN_EMAIL;
   const notify  = (msg, type = 'success') => setNotif({ msg, type, key: Date.now() });
 
-  // ── 'olp' added to PUBLIC_TABS — no login required ──
   const PUBLIC_TABS = new Set(['home', 'login', 'info', 'olp']);
 
   const applyPortData = (d3) => {
@@ -474,10 +469,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    const handler = (e) => {
-      e.preventDefault();
-      setInstallPrompt(e);
-    };
+    const handler = (e) => { e.preventDefault(); setInstallPrompt(e); };
     window.addEventListener('beforeinstallprompt', handler);
     window.addEventListener('appinstalled', () => setInstallPrompt(null));
     return () => {
@@ -548,7 +540,6 @@ export default function App() {
     { k:'portshore',   i:'🏖', l:'Port & Shore' },
     { k:'seadiary',    i:'📔', l:'Sea Diary' },
     { k:'cargoops',    i:'🚢', l:'Cargo Ops' },
-    // ── NEW ──────────────────────────────────────────────────────────────
     { k:'olp',         i:'🎓', l:'OLP Assistant' },
     ...(user ? [{ k:'account', i:'👤', l:'My Account' }] : []),
     ...(isAdmin ? [{ k:'admin', i:'🛡', l:'Admin' }] : []),
@@ -563,11 +554,8 @@ export default function App() {
       sessionStorage.setItem('intendedTab', k); return;
     }
     if (k !== tab) {
-      if (k === 'home') {
-        setTabHistory([]);
-      } else {
-        setTabHistory(h => [...h, tab]);
-      }
+      if (k === 'home') { setTabHistory([]); }
+      else { setTabHistory(h => [...h, tab]); }
     }
     setTab(k); setMenuOpen(false);
     const navTabs = ['routes', 'planner', 'navmode'];
@@ -640,7 +628,6 @@ export default function App() {
             </div>
             <div className="nav-controls">
               <div className="sd" />
-
               {installPrompt && (
                 <button onClick={handleInstallApp}
                   style={{ background:'linear-gradient(135deg,var(--cyan),var(--blue))',
@@ -651,7 +638,6 @@ export default function App() {
                   📲 Install
                 </button>
               )}
-
               {user && (
                 <button onClick={() => { setShowNotifPanel(p => !p); markAllRead(); }}
                   style={{ position:'relative', background:'rgba(255,255,255,0.06)', border:'1px solid var(--border)',
@@ -683,6 +669,7 @@ export default function App() {
           </div>
         </nav>
 
+        {/* ── Mobile menu — fixed height with overflow-y:auto for scrolling ── */}
         <div className={`mob-menu ${menuOpen ? 'open' : ''}`}>
           {TABS.map(t => (
             <button key={t.k} className={`mtab ${tab===t.k?'active':''}`} onClick={() => switchTab(t.k)}>
@@ -724,7 +711,6 @@ export default function App() {
         )}
 
         <div className="app-body">
-
           <aside className="app-sidebar">
             <div style={{ padding:'4px 6px 8px', marginBottom:2 }}>
               <div style={{ fontSize:'0.52rem', color:'var(--text3)', textTransform:'uppercase', letterSpacing:'0.14em' }}>NAVIGATION</div>
@@ -737,7 +723,6 @@ export default function App() {
                 {t.k==='sights'   && <span style={{ marginLeft:'auto', padding:'1px 5px', borderRadius:4, fontSize:'0.5rem', background:'rgba(240,165,0,0.15)', color:'var(--gold)', border:'1px solid rgba(240,165,0,0.25)', fontWeight:700, flexShrink:0 }}>NEW</span>}
                 {t.k==='seadiary' && <span style={{ marginLeft:'auto', padding:'1px 5px', borderRadius:4, fontSize:'0.5rem', background:'rgba(0,180,216,0.15)', color:'var(--cyan)', border:'1px solid rgba(0,180,216,0.25)', fontWeight:700, flexShrink:0 }}>NEW</span>}
                 {t.k==='cargoops' && <span style={{ marginLeft:'auto', padding:'1px 5px', borderRadius:4, fontSize:'0.5rem', background:'rgba(245,158,11,0.15)', color:'#F59E0B', border:'1px solid rgba(245,158,11,0.25)', fontWeight:700, flexShrink:0 }}>NEW</span>}
-                {/* ── NEW badge for OLP ── */}
                 {t.k==='olp'      && <span style={{ marginLeft:'auto', padding:'1px 5px', borderRadius:4, fontSize:'0.5rem', background:'rgba(124,58,237,0.15)', color:'#a78bfa', border:'1px solid rgba(124,58,237,0.3)', fontWeight:700, flexShrink:0 }}>NEW</span>}
               </button>
             ))}
@@ -854,9 +839,9 @@ export default function App() {
             {tab==='portshore'   && <PortShorePage user={user} onNavigate={switchTab} />}
             {tab==='seadiary'    && user && <SeaDiaryPage user={user} notify={notify} portsDb={portsDb} />}
             {tab==='cargoops'    && user && <CargoOpsPage notify={notify} />}
-            {/* ── NEW OLP Assistant ── */}
             {tab==='olp'         && <OLPAssistantPage />}
-            {tab==='login'       && <LoginPage notify={notify} onLogin={(u, redirectTo, isNew, userName, userRank) => {
+            {/* ── UPDATED: LoginPage now receives installPrompt + onInstallApp ── */}
+            {tab==='login'       && <LoginPage notify={notify} installPrompt={installPrompt} onInstallApp={handleInstallApp} onLogin={(u, redirectTo, isNew, userName, userRank) => {
               setUser(u); setTab(redirectTo || 'home');
               if (!sessionStorage.getItem('welcome_shown')) {
                 sessionStorage.setItem('welcome_shown', '1');
@@ -889,7 +874,6 @@ export default function App() {
             )}
 
             {tab === 'home' && <Footer setTab={switchTab} />}
-
           </div>
         </div>
 
@@ -920,10 +904,10 @@ export default function App() {
             background:'rgba(4,12,26,0.97)', border:'1px solid rgba(240,165,0,0.4)', borderRadius:12,
             padding:'10px 16px', display:'flex', alignItems:'center', gap:10,
             boxShadow:'0 6px 24px rgba(0,0,0,0.5)', backdropFilter:'blur(20px)', maxWidth:'92vw', minWidth:260 }}>
-            <span>⚠️</span>
-            <span style={{ fontSize:'0.7rem', color:'var(--gold)', lineHeight:1.4 }}>Not to be used solely for navigation. Always verify with official sources.</span>
-            <button onClick={() => setNavDiscBanner(false)} style={{ background:'none', border:'none', color:'var(--text3)', cursor:'pointer', fontSize:'1rem', flexShrink:0, marginLeft:4 }}>✕</button>
-          </div>
+          <span>⚠️</span>
+          <span style={{ fontSize:'0.7rem', color:'var(--gold)', lineHeight:1.4 }}>Not to be used solely for navigation. Always verify with official sources.</span>
+          <button onClick={() => setNavDiscBanner(false)} style={{ background:'none', border:'none', color:'var(--text3)', cursor:'pointer', fontSize:'1rem', flexShrink:0, marginLeft:4 }}>✕</button>
+        </div>
         )}
       </div>
     </>
