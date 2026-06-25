@@ -2647,11 +2647,111 @@ function buildPortOpFromBaplie(parsed, portName, vesselNameOverride) {
   };
 }
 
+// ─── MSC BAYPLAN XML IMPORT (additive — second supported import format) ─────
+// Some planners send MSC's proprietary "BayPlan" XML export instead of BAPLIE
+// EDIFACT. Confirmed against a real 3,027-container MSC AZRA file. Key
+// difference from BAPLIE: StowPosition here is 6 digits (bay 2 + row 2 +
+// tier 2), NOT 7 digits (bay 3 + row 2 + tier 2) like BAPLIE — same tier
+// threshold rule applies (tier <=22 => Hold, tier >=70 => Deck).
+function isMscBayPlanXml(text) {
+  return text.includes('<BayPlan>') && text.includes('<Containers>');
+}
+
+// Extracts the text content of a simple (non-repeating) XML tag from a block.
+function xmlTag(block, tag) {
+  const m = block.match(new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`));
+  return m ? m[1].trim() : '';
+}
+
+// MSC's HazardousCargo Class is a 2-digit code: first digit = IMDG class,
+// second digit = division (e.g. "42" => Class 4, Division 2). A single-digit
+// class (no division) is left as-is.
+function decodeMscDgClass(code) {
+  const c = (code || '').trim();
+  if (!c) return '';
+  if (c.length >= 2) return `${c[0]}.${c.slice(1)}`;
+  return c;
+}
+
+function decodeMscStowPosition(code) {
+  const clean = (code || '').trim();
+  if (clean.length < 6) return null;
+  const bay = clean.substring(0, 2);
+  const row = clean.substring(2, 4);
+  const tier = clean.substring(4, 6);
+  const tierNum = parseInt(tier, 10);
+  const holdDeck = tierNum >= 70 ? 'Deck' : 'Hold';
+  return { bay, row, tier, holdDeck };
+}
+
+function parseMscBayPlanXml(rawText) {
+  const warnings = [];
+  const vesselName = xmlTag(rawText, 'VesselName');
+  const loadingPort = xmlTag(rawText, 'LoadingPort'); // used as "current port" reference, same role as BAPLIE's LOC+5
+  const voyage = xmlTag(rawText, 'Voyage');
+
+  const containerBlocks = rawText.split('<Container>').slice(1).map(s => s.split('</Container>')[0]);
+  const containers = [];
+
+  for (const block of containerBlocks) {
+    const id = xmlTag(block, 'ContainerNumber').toUpperCase();
+    if (!id) { warnings.push('Container block with no ContainerNumber skipped'); continue; }
+
+    const stowRaw = xmlTag(block, 'StowPosition');
+    const pos = decodeMscStowPosition(stowRaw);
+    if (!pos) { warnings.push(`Unparseable StowPosition for ${id}: ${stowRaw}`); continue; }
+
+    const isoCode = xmlTag(block, 'CtrIsoCode');
+    const st = baplieDecodeIsoSizeType(isoCode); // reuse existing ISO 6346 decoder — same code format
+
+    const isReefer = xmlTag(block, 'IsReeferContainer') === 'true';
+    const isOOG = xmlTag(block, 'IsOverDimensionContainer') === 'true' || xmlTag(block, 'IsOverSlotContainer') === 'true';
+    const fullEmptyRaw = xmlTag(block, 'FullEmpty');
+
+    // HazardousCargos can contain multiple HazardousCargo entries per container.
+    const dgClasses = [];
+    const hazBlocks = block.split('<HazardousCargo>').slice(1).map(s => s.split('</HazardousCargo>')[0]);
+    for (const hz of hazBlocks) {
+      const cls = decodeMscDgClass(xmlTag(hz, 'Class'));
+      const unNo = xmlTag(hz, 'UNNumber');
+      if (cls) dgClasses.push({ class: cls, unNo });
+    }
+
+    containers.push({
+      id,
+      weight: parseFloat(xmlTag(block, 'GrossWeight')) || 0,
+      pol: xmlTag(block, 'LoadingPort'),
+      pod: xmlTag(block, 'DischargingPort'),
+      originalPol: xmlTag(block, 'OriginPort'),
+      finalDestination: xmlTag(block, 'FinalDischargePort') || xmlTag(block, 'DestinationPort'),
+      size: st.size, type: st.type,
+      dgClass: dgClasses.length ? dgClasses[0].class : '',
+      dgClasses,
+      reefer: isReefer, reeferSetTemp: '', reeferRangeMin: '', reeferRangeMax: '',
+      oog: isOOG, oogDims: [],
+      holdDeck: pos.holdDeck, bay: pos.bay, row: pos.row, tier: pos.tier,
+      verifiedWeight: xmlTag(block, 'VerifiedGrossMass') === 'Y',
+      fullEmpty: fullEmptyRaw === 'E' ? 'empty' : 'full',
+    });
+  }
+
+  return {
+    containers,
+    currentPort: loadingPort,
+    nextPort: '', // not present in this XML format — only the rotation file has full schedule
+    vesselName: vesselName + (voyage ? ` (${voyage})` : ''),
+    warnings,
+    skippedCount: containerBlocks.length - containers.length,
+    totalParsed: containers.length,
+  };
+}
+
 // ─── BAPLIE IMPORT UI ─────────────────────────────────────────────────────────
 function BaplieImport() {
   const SETUP_KEY = 'cargo_container_port_op'; // same key ContainerLiveOps/ContainerSearch use
   const [fileName, setFileName] = useState('');
   const [parsed, setParsed] = useState(null);
+  const [detectedFormat, setDetectedFormat] = useState('');
   const [error, setError] = useState('');
   const [importing, setImporting] = useState(false);
   const [imported, setImported] = useState(false);
@@ -2661,14 +2761,20 @@ function BaplieImport() {
     setError('');
     setParsed(null);
     setImported(false);
+    setDetectedFormat('');
     setFileName(file.name);
     const reader = new FileReader();
     reader.onload = (e) => {
       try {
         const text = e.target.result;
-        const result = parseBaplie(text);
+        // Auto-detect format: MSC BayPlan XML vs standard BAPLIE EDIFACT.
+        // Detection does not assume file extension — some planners rename
+        // files, so we check the actual content structure.
+        const isXml = isMscBayPlanXml(text);
+        const result = isXml ? parseMscBayPlanXml(text) : parseBaplie(text);
+        setDetectedFormat(isXml ? 'MSC BayPlan XML' : 'BAPLIE EDIFACT');
         if (result.totalParsed === 0) {
-          setError('No containers could be parsed from this file. Is it a valid BAPLIE (.edi/.txt) file?');
+          setError('No containers could be parsed from this file. Is it a valid BAPLIE (.edi/.txt) or MSC BayPlan (.xml) file?');
           return;
         }
         setParsed(result);
@@ -2711,9 +2817,10 @@ function BaplieImport() {
   return (
     <div>
       <Card style={{ marginBottom: 10 }}>
-        <SectionLabel text="Import BAPLIE EDI File" color={ACC} />
+        <SectionLabel text="Import Loading Plan (BAPLIE or MSC XML)" color={ACC} />
         <div style={{ color: S.dm, fontSize: S.xs, marginBottom: 10, lineHeight: 1.6 }}>
-          Upload a UN/EDIFACT BAPLIE (.edi or .txt) loading plan from your planner.
+          Upload a UN/EDIFACT BAPLIE (.edi/.txt) or an MSC BayPlan XML (.xml)
+          loading plan from your planner — the format is detected automatically.
           This will replace the current port operation entirely — all bays and
           containers will be rebuilt from the imported file.
         </div>
@@ -2727,9 +2834,9 @@ function BaplieImport() {
             textAlign: 'center', cursor: 'pointer', background: S.bg3, marginBottom: 10,
           }}
         >
-          <div style={{ color: S.cy, fontSize: S.sm, fontWeight: 700, marginBottom: 4 }}>📥 Drop BAPLIE file here, or tap to browse</div>
-          <div style={{ color: S.dm, fontSize: S.ti }}>{fileName || '.edi or .txt'}</div>
-          <input ref={fileInputRef} type="file" accept=".edi,.txt" onChange={onFileInputChange} style={{ display: 'none' }} />
+          <div style={{ color: S.cy, fontSize: S.sm, fontWeight: 700, marginBottom: 4 }}>📥 Drop loading plan file here, or tap to browse</div>
+          <div style={{ color: S.dm, fontSize: S.ti }}>{fileName || '.edi, .txt, or .xml'}</div>
+          <input ref={fileInputRef} type="file" accept=".edi,.txt,.xml" onChange={onFileInputChange} style={{ display: 'none' }} />
         </div>
 
         {error && (
@@ -2742,6 +2849,9 @@ function BaplieImport() {
       {parsed && !imported && (
         <Card style={{ marginBottom: 10 }}>
           <SectionLabel text="Parse Summary — Review Before Import" color={S.gd} />
+          {detectedFormat && (
+            <div style={{ color: S.dm, fontSize: S.ti, marginBottom: 8 }}>Detected format: <span style={{ color: S.cy, fontWeight: 700 }}>{detectedFormat}</span></div>
+          )}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6, marginBottom: 10 }}>
             <StatBox label="Containers" value={parsed.totalParsed} color={ACC} />
             <StatBox label="Bays Found" value={bayCount} color={S.cy} />
@@ -2937,7 +3047,7 @@ const VESSEL_TABS = {
   ],
   container: [
     { id: 'liveops', label: '⚡ Live Cargo Ops',  component: ContainerLiveOps   },
-    { id: 'import',  label: '📥 Import BAPLIE',   component: BaplieImport       },
+    { id: 'import',  label: '📥 Import Plan',    component: BaplieImport       },
     { id: 'search',  label: '🔍 Container Search', component: ContainerSearch  },
     { id: 'oog',     label: '📐 OOG Tracker',     component: ContainerOOG       },
     { id: 'lashing', label: '⚓ Lashing Calc',    component: ContainerLashing   },
@@ -3020,4 +3130,4 @@ export default function CargoOpsPage({ notify }) {
 
     </div>
   );
-                   }
+            }
