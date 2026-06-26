@@ -58,19 +58,15 @@ const RotGauge=({rotRef,size=60})=>{
       const W=canvas.width,H=canvas.height;
       ctx.clearRect(0,0,W,H);
       const cx=W/2,cy=H-1,r=H-3;
-      // Background arcs
       ctx.beginPath();ctx.arc(cx,cy,r,Math.PI,0);ctx.strokeStyle='rgba(255,32,32,0.3)';ctx.lineWidth=5;ctx.stroke();
       ctx.beginPath();ctx.arc(cx,cy,r,0,Math.PI);ctx.strokeStyle='rgba(0,255,136,0.3)';ctx.lineWidth=5;ctx.stroke();
-      // Labels
       ctx.fillStyle='rgba(255,32,32,0.7)';ctx.font='bold 7px monospace';ctx.textAlign='left';ctx.fillText('P',3,H-2);
       ctx.fillStyle='rgba(0,255,136,0.7)';ctx.textAlign='right';ctx.fillText('S',W-3,H-2);
-      // Needle
       const ang=(rot/30)*Math.PI*0.9-Math.PI/2;
       const nx=cx+(r-2)*Math.cos(ang),ny=cy+(r-2)*Math.sin(ang);
       const col=rot<-2?'#FF2020':rot>2?'#00FF88':'#FFD700';
       ctx.beginPath();ctx.moveTo(cx,cy);ctx.lineTo(nx,ny);ctx.strokeStyle=col;ctx.lineWidth=3;ctx.lineCap='round';ctx.stroke();
       ctx.beginPath();ctx.arc(cx,cy,3,0,2*Math.PI);ctx.fillStyle='#00D4FF';ctx.fill();
-      // Value text
       ctx.fillStyle=col;ctx.font='bold 7px monospace';ctx.textAlign='center';
       ctx.fillText((rot>0.5?'⇒':rot<-0.5?'⇐':'·')+' '+Math.abs(rot).toFixed(1)+'°/m',cx,H-12);
     };
@@ -107,7 +103,6 @@ const drawCompassRose=(canvas,cog)=>{
     ctx.fillStyle=col;ctx.font='bold 8px monospace';
     ctx.fillText(lbl,cx+rr*Math.cos(rad),cy+rr*Math.sin(rad));
   });
-  // North arrow
   const rad=(-cog-90)*Math.PI/180,rr=r-4;
   ctx.beginPath();
   ctx.moveTo(cx+rr*Math.cos(rad),cy+rr*Math.sin(rad));
@@ -122,7 +117,6 @@ const CompassRose=({cogRef,size=70})=>{
     const canvas=canvasRef.current;
     if(!canvas)return;
     let last=-1;
-    // 2fps is plenty for compass — avoids 60fps repaints causing flicker
     const timer=setInterval(()=>{
       const cog=cogRef.current?.cog||0;
       if(Math.abs(cog-last)>0.3){drawCompassRose(canvas,cog);last=cog;}
@@ -147,19 +141,16 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
   const aisRangeRef=useRef(0),aisSourceRef=useRef('internet');
   const prevRouteNameRef=useRef(null),indonesiaEncLayerRef=useRef(null);
   const scsEncLayerRef=useRef(null);
-  // ROT tracking — separate refs per source to avoid interference
   const prevHdgRef=useRef(null),prevHdgTimeRef=useRef(null);
   const spPrevHdgRef=useRef(null),spPrevHdgTimeRef=useRef(null);
   const alarmCooldownRef=useRef({}),anchorAlarmCooldownRef=useRef(0),wpAlarmCooldownRef=useRef(0);
   const guardZoneAlarmCooldown=useRef({});
   const ownMmsiRef=useRef(null);
-  // FIX 2: movable AIS popup drag ref
   const aisPopupDragRef=useRef(null);
   const gpsThrottleRef=useRef(null);
   const rotValueRef=useRef(0);
   const rotCanvasRef=useRef(null);
   const cogCanvasRef=useRef(null);
-  // Popup data stored in refs to avoid setAisPopup inside render loops (flicker fix)
   const aisPopupMmsiRef=useRef(null);
   const aisPopupDataRef=useRef(null);
 
@@ -204,8 +195,6 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
   const [offTrackAlarm,setOffTrackAlarm]=useState(false);
   const [fullScreen,setFullScreen]=useState(false);
   const [mapZoom,setMapZoom]=useState(4);
-  // Derived band (not raw zoom) so route labels only re-render when crossing the threshold,
-  // not on every single zoom step — prevents flicker while still hiding labels when zoomed out
   const [routeLabelZoomBand,setRouteLabelZoomBand]=useState(()=>mapZoom>=8?'in':'out');
   const [cogPanelPos,setCogPanelPos]=useState(()=>{try{return JSON.parse(localStorage.getItem('nav_cogPanelPos')||'null')||{x:null,y:8};}catch{return{x:null,y:8};}});
   const [cogPanelVisible,setCogPanelVisible]=useState(()=>localStorage.getItem('nav_cogPanel')!=='false');
@@ -240,8 +229,7 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
   const [anchorShackles,setAnchorShackles]=useState(()=>Number(ls('nav_anchorShackles')||3));
   const [showAllAisVectors,setShowAllAisVectors]=useState(()=>localStorage.getItem('nav_aisVectors')==='true');
   const [selectedAisMmsi,setSelectedAisMmsi]=useState(null);
-  // AIS popup as full React state — no ref reads at render time (crash fix)
-  const [aisPopup,setAisPopup]=useState(null); // {mmsi,x,y,expanded,data}
+  const [aisPopup,setAisPopup]=useState(null);
 
   const safeInvalidate=useCallback(()=>{invalidateTimers.current.forEach(clearTimeout);invalidateTimers.current=[];const f=()=>{try{leafRef.current?.invalidateSize({animate:false});}catch{}};f();invalidateTimers.current=[100,300,600,1000,1800].map(t=>setTimeout(f,t));},[]);
 
@@ -251,12 +239,11 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
   const colreg=(o,t)=>{const b=(Math.atan2(t.lon-o.lon,t.lat-o.lat)*180/Math.PI+360)%360,rel=(b-o.cog+360)%360;if(rel>345||rel<15)return"HEAD-ON";if(rel>112.5&&rel<247.5)return"OVERTAKING";if(rel>15&&rel<112.5)return"CROSSING-STBD";return"CROSSING-PORT";};
   const offsetPt=(lat,lon,bd,dn)=>{const R=3440.065,d=dn/R,b=bd*Math.PI/180,p1=lat*Math.PI/180,l1=lon*Math.PI/180,p2=Math.asin(Math.sin(p1)*Math.cos(d)+Math.cos(p1)*Math.sin(d)*Math.cos(b)),l2=l1+Math.atan2(Math.sin(b)*Math.sin(d)*Math.cos(p1),Math.cos(d)-Math.sin(p1)*Math.sin(p2));return[p2*180/Math.PI,l2*180/Math.PI];};
 
-  // ROT calc helper — takes explicit prev refs so GPS and SafePilot don't interfere
   const calcROTWith=(newCog,nowMs,hRef,tRef)=>{
     let rot=0;
     if(hRef.current!==null&&tRef.current!==null){
       const dtMin=(nowMs-tRef.current)/60000;
-      if(dtMin>0.003&&dtMin<5){ // at least 0.2s gap to avoid /0
+      if(dtMin>0.003&&dtMin<5){
         const delta=(newCog-hRef.current+540)%360-180;
         rot=Math.max(-720,Math.min(720,parseFloat((delta/dtMin).toFixed(1))));
       }
@@ -287,6 +274,15 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
   const loadRoute=e=>{const fi=e.target.files?.[0];if(!fi)return;const r=new FileReader();r.onload=ev=>{try{const rt=parseRoute(ev.target.result,fi.name);if(!rt?.waypoints?.length)throw new Error('No waypoints');setActiveRoute(rt);setSelectedWpIdx(rt.waypoints.length-1);notify(`✓ ${rt.name} (${rt.waypoints.length} WPs)`,'error');}catch(er){notify(`Load failed: ${er.message}`,'error');}};r.readAsText(fi);e.target.value='';};
   const saveRoute=()=>{if(!activeRoute)return;setSavedRoutes(prev=>{const i=prev.findIndex(r=>r.name===activeRoute.name);const u=i>=0?prev.map((r,j)=>j===i?activeRoute:r):[activeRoute,...prev].slice(0,100);localStorage.setItem('nav_savedRoutes',JSON.stringify(u));return u;});notify(`✓ Saved: ${activeRoute.name}`,'error');};
   const delRoute=n=>{setSavedRoutes(prev=>{const u=prev.filter(r=>r.name!==n);localStorage.setItem('nav_savedRoutes',JSON.stringify(u));return u;});};
+
+  // ── CHANGE 1: S-52 sounding color helper — reads mariner's contour settings from ref ──
+  const getSoundingColor=useCallback((depth)=>{
+    const {shallow,safety,deep}=contoursRef.current;
+    if(depth<=shallow) return '#FF2020'; // DEPVS — very shallow, danger red
+    if(depth<=safety)  return '#FF9500'; // DEPMS — inside safety contour, orange
+    if(depth<=deep)    return '#FFD700'; // DEPMD — moderate depth, yellow
+    return '#00D4FF';                    // DEPDW — deep water, safe cyan
+  },[]);
 
   const loadIndonesiaEnc=useCallback(async()=>{if(!leafRef.current||!window.L||indonesiaEncLayerRef.current)return;notify('⏳ Loading Indonesia ENC…','error');try{const res=await fetch(INDONESIA_ENC_URL);if(!res.ok)throw new Error(`HTTP ${res.status}`);const geojson=await res.json();const L=window.L,m=leafRef.current;if(!m.getPane('indonesiaPane')){const cp=m.createPane('indonesiaPane');cp.style.zIndex='445';cp.style.pointerEvents='none';}const depthOnly={...geojson,features:(geojson.features||[]).filter(f=>['depth_area','depth_contour','sounding'].includes(f.properties?.type||f.properties?.featureType||''))};const layer=L.geoJSON(depthOnly,{pane:'indonesiaPane',style:ft=>{const t=ft.properties?.type||ft.properties?.featureType||'';if(t==='depth_area')return{color:'#0050AA',weight:0,fillColor:'#AADDFF',fillOpacity:0.18};if(t==='depth_contour')return{color:'#0050AA',weight:0.8,opacity:0.6,dashArray:'3 3'};return{opacity:0,weight:0,color:'transparent',fillOpacity:0};},pointToLayer:(ft,ll)=>{const p=ft.properties;if(p.type==='sounding'||p.featureType==='sounding')return L.marker(ll,{icon:L.divIcon({html:`<div style="color:#00D4FF;font-size:9px;font-weight:700;font-family:monospace;white-space:nowrap;text-shadow:1px 1px 2px #000;pointer-events:none;">${p.depth!=null?p.depth:''}</div>`,className:'',iconSize:[0,0],iconAnchor:[8,6]}),interactive:false});return L.circleMarker(ll,{radius:3,color:'#00BFFF',fillOpacity:0.6,weight:1});}}).addTo(m);indonesiaEncLayerRef.current=layer;notify(`✓ Indonesia ENC (${geojson.features?.length||0} features)`,'error');}catch(e){notify(`Indonesia ENC: ${e.message}`,'error');}},[]);
   const removeIndonesiaEnc=useCallback(()=>{if(indonesiaEncLayerRef.current&&leafRef.current){try{leafRef.current.removeLayer(indonesiaEncLayerRef.current);}catch{}indonesiaEncLayerRef.current=null;}},[]);
@@ -321,7 +317,8 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
           const p=ft.properties;const t=p.type||'';
           if(t==='sounding'){
             const d=p.depth;
-            const col=d<5?'#FF2020':d<10?'#FF9500':d<20?'#FFD700':'#00D4FF';
+            // CHANGE 2: Use getSoundingColor instead of hardcoded thresholds
+            const col=getSoundingColor(d!=null?d:9999);
             return L.marker(ll,{icon:L.divIcon({html:`<div style="color:${col};font-size:9px;font-weight:700;font-family:monospace;white-space:nowrap;text-shadow:1px 1px 2px #000;pointer-events:none;">${d!=null?d:''}</div>`,className:'',iconSize:[0,0],iconAnchor:[8,6]}),interactive:false});
           }
           if(t==='light'||t==='landmark')return L.circleMarker(ll,{radius:4,color:'#FFD700',fillOpacity:0.9,weight:1}).bindPopup(`<b>${p.name||t}</b>`);
@@ -340,7 +337,7 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
       const count=geojson.features?.length||0;
       notify(`✓ Indonesia Karimata ENC (${count} features — depth contours, soundings, TSS)`,'error');
     }catch(e){notify(`Karimata ENC: ${e.message}`,'error');}
-  },[]);
+  },[getSoundingColor]);
 
   const loadChartLayer=(ov)=>{if(!ov||!leafRef.current||!window.L)return;const L=window.L,m=leafRef.current;if(!m.getPane('chartPane')){const cp=m.createPane('chartPane');cp.style.zIndex='450';cp.style.pointerEvents='none';}const cc=colorsRef.current.chart||'#FF2020';const layer=L.geoJSON(ov.data,{pane:'chartPane',style:ft=>{const p=ft.properties,dg=p.checkDanger,da=p.lineType===2?'8 5':p.lineType===3?'3 5':null;return{color:dg?'#FF2020':cc,weight:3,opacity:1,dashArray:da,fillColor:dg?'#FF2020':cc,fillOpacity:0.12};},pointToLayer:(ft,ll)=>{const p=ft.properties;if(p.featureType==='label')return L.marker(ll,{icon:L.divIcon({html:`<div style="background:rgba(0,0,20,0.8);color:${cc};font-size:11px;font-weight:700;white-space:nowrap;font-family:monospace;padding:1px 4px;border-radius:3px;pointer-events:none;">${p.labelText||''}</div>`,className:'',iconAnchor:[0,8]}),interactive:false,zIndexOffset:300});return L.circleMarker(ll,{radius:6,color:cc,fillOpacity:0.85,weight:2}).bindPopup(`<b>${p.name||''}</b>`);},onEachFeature:(ft,l)=>{if(ft.properties.name&&ft.properties.featureType!=='label')l.bindPopup(`<b>${ft.properties.name}</b>`);}}).addTo(m);layer.bringToFront();chartLayersRef.current.push({id:ov.name,layer});try{const b=layer.getBounds();if(b.isValid())m.fitBounds(b,{padding:[40,40]});}catch{}};
 
@@ -366,12 +363,10 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
       if(livePosRef.current)aisService.setOwnShip(livePosRef.current);
       const off1=aisService.on('status',({status,targets})=>{setLocalAisStatus(status||'connected');setLocalAisCount(typeof targets==='number'?targets:(targets?.size||0));});
       const off2=aisService.on('alert',al=>{setLocalAisAlert(al);notify(`⚠ COLLISION: ${al?.name||al?.mmsi} CPA ${al?.cpa}NM`,'error');setTimeout(()=>setLocalAisAlert(null),30000);});
-      // FIX 3: Store all available AIS fields
       const off3=aisService.on('update',({target,targets})=>{
         if(!target?.lat||!target?.lon)return;
         const ownM=shipProfile?.mmsi?String(shipProfile.mmsi):null;
         ownMmsiRef.current=ownM;
-        // FIX 1: filter own ship
         if(ownM&&String(target.mmsi)===ownM)return;
         setAisTargets(prev=>({...prev,[target.mmsi]:{
           mmsi:target.mmsi,lat:target.lat,lon:target.lon,
@@ -407,7 +402,6 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
     }
   },[aisSource,localAisHost]);
 
-  // SafePilot own position — separate ROT calculation, crash-safe renderShip
   useEffect(()=>{
     if(aisSource!=='safepilot'&&aisSource!=='bridge')return;
     const off=aisService.on('ownPos',pos=>{
@@ -436,7 +430,6 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
 
   useEffect(()=>{if(livePos&&(aisSource==='safepilot'||aisSource==='bridge'))aisService.setOwnShip(livePos);},[livePos,aisSource]);
 
-  // GPS watch
   useEffect(()=>{
     if(!gpsOn)return;
     if(!navigator.geolocation){notify("GPS not supported","error");return;}
@@ -450,7 +443,6 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
         rotValueRef.current=rot;
         const fix={lat:la,lon:ln,sog,cog,heading:cog,acc,rot};
         livePosRef.current=fix;
-        // Throttle React state to 1/sec — map panning uses livePosRef directly
         const nowThrottle=Date.now();
         if(!gpsThrottleRef.current||nowThrottle-gpsThrottleRef.current>1000){
           gpsThrottleRef.current=nowThrottle;
@@ -470,8 +462,6 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
 
   useEffect(()=>{localStorage.setItem('nav_aisVectors',showAllAisVectors);},[showAllAisVectors]);
 
-  // ── AIS marker rendering — only on aisTargets change, never on GPS ticks ──
-  // own position read from livePosRef (ref) so livePos state not in deps
   useEffect(()=>{
     if(!leafRef.current||!window.L)return;
     const L=window.L,m=leafRef.current;
@@ -504,7 +494,6 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
         layersRef.current.ais[v.mmsi].mk.setLatLng([v.lat,v.lon]);
         layersRef.current.ais[v.mmsi].mk.setIcon(aisIcon);
         layersRef.current.ais[v.mmsi].data=liveData;
-        // Update ref only — no setState here (prevents flicker)
         if(aisPopupMmsiRef.current===String(v.mmsi)) aisPopupDataRef.current=liveData;
       } else {
         const mk=L.marker([v.lat,v.lon],{icon:aisIcon,zIndexOffset:500}).addTo(m);
@@ -539,7 +528,6 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
       }
     });
 
-    // Batch guard state — only update if actually changed
     setGuardZoneTargets(prev=>{const same=prev.length===guardBreachers.length&&prev.every((x,i)=>x===guardBreachers[i]);return same?prev:guardBreachers;});
     setGuardZoneAlarm(guardBreachers.length>0);
 
@@ -551,19 +539,17 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
         if(aisPopupMmsiRef.current===mmsi){aisPopupMmsiRef.current=null;aisPopupDataRef.current=null;setAisPopup(null);}
       }
     });
-  // NO livePos in deps — GPS ticks don't re-run this effect (flicker fix)
   },[aisTargets,showAllAisVectors,selectedAisMmsi,guardZoneOn,guardZoneRadiusNM]);
 
-  // Live CPA refresh for open popup — runs on GPS tick but only updates ref, no DOM
   useEffect(()=>{
     if(!aisPopup||!livePosRef.current||!aisPopupMmsiRef.current)return;
     const stored=layersRef.current.ais[aisPopupMmsiRef.current]?.data;
     if(stored)aisPopupDataRef.current=stored;
   },[livePos,aisPopup]);
+
   useEffect(()=>{
     if(!mapReady||!leafRef.current||!window.L)return;
     const L=window.L,m=leafRef.current;
-    // Only remove base tile on mapMode change — don't touch depth layers
     if(baseTileRef.current){try{m.removeLayer(baseTileRef.current);}catch{}baseTileRef.current=null;}
     const TILES={night:'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',day:'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',dusk:'https://{s}.basemaps.cartocdn.com/rastertiles/voyager_nolabels/{z}/{x}/{y}{r}.png'};
     baseTileRef.current=L.tileLayer(TILES[mapMode]||TILES.night,{subdomains:'abcd',maxZoom:20,zIndex:1,attribution:'© CARTO'}).addTo(m);
@@ -572,10 +558,8 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
   useEffect(()=>{
     if(!mapReady||!leafRef.current||!window.L)return;
     const L=window.L,m=leafRef.current;
-    // Only remove depth/ENC layers — NOT base tile or seamark
     [esriBaseRef,emodnetTileRef,gebcoWmsRef,gebcoRefTile,encTileRef].forEach(r=>{if(r.current){try{m.removeLayer(r.current);}catch{}r.current=null;}});
     const ds=depthSources,hasAny=ds.size>0;
-    // Update seamark opacity without recreating it
     if(seamarkRef.current)try{seamarkRef.current.setOpacity(hasAny?0.9:0.55);}catch{}
     if(ds.has('usa')){esriBaseRef.current=L.tileLayer('https://server.arcgisonline.com/arcgis/rest/services/Ocean/World_Ocean_Base/MapServer/tile/{z}/{y}/{x}',{maxZoom:13,opacity:0.55,zIndex:2,attribution:'© Esri'}).addTo(m);try{encTileRef.current=L.tileLayer.wms('https://gis.charttools.noaa.gov/arcgis/rest/services/MCS/ENCOnline/MapServer/exts/MaritimeChartService/WMSServer',{layers:'0,1,2,3,4,5,6,7',format:'image/png',transparent:true,version:'1.3.0',opacity:0.9,zIndex:6,attribution:'© NOAA'}).addTo(m);}catch(e){console.warn('[NOAA ENC]',e);}}
     if(ds.has('europe')){try{emodnetTileRef.current=L.tileLayer.wms('https://ows.emodnet-bathymetry.eu/wms',{layers:'mean_atlas_land,mean_rainbowcolour',format:'image/png',transparent:true,version:'1.3.0',opacity:0.65,zIndex:3,attribution:'© EMODnet'}).addTo(m);}catch{try{emodnetTileRef.current=L.tileLayer.wms('https://ows.emodnet-bathymetry.eu/wms',{layers:'emodnet:mean_depth_corrected',format:'image/png',transparent:true,version:'1.1.1',opacity:0.6,zIndex:3,attribution:'© EMODnet'}).addTo(m);}catch(e){console.warn('[EMODnet]',e);}}}
@@ -602,6 +586,27 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
   useEffect(()=>{depthCheckOnRef.current=depthCheckOn;},[depthCheckOn]);
   useEffect(()=>{contoursRef.current={shallow:shallowDepth,safety:safetyDepth,deep:deepDepth,draft:shipDraft};},[shallowDepth,safetyDepth,deepDepth,shipDraft]);
   useEffect(()=>{aisSourceRef.current=aisSource;},[aisSource]);
+
+  // CHANGE 3: Instant S-52 sounding recolor when mariner changes depth contour sliders
+  useEffect(()=>{
+    if(!scsEncLayerRef.current||!window.L)return;
+    scsEncLayerRef.current.eachLayer(layer=>{
+      try{
+        const ft=layer.feature;
+        if(!ft||ft.properties?.type!=='sounding')return;
+        const depth=ft.properties?.depth;
+        if(depth==null)return;
+        const col=getSoundingColor(depth);
+        const newIcon=window.L.divIcon({
+          html:`<div style="color:${col};font-size:9px;font-weight:700;font-family:monospace;white-space:nowrap;text-shadow:1px 1px 2px #000;pointer-events:none;">${depth}</div>`,
+          className:'',
+          iconSize:[0,0],
+          iconAnchor:[8,6]
+        });
+        if(typeof layer.setIcon==='function')layer.setIcon(newIcon);
+      }catch{}
+    });
+  },[shallowDepth,safetyDepth,deepDepth,getSoundingColor]);
 
   // Persist to localStorage
   useEffect(()=>{localStorage.setItem('nav_mapMode',mapMode);},[mapMode]);
@@ -647,7 +652,7 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
     lrs.xtdPort=null;lrs.xtdStbd=null;lrs.xtdFill=null;
     if(!activeRoute?.waypoints?.length)return;
     const wps=normalizeRoute(activeRoute.waypoints),c=colors;
-    const showLabels=routeLabelZoomBand==='in'; // hide text labels when zoomed out — prevents label-stacking chaos
+    const showLabels=routeLabelZoomBand==='in';
     lrs.route=L.polyline(wps.map(w=>[w.lat,w.lon]),{color:c.route,weight:2.5,opacity:0.9,dashArray:'8 4',noClip:true}).addTo(m);
     wps.forEach((wp,i)=>{
       const first=i===0,last=i===wps.length-1,col=first?'#00C896':last?'#FF4757':c.route,sz=first||last?14:8;
@@ -684,10 +689,6 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
     if(activeRoute?.name!==prevRouteNameRef.current){prevRouteNameRef.current=activeRoute?.name||null;try{m.fitBounds(lrs.route.getBounds(),{padding:[60,60]});}catch{}}
   },[activeRoute,mapReady,colors,xtdNM,routeLabelZoomBand]);
 
-  // ETA
-  // ETA — correct remaining distance calculation
-  // Remaining = distance along route from current position to FINAL waypoint
-  // Method: project ship onto each leg, find best match, sum remaining leg + all subsequent legs
   const etaThrottleRef=useRef(0);
   useEffect(()=>{
     if(!livePos||!activeRoute?.waypoints?.length){setEtaResult(null);return;}
@@ -700,7 +701,6 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
     const finalIdx=wps.length-1;
     const ti=Math.min(Math.max(selectedWpIdx,0),finalIdx);
 
-    // Sum of haversine leg distances from wp index a to wp index b
     const legSum=(a,b)=>{
       let d=0;
       for(let i=a;i<b&&i<wps.length-1;i++)
@@ -709,7 +709,6 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
     };
     const totalRouteDist=legSum(0,finalIdx);
 
-    // Project ship onto every leg, pick the leg that gives minimum remaining
     let remToFinal=Infinity;
     let remToTarget=Infinity;
 
@@ -717,29 +716,23 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
       const legBrg=brg(wps[i].lat,wps[i].lon,wps[i+1].lat,wps[i+1].lon);
       const shipBrg=brg(wps[i].lat,wps[i].lon,livePos.lat,livePos.lon);
       const shipDist=distNM(wps[i].lat,wps[i].lon,livePos.lat,livePos.lon);
-      // Angle between leg direction and ship bearing from leg start
       const angle=((legBrg-shipBrg)+540)%360-180;
-      // How far along the leg the ship's projected position falls
       const along=shipDist*Math.cos(angle*Math.PI/180);
       const legLen=distNM(wps[i].lat,wps[i].lon,wps[i+1].lat,wps[i+1].lon);
-      // Only consider if projection lands on (or just past) this leg
       if(along>=-0.5&&along<=legLen+0.5){
         const remainOnThisLeg=Math.max(0,legLen-along);
-        // Total remaining = rest of this leg + all subsequent legs to final WP
         const dToFinal=remainOnThisLeg+legSum(i+1,finalIdx);
         if(dToFinal<remToFinal){
           remToFinal=dToFinal;
-          // Remaining to selected target WP (only count if target is ahead)
           remToTarget=i<ti
             ? remainOnThisLeg+legSum(i+1,ti)
             : i===ti
             ? remainOnThisLeg
-            : 0; // already past selected WP
+            : 0;
         }
       }
     }
 
-    // Fallback: ship far off-track — straight line to nearest upcoming WP then route
     if(remToFinal===Infinity){
       let minD=Infinity,nearestI=0;
       for(let i=0;i<wps.length;i++){
@@ -769,8 +762,6 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
     });
   },[livePos,activeRoute,selectedWpIdx]);
 
-  // Map bearing — only needs to update when mode changes, not every GPS tick
-  // For course-up/head-up we update at most every 2s to avoid flicker
   const bearingThrottleRef=useRef(0);
   useEffect(()=>{
     if(!mapReady||!mapRef.current||!leafRef.current)return;
@@ -787,7 +778,6 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
       if(mapRef.current)mapRef.current.style.transform=`rotate(${b}deg)`;
     };
     applyBearing();
-    // For dynamic modes, poll from ref every 2s — no state dep needed
     const timer=setInterval(applyBearing,2000);
     return()=>clearInterval(timer);
   },[displayMode,mapReady]);
@@ -839,14 +829,13 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
   const offTrackThrottleRef=useRef(0);
   useEffect(()=>{
     if(!livePos||!activeRoute?.waypoints?.length){setOffTrackAlarm(false);return;}
-    // Only check XTD every 3 seconds
     const now=Date.now();
     if(now-offTrackThrottleRef.current<3000)return;
     offTrackThrottleRef.current=now;
     const wps=activeRoute.waypoints;let minXTD=Infinity;
     for(let i=0;i<wps.length-1;i++){const legBrg=brg(wps[i].lat,wps[i].lon,wps[i+1].lat,wps[i+1].lon);const shipBrg=brg(wps[i].lat,wps[i].lon,livePos.lat,livePos.lon);const shipDist=distNM(wps[i].lat,wps[i].lon,livePos.lat,livePos.lon);const angle=((legBrg-shipBrg)+540)%360-180;const along=shipDist*Math.cos(angle*Math.PI/180);const legLen=distNM(wps[i].lat,wps[i].lon,wps[i+1].lat,wps[i+1].lon);if(along>=0&&along<=legLen+0.5){const xtd=Math.abs(shipDist*Math.sin(angle*Math.PI/180));if(xtd<minXTD)minXTD=xtd;}}
     if(minXTD===Infinity)minXTD=distNM(livePos.lat,livePos.lon,wps[selectedWpIdx]?.lat||wps[0].lat,wps[selectedWpIdx]?.lon||wps[0].lon);
-    const threshold=xtdNM; // Off-track alarm uses XTD corridor width
+    const threshold=xtdNM;
     if(minXTD>threshold){setOffTrackAlarm(true);const now=Date.now();if(!alarmCooldownRef.current.offtrack||now-alarmCooldownRef.current.offtrack>30000){alarmCooldownRef.current.offtrack=now;playAlarm('offtrack');notify(`⚠ OFF TRACK — ${minXTD.toFixed(2)}NM (limit ${threshold}NM)`,'error');}}
     else setOffTrackAlarm(false);
   },[livePos,activeRoute,offTrackNM,xtdNM,selectedWpIdx]);
@@ -861,7 +850,6 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
     if(weatherLoading)return;
     setWeatherLoading(true);
     try{
-      // Open-Meteo — free, no API key required, no rate limits for reasonable use
       const res=await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,wind_speed_10m,wind_direction_10m,weather_code,surface_pressure,visibility&wind_speed_unit=kn`);
       if(res.ok){
         const d=await res.json();
@@ -883,7 +871,6 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
       }
       throw new Error(`Open-Meteo HTTP ${res.status}`);
     }catch(e1){
-      // Fallback to OpenWeatherMap if Open-Meteo somehow fails
       try{
         const res2=await fetch(`https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&units=metric&appid=dc9f59e2df05e49c03bc4aaacbb6d27a`);
         if(res2.ok){
@@ -912,7 +899,6 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
   const onTE=()=>{hudDragRef.current=null;};
   const toggleDepth=id=>{setDepthSources(prev=>{const next=new Set(prev);if(next.has(id))next.delete(id);else next.add(id);return next;});};
 
-  // ── Audible alarms — Web Audio API, no external files needed ──
   const playAlarm=useCallback((type='alert')=>{
     try{
       const ctx=new(window.AudioContext||window.webkitAudioContext)();
@@ -940,7 +926,6 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
     }catch(e){console.warn('[alarm]',e);}
   },[]);
   const S={bg:'rgba(4,12,26,0.97)',bd:'rgba(0,212,255,0.28)',tx:'#D0E8F8',dm:'#5A7A90',vd:'#243850',cy:'#00D4FF',gn:'#00FF88',gd:'#FFD700',rd:'#FF4757',sm:'0.78rem',xs:'0.68rem',lb:'0.58rem'};
-  // Read popup data from ref at render time — updated by AIS loop without setState
   const aisPopupData=aisPopup?aisPopupDataRef.current:null;
 
   return(
@@ -960,7 +945,7 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
 
       <div ref={mapRef} style={{flex:1,minHeight:0}}/>
 
-      {/* Compass rose — bottom right, transparent, rotates with COG */}
+      {/* Compass rose */}
       <div style={{position:'absolute',bottom:48,right:panelCollapsed?8:188,zIndex:490,pointerEvents:'none',opacity:0.88,transition:'right 0.2s'}}>
         <CompassRose cogRef={livePosRef} size={70}/>
       </div>
@@ -998,7 +983,7 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
         </div>
       )}
 
-      {/* FIX 2: Movable AIS popup — FIX 3: expandable full data */}
+      {/* AIS popup */}
       {aisPopup&&aisPopupData&&(
         <div
           style={{position:'absolute',left:aisPopup.x,top:aisPopup.y,zIndex:800,background:'rgba(2,8,20,0.97)',border:`2px solid ${aisPopupData.cpaTcpa?.cpa<1?'#FF3030':aisPopupData.cpaTcpa?.cpa<3?'#FF9500':'rgba(0,212,255,0.55)'}`,borderRadius:10,minWidth:205,maxWidth:260,backdropFilter:'blur(14px)',boxShadow:'0 4px 24px rgba(0,0,0,0.7)',touchAction:'none',userSelect:'none'}}
@@ -1027,7 +1012,6 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
               </div>
               {aisPopupData.cpaTcpa?.cpa<1.5&&aisPopupData.cpaTcpa?.tcpa>0&&<div style={{color:'#FF3030',fontSize:'0.62rem',fontWeight:700,marginTop:3}}>⚠ COLLISION RISK</div>}
             </div>
-            {/* Expandable full AIS data — all fields */}
             {aisPopup.expanded&&(
               <div style={{borderTop:'1px solid rgba(0,212,255,0.12)',paddingTop:5,display:'flex',flexDirection:'column',gap:3}}>
                 {[
@@ -1053,7 +1037,7 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
         </div>
       )}
 
-      {/* COG panel — reads from livePosRef via canvas, not livePos state */}
+      {/* COG panel */}
       {cogPanelVisible&&livePos&&(
         <div style={{position:'absolute',left:cogPanelPos.x!==null?cogPanelPos.x:'50%',top:cogPanelPos.y,transform:cogPanelPos.x===null?'translateX(-50%)':'none',zIndex:601,touchAction:'none',cursor:'grab'}}
           onTouchStart={e=>{const t=e.touches[0];cogDragRef.current={dx:t.clientX-(cogPanelPos.x||window.innerWidth/2-120),dy:t.clientY-cogPanelPos.y};}}
@@ -1174,8 +1158,26 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
           {activePanel==='enc'&&(<div style={{display:'flex',flexDirection:'column',gap:5}}>
             <div style={{color:S.dm,fontSize:S.lb,marginBottom:2}}>ENC DEPTH LAYERS</div>
             {DEPTH_SOURCES.map(d=>{const on=depthSources.has(d.id);return(<button key={d.id} onClick={()=>toggleDepth(d.id)} title={d.desc} style={{display:'flex',alignItems:'center',gap:5,background:on?'rgba(0,212,255,0.15)':'transparent',border:`1px solid ${on?S.cy:S.vd}`,color:on?S.cy:S.dm,borderRadius:5,padding:'4px 7px',fontSize:'0.65rem',cursor:'pointer',textAlign:'left',width:'100%'}}><span>{d.emoji}</span><span style={{flex:1}}>{d.label}</span>{on&&<span style={{color:S.cy,fontSize:'0.65rem'}}>✓</span>}</button>);})}
-            {/* South China Sea ENC — added directly, not in shared DEPTH_SOURCES constant */}
-            <button onClick={()=>toggleDepth('scs')} title="S-57 ENC: Karimata Strait / Bangka Belitung — 580 features: depth contours, soundings, buoys, pipelines" style={{display:'flex',alignItems:'center',gap:5,background:depthSources.has('scs')?'rgba(0,212,255,0.15)':'transparent',border:`1px solid ${depthSources.has('scs')?S.cy:S.vd}`,color:depthSources.has('scs')?S.cy:S.dm,borderRadius:5,padding:'4px 7px',fontSize:'0.65rem',cursor:'pointer',textAlign:'left',width:'100%'}}><span>🇮🇩</span><span style={{flex:1}}>Indonesia Karimata ENC</span>{depthSources.has('scs')&&<span style={{color:S.cy,fontSize:'0.65rem'}}>✓</span>}</button>
+            <button onClick={()=>toggleDepth('scs')} title="S-57 ENC: Karimata Strait / Bangka Belitung — depth contours, soundings, buoys" style={{display:'flex',alignItems:'center',gap:5,background:depthSources.has('scs')?'rgba(0,212,255,0.15)':'transparent',border:`1px solid ${depthSources.has('scs')?S.cy:S.vd}`,color:depthSources.has('scs')?S.cy:S.dm,borderRadius:5,padding:'4px 7px',fontSize:'0.65rem',cursor:'pointer',textAlign:'left',width:'100%'}}><span>🇮🇩</span><span style={{flex:1}}>Indonesia Karimata ENC</span>{depthSources.has('scs')&&<span style={{color:S.cy,fontSize:'0.65rem'}}>✓</span>}</button>
+            {/* S-52 depth legend — shows mariner's current contour thresholds */}
+            {depthSources.has('scs')&&(
+              <div style={{background:'rgba(0,0,0,0.3)',border:'1px solid rgba(0,212,255,0.15)',borderRadius:6,padding:'6px 8px',marginTop:2}}>
+                <div style={{color:S.dm,fontSize:S.lb,marginBottom:4}}>S-52 SOUNDING LEGEND</div>
+                {[
+                  ['#FF2020',`≤ ${shallowDepth}m`,'DEPVS — Danger'],
+                  ['#FF9500',`≤ ${safetyDepth}m`,'DEPMS — Safety'],
+                  ['#FFD700',`≤ ${deepDepth}m`,'DEPMD — Moderate'],
+                  ['#00D4FF',`> ${deepDepth}m`,'DEPDW — Deep'],
+                ].map(([col,range,label])=>(
+                  <div key={label} style={{display:'flex',alignItems:'center',gap:5,marginBottom:3}}>
+                    <div style={{width:10,height:10,borderRadius:2,background:col,flexShrink:0}}/>
+                    <span style={{color:col,fontFamily:'monospace',fontSize:'0.58rem',fontWeight:700,width:40}}>{range}</span>
+                    <span style={{color:S.vd,fontSize:'0.55rem'}}>{label}</span>
+                  </div>
+                ))}
+                <div style={{color:S.vd,fontSize:'0.52rem',marginTop:3,borderTop:'1px solid rgba(0,212,255,0.1)',paddingTop:3}}>Adjust in ☰ → 🌊 Contours</div>
+              </div>
+            )}
             {depthSources.size>0&&<button onClick={()=>setDepthSources(new Set())} style={{background:'transparent',border:`1px solid rgba(255,71,87,0.4)`,color:S.rd,borderRadius:5,padding:'4px',fontSize:S.xs,cursor:'pointer'}}>⭕ Clear All</button>}
           </div>)}
 
@@ -1185,7 +1187,6 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
             {aisSource==='bridge'&&(
               <div style={{display:'flex',flexDirection:'column',gap:4}}>
                 <input value={localAisHost} onChange={e=>setLocalAisHost(e.target.value)} placeholder="ws://192.168.x.x:4002" style={{width:'100%',boxSizing:'border-box',background:'#06101C',color:S.cy,border:'1px solid #1A3050',borderRadius:4,padding:'5px 7px',fontSize:'0.63rem',outline:'none'}}/>
-
               </div>
             )}
             <div style={{borderTop:'1px solid rgba(0,212,255,0.1)',paddingTop:5}}>
@@ -1316,7 +1317,21 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
           {menuCat==='colors'&&(<div style={{display:'flex',flexDirection:'column',gap:12}}>{[['route','Route Line'],['vector','COG Vector'],['ship','Ship Icon'],['track','Past Track'],['xtd','XTD Corridor'],['chart','Chart Overlay']].map(([k,lb])=>(<div key={k} style={{display:'flex',alignItems:'center',justifyContent:'space-between'}}><div style={{display:'flex',alignItems:'center',gap:10}}><div style={{width:18,height:18,borderRadius:4,background:colors[k],border:'1px solid rgba(255,255,255,0.25)'}}/><span style={{color:S.tx,fontSize:S.sm}}>{lb}</span></div><input type="color" value={colors[k]} onChange={e=>setColors({...colors,[k]:e.target.value})} style={{width:40,height:28,border:'none',borderRadius:6,cursor:'pointer',background:'transparent'}}/></div>))}<button onClick={()=>setColors(DEFAULT_COLORS)} style={{marginTop:4,background:'transparent',border:`1px solid ${S.vd}`,color:S.dm,borderRadius:6,padding:'7px',fontSize:S.xs,cursor:'pointer'}}>↺ Reset defaults</button></div>)}
           {menuCat==='ship'&&(<div style={{display:'flex',flexDirection:'column',gap:10}}>{[['name','Ship Name','e.g. MV NAVIGATOR'],['callsign','Call Sign','e.g. VQAB2'],['imo','IMO Number','e.g. 9123456'],['mmsi','MMSI','e.g. 123456789']].map(([k,lb,ph])=>(<div key={k}><div style={{color:S.dm,fontSize:S.lb,marginBottom:3}}>{lb}</div><input value={shipProfile[k]||''} onChange={e=>setShipProfile(p=>({...p,[k]:e.target.value}))} placeholder={ph} style={{width:'100%',boxSizing:'border-box',background:'#060F1C',color:S.cy,border:`1px solid ${S.vd}`,borderRadius:5,padding:'7px 9px',fontSize:S.sm,outline:'none',fontFamily:'monospace'}}/></div>))}<div style={{borderTop:'1px solid rgba(0,212,255,0.1)',paddingTop:8,display:'flex',flexDirection:'column',gap:5}}>{[['loa','LOA (m)','e.g. 185'],['beam','Beam (m)','e.g. 28'],['draft','Draft (m)','e.g. 8.5']].map(([k,lb,ph])=>(<div key={k} style={{display:'flex',alignItems:'center',gap:8}}><div style={{color:S.dm,fontSize:S.xs,width:80,flexShrink:0}}>{lb}</div><input value={shipProfile[k]||''} onChange={e=>setShipProfile(p=>({...p,[k]:e.target.value}))} placeholder={ph} type="number" style={{flex:1,background:'#060F1C',color:S.cy,border:`1px solid ${S.vd}`,borderRadius:5,padding:'5px 7px',fontSize:S.sm,outline:'none',fontFamily:'monospace'}}/></div>))}</div><button onClick={()=>setShipProfile({})} style={{background:'transparent',border:`1px solid ${S.vd}`,color:S.dm,borderRadius:6,padding:'7px',fontSize:S.xs,cursor:'pointer'}}>↺ Clear Profile</button></div>)}
           {menuCat==='track'&&(<div style={{display:'flex',flexDirection:'column',gap:10}}><div style={{color:S.dm,fontSize:S.xs}}>PAST TRACK DURATION</div><div style={{display:'flex',gap:5,flexWrap:'wrap'}}>{[[0,'OFF'],[1,'1H'],[2,'2H'],[6,'6H'],[12,'12H'],[24,'24H']].map(([h,l])=>(<button key={h} onClick={()=>setTrackHours(h)} style={{background:trackHours===h?'rgba(0,255,136,0.18)':'#060F1C',border:`1px solid ${trackHours===h?S.gn:S.vd}`,color:trackHours===h?S.gn:S.tx,borderRadius:7,padding:'7px 12px',fontSize:S.sm,cursor:'pointer'}}>{l}</button>))}</div></div>)}
-          {menuCat==='contours'&&(<div style={{display:'flex',flexDirection:'column',gap:12}}>{[['shallowDepth',shallowDepth,setShallowDepth,'🔴 Shallow (m)'],['safetyDepth',safetyDepth,setSafetyDepth,'🟡 Safety (m)'],['deepDepth',deepDepth,setDeepDepth,'🟢 Deep (m)'],['shipDraft',shipDraft,setShipDraft,'⚓ Draft (m)']].map(([k,val,set,lbl])=>(<div key={k}><div style={{display:'flex',justifyContent:'space-between',marginBottom:3}}><span style={{color:S.tx,fontSize:S.sm}}>{lbl}</span><span style={{color:S.cy,fontFamily:'monospace',fontSize:S.sm}}>{val}m</span></div><input type="range" min={1} max={k==='deepDepth'?500:k==='safetyDepth'?100:50} value={val} onChange={e=>set(Number(e.target.value))} style={{width:'100%',accentColor:'#00D4FF'}}/></div>))}</div>)}
+          {menuCat==='contours'&&(<div style={{display:'flex',flexDirection:'column',gap:12}}>
+            {/* S-52 legend inline in contours menu */}
+            <div style={{background:'rgba(0,0,0,0.3)',border:'1px solid rgba(0,212,255,0.15)',borderRadius:6,padding:'6px 8px',marginBottom:4}}>
+              <div style={{color:S.dm,fontSize:S.lb,marginBottom:4}}>S-52 DEPTH ZONES (Karimata ENC)</div>
+              <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+                {[['#FF2020','DEPVS'],['#FF9500','DEPMS'],['#FFD700','DEPMD'],['#00D4FF','DEPDW']].map(([col,lbl])=>(
+                  <div key={lbl} style={{display:'flex',alignItems:'center',gap:3}}>
+                    <div style={{width:8,height:8,borderRadius:1,background:col}}/>
+                    <span style={{color:col,fontSize:'0.55rem',fontFamily:'monospace',fontWeight:700}}>{lbl}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+            {[['shallowDepth',shallowDepth,setShallowDepth,'🔴 Shallow (m)'],['safetyDepth',safetyDepth,setSafetyDepth,'🟡 Safety (m)'],['deepDepth',deepDepth,setDeepDepth,'🟢 Deep (m)'],['shipDraft',shipDraft,setShipDraft,'⚓ Draft (m)']].map(([k,val,set,lbl])=>(<div key={k}><div style={{display:'flex',justifyContent:'space-between',marginBottom:3}}><span style={{color:S.tx,fontSize:S.sm}}>{lbl}</span><span style={{color:S.cy,fontFamily:'monospace',fontSize:S.sm}}>{val}m</span></div><input type="range" min={1} max={k==='deepDepth'?500:k==='safetyDepth'?100:50} value={val} onChange={e=>set(Number(e.target.value))} style={{width:'100%',accentColor:'#00D4FF'}}/></div>))}
+          </div>)}
           {menuCat==='display'&&(<div style={{display:'flex',flexDirection:'column',gap:12}}>
             <div><div style={{color:S.dm,fontSize:S.xs,marginBottom:6}}>COG VECTOR</div><div style={{display:'flex',gap:4,flexWrap:'wrap'}}>{[[6,'6m'],[12,'12m'],[20,'20m'],[30,'30m'],[60,'60m']].map(([n,l])=>(<button key={n} onClick={()=>setVectorMins(n)} style={{background:vectorMins===n?'rgba(0,212,255,0.18)':'#060F1C',border:`1px solid ${vectorMins===n?S.cy:S.vd}`,color:vectorMins===n?S.cy:S.tx,borderRadius:7,padding:'7px 10px',fontSize:S.sm,cursor:'pointer'}}>{l}</button>))}</div></div>
             <div><div style={{color:S.dm,fontSize:S.xs,marginBottom:6}}>ORIENTATION</div><div style={{display:'flex',gap:4}}>{[['north','N↑'],['course','C↑'],['head','H↑']].map(([v,l])=>(<button key={v} onClick={()=>setDisplayMode(v)} style={{flex:1,background:displayMode===v?'rgba(0,212,255,0.18)':'#060F1C',border:`1px solid ${displayMode===v?S.cy:S.vd}`,color:displayMode===v?S.cy:S.tx,borderRadius:7,padding:'7px 4px',fontSize:'0.68rem',cursor:'pointer'}}>{l}</button>))}</div></div>
