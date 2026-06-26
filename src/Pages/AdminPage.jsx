@@ -1,12 +1,32 @@
 /* eslint-disable */
 import { useState, useEffect, useRef } from "react";
 import { auth, db } from "../firebase";
-import { collection, getDocs, deleteDoc, doc, setDoc, getDoc, addDoc, serverTimestamp, query, orderBy, onSnapshot, updateDoc } from "firebase/firestore";
+import { collection, getDocs, deleteDoc, doc, setDoc, getDoc, addDoc, serverTimestamp, query, orderBy, onSnapshot, updateDoc, increment } from "firebase/firestore";
 import { onAuthStateChanged, signInWithEmailAndPassword, signOut, sendPasswordResetEmail } from "firebase/auth";
 import * as XLSX from "xlsx";
 import { ADMIN_EMAIL, ECDIS_BRANDS } from "../constants";
 import { idbSet, fetchRouteSheet, fetchChartSheet } from "../sheets";
 import PortSearchPage from "./PortSearchPage";
+
+// ─── ADDED: GitHub repo constant ─────────────────────────────────────────────
+const GITHUB_OWNER = 'cookcaptain57-cpu';
+const GITHUB_REPO  = 'ecdis-route-finder';
+
+// ─── ADDED: Firebase Spark plan daily limits ──────────────────────────────────
+const FB_LIMITS = {
+  reads:   50000,
+  writes:  20000,
+  deletes: 20000,
+  storage: 1073741824, // 1 GB in bytes
+};
+
+// ─── ADDED: Vercel free tier limits ──────────────────────────────────────────
+const VERCEL_LIMITS = {
+  bandwidth:    100,   // GB/month
+  deployments:  100,   // per day
+  fnInvocations: 100000, // per day
+  buildMinutes: 6000,  // per month
+};
 
 function AdminPage({
   notify, routes, setRoutes, charts, setCharts,
@@ -45,14 +65,26 @@ function AdminPage({
   const [liveLoadingRoutes, setLiveLoadingRoutes] = useState(false);
   const [liveLoadingCharts, setLiveLoadingCharts] = useState(false);
 
-  // ─── ADDED: Contact Messages state ───────────────────────────────────────
+  // Contact Messages state
   const [contactMessages,      setContactMessages]      = useState([]);
   const [messagesLoading,      setMessagesLoading]      = useState(false);
-  const [msgFilter,            setMsgFilter]            = useState('all');   // all | unread | bug | suggestion | data | query | maritime | urgent
+  const [msgFilter,            setMsgFilter]            = useState('all');
   const [selectedMsg,          setSelectedMsg]          = useState(null);
   const [unreadMsgCount,       setUnreadMsgCount]       = useState(0);
   const msgUnsubRef = useRef(null);
-  // ─── END ADDED ────────────────────────────────────────────────────────────
+
+  // ─── ADDED: Infrastructure / App Health state ─────────────────────────────
+  const [githubData,      setGithubData]      = useState(null);
+  const [githubLoading,   setGithubLoading]   = useState(false);
+  const [githubCommit,    setGithubCommit]    = useState(null);
+  const [githubToken,     setGithubToken]     = useState(() => localStorage.getItem('nsx_gh_token') || '');
+  const [showTokenInput,  setShowTokenInput]  = useState(false);
+  const [fbUsage,         setFbUsage]         = useState({ reads: 0, writes: 0, deletes: 0, date: '' });
+  const [fbUsageLoading,  setFbUsageLoading]  = useState(false);
+  const [healthStatus,    setHealthStatus]    = useState({ firebase: 'checking', lastCheck: null });
+  const [syncTimestamps,  setSyncTimestamps]  = useState({ routes: null, charts: null, ports: null });
+  const [userStats,       setUserStats]       = useState({ activeToday: 0, newThisWeek: 0, paid: 0, free: 0, blocked: 0 });
+  // ─── END ADDED ───────────────────────────────────────────────────────────
 
   const loadLiveRoutes = async () => {
     if (liveRoutes.length > 0) return;
@@ -123,21 +155,48 @@ function AdminPage({
   useEffect(() => { if (user && section === 'notices')       loadNotices();    }, [user, section]);
   useEffect(() => { if (user && section === 'notifications') loadSentNotifs(); }, [user, section]);
 
-  // ─── ADDED: Subscribe to contactMessages in realtime when admin logs in ──
+  // ─── ADDED: Load infra data when section === 'infra' ─────────────────────
+  useEffect(() => {
+    if (user && section === 'infra') {
+      loadFbUsage();
+      loadGithubData();
+      checkFirebaseHealth();
+      loadSyncTimestamps();
+    }
+  }, [user, section]);
+
+  // ─── ADDED: Derive userStats whenever users list loads ────────────────────
+  useEffect(() => {
+    if (users.length === 0) return;
+    const now = Date.now();
+    const oneDayMs  = 86400000;
+    const oneWeekMs = 604800000;
+    const paid    = users.filter(u => u.tier === 'paid').length;
+    const blocked = users.filter(u => u.blocked).length;
+    const newThisWeek = users.filter(u => {
+      const ts = u.createdAt?.toDate?.()?.getTime?.() || 0;
+      return now - ts < oneWeekMs;
+    }).length;
+    const activeToday = users.filter(u => {
+      const ts = u.lastLoginAt?.toDate?.()?.getTime?.() || 0;
+      return now - ts < oneDayMs;
+    }).length;
+    setUserStats({ activeToday, newThisWeek, paid, free: users.length - paid, blocked });
+  }, [users]);
+  // ─── END ADDED ───────────────────────────────────────────────────────────
+
+  // Contact messages realtime listener
   useEffect(() => {
     if (!user) return;
-    // Realtime listener on contactMessages collection
     const q = query(collection(db, 'contactMessages'), orderBy('createdAt', 'desc'));
     const unsub = onSnapshot(q, snap => {
       const msgs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       setContactMessages(msgs);
       const unread = msgs.filter(m => !m.read).length;
       setUnreadMsgCount(unread);
-      // Fire Notif toast only for brand-new unread (added since we started listening)
       snap.docChanges().forEach(change => {
         if (change.type === 'added' && !change.doc.data().read) {
           const d = change.doc.data();
-          // Only toast if it was just created (within last 10 seconds)
           const ts = d.createdAt?.toDate?.()?.getTime?.() || 0;
           if (Date.now() - ts < 10000) {
             notify(`📬 New message from ${d.name || 'a user'}: ${d.subject || ''}`, 'info');
@@ -148,7 +207,105 @@ function AdminPage({
     msgUnsubRef.current = unsub;
     return () => unsub();
   }, [user?.uid]);
-  // ─── END ADDED ────────────────────────────────────────────────────────────
+
+  // ─── ADDED: Firebase usage tracker ───────────────────────────────────────
+  const loadFbUsage = async () => {
+    setFbUsageLoading(true);
+    try {
+      const today = new Date().toISOString().slice(0, 10);
+      const snap = await getDoc(doc(db, '_stats', `usage_${today}`));
+      if (snap.exists()) {
+        setFbUsage({ ...snap.data(), date: today });
+      } else {
+        setFbUsage({ reads: 0, writes: 0, deletes: 0, date: today });
+      }
+    } catch { setFbUsage({ reads: 0, writes: 0, deletes: 0, date: '' }); }
+    setFbUsageLoading(false);
+  };
+
+  // ─── ADDED: Increment Firebase usage counter ──────────────────────────────
+  const trackFbOp = async (type = 'reads', count = 1) => {
+    try {
+      const today = new Date().toISOString().slice(0, 10);
+      await setDoc(doc(db, '_stats', `usage_${today}`), {
+        [type]: increment(count),
+        updatedAt: serverTimestamp(),
+      }, { merge: true });
+    } catch {}
+  };
+
+  // ─── ADDED: GitHub API fetch ──────────────────────────────────────────────
+  const loadGithubData = async () => {
+    setGithubLoading(true);
+    try {
+      const headers = {};
+      const token = localStorage.getItem('nsx_gh_token');
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
+      const [repoRes, commitRes] = await Promise.all([
+        fetch(`https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}`, { headers }),
+        fetch(`https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/commits?per_page=1`, { headers }),
+      ]);
+
+      if (repoRes.ok) {
+        const repo = await repoRes.json();
+        setGithubData(repo);
+      } else if (repoRes.status === 404) {
+        setGithubData({ _error: 'private' });
+      } else {
+        setGithubData({ _error: 'failed' });
+      }
+
+      if (commitRes.ok) {
+        const commits = await commitRes.json();
+        if (commits.length > 0) setGithubCommit(commits[0]);
+      }
+    } catch {
+      setGithubData({ _error: 'failed' });
+    }
+    setGithubLoading(false);
+  };
+
+  // ─── ADDED: Firebase health check ─────────────────────────────────────────
+  const checkFirebaseHealth = async () => {
+    setHealthStatus(h => ({ ...h, firebase: 'checking' }));
+    try {
+      const start = Date.now();
+      await getDoc(doc(db, 'app_config', 'limits'));
+      const ms = Date.now() - start;
+      setHealthStatus({ firebase: ms < 800 ? 'good' : ms < 2000 ? 'slow' : 'slow', latencyMs: ms, lastCheck: new Date().toLocaleTimeString() });
+    } catch {
+      setHealthStatus({ firebase: 'error', latencyMs: null, lastCheck: new Date().toLocaleTimeString() });
+    }
+  };
+
+  // ─── ADDED: Load last sync timestamps ────────────────────────────────────
+  const loadSyncTimestamps = async () => {
+    try {
+      const snap = await getDoc(doc(db, 'app_config', 'sync_log'));
+      if (snap.exists()) setSyncTimestamps(snap.data());
+    } catch {}
+  };
+
+  // ─── ADDED: Save GitHub token ─────────────────────────────────────────────
+  const saveGithubToken = () => {
+    localStorage.setItem('nsx_gh_token', githubToken);
+    setShowTokenInput(false);
+    notify('✅ GitHub token saved', 'success');
+    setGithubData(null);
+    setGithubCommit(null);
+    loadGithubData();
+  };
+
+  const clearGithubToken = () => {
+    localStorage.removeItem('nsx_gh_token');
+    setGithubToken('');
+    setShowTokenInput(false);
+    notify('Token cleared', 'success');
+    setGithubData(null);
+    loadGithubData();
+  };
+  // ─── END ADDED ───────────────────────────────────────────────────────────
 
   const loadSentNotifs = async () => {
     try {
@@ -199,14 +356,10 @@ function AdminPage({
     catch { notify('Delete failed', 'error'); }
   };
 
-  // ─── ADDED: Mark message as read ─────────────────────────────────────────
   const markMsgRead = async (id) => {
-    try {
-      await updateDoc(doc(db, 'contactMessages', id), { read: true });
-    } catch {}
+    try { await updateDoc(doc(db, 'contactMessages', id), { read: true }); } catch {}
   };
 
-  // ─── ADDED: Delete contact message ───────────────────────────────────────
   const deleteMsg = async (id) => {
     if (!window.confirm('Delete this message?')) return;
     try {
@@ -216,7 +369,6 @@ function AdminPage({
     } catch { notify('Delete failed', 'error'); }
   };
 
-  // ─── ADDED: Export messages to Excel ─────────────────────────────────────
   const exportMessages = () => {
     if (contactMessages.length === 0) { notify('No messages to export', 'error'); return; }
     const rows = contactMessages.map(m => ({
@@ -238,7 +390,6 @@ function AdminPage({
     XLSX.writeFile(wb, `NavisphereX_Messages_${new Date().toISOString().slice(0,10)}.xlsx`);
     notify(`✅ Exported ${rows.length} messages`, 'success');
   };
-  // ─── END ADDED ────────────────────────────────────────────────────────────
 
   const confirmAndRefreshRoutes = () => {
     if (!window.confirm('🔄 Sync Routes?\n\nFetches all routes from Google Sheet → saves to Firebase.\nContinue?')) return;
@@ -331,6 +482,63 @@ function AdminPage({
     </div>
   );
 
+  // ─── ADDED: Quota progress bar helper ────────────────────────────────────
+  const QuotaBar = ({ label, used, total, unit = '', color }) => {
+    const pct = Math.min(100, Math.round((used / total) * 100));
+    const barColor = pct >= 90 ? 'var(--red)' : pct >= 70 ? 'var(--gold)' : color || 'var(--cyan)';
+    return (
+      <div style={{ marginBottom: '0.9rem' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4, fontSize: '0.72rem' }}>
+          <span style={{ color: 'var(--text2)', fontWeight: 600 }}>{label}</span>
+          <span style={{ color: barColor, fontFamily: 'Orbitron,monospace', fontWeight: 700 }}>
+            {used.toLocaleString()}{unit} <span style={{ color: 'var(--text3)', fontWeight: 400 }}>/ {total.toLocaleString()}{unit}</span>
+          </span>
+        </div>
+        <div style={{ height: 7, background: 'rgba(255,255,255,0.06)', borderRadius: 8, overflow: 'hidden' }}>
+          <div style={{ height: '100%', borderRadius: 8, transition: 'width 0.5s ease', width: `${pct}%`, background: `linear-gradient(90deg,${barColor},${barColor}99)`,
+            boxShadow: pct > 0 ? `0 0 8px ${barColor}55` : 'none' }} />
+        </div>
+        <div style={{ textAlign: 'right', fontSize: '0.6rem', color: 'var(--text3)', marginTop: 2 }}>{pct}% used</div>
+      </div>
+    );
+  };
+
+  // ─── ADDED: Health status dot ─────────────────────────────────────────────
+  const HealthDot = ({ status }) => {
+    const map = { good: 'var(--green)', slow: 'var(--gold)', error: 'var(--red)', checking: 'var(--text3)' };
+    const label = { good: 'Online', slow: 'Slow', error: 'Error', checking: 'Checking…' };
+    const c = map[status] || 'var(--text3)';
+    return (
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+        <span style={{ width: 8, height: 8, borderRadius: '50%', background: c, boxShadow: status === 'good' ? `0 0 6px ${c}` : 'none',
+          animation: status === 'checking' ? 'pulse 1s infinite' : 'none', display: 'inline-block' }} />
+        <span style={{ fontSize: '0.72rem', color: c, fontWeight: 700 }}>{label[status] || status}</span>
+      </span>
+    );
+  };
+
+  // ─── ADDED: Mini stat chip ────────────────────────────────────────────────
+  const Chip = ({ label, value, color = 'var(--cyan)' }) => (
+    <div style={{ background: 'rgba(0,0,0,0.25)', border: `1px solid ${color}33`, borderRadius: 8, padding: '0.5rem 0.8rem', textAlign: 'center', minWidth: 80 }}>
+      <div style={{ fontFamily: 'Orbitron,monospace', fontSize: '1.1rem', fontWeight: 700, color }}>{value}</div>
+      <div style={{ fontSize: '0.6rem', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.07em', marginTop: 2 }}>{label}</div>
+    </div>
+  );
+
+  // ─── ADDED: Relative time helper ──────────────────────────────────────────
+  const relativeTime = (dateStr) => {
+    if (!dateStr) return '—';
+    const diff = Date.now() - new Date(dateStr).getTime();
+    const mins  = Math.floor(diff / 60000);
+    const hours = Math.floor(diff / 3600000);
+    const days  = Math.floor(diff / 86400000);
+    if (mins < 1)   return 'just now';
+    if (mins < 60)  return `${mins}m ago`;
+    if (hours < 24) return `${hours}h ago`;
+    return `${days}d ago`;
+  };
+  // ─── END ADDED ───────────────────────────────────────────────────────────
+
   const SyncBar = ({ progress, loading, color = 'var(--cyan)' }) => {
     if (!loading && progress === 0) return null;
     const pct = progress;
@@ -392,10 +600,10 @@ function AdminPage({
 
   const clearBtnStyle = { padding: '5px 12px', fontSize: '0.72rem', borderColor: 'rgba(255,71,87,0.4)', color: 'var(--red)' };
 
-  // ─── ADDED: messages entry in sidebar ────────────────────────────────────
   const sides = [
     { k: 'dashboard',    i: '📊', l: 'Dashboard' },
-    { k: 'messages',     i: '📬', l: 'Messages',        badge: unreadMsgCount }, // ADDED
+    { k: 'infra',        i: '🖥', l: 'App Infrastructure' }, // ADDED
+    { k: 'messages',     i: '📬', l: 'Messages',        badge: unreadMsgCount },
     { k: 'routes',       i: '📋', l: 'Manage Routes' },
     { k: 'charts',       i: '🗂', l: 'Manage Charts' },
     { k: 'sheet-routes', i: '🔄', l: 'Sync Routes' },
@@ -406,9 +614,7 @@ function AdminPage({
     { k: 'settings',     i: '⚙️', l: 'Settings' },
     { k: 'users',        i: '👥', l: 'User Database' },
   ];
-  // ─── END ADDED ────────────────────────────────────────────────────────────
 
-  // ─── ADDED: filtered messages helper ─────────────────────────────────────
   const filteredMsgs = contactMessages.filter(m => {
     if (msgFilter === 'all')    return true;
     if (msgFilter === 'unread') return !m.read;
@@ -418,7 +624,15 @@ function AdminPage({
 
   const PRIORITY_COLOR = { low: 'var(--green)', medium: 'var(--gold)', urgent: 'var(--red)' };
   const CATEGORY_LABEL = { bug:'🐛 Bug', suggestion:'💡 Suggestion', data:'📦 Data Update', query:'🙋 Query', maritime:'⚓ Maritime', other:'📝 Other' };
-  // ─── END ADDED ────────────────────────────────────────────────────────────
+
+  // ─── ADDED: Section card wrapper style ───────────────────────────────────
+  const sectionCard = {
+    background: 'var(--card)',
+    border: '1px solid var(--border)',
+    borderRadius: 12,
+    padding: '1.1rem',
+    marginBottom: '1rem',
+  };
 
   return (
     <div>
@@ -428,7 +642,6 @@ function AdminPage({
             onClick={() => setSection(s.k)}
             style={{ position: 'relative' }}>
             {s.i} {s.l}
-            {/* ADDED: mobile badge */}
             {s.badge > 0 && (
               <span style={{ marginLeft: 4, background: 'var(--red)', color: 'white', borderRadius: '50%', padding: '1px 5px', fontSize: '0.6rem', fontWeight: 900 }}>
                 {s.badge > 9 ? '9+' : s.badge}
@@ -449,7 +662,6 @@ function AdminPage({
                 style={{ position: 'relative' }}>
                 <span>{s.i}</span>
                 {s.l}
-                {/* ADDED: sidebar badge */}
                 {s.badge > 0 && (
                   <span style={{
                     marginLeft: 'auto', background: 'var(--red)', color: 'white',
@@ -485,15 +697,16 @@ function AdminPage({
                   { l: 'Sheet Charts',  v: sheetCharts.length, i: '🔄', c: 'var(--gold)' },
                   { l: 'World Ports',   v: portsDb.length,     i: '⚓', c: 'var(--green)' },
                   { l: 'ECDIS Brands',  v: ECDIS_BRANDS.length, i: '🖥', c: '#A78BFA' },
-                  // ADDED: Messages stat card
                   { l: 'Messages',      v: contactMessages.length, i: '📬', c: unreadMsgCount > 0 ? 'var(--red)' : 'var(--text2)', sub: unreadMsgCount > 0 ? `${unreadMsgCount} unread` : 'all read' },
+                  // ADDED: Users quick card
+                  { l: 'Total Users',   v: users.length || '—',  i: '👥', c: '#A78BFA', sub: users.length > 0 ? `${userStats.paid} paid` : null, onClick: () => { loadUsers(); setSection('users'); } },
                 ].map(s => (
-                  <div key={s.l} className="file-card" style={{ padding: '1rem', cursor: s.l === 'Messages' ? 'pointer' : 'default' }}
-                    onClick={s.l === 'Messages' ? () => setSection('messages') : undefined}>
+                  <div key={s.l} className="file-card" style={{ padding: '1rem', cursor: (s.l === 'Messages' || s.l === 'Total Users') ? 'pointer' : 'default' }}
+                    onClick={s.l === 'Messages' ? () => setSection('messages') : s.onClick}>
                     <div style={{ fontSize: '1.5rem', marginBottom: 4 }}>{s.i}</div>
-                    <div style={{ fontFamily: 'Orbitron,monospace', fontSize: '1.5rem', fontWeight: 700, color: s.c }}>{s.v.toLocaleString()}</div>
+                    <div style={{ fontFamily: 'Orbitron,monospace', fontSize: '1.5rem', fontWeight: 700, color: s.c }}>{typeof s.v === 'number' ? s.v.toLocaleString() : s.v}</div>
                     <div style={{ fontSize: '0.64rem', color: 'var(--text2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>{s.l}</div>
-                    {s.sub && <div style={{ fontSize: '0.6rem', color: unreadMsgCount > 0 ? 'var(--red)' : 'var(--text3)', marginTop: 2 }}>{s.sub}</div>}
+                    {s.sub && <div style={{ fontSize: '0.6rem', color: s.l === 'Messages' && unreadMsgCount > 0 ? 'var(--red)' : 'var(--text3)', marginTop: 2 }}>{s.sub}</div>}
                   </div>
                 ))}
               </div>
@@ -531,7 +744,300 @@ function AdminPage({
             </>
           )}
 
-          {/* ─── ADDED: MESSAGES SECTION ───────────────────────────────── */}
+          {/* ─── ADDED: APP INFRASTRUCTURE SECTION ────────────────────── */}
+          {section === 'infra' && (
+            <>
+              <div className="a-hdr">
+                <div className="a-title">🖥 App Infrastructure</div>
+                <button className="btn btn-secondary" style={{ padding: '5px 12px', fontSize: '0.72rem' }}
+                  onClick={() => { loadFbUsage(); loadGithubData(); checkFirebaseHealth(); loadSyncTimestamps(); }}>
+                  🔄 Refresh All
+                </button>
+              </div>
+
+              {/* ── Row 1: App Health Status ── */}
+              <div style={sectionCard}>
+                <div style={{ fontFamily: 'Orbitron,monospace', fontSize: '0.74rem', color: 'var(--gold)', marginBottom: '0.9rem', letterSpacing: '0.06em' }}>
+                  🛰 APP HEALTH STATUS
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(180px,1fr))', gap: '0.7rem' }}>
+                  {/* Firebase */}
+                  <div style={{ background: 'rgba(0,0,0,0.2)', borderRadius: 10, padding: '0.8rem', border: '1px solid var(--border)' }}>
+                    <div style={{ fontSize: '0.68rem', color: 'var(--text3)', marginBottom: 5, textTransform: 'uppercase', letterSpacing: '0.08em' }}>🔥 Firebase</div>
+                    <HealthDot status={healthStatus.firebase} />
+                    {healthStatus.latencyMs && (
+                      <div style={{ fontSize: '0.65rem', color: 'var(--text3)', marginTop: 4 }}>
+                        Latency: <span style={{ color: healthStatus.latencyMs < 500 ? 'var(--green)' : 'var(--gold)', fontWeight: 700 }}>{healthStatus.latencyMs}ms</span>
+                      </div>
+                    )}
+                    {healthStatus.lastCheck && <div style={{ fontSize: '0.6rem', color: 'var(--text3)', marginTop: 2 }}>Checked: {healthStatus.lastCheck}</div>}
+                    <button className="btn btn-secondary" style={{ marginTop: 8, padding: '3px 9px', fontSize: '0.65rem' }} onClick={checkFirebaseHealth}>Ping</button>
+                  </div>
+                  {/* Vercel */}
+                  <div style={{ background: 'rgba(0,0,0,0.2)', borderRadius: 10, padding: '0.8rem', border: '1px solid var(--border)' }}>
+                    <div style={{ fontSize: '0.68rem', color: 'var(--text3)', marginBottom: 5, textTransform: 'uppercase', letterSpacing: '0.08em' }}>▲ Vercel Hosting</div>
+                    <HealthDot status="good" />
+                    <div style={{ fontSize: '0.65rem', color: 'var(--text3)', marginTop: 4 }}>Free tier — static + serverless</div>
+                    <a href="https://vercel.com/dashboard" target="_blank" rel="noreferrer"
+                      className="btn btn-secondary" style={{ marginTop: 8, padding: '3px 9px', fontSize: '0.65rem', textDecoration: 'none', display: 'inline-block' }}>
+                      Open Dashboard ↗
+                    </a>
+                  </div>
+                  {/* GitHub */}
+                  <div style={{ background: 'rgba(0,0,0,0.2)', borderRadius: 10, padding: '0.8rem', border: '1px solid var(--border)' }}>
+                    <div style={{ fontSize: '0.68rem', color: 'var(--text3)', marginBottom: 5, textTransform: 'uppercase', letterSpacing: '0.08em' }}>🐙 GitHub Repo</div>
+                    {githubLoading
+                      ? <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}><div className="spin" style={{ width: 10, height: 10 }} /><span style={{ fontSize: '0.7rem', color: 'var(--text3)' }}>Fetching…</span></div>
+                      : githubData?._error === 'private'
+                        ? <HealthDot status="slow" />
+                        : githubData?._error
+                          ? <HealthDot status="error" />
+                          : <HealthDot status="good" />
+                    }
+                    <a href={`https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}`} target="_blank" rel="noreferrer"
+                      className="btn btn-secondary" style={{ marginTop: 8, padding: '3px 9px', fontSize: '0.65rem', textDecoration: 'none', display: 'inline-block' }}>
+                      View Repo ↗
+                    </a>
+                  </div>
+                  {/* Last sync timestamps */}
+                  <div style={{ background: 'rgba(0,0,0,0.2)', borderRadius: 10, padding: '0.8rem', border: '1px solid var(--border)' }}>
+                    <div style={{ fontSize: '0.68rem', color: 'var(--text3)', marginBottom: 5, textTransform: 'uppercase', letterSpacing: '0.08em' }}>🕐 Last Syncs</div>
+                    {[['Routes', syncTimestamps.routes], ['Charts', syncTimestamps.charts], ['Ports', syncTimestamps.ports]].map(([label, ts]) => (
+                      <div key={label} style={{ fontSize: '0.65rem', color: 'var(--text2)', marginBottom: 3 }}>
+                        <span style={{ color: 'var(--text3)', width: 44, display: 'inline-block' }}>{label}:</span>
+                        <span style={{ color: ts ? 'var(--green)' : 'var(--red)' }}>
+                          {ts?.toDate ? relativeTime(ts.toDate().toISOString()) : ts ? relativeTime(ts) : 'Never'}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* ── Row 2: Firebase Quota (Spark Plan) ── */}
+              <div style={sectionCard}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.9rem' }}>
+                  <div style={{ fontFamily: 'Orbitron,monospace', fontSize: '0.74rem', color: 'var(--cyan)', letterSpacing: '0.06em' }}>
+                    🔥 FIREBASE SPARK PLAN — DAILY QUOTA
+                  </div>
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                    <span style={{ fontSize: '0.62rem', color: 'var(--text3)' }}>{fbUsage.date || 'today'}</span>
+                    <button className="btn btn-secondary" style={{ padding: '3px 9px', fontSize: '0.65rem' }} onClick={loadFbUsage} disabled={fbUsageLoading}>
+                      {fbUsageLoading ? '…' : '🔄'}
+                    </button>
+                  </div>
+                </div>
+                {fbUsageLoading
+                  ? <div className="loading"><div className="spin" /><span>Loading usage…</span></div>
+                  : <>
+                    <QuotaBar label="Reads"   used={fbUsage.reads   || 0} total={FB_LIMITS.reads}   color="var(--cyan)" />
+                    <QuotaBar label="Writes"  used={fbUsage.writes  || 0} total={FB_LIMITS.writes}  color="var(--gold)" />
+                    <QuotaBar label="Deletes" used={fbUsage.deletes || 0} total={FB_LIMITS.deletes} color="#A78BFA" />
+                  </>
+                }
+                <div className="info-box" style={{ marginTop: '0.6rem', fontSize: '0.68rem' }}>
+                  ℹ️ <strong style={{ color: 'var(--cyan)' }}>Self-tracked</strong> via <code style={{ background: 'rgba(0,180,216,0.1)', padding: '1px 4px', borderRadius: 3 }}>_stats/usage_YYYY-MM-DD</code> doc.
+                  Counters increment when admin syncs data. Resets at midnight. <strong style={{ color: 'var(--gold)' }}>Real-time Firebase console</strong> is the authoritative source —{' '}
+                  <a href="https://console.firebase.google.com" target="_blank" rel="noreferrer" style={{ color: 'var(--cyan)' }}>open console ↗</a>
+                </div>
+              </div>
+
+              {/* ── Row 3: Vercel Free Tier Limits ── */}
+              <div style={sectionCard}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.9rem' }}>
+                  <div style={{ fontFamily: 'Orbitron,monospace', fontSize: '0.74rem', color: '#A78BFA', letterSpacing: '0.06em' }}>
+                    ▲ VERCEL FREE TIER — STATIC LIMITS
+                  </div>
+                  <a href="https://vercel.com/dashboard" target="_blank" rel="noreferrer"
+                    className="btn btn-secondary" style={{ padding: '3px 9px', fontSize: '0.65rem', textDecoration: 'none' }}>
+                    Open Vercel ↗
+                  </a>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(160px,1fr))', gap: '0.7rem', marginBottom: '0.8rem' }}>
+                  {[
+                    { l: 'Bandwidth / Month',        v: `${VERCEL_LIMITS.bandwidth} GB`,          i: '📡', c: '#A78BFA' },
+                    { l: 'Deployments / Day',         v: `${VERCEL_LIMITS.deployments}`,            i: '🚀', c: 'var(--cyan)' },
+                    { l: 'Function Invocations / Day',v: `${(VERCEL_LIMITS.fnInvocations/1000)}k`,  i: '⚡', c: 'var(--gold)' },
+                    { l: 'Build Minutes / Month',     v: `${VERCEL_LIMITS.buildMinutes.toLocaleString()} min`, i: '🔨', c: 'var(--green)' },
+                  ].map(item => (
+                    <div key={item.l} style={{ background: 'rgba(0,0,0,0.2)', borderRadius: 10, padding: '0.7rem', border: `1px solid ${item.c}22` }}>
+                      <div style={{ fontSize: '1.2rem', marginBottom: 4 }}>{item.i}</div>
+                      <div style={{ fontFamily: 'Orbitron,monospace', fontSize: '1rem', fontWeight: 700, color: item.c }}>{item.v}</div>
+                      <div style={{ fontSize: '0.6rem', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.06em', marginTop: 2 }}>{item.l}</div>
+                    </div>
+                  ))}
+                </div>
+                <div className="info-box" style={{ fontSize: '0.68rem' }}>
+                  ℹ️ Vercel does not expose a free-tier usage API. These are the plan limits.
+                  Check real-time usage in your <a href="https://vercel.com/dashboard" target="_blank" rel="noreferrer" style={{ color: '#A78BFA' }}>Vercel dashboard → Usage tab ↗</a>
+                </div>
+              </div>
+
+              {/* ── Row 4: GitHub Repository Stats ── */}
+              <div style={sectionCard}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.9rem', gap: 8, flexWrap: 'wrap' }}>
+                  <div style={{ fontFamily: 'Orbitron,monospace', fontSize: '0.74rem', color: 'var(--green)', letterSpacing: '0.06em' }}>
+                    🐙 GITHUB REPOSITORY
+                  </div>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <button className="btn btn-secondary" style={{ padding: '3px 9px', fontSize: '0.65rem' }} onClick={() => setShowTokenInput(s => !s)}>
+                      🔑 {localStorage.getItem('nsx_gh_token') ? 'Change Token' : 'Add Token'}
+                    </button>
+                    <button className="btn btn-secondary" style={{ padding: '3px 9px', fontSize: '0.65rem' }} onClick={() => { setGithubData(null); setGithubCommit(null); loadGithubData(); }}>🔄</button>
+                  </div>
+                </div>
+
+                {/* Token input (private repo support) */}
+                {showTokenInput && (
+                  <div style={{ background: 'rgba(0,180,216,0.05)', border: '1px solid rgba(0,180,216,0.2)', borderRadius: 10, padding: '0.8rem', marginBottom: '0.9rem' }}>
+                    <div style={{ fontSize: '0.7rem', color: 'var(--text2)', marginBottom: 6 }}>
+                      For private repos: create a GitHub Personal Access Token with <code style={{ background: 'rgba(255,255,255,0.07)', padding: '1px 4px', borderRadius: 3 }}>repo:read</code> scope.
+                      <a href="https://github.com/settings/tokens/new" target="_blank" rel="noreferrer" style={{ color: 'var(--cyan)', marginLeft: 4 }}>Create token ↗</a>
+                    </div>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <input className="fi" type="password" placeholder="ghp_xxxxxxxxxxxx" value={githubToken}
+                        onChange={e => setGithubToken(e.target.value)}
+                        style={{ flex: 1, margin: 0, fontSize: '0.72rem', padding: '6px 10px' }} />
+                      <button className="btn btn-primary" style={{ padding: '5px 10px', fontSize: '0.72rem' }} onClick={saveGithubToken}>Save</button>
+                      {localStorage.getItem('nsx_gh_token') && (
+                        <button className="btn btn-danger" style={{ padding: '5px 10px', fontSize: '0.72rem' }} onClick={clearGithubToken}>Clear</button>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {githubLoading
+                  ? <div className="loading"><div className="spin" /><span>Fetching from GitHub API…</span></div>
+                  : githubData?._error === 'private'
+                    ? (
+                      <div className="info-box" style={{ borderColor: 'rgba(240,165,0,0.3)' }}>
+                        <strong style={{ color: 'var(--gold)' }}>🔒 Private Repository</strong><br />
+                        GitHub API returned 404 — your repo is private. Add a Personal Access Token above to fetch stats.
+                      </div>
+                    )
+                    : githubData?._error
+                      ? <div className="info-box" style={{ borderColor: 'rgba(255,71,87,0.3)' }}><strong style={{ color: 'var(--red)' }}>❌ Could not reach GitHub API.</strong> Check your connection.</div>
+                      : githubData && (
+                        <>
+                          {/* Repo meta row */}
+                          <div style={{ display: 'flex', gap: '0.7rem', flexWrap: 'wrap', marginBottom: '0.9rem' }}>
+                            <Chip label="Stars"      value={githubData.stargazers_count ?? 0}             color="var(--gold)" />
+                            <Chip label="Forks"      value={githubData.forks_count ?? 0}                  color="var(--cyan)" />
+                            <Chip label="Open Issues" value={githubData.open_issues_count ?? 0}            color={githubData.open_issues_count > 0 ? 'var(--red)' : 'var(--green)'} />
+                            <Chip label="Repo Size"  value={`${((githubData.size || 0)/1024).toFixed(1)} MB`} color="#A78BFA" />
+                            <Chip label="Watchers"   value={githubData.watchers_count ?? 0}               color="var(--green)" />
+                          </div>
+
+                          {/* Repo details */}
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: '0.8rem', fontSize: '0.72rem' }}>
+                            {[
+                              { l: 'Branch',        v: githubData.default_branch || 'main' },
+                              { l: 'Visibility',    v: githubData.private ? '🔒 Private' : '🌐 Public' },
+                              { l: 'Language',      v: githubData.language || '—' },
+                              { l: 'Last Push',     v: relativeTime(githubData.pushed_at) },
+                              { l: 'Created',       v: githubData.created_at ? new Date(githubData.created_at).toLocaleDateString() : '—' },
+                              { l: 'API Limit',     v: '60 req/hr (unauthenticated)' },
+                            ].map(row => (
+                              <div key={row.l} style={{ background: 'rgba(0,0,0,0.15)', borderRadius: 8, padding: '0.5rem 0.7rem', display: 'flex', justifyContent: 'space-between', gap: 6 }}>
+                                <span style={{ color: 'var(--text3)' }}>{row.l}</span>
+                                <span style={{ color: 'var(--text)', fontWeight: 600 }}>{row.v}</span>
+                              </div>
+                            ))}
+                          </div>
+
+                          {/* Latest commit */}
+                          {githubCommit && (
+                            <div style={{ background: 'rgba(0,0,0,0.2)', borderRadius: 10, padding: '0.8rem', border: '1px solid rgba(0,180,216,0.15)' }}>
+                              <div style={{ fontSize: '0.65rem', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 5 }}>Latest Commit</div>
+                              <div style={{ fontSize: '0.78rem', color: 'var(--cyan)', fontWeight: 600, marginBottom: 4 }}>
+                                {(githubCommit.commit?.message || '').split('\n')[0].slice(0, 80)}{githubCommit.commit?.message?.length > 80 ? '…' : ''}
+                              </div>
+                              <div style={{ display: 'flex', gap: 12, fontSize: '0.65rem', color: 'var(--text3)' }}>
+                                <span>👤 {githubCommit.commit?.author?.name || '—'}</span>
+                                <span>🕐 {relativeTime(githubCommit.commit?.author?.date)}</span>
+                                <a href={githubCommit.html_url} target="_blank" rel="noreferrer" style={{ color: 'var(--green)', marginLeft: 'auto' }}>
+                                  {githubCommit.sha?.slice(0, 7)} ↗
+                                </a>
+                              </div>
+                            </div>
+                          )}
+                        </>
+                      )
+                }
+              </div>
+
+              {/* ── Row 5: User Analytics ── */}
+              <div style={sectionCard}>
+                <div style={{ fontFamily: 'Orbitron,monospace', fontSize: '0.74rem', color: 'var(--cyan)', marginBottom: '0.9rem', letterSpacing: '0.06em' }}>
+                  👥 USER ANALYTICS
+                  {users.length === 0 && (
+                    <button className="btn btn-secondary" style={{ marginLeft: 10, padding: '2px 8px', fontSize: '0.62rem' }} onClick={loadUsers}>Load Users</button>
+                  )}
+                </div>
+                {users.length === 0
+                  ? <div style={{ fontSize: '0.74rem', color: 'var(--text3)', textAlign: 'center', padding: '1rem' }}>Click "Load Users" to see analytics</div>
+                  : <>
+                    <div style={{ display: 'flex', gap: '0.7rem', flexWrap: 'wrap', marginBottom: '1rem' }}>
+                      <Chip label="Total"       value={users.length}             color="var(--cyan)" />
+                      <Chip label="Active Today" value={userStats.activeToday}   color="var(--green)" />
+                      <Chip label="New (7d)"    value={userStats.newThisWeek}    color="#A78BFA" />
+                      <Chip label="Paid ⭐"     value={userStats.paid}           color="var(--gold)" />
+                      <Chip label="Free 🆓"     value={userStats.free}           color="var(--text2)" />
+                      <Chip label="Blocked ⛔"  value={userStats.blocked}        color={userStats.blocked > 0 ? 'var(--red)' : 'var(--text3)'} />
+                    </div>
+
+                    {/* Paid vs Free visual bar */}
+                    {users.length > 0 && (
+                      <div style={{ marginBottom: '0.8rem' }}>
+                        <div style={{ fontSize: '0.68rem', color: 'var(--text3)', marginBottom: 4 }}>Tier Distribution</div>
+                        <div style={{ height: 10, borderRadius: 10, overflow: 'hidden', background: 'rgba(255,255,255,0.06)', display: 'flex' }}>
+                          <div style={{ height: '100%', background: 'linear-gradient(90deg,var(--gold),var(--gold)99)', width: `${(userStats.paid/users.length)*100}%`, transition: 'width 0.5s ease' }} />
+                          <div style={{ height: '100%', background: 'linear-gradient(90deg,var(--cyan),var(--cyan)99)', flex: 1 }} />
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.6rem', color: 'var(--text3)', marginTop: 3 }}>
+                          <span style={{ color: 'var(--gold)' }}>⭐ Paid: {userStats.paid} ({Math.round((userStats.paid/users.length)*100)}%)</span>
+                          <span style={{ color: 'var(--cyan)' }}>🆓 Free: {userStats.free} ({Math.round((userStats.free/users.length)*100)}%)</span>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Blocked bar */}
+                    {userStats.blocked > 0 && (
+                      <div style={{ background: 'rgba(255,71,87,0.06)', border: '1px solid rgba(255,71,87,0.2)', borderRadius: 8, padding: '0.6rem 0.8rem', fontSize: '0.7rem', color: 'var(--red)' }}>
+                        ⚠️ {userStats.blocked} user{userStats.blocked > 1 ? 's' : ''} currently blocked —{' '}
+                        <span style={{ color: 'var(--text2)', cursor: 'pointer', textDecoration: 'underline' }} onClick={() => setSection('users')}>view in User Database</span>
+                      </div>
+                    )}
+                  </>
+                }
+              </div>
+
+              {/* ── Row 6: Quick Links ── */}
+              <div style={sectionCard}>
+                <div style={{ fontFamily: 'Orbitron,monospace', fontSize: '0.74rem', color: 'var(--text3)', marginBottom: '0.9rem', letterSpacing: '0.06em' }}>
+                  🔗 EXTERNAL DASHBOARDS
+                </div>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  {[
+                    { l: '🔥 Firebase Console',   href: 'https://console.firebase.google.com',                            c: '#FF6D00' },
+                    { l: '▲ Vercel Dashboard',    href: 'https://vercel.com/dashboard',                                   c: '#A78BFA' },
+                    { l: '🐙 GitHub Repo',        href: `https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}`,              c: 'var(--green)' },
+                    { l: '📊 GitHub Actions',     href: `https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/actions`,      c: 'var(--cyan)' },
+                    { l: '🌐 Live App',            href: 'https://navisphere-x.vercel.app',                                c: 'var(--gold)' },
+                  ].map(link => (
+                    <a key={link.l} href={link.href} target="_blank" rel="noreferrer"
+                      style={{ padding: '8px 14px', borderRadius: 8, border: `1px solid ${link.c}44`, color: link.c, fontSize: '0.72rem', fontWeight: 600,
+                        textDecoration: 'none', background: `${link.c}0d`, transition: 'all 0.15s' }}>
+                      {link.l} ↗
+                    </a>
+                  ))}
+                </div>
+              </div>
+            </>
+          )}
+          {/* ─── END ADDED INFRA SECTION ───────────────────────────────── */}
+
+          {/* ─── MESSAGES SECTION ──────────────────────────────────────── */}
           {section === 'messages' && (
             <>
               <div className="a-hdr">
@@ -549,7 +1055,6 @@ function AdminPage({
                 </div>
               </div>
 
-              {/* Filter bar */}
               <div className="fbar" style={{ marginBottom: '1rem' }}>
                 {[
                   { k: 'all',        l: `All (${contactMessages.length})` },
@@ -565,19 +1070,13 @@ function AdminPage({
                 ))}
               </div>
 
-              {/* Two-pane layout: list + detail */}
               <div style={{ display: 'grid', gridTemplateColumns: selectedMsg ? '1fr 1fr' : '1fr', gap: '1rem' }}>
-
-                {/* Message List */}
                 <div>
                   {filteredMsgs.length === 0
                     ? <div className="empty"><div className="empty-icon">📬</div><div className="empty-t">No Messages</div><div className="empty-d">No messages match this filter.</div></div>
                     : filteredMsgs.map(m => (
                       <div key={m.id}
-                        onClick={async () => {
-                          setSelectedMsg(m);
-                          if (!m.read) await markMsgRead(m.id);
-                        }}
+                        onClick={async () => { setSelectedMsg(m); if (!m.read) await markMsgRead(m.id); }}
                         style={{
                           background: selectedMsg?.id === m.id ? 'rgba(0,180,216,0.08)' : 'var(--card)',
                           border: `1px solid ${selectedMsg?.id === m.id ? 'rgba(0,180,216,0.35)' : !m.read ? 'rgba(0,180,216,0.2)' : 'var(--border)'}`,
@@ -607,7 +1106,6 @@ function AdminPage({
                   }
                 </div>
 
-                {/* Message Detail */}
                 {selectedMsg && (
                   <div style={{ background: 'var(--card)', border: '1px solid var(--border2)', borderRadius: 12, padding: '1.2rem', position: 'sticky', top: 0, maxHeight: '80vh', overflowY: 'auto' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1rem', gap: 8 }}>
@@ -652,7 +1150,6 @@ function AdminPage({
               </div>
             </>
           )}
-          {/* ─── END ADDED MESSAGES SECTION ────────────────────────────── */}
 
           {/* ─── MANAGE ROUTES ─────────────────────────────────────────── */}
           {section === 'routes' && (
