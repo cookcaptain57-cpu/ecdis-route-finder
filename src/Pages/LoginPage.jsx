@@ -91,61 +91,60 @@ function LegalModal({ tab, onClose }) {
   const isTC = tab === 'tc';
   return (
     <div style={{
-      position: 'fixed', inset: 0, zIndex: 99999,
-      background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(6px)',
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-      padding: '1rem',
+      position:'fixed',inset:0,zIndex:99999,
+      background:'rgba(0,0,0,0.8)',backdropFilter:'blur(6px)',
+      display:'flex',alignItems:'center',justifyContent:'center',padding:'1rem',
     }} onClick={onClose}>
       <div style={{
-        background: 'var(--card)', border: '1px solid var(--border2)',
-        borderRadius: 16, padding: '1.4rem', maxWidth: 520, width: '100%',
-        maxHeight: '80vh', overflowY: 'auto',
-      }} onClick={e => e.stopPropagation()}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-          <div style={{ fontFamily: 'Orbitron,monospace', fontSize: '0.84rem', fontWeight: 700, color: 'var(--cyan)' }}>
-            {isTC ? '📋 Terms & Conditions' : '🔒 Privacy Policy'}
+        background:'var(--card)',border:'1px solid var(--border2)',
+        borderRadius:16,padding:'1.4rem',maxWidth:520,width:'100%',
+        maxHeight:'80vh',overflowY:'auto',
+      }} onClick={e=>e.stopPropagation()}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'1rem'}}>
+          <div style={{fontFamily:'Orbitron,monospace',fontSize:'0.84rem',fontWeight:700,color:'var(--cyan)'}}>
+            {isTC?'📋 Terms & Conditions':'🔒 Privacy Policy'}
           </div>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--text3)', cursor: 'pointer', fontSize: '1.2rem' }}>✕</button>
+          <button onClick={onClose} style={{background:'none',border:'none',color:'var(--text3)',cursor:'pointer',fontSize:'1.2rem'}}>✕</button>
         </div>
-        <div style={{ fontSize: '0.64rem', color: 'var(--text3)', marginBottom: '1rem' }}>Last updated: June 2026</div>
-        {isTC ? (
-          <div style={{ fontSize: '0.76rem', color: 'var(--text2)', lineHeight: 1.9 }}>
+        <div style={{fontSize:'0.64rem',color:'var(--text3)',marginBottom:'1rem'}}>Last updated: June 2026</div>
+        {isTC?(
+          <div style={{fontSize:'0.76rem',color:'var(--text2)',lineHeight:1.9}}>
             {[
-              { title: '1. Who Can Use This App', body: 'NavisphereX Marine is for maritime professionals, students, and shore staff aged 16 or older. By registering, you confirm you meet these criteria.' },
-              { title: '2. Account Registration', body: 'You must provide accurate information. You are responsible for keeping credentials confidential. One account per user — do not share your account.' },
-              { title: '3. Acceptable Use', body: 'You must not scrape, copy, or redistribute app data; use the app to harm or defraud others; use bots to access the app; or upload malicious content.' },
-              { title: '4. Data Privacy', body: 'We store your name, email, rank, phone, and data you enter (sea time, certificates). We do NOT sell your data. Your password is encrypted by Firebase and inaccessible to the developer.' },
-              { title: '5. Intellectual Property', body: 'All content and features of NavisphereX Marine are the property of Manish Bharti. Personal, non-commercial use is permitted.' },
-              { title: '6. Changes to the App', body: 'Features may be added, modified, or removed at any time. These Terms may be updated — continued use constitutes acceptance.' },
-              { title: '7. Account Suspension', body: 'The developer reserves the right to suspend accounts for violation of these Terms, misuse, or harmful behaviour.' },
-              { title: '8. Governing Law', body: 'These Terms are governed by Indian law. Disputes are subject to the jurisdiction of courts in India.' },
-              { title: '9. Contact', body: 'For legal queries: navispherex@gmail.com or via the Contact Us page.' },
-            ].map(s => (
-              <div key={s.title} style={{ marginBottom: '0.9rem' }}>
-                <div style={{ fontFamily: 'Orbitron,monospace', fontSize: '0.66rem', fontWeight: 700, color: 'var(--cyan)', marginBottom: 4 }}>{s.title}</div>
+              {title:'1. Who Can Use This App',body:'NavisphereX Marine is for maritime professionals, students, and shore staff aged 16 or older. By registering, you confirm you meet these criteria.'},
+              {title:'2. Account Registration',body:'You must provide accurate information. You are responsible for keeping credentials confidential. One account per user — do not share your account.'},
+              {title:'3. Acceptable Use',body:'You must not scrape, copy, or redistribute app data; use the app to harm or defraud others; use bots to access the app; or upload malicious content.'},
+              {title:'4. Data Privacy',body:'We store your name, email, rank, phone, and data you enter (sea time, certificates). We do NOT sell your data. Your password is encrypted by Firebase and inaccessible to the developer.'},
+              {title:'5. Intellectual Property',body:'All content and features of NavisphereX Marine are the property of Manish Bharti. Personal, non-commercial use is permitted.'},
+              {title:'6. Changes to the App',body:'Features may be added, modified, or removed at any time. These Terms may be updated — continued use constitutes acceptance.'},
+              {title:'7. Account Suspension',body:'The developer reserves the right to suspend accounts for violation of these Terms, misuse, or harmful behaviour.'},
+              {title:'8. Governing Law',body:'These Terms are governed by Indian law. Disputes are subject to the jurisdiction of courts in India.'},
+              {title:'9. Contact',body:'For legal queries: navispherex@gmail.com or via the Contact Us page.'},
+            ].map(s=>(
+              <div key={s.title} style={{marginBottom:'0.9rem'}}>
+                <div style={{fontFamily:'Orbitron,monospace',fontSize:'0.66rem',fontWeight:700,color:'var(--cyan)',marginBottom:4}}>{s.title}</div>
                 <div>{s.body}</div>
               </div>
             ))}
           </div>
-        ) : (
-          <div style={{ fontSize: '0.76rem', color: 'var(--text2)', lineHeight: 1.9 }}>
+        ):(
+          <div style={{fontSize:'0.76rem',color:'var(--text2)',lineHeight:1.9}}>
             {[
-              { title: '1. What We Collect', body: 'Name, email, phone, rank, ship name, sea time entries, certificate records, and usage data you voluntarily provide.' },
-              { title: '2. How We Use It', body: 'To provide app features, personalise your experience, respond to support queries, and improve the app. We do not use your data for advertising.' },
-              { title: '3. Data Storage', body: 'Data is stored on Google Firebase (Firestore) with industry-standard encryption. Your password is never stored or accessible in plain text.' },
-              { title: '4. Data Sharing', body: 'We do not sell, trade, or transfer your data to third parties. Data may be shared only if required by law.' },
-              { title: '5. Your Rights', body: 'You may request deletion of your account and all associated data at any time by contacting navispherex@gmail.com.' },
-              { title: '6. Cookies', body: 'We use localStorage and sessionStorage for app preferences (theme, tabs). No third-party tracking cookies are used.' },
-              { title: '7. Contact', body: 'Privacy queries: navispherex@gmail.com' },
-            ].map(s => (
-              <div key={s.title} style={{ marginBottom: '0.9rem' }}>
-                <div style={{ fontFamily: 'Orbitron,monospace', fontSize: '0.66rem', fontWeight: 700, color: 'var(--cyan)', marginBottom: 4 }}>{s.title}</div>
+              {title:'1. What We Collect',body:'Name, email, phone, rank, ship name, sea time entries, certificate records, and usage data you voluntarily provide.'},
+              {title:'2. How We Use It',body:'To provide app features, personalise your experience, respond to support queries, and improve the app. We do not use your data for advertising.'},
+              {title:'3. Data Storage',body:'Data is stored on Google Firebase (Firestore) with industry-standard encryption. Your password is never stored or accessible in plain text.'},
+              {title:'4. Data Sharing',body:'We do not sell, trade, or transfer your data to third parties. Data may be shared only if required by law.'},
+              {title:'5. Your Rights',body:'You may request deletion of your account and all associated data at any time by contacting navispherex@gmail.com.'},
+              {title:'6. Cookies',body:'We use localStorage and sessionStorage for app preferences (theme, tabs). No third-party tracking cookies are used.'},
+              {title:'7. Contact',body:'Privacy queries: navispherex@gmail.com'},
+            ].map(s=>(
+              <div key={s.title} style={{marginBottom:'0.9rem'}}>
+                <div style={{fontFamily:'Orbitron,monospace',fontSize:'0.66rem',fontWeight:700,color:'var(--cyan)',marginBottom:4}}>{s.title}</div>
                 <div>{s.body}</div>
               </div>
             ))}
           </div>
         )}
-        <button className="btn btn-primary" style={{ width: '100%', justifyContent: 'center', marginTop: '1rem' }} onClick={onClose}>
+        <button className="btn btn-primary" style={{width:'100%',justifyContent:'center',marginTop:'1rem'}} onClick={onClose}>
           ✅ I Understand — Close
         </button>
       </div>
@@ -172,48 +171,48 @@ function CountryCodePicker({ value, onChange }) {
   const selected = COUNTRY_CODES.find(c => c.dial === value);
 
   return (
-    <div ref={ref} style={{ position: 'relative', width: 130, flexShrink: 0 }}>
-      {manual ? (
-        <div style={{ display: 'flex', gap: 4 }}>
-          <input className="fi" placeholder="+xx" style={{ flex: 1, padding: '10px 8px' }}
-            value={manualVal} onChange={e => { setManualVal(e.target.value); onChange(e.target.value); }} />
-          <button className="btn btn-secondary" style={{ padding: '0 8px', fontSize: '0.7rem' }}
-            onClick={() => { setManual(false); onChange('+91'); setManualVal(''); }}>✕</button>
+    <div ref={ref} style={{position:'relative',width:130,flexShrink:0}}>
+      {manual?(
+        <div style={{display:'flex',gap:4}}>
+          <input className="fi" placeholder="+xx" style={{flex:1,padding:'10px 8px'}}
+            value={manualVal} onChange={e=>{setManualVal(e.target.value);onChange(e.target.value);}}/>
+          <button className="btn btn-secondary" style={{padding:'0 8px',fontSize:'0.7rem'}}
+            onClick={()=>{setManual(false);onChange('+91');setManualVal('');}}>✕</button>
         </div>
-      ) : (
-        <button onClick={() => setOpen(o => !o)} style={{ width: '100%', padding: '10px 10px',
-          background: 'var(--bg2)', border: '1px solid var(--border2)', borderRadius: 9,
-          color: 'var(--text)', fontFamily: 'Exo 2,sans-serif', fontSize: '0.84rem',
-          cursor: 'pointer', textAlign: 'left', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      ):(
+        <button onClick={()=>setOpen(o=>!o)} style={{width:'100%',padding:'10px 10px',
+          background:'var(--bg2)',border:'1px solid var(--border2)',borderRadius:9,
+          color:'var(--text)',fontFamily:'Exo 2,sans-serif',fontSize:'0.84rem',
+          cursor:'pointer',textAlign:'left',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
           <span><strong>{value}</strong> {selected?.name?.slice(0,10)}{(selected?.name?.length||0)>10?'…':''}</span>
-          <span style={{ color: 'var(--text3)', fontSize: '0.7rem' }}>▾</span>
+          <span style={{color:'var(--text3)',fontSize:'0.7rem'}}>▾</span>
         </button>
       )}
-      {open && !manual && (
-        <div style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, zIndex: 500, width: 240,
-          background: 'var(--card)', border: '1px solid var(--border2)', borderRadius: 10,
-          boxShadow: '0 12px 40px rgba(0,0,0,0.6)', overflow: 'hidden' }}>
-          <div style={{ padding: '8px 10px', borderBottom: '1px solid var(--border)' }}>
+      {open&&!manual&&(
+        <div style={{position:'absolute',top:'calc(100% + 4px)',left:0,zIndex:500,width:240,
+          background:'var(--card)',border:'1px solid var(--border2)',borderRadius:10,
+          boxShadow:'0 12px 40px rgba(0,0,0,0.6)',overflow:'hidden'}}>
+          <div style={{padding:'8px 10px',borderBottom:'1px solid var(--border)'}}>
             <input className="fi" autoFocus placeholder="Search country or code…"
-              style={{ margin: 0, padding: '7px 10px', fontSize: '0.8rem' }}
-              value={search} onChange={e => setSearch(e.target.value)} />
+              style={{margin:0,padding:'7px 10px',fontSize:'0.8rem'}}
+              value={search} onChange={e=>setSearch(e.target.value)}/>
           </div>
-          <div style={{ maxHeight: 200, overflowY: 'auto' }}>
-            {filtered.slice(0, 80).map((c, i) => (
-              <div key={i} onMouseDown={() => { onChange(c.dial); setOpen(false); setSearch(''); }}
-                style={{ padding: '8px 12px', cursor: 'pointer', fontSize: '0.8rem',
-                  display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.03)' }}
-                onMouseEnter={e => e.currentTarget.style.background = 'rgba(0,180,216,0.08)'}
-                onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-                <span style={{ color: 'var(--text2)' }}>{c.name}</span>
-                <span style={{ color: 'var(--cyan)', fontWeight: 700 }}>{c.dial}</span>
+          <div style={{maxHeight:200,overflowY:'auto'}}>
+            {filtered.slice(0,80).map((c,i)=>(
+              <div key={i} onMouseDown={()=>{onChange(c.dial);setOpen(false);setSearch('');}}
+                style={{padding:'8px 12px',cursor:'pointer',fontSize:'0.8rem',
+                  display:'flex',justifyContent:'space-between',borderBottom:'1px solid rgba(255,255,255,0.03)'}}
+                onMouseEnter={e=>e.currentTarget.style.background='rgba(0,180,216,0.08)'}
+                onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
+                <span style={{color:'var(--text2)'}}>{c.name}</span>
+                <span style={{color:'var(--cyan)',fontWeight:700}}>{c.dial}</span>
               </div>
             ))}
-            <div onMouseDown={() => { setManual(true); setOpen(false); setSearch(''); }}
-              style={{ padding: '10px 12px', cursor: 'pointer', fontSize: '0.78rem',
-                color: 'var(--gold)', borderTop: '1px solid var(--border)' }}
-              onMouseEnter={e => e.currentTarget.style.background = 'rgba(240,165,0,0.06)'}
-              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+            <div onMouseDown={()=>{setManual(true);setOpen(false);setSearch('');}}
+              style={{padding:'10px 12px',cursor:'pointer',fontSize:'0.78rem',
+                color:'var(--gold)',borderTop:'1px solid var(--border)'}}
+              onMouseEnter={e=>e.currentTarget.style.background='rgba(240,165,0,0.06)'}
+              onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
               ✏️ Enter code manually
             </div>
           </div>
@@ -223,7 +222,6 @@ function CountryCodePicker({ value, onChange }) {
   );
 }
 
-// ── UPDATED: added installPrompt and onInstallApp props ──────────────────────
 function LoginPage({ notify, onLogin, installPrompt=null, onInstallApp=null }) {
   const [mode, setMode]               = useState('login');
   const [email, setEmail]             = useState('');
@@ -265,7 +263,7 @@ function LoginPage({ notify, onLogin, installPrompt=null, onInstallApp=null }) {
       const profile = snap.exists() ? snap.data() : {};
       onLogin(c.user, intended || 'home', false, profile.name, profile.rank);
     } catch (e) {
-      if (e.code === 'auth/invalid-credential' || e.code === 'auth/wrong-password' || e.code === 'auth/user-not-found')
+      if (e.code==='auth/invalid-credential'||e.code==='auth/wrong-password'||e.code==='auth/user-not-found')
         setErr('Invalid email or password.');
       else setErr('Login error: ' + e.message);
     }
@@ -273,25 +271,25 @@ function LoginPage({ notify, onLogin, installPrompt=null, onInstallApp=null }) {
   };
 
   const doSignup = async () => {
-    if (!name.trim())     { setErr('Please enter your full name.'); return; }
-    if (!phone.trim())    { setErr('Please enter your phone number.'); return; }
-    if (!finalRank)       { setErr('Please select or enter your rank.'); return; }
-    if (!email || !pass)  { setErr('Fill all fields.'); return; }
-    if (pass.length < 6)  { setErr('Password min 6 characters.'); return; }
-    if (!agreeTerms)      { setErr('Please accept Terms & Conditions.'); return; }
+    if (!name.trim())    { setErr('Please enter your full name.'); return; }
+    if (!phone.trim())   { setErr('Please enter your phone number.'); return; }
+    if (!finalRank)      { setErr('Please select or enter your rank.'); return; }
+    if (!email||!pass)   { setErr('Fill all fields.'); return; }
+    if (pass.length < 6) { setErr('Password min 6 characters.'); return; }
+    if (!agreeTerms)     { setErr('Please accept Terms & Conditions.'); return; }
     setLoading(true); setErr('');
     try {
       const c = await createUserWithEmailAndPassword(auth, email, pass);
-      await setDoc(doc(db, 'users', c.user.uid), {
-        email, name: name.trim(), phone: `${countryCode} ${phone.trim()}`,
-        rank: finalRank, tier, createdAt: serverTimestamp(), role: 'user',
+      await setDoc(doc(db,'users',c.user.uid),{
+        email, name:name.trim(), phone:`${countryCode} ${phone.trim()}`,
+        rank:finalRank, tier, createdAt:serverTimestamp(), role:'user',
       });
       await sendEmailVerification(c.user);
       await signOut(auth);
       setMode('verify');
-      notify('Verification email sent! 📧', 'success');
+      notify('Verification email sent! 📧','success');
     } catch (e) {
-      setErr(e.code === 'auth/email-already-in-use' ? 'Email already registered. Login instead.' : 'Error: ' + e.message);
+      setErr(e.code==='auth/email-already-in-use'?'Email already registered. Login instead.':'Error: '+e.message);
     }
     setLoading(false);
   };
@@ -299,142 +297,141 @@ function LoginPage({ notify, onLogin, installPrompt=null, onInstallApp=null }) {
   const doReset = async () => {
     if (!email) { setErr('Enter your email.'); return; }
     setLoading(true); setErr('');
-    try { await sendPasswordResetEmail(auth, email); setOk('Reset email sent! Check your inbox.'); }
+    try { await sendPasswordResetEmail(auth,email); setOk('Reset email sent! Check your inbox.'); }
     catch { setErr('Email not found.'); }
     setLoading(false);
   };
 
   const resendVerification = async () => {
-    if (!email || !pass) { setErr('Enter email and password to resend.'); return; }
+    if (!email||!pass) { setErr('Enter email and password to resend.'); return; }
     setLoading(true); setErr('');
     try {
-      const c = await signInWithEmailAndPassword(auth, email, pass);
+      const c = await signInWithEmailAndPassword(auth,email,pass);
       await sendEmailVerification(c.user); await signOut(auth);
       setOk('Verification email resent! Check your inbox.');
     } catch { setErr('Could not resend. Check your credentials.'); }
     setLoading(false);
   };
 
-  if (mode === 'verify') return (
-    <div className="auth-wrap"><div className="auth-card" style={{ textAlign: 'center' }}>
-      <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>📧</div>
-      <div className="auth-title" style={{ marginBottom: '0.5rem' }}>Verify Your Email</div>
-      <div className="auth-sub" style={{ marginBottom: '1.4rem', lineHeight: 1.7 }}>
-        A link was sent to<br /><strong style={{ color: 'var(--cyan)' }}>{email}</strong><br />
+  if (mode==='verify') return (
+    <div className="auth-wrap"><div className="auth-card" style={{textAlign:'center'}}>
+      <div style={{fontSize:'3rem',marginBottom:'1rem'}}>📧</div>
+      <div className="auth-title" style={{marginBottom:'0.5rem'}}>Verify Your Email</div>
+      <div className="auth-sub" style={{marginBottom:'1.4rem',lineHeight:1.7}}>
+        A link was sent to<br/><strong style={{color:'var(--cyan)'}}>{email}</strong><br/>
         Click it, then come back to log in.
       </div>
-      <div className="info-box" style={{ textAlign: 'left', fontSize: '0.74rem' }}>
+      <div className="info-box" style={{textAlign:'left',fontSize:'0.74rem'}}>
         📌 Check your <strong>spam/junk</strong> folder if you don't see it.
       </div>
-      {err && <div className="err-box">{err}</div>}
-      {ok  && <div className="ok-box">{ok}</div>}
-      <button className="btn btn-secondary" style={{ width: '100%', justifyContent: 'center', marginBottom: 8 }}
+      {err&&<div className="err-box">{err}</div>}
+      {ok&&<div className="ok-box">{ok}</div>}
+      <button className="btn btn-secondary" style={{width:'100%',justifyContent:'center',marginBottom:8}}
         onClick={resendVerification} disabled={loading}>
-        {loading ? 'Sending…' : '🔄 Resend Verification Email'}
+        {loading?'Sending…':'🔄 Resend Verification Email'}
       </button>
-      <button className="submit-btn" onClick={() => resetForm('login')}>✅ Go to Login</button>
+      <button className="submit-btn" onClick={()=>resetForm('login')}>✅ Go to Login</button>
     </div></div>
   );
 
   return (
     <>
-      {legalModal && <LegalModal tab={legalModal} onClose={() => setLegalModal(null)} />}
+      {legalModal && <LegalModal tab={legalModal} onClose={()=>setLegalModal(null)}/>}
 
       <div className="auth-wrap"><div className="auth-card">
         <div className="auth-logo">
           <div className="auth-icon">🧭</div>
           <div className="auth-title">NavisphereX Marine</div>
-          <div className="auth-sub">{mode === 'reset' ? 'Reset Password' : 'Free account · Download all files'}</div>
+          <div className="auth-sub">{mode==='reset'?'Reset Password':'Free account · Download all files'}</div>
         </div>
 
-        {mode !== 'reset' && (
+        {mode!=='reset'&&(
           <div className="auth-tabs">
-            <button className={`atab ${mode==='login'?'active':''}`} onClick={() => resetForm('login')}>Login</button>
-            <button className={`atab ${mode==='signup'?'active':''}`} onClick={() => resetForm('signup')}>Create Account</button>
+            <button className={`atab ${mode==='login'?'active':''}`} onClick={()=>resetForm('login')}>Login</button>
+            <button className={`atab ${mode==='signup'?'active':''}`} onClick={()=>resetForm('signup')}>Create Account</button>
           </div>
         )}
 
-        {/* ── UPDATED: Install button replaces info-box, falls back to info-box if not available ── */}
+        {/* Install button — no fallback, nothing shown if already installed */}
         {installPrompt && onInstallApp ? (
-        {installPrompt && onInstallApp && (
-  <button onClick={onInstallApp}
-    style={{width:'100%',padding:'10px 14px',borderRadius:10,
-      border:'1px solid rgba(0,180,216,0.4)',
-      background:'linear-gradient(135deg,rgba(0,180,216,0.12),rgba(21,101,192,0.12))',
-      cursor:'pointer',display:'flex',alignItems:'center',gap:10,marginBottom:'1rem',
-      fontFamily:"'Exo 2',sans-serif",transition:'all 0.2s'}}
-    onMouseEnter={e=>{e.currentTarget.style.borderColor='rgba(0,180,216,0.7)';e.currentTarget.style.background='linear-gradient(135deg,rgba(0,180,216,0.2),rgba(21,101,192,0.2))';}}
-    onMouseLeave={e=>{e.currentTarget.style.borderColor='rgba(0,180,216,0.4)';e.currentTarget.style.background='linear-gradient(135deg,rgba(0,180,216,0.12),rgba(21,101,192,0.12))';}}>
-    <div style={{width:34,height:34,borderRadius:9,
-      background:'linear-gradient(135deg,var(--cyan),var(--blue))',
-      display:'flex',alignItems:'center',justifyContent:'center',
-      fontSize:'1.1rem',flexShrink:0,
-      boxShadow:'0 3px 10px rgba(0,180,216,0.4)'}}>📲</div>
-    <div style={{flex:1,textAlign:'left'}}>
-      <div style={{fontFamily:'Orbitron,monospace',fontSize:'0.68rem',
-        fontWeight:700,color:'var(--cyan)',marginBottom:1}}>
-        Install NavisphereX App
-      </div>
-      <div style={{fontSize:'0.62rem',color:'var(--text2)'}}>
-        Add to home screen for faster access
-      </div>
-    </div>
-    <div style={{fontSize:'0.72rem',color:'var(--cyan)',fontWeight:700}}>Install →</div>
-  </button>
-)}
+          <button onClick={onInstallApp}
+            style={{width:'100%',padding:'10px 14px',borderRadius:10,
+              border:'1px solid rgba(0,180,216,0.4)',
+              background:'linear-gradient(135deg,rgba(0,180,216,0.12),rgba(21,101,192,0.12))',
+              cursor:'pointer',display:'flex',alignItems:'center',gap:10,marginBottom:'1rem',
+              fontFamily:"'Exo 2',sans-serif",transition:'all 0.2s'}}
+            onMouseEnter={e=>{e.currentTarget.style.borderColor='rgba(0,180,216,0.7)';e.currentTarget.style.background='linear-gradient(135deg,rgba(0,180,216,0.2),rgba(21,101,192,0.2))';}}
+            onMouseLeave={e=>{e.currentTarget.style.borderColor='rgba(0,180,216,0.4)';e.currentTarget.style.background='linear-gradient(135deg,rgba(0,180,216,0.12),rgba(21,101,192,0.12))';}}>
+            <div style={{width:34,height:34,borderRadius:9,
+              background:'linear-gradient(135deg,var(--cyan),var(--blue))',
+              display:'flex',alignItems:'center',justifyContent:'center',
+              fontSize:'1.1rem',flexShrink:0,
+              boxShadow:'0 3px 10px rgba(0,180,216,0.4)'}}>📲</div>
+            <div style={{flex:1,textAlign:'left'}}>
+              <div style={{fontFamily:'Orbitron,monospace',fontSize:'0.68rem',
+                fontWeight:700,color:'var(--cyan)',marginBottom:1}}>
+                Install NavisphereX App
+              </div>
+              <div style={{fontSize:'0.62rem',color:'var(--text2)'}}>
+                Add to home screen for faster access
+              </div>
+            </div>
+            <div style={{fontSize:'0.72rem',color:'var(--cyan)',fontWeight:700}}>Install →</div>
+          </button>
+        ) : null}
 
-        {mode === 'signup' && (<>
+        {mode==='signup'&&(<>
           <div className="ff">
             <label className="fl">Full Name *</label>
-            <input className="fi" placeholder="e.g. Manish Bharti" value={name} onChange={e => setName(e.target.value)} />
+            <input className="fi" placeholder="e.g. Manish Bharti" value={name} onChange={e=>setName(e.target.value)}/>
           </div>
           <div className="ff">
             <label className="fl">Phone Number *</label>
-            <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
-              <CountryCodePicker value={countryCode} onChange={setCountryCode} />
+            <div style={{display:'flex',gap:8,alignItems:'flex-start'}}>
+              <CountryCodePicker value={countryCode} onChange={setCountryCode}/>
               <input className="fi" type="tel" placeholder="Phone number" value={phone}
-                onChange={e => setPhone(e.target.value)} style={{ flex: 1 }} />
+                onChange={e=>setPhone(e.target.value)} style={{flex:1}}/>
             </div>
-            <div style={{ fontSize: '0.62rem', color: 'var(--text3)', marginTop: 4 }}>
-              Code: <strong style={{ color: 'var(--cyan)' }}>{countryCode}</strong>
+            <div style={{fontSize:'0.62rem',color:'var(--text3)',marginTop:4}}>
+              Code: <strong style={{color:'var(--cyan)'}}>{countryCode}</strong>
             </div>
           </div>
           <div className="ff">
             <label className="fl">Rank / Designation *</label>
-            <select className="fi" value={showCustomRank ? '__other__' : rank}
-              onChange={e => {
-                if (e.target.value === '__other__') { setShowCustomRank(true); setRank(''); }
-                else { setShowCustomRank(false); setRank(e.target.value); }
+            <select className="fi" value={showCustomRank?'__other__':rank}
+              onChange={e=>{
+                if(e.target.value==='__other__'){setShowCustomRank(true);setRank('');}
+                else{setShowCustomRank(false);setRank(e.target.value);}
               }}>
               <option value="">— Select your rank —</option>
-              {MARITIME_RANKS.map(r => <option key={r} value={r}>{r}</option>)}
+              {MARITIME_RANKS.map(r=><option key={r} value={r}>{r}</option>)}
               <option value="__other__">✏️ Other — type below</option>
             </select>
-            {showCustomRank && (
-              <input className="fi" style={{ marginTop: 6 }}
+            {showCustomRank&&(
+              <input className="fi" style={{marginTop:6}}
                 placeholder="Enter your rank or designation…"
-                value={customRank} onChange={e => setCustomRank(e.target.value)} />
+                value={customRank} onChange={e=>setCustomRank(e.target.value)}/>
             )}
           </div>
           <div className="ff">
             <label className="fl">Access Tier *</label>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-              {[{val:'free',icon:'🆓',label:'Free',desc:'Basic access'},{val:'paid',icon:'⭐',label:'Paid',desc:'Full access'}].map(t => (
-                <div key={t.val} onClick={() => setTier(t.val)}
-                  style={{ padding: '10px', borderRadius: 10, cursor: 'pointer', textAlign: 'center',
-                    border: `2px solid ${tier===t.val?'var(--cyan)':'var(--border)'}`,
-                    background: tier===t.val?'rgba(0,180,216,0.08)':'transparent', transition: 'all 0.2s' }}>
-                  <div style={{ fontSize: '1.4rem', marginBottom: 2 }}>{t.icon}</div>
-                  <div style={{ fontFamily: 'Orbitron,monospace', fontSize: '0.62rem', fontWeight: 700,
-                    color: tier===t.val?'var(--cyan)':'var(--text2)' }}>{t.label}</div>
-                  <div style={{ fontSize: '0.58rem', color: 'var(--text3)' }}>{t.desc}</div>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
+              {[{val:'free',icon:'🆓',label:'Free',desc:'Basic access'},{val:'paid',icon:'⭐',label:'Paid',desc:'Full access'}].map(t=>(
+                <div key={t.val} onClick={()=>setTier(t.val)}
+                  style={{padding:'10px',borderRadius:10,cursor:'pointer',textAlign:'center',
+                    border:`2px solid ${tier===t.val?'var(--cyan)':'var(--border)'}`,
+                    background:tier===t.val?'rgba(0,180,216,0.08)':'transparent',transition:'all 0.2s'}}>
+                  <div style={{fontSize:'1.4rem',marginBottom:2}}>{t.icon}</div>
+                  <div style={{fontFamily:'Orbitron,monospace',fontSize:'0.62rem',fontWeight:700,
+                    color:tier===t.val?'var(--cyan)':'var(--text2)'}}>{t.label}</div>
+                  <div style={{fontSize:'0.58rem',color:'var(--text3)'}}>{t.desc}</div>
                 </div>
               ))}
             </div>
-            {tier === 'paid' && (
-              <div style={{ marginTop: 10, padding: '10px 12px',
-                background: 'rgba(240,165,0,0.08)', border: '1px solid rgba(240,165,0,0.3)',
-                borderRadius: 9, fontSize: '0.72rem', color: 'var(--gold)', lineHeight: 1.6 }}>
+            {tier==='paid'&&(
+              <div style={{marginTop:10,padding:'10px 12px',
+                background:'rgba(240,165,0,0.08)',border:'1px solid rgba(240,165,0,0.3)',
+                borderRadius:9,fontSize:'0.72rem',color:'var(--gold)',lineHeight:1.6}}>
                 ⭐ <strong>Note:</strong> You are currently enrolling on the <strong>Free tier</strong>.
                 All premium features are available on a <strong>trial basis</strong>.
                 A paid upgrade plan will be introduced in a future update.
@@ -446,37 +443,37 @@ function LoginPage({ notify, onLogin, installPrompt=null, onInstallApp=null }) {
         <div className="ff">
           <label className="fl">Email</label>
           <input className="fi" type="email" placeholder="e.g. navispherex@gmail.com" value={email}
-            onChange={e => setEmail(e.target.value)}
-            onKeyDown={e => e.key==='Enter'&&(mode==='login'?doLogin():mode==='signup'?doSignup():doReset())} />
+            onChange={e=>setEmail(e.target.value)}
+            onKeyDown={e=>e.key==='Enter'&&(mode==='login'?doLogin():mode==='signup'?doSignup():doReset())}/>
         </div>
 
-        {mode !== 'reset' && (
+        {mode!=='reset'&&(
           <div className="ff">
             <label className="fl">Password</label>
             <input className="fi" type="password" placeholder="Min 6 characters" value={pass}
-              onChange={e => setPass(e.target.value)}
-              onKeyDown={e => e.key==='Enter'&&(mode==='login'?doLogin():doSignup())} />
+              onChange={e=>setPass(e.target.value)}
+              onKeyDown={e=>e.key==='Enter'&&(mode==='login'?doLogin():doSignup())}/>
           </div>
         )}
 
-        {mode === 'signup' && (
-          <div style={{ display:'flex', alignItems:'flex-start', gap:10, marginBottom:'1rem', cursor:'pointer' }}
-            onClick={() => setAgreeTerms(a=>!a)}>
-            <div style={{ width:18, height:18, borderRadius:4, flexShrink:0, marginTop:2,
+        {mode==='signup'&&(
+          <div style={{display:'flex',alignItems:'flex-start',gap:10,marginBottom:'1rem',cursor:'pointer'}}
+            onClick={()=>setAgreeTerms(a=>!a)}>
+            <div style={{width:18,height:18,borderRadius:4,flexShrink:0,marginTop:2,
               border:`2px solid ${agreeTerms?'var(--cyan)':'var(--border2)'}`,
               background:agreeTerms?'var(--cyan)':'transparent',
-              display:'flex', alignItems:'center', justifyContent:'center', transition:'all 0.2s' }}>
-              {agreeTerms && <span style={{ color:'#000', fontSize:'0.7rem', fontWeight:900 }}>✓</span>}
+              display:'flex',alignItems:'center',justifyContent:'center',transition:'all 0.2s'}}>
+              {agreeTerms&&<span style={{color:'#000',fontSize:'0.7rem',fontWeight:900}}>✓</span>}
             </div>
-            <span style={{ fontSize:'0.72rem', color:'var(--text2)', lineHeight:1.5 }}>
+            <span style={{fontSize:'0.72rem',color:'var(--text2)',lineHeight:1.5}}>
               I agree to the{' '}
-              <span style={{ color:'var(--cyan)', cursor:'pointer', textDecoration:'underline' }}
-                onClick={e => { e.stopPropagation(); setLegalModal('tc'); }}>
+              <span style={{color:'var(--cyan)',cursor:'pointer',textDecoration:'underline'}}
+                onClick={e=>{e.stopPropagation();setLegalModal('tc');}}>
                 Terms &amp; Conditions
               </span>
               {' '}and{' '}
-              <span style={{ color:'var(--cyan)', cursor:'pointer', textDecoration:'underline' }}
-                onClick={e => { e.stopPropagation(); setLegalModal('pp'); }}>
+              <span style={{color:'var(--cyan)',cursor:'pointer',textDecoration:'underline'}}
+                onClick={e=>{e.stopPropagation();setLegalModal('pp');}}>
                 Privacy Policy
               </span>.
               {' '}Content not for sole navigation use.
@@ -484,8 +481,8 @@ function LoginPage({ notify, onLogin, installPrompt=null, onInstallApp=null }) {
           </div>
         )}
 
-        {err && <div className="err-box">{err}</div>}
-        {ok  && <div className="ok-box">{ok}</div>}
+        {err&&<div className="err-box">{err}</div>}
+        {ok&&<div className="ok-box">{ok}</div>}
 
         <button className="submit-btn"
           onClick={mode==='login'?doLogin:mode==='signup'?doSignup:doReset}
@@ -493,12 +490,12 @@ function LoginPage({ notify, onLogin, installPrompt=null, onInstallApp=null }) {
           {loading?'Please wait…':mode==='login'?'🔐 LOGIN':mode==='signup'?'✅ CREATE FREE ACCOUNT':'📧 SEND RESET EMAIL'}
         </button>
 
-        {mode==='login'  && <div className="link-txt" onClick={() => resetForm('reset')}>Forgot password?</div>}
-        {mode==='reset'  && <div className="link-txt" onClick={() => resetForm('login')}>← Back to login</div>}
-        {mode==='login'  && (
-          <div style={{ textAlign:'center', marginTop:8 }}>
-            <span style={{ fontSize:'0.7rem', color:'var(--text3)', cursor:'pointer' }}
-              onClick={() => resetForm('verify')}>Didn't receive verification email?</span>
+        {mode==='login'&&<div className="link-txt" onClick={()=>resetForm('reset')}>Forgot password?</div>}
+        {mode==='reset'&&<div className="link-txt" onClick={()=>resetForm('login')}>← Back to login</div>}
+        {mode==='login'&&(
+          <div style={{textAlign:'center',marginTop:8}}>
+            <span style={{fontSize:'0.7rem',color:'var(--text3)',cursor:'pointer'}}
+              onClick={()=>resetForm('verify')}>Didn't receive verification email?</span>
           </div>
         )}
       </div></div>
