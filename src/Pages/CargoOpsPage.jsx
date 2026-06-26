@@ -1,5 +1,7 @@
 /* eslint-disable */
 import { useState, useEffect, useCallback, useRef } from "react";
+import { db } from "./firebase";
+import { doc, getDoc, setDoc } from "firebase/firestore";
 
 // ─── THEME ────────────────────────────────────────────────────────────────────
 const S = {
@@ -772,6 +774,103 @@ const HOLD_DECK_OPTIONS = ['Deck', 'Hold'];
 const CONTAINER_SIZE_OPTIONS = ['20', '40', '45'];
 const CONTAINER_TYPE_OPTIONS = ['GP', 'HC', 'RF', 'OT', 'FR', 'TK'];
 
+// ─── SHIP PARTICULARS (Firestore-persisted vessel bay/row/tier design) ─────
+// Matches the persistence pattern already used in sheets.js: a single small
+// Firestore document under the app_cache collection, with an IndexedDB
+// mirror as a fast local fallback. Unlike route/chart data, ship particulars
+// are small (one doc per vessel, no chunking needed).
+const SHIP_PARTICULARS_DOC = 'ship_particulars';
+const SHIP_PARTICULARS_IDB_KEY = 'cargo_ship_particulars_cache';
+
+async function saveShipParticulars(particulars) {
+  const record = { ...particulars, updatedAt: new Date().toISOString() };
+  try {
+    await setDoc(doc(db, 'app_cache', SHIP_PARTICULARS_DOC), record);
+  } catch (e) {
+    console.warn('saveShipParticulars: Firestore write failed, saved locally only:', e?.message);
+  }
+  await idbSetCargo(SHIP_PARTICULARS_IDB_KEY, record); // local mirror, always written
+  return record;
+}
+
+async function loadShipParticulars() {
+  try {
+    const snap = await getDoc(doc(db, 'app_cache', SHIP_PARTICULARS_DOC));
+    if (snap.exists()) {
+      const data = snap.data();
+      await idbSetCargo(SHIP_PARTICULARS_IDB_KEY, data); // refresh local mirror
+      return data;
+    }
+  } catch (e) {
+    console.warn('loadShipParticulars: Firestore read failed, trying local cache:', e?.message);
+  }
+  // Firestore unavailable or doc doesn't exist yet — fall back to local cache.
+  return await idbGetCargo(SHIP_PARTICULARS_IDB_KEY, null);
+}
+
+async function deleteShipParticulars() {
+  try {
+    await setDoc(doc(db, 'app_cache', SHIP_PARTICULARS_DOC), { deleted: true, updatedAt: new Date().toISOString() });
+  } catch (e) {
+    console.warn('deleteShipParticulars: Firestore write failed:', e?.message);
+  }
+  await idbDeleteCargo(SHIP_PARTICULARS_IDB_KEY);
+}
+
+// Generates row labels for one side of the centerline, per the confirmed
+// convention: Port = even numbers (02,04,06...), Starboard = odd (01,03,05...),
+// counting outward from the centerline up to the configured max count.
+function generateRowLabels(maxPort, maxStbd) {
+  const port = [];
+  for (let i = 1; i <= (maxPort || 0); i++) port.push(String(i * 2).padStart(2, '0'));
+  const stbd = [];
+  for (let i = 0; i < (maxStbd || 0); i++) stbd.push(String(i * 2 + 1).padStart(2, '0'));
+  return [...port, ...stbd].sort((a, b) => parseInt(a, 10) - parseInt(b, 10));
+}
+
+// Generates tier labels per the confirmed convention: Hold = 02,04,06...
+// up to maxTierHold; Deck = 72,74,76... up to maxTierDeck (count of deck
+// tier levels, not the raw max number — e.g. maxTierDeck=4 => 72,74,76,78).
+function generateTierLabels(maxTierHold, maxTierDeck) {
+  const hold = [];
+  for (let i = 1; i <= (maxTierHold || 0); i++) hold.push(String(i * 2).padStart(2, '0'));
+  const deck = [];
+  for (let i = 0; i < (maxTierDeck || 0); i++) deck.push(String(72 + i * 2).padStart(2, '0'));
+  return { holdTiers: hold, deckTiers: deck };
+}
+
+// Builds the complete blank row/tier skeleton for one bay from its ship
+// particulars entry, independent of whether any containers exist yet.
+// This is the foundation BayGridView now renders from — every valid slot
+// is shown (blank if empty), not just slots where containers happen to exist.
+function buildEmptyGridFromParticulars(bayParticulars) {
+  if (!bayParticulars) return null;
+  const rows = generateRowLabels(bayParticulars.maxRowPort, bayParticulars.maxRowStbd);
+  const { holdTiers, deckTiers } = generateTierLabels(bayParticulars.maxTierHold, bayParticulars.maxTierDeck);
+  return {
+    deck: { tiers: deckTiers.slice().sort((a, b) => parseInt(b, 10) - parseInt(a, 10)), rows, cellMap: {} },
+    hold: { tiers: holdTiers.slice().sort((a, b) => parseInt(b, 10) - parseInt(a, 10)), rows, cellMap: {} },
+  };
+}
+
+// Overlays real containers onto a blank skeleton (from buildEmptyGridFromParticulars)
+// without losing any blank slot — every position from the skeleton survives;
+// matching containers just populate their cellMap entry.
+function overlayContainersOnGrid(skeleton, containers) {
+  if (!skeleton) return skeleton;
+  const deckCellMap = { ...skeleton.deck.cellMap };
+  const holdCellMap = { ...skeleton.hold.cellMap };
+  (containers || []).forEach(c => {
+    const key = `${c.row}_${c.tier}`;
+    if (c.holdDeck === 'Deck') deckCellMap[key] = c;
+    else holdCellMap[key] = c;
+  });
+  return {
+    deck: { ...skeleton.deck, cellMap: deckCellMap },
+    hold: { ...skeleton.hold, cellMap: holdCellMap },
+  };
+}
+
 // Real-world container vessel bay numbering:
 // - 'odd'  : 20ft bay slots only, step 2  (e.g. 01,03,05...95)
 // - 'even2': 40ft bay slots, step 2       (e.g. 02,04,06...96) - rare, dense 40ft-capable layout
@@ -1078,21 +1177,26 @@ function BayGridSection({ title, section, filter, onCellClick, portFilterState }
   );
 }
 
-function BayGridView({ bay, onCellClick, portFilterState }) {
+function BayGridView({ bay, onCellClick, portFilterState, bayParticulars }) {
   const [filter, setFilter] = useState('all');
   const containers = bay.containers || [];
 
-  if (containers.length === 0) {
+  // Prefer the ship-particulars skeleton (full bay design, every slot shown)
+  // when available. Falls back to deriving the grid purely from whatever
+  // containers exist, so bays/voyages without particulars set up yet still
+  // show something rather than nothing.
+  const skeleton = bayParticulars ? buildEmptyGridFromParticulars(bayParticulars) : null;
+  const grouped = skeleton ? overlayContainersOnGrid(skeleton, containers) : groupContainersForGrid(containers);
+
+  if (!skeleton && containers.length === 0) {
     return (
       <div style={{ background:S.bg3, borderRadius:7, padding:'16px 12px', textAlign:'center', marginBottom:6 }}>
         <div style={{ color:S.vd, fontSize:S.xs, fontStyle:'italic' }}>
-          No container-level data for this bay yet — import a loading plan (BAPLIE or MSC XML) to see the grid
+          No ship particulars or container data for this bay yet — set up Ship Particulars or import a loading plan to see the grid
         </div>
       </div>
     );
   }
-
-  const grouped = groupContainersForGrid(containers);
 
   return (
     <div style={{ background:S.bg3, borderRadius:7, padding:'10px', marginBottom:6 }}>
@@ -1295,10 +1399,15 @@ function ContainerDetailModal({ container, onClose }) {
 // physical deck space as bays 21+23 (20ft). Each member bay still renders its
 // own full BayCard with independent status/progress — this is a display
 // grouping only, not a data merge.
-function MasterBayGroup({ group, gantries, movesPerHr, onUpdate, bayIndexMap, portFilterState }) {
+function MasterBayGroup({ group, gantries, movesPerHr, onUpdate, bayIndexMap, portFilterState, bayParticularsMap }) {
   const totalContainers = group.members.reduce((s, b) => s + (b.containers ? b.containers.length : 0), 0);
-  const label = group.members.length > 1
-    ? `Bay ${group.members.map(b => b.bay).sort((a, b) => parseInt(a, 10) - parseInt(b, 10)).join(' / ')}`
+  // Label format matches the real paper stowage plan convention: the odd
+  // (20ft) bay number is shown as the heading, with the even (40ft, master)
+  // bay number in parentheses — e.g. "71(70)", "63(62)". When there's no
+  // odd partner, or this is a standalone bay, just show its own number.
+  const oddMember = group.members.find(b => parseInt(b.bay, 10) % 2 !== 0);
+  const label = oddMember && group.fortyFt
+    ? `Bay ${oddMember.bay}(${group.fortyFt.bay})`
     : `Bay ${group.masterBay}`;
 
   return (
@@ -1310,7 +1419,8 @@ function MasterBayGroup({ group, gantries, movesPerHr, onUpdate, bayIndexMap, po
       {group.members.map(b => (
         <BayCard key={b.bay} bay={b} idx={bayIndexMap[b.bay]}
           gantries={gantries} movesPerHr={movesPerHr}
-          onUpdate={onUpdate} portFilterState={portFilterState} />
+          onUpdate={onUpdate} portFilterState={portFilterState}
+          bayParticulars={bayParticularsMap ? bayParticularsMap[b.bay] : null} />
       ))}
     </div>
   );
@@ -1321,7 +1431,7 @@ function MasterBayGroup({ group, gantries, movesPerHr, onUpdate, bayIndexMap, po
 // rendered from LiveOps (one heading per 40ft bay + its 20ft neighbors), but
 // each individual bay (40ft or 20ft) still tracks its own status/progress —
 // the merge is a display grouping, not a data merge.
-function BayCard({ bay, idx, gantries, onUpdate, movesPerHr, portFilterState }) {
+function BayCard({ bay, idx, gantries, onUpdate, movesPerHr, portFilterState, bayParticulars }) {
   const [expanded, setExpanded] = useState(false);
   const [selectedContainer, setSelectedContainer] = useState(null);
   const col = STATUS_COLOR[bay.status] || S.vd;
@@ -1431,7 +1541,7 @@ function BayCard({ bay, idx, gantries, onUpdate, movesPerHr, portFilterState }) 
             ))}
           </div>
 
-          <BayGridView bay={bay} onCellClick={setSelectedContainer} portFilterState={portFilterState} />
+          <BayGridView bay={bay} onCellClick={setSelectedContainer} portFilterState={portFilterState} bayParticulars={bayParticulars} />
         </div>
       )}
 
@@ -1616,6 +1726,18 @@ function LiveOps({ portOp, onUpdate, onReset }) {
   const [extraGantries, setExtraGantries] = useState(portOp.gantries);
   const [portFilterPort, setPortFilterPort] = useState(portOp.port || '');
   const [portFilterMode, setPortFilterMode] = useState('all');
+  const [shipParticulars, setShipParticulars] = useState(null);
+
+  useEffect(() => {
+    let mounted = true;
+    loadShipParticulars().then(data => { if (mounted) setShipParticulars(data); });
+    return () => { mounted = false; };
+  }, []);
+
+  const bayParticularsMap = {};
+  if (shipParticulars && shipParticulars.bays) {
+    shipParticulars.bays.forEach(bp => { bayParticularsMap[bp.bay] = bp; });
+  }
 
   const bays = portOp.bays || [];
   const allContainers = bays.flatMap(b => b.containers || []);
@@ -1836,7 +1958,7 @@ function LiveOps({ portOp, onUpdate, onReset }) {
           <MasterBayGroup key={g.masterBay} group={g}
             gantries={portOp.gantries} movesPerHr={portOp.movesPerHr}
             onUpdate={updateBay} bayIndexMap={bayIndexMap}
-            portFilterState={portFilterState} />
+            portFilterState={portFilterState} bayParticularsMap={bayParticularsMap} />
         ));
       })()}
 
@@ -2696,6 +2818,197 @@ function parseMscBayPlanXml(rawText) {
 }
 
 // ─── BAPLIE IMPORT UI ─────────────────────────────────────────────────────────
+// ─── SHIP PARTICULARS SETUP ──────────────────────────────────────────────────
+// Lets the user define the vessel's actual bay/row/tier design once, persisted
+// to Firestore (and mirrored to IndexedDB). Uses a template + bulk-assign
+// approach so ~80+ bays don't need to be entered one at a time: define a few
+// reusable templates, apply each to a bay range, then fine-tune individual
+// bays afterward if needed.
+function ShipParticularsSetup() {
+  const [vesselName, setVesselName] = useState('');
+  const [templates, setTemplates] = useState([
+    { id: 't1', name: 'Standard 40ft', maxRowPort: 8, maxRowStbd: 8, maxTierHold: 8, maxTierDeck: 6 },
+  ]);
+  const [bays, setBays] = useState([]); // [{ bay, templateId, maxRowPort, maxRowStbd, maxTierHold, maxTierDeck }]
+  const [loaded, setLoaded] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [savedAt, setSavedAt] = useState('');
+
+  // Bulk-assign form state
+  const [rangeFrom, setRangeFrom] = useState('1');
+  const [rangeTo, setRangeTo] = useState('86');
+  const [rangeTemplateId, setRangeTemplateId] = useState('t1');
+  const [editingBay, setEditingBay] = useState(null); // bay number being fine-tuned, or null
+
+  useEffect(() => {
+    let mounted = true;
+    loadShipParticulars().then(data => {
+      if (!mounted) return;
+      if (data && !data.deleted) {
+        setVesselName(data.vesselName || '');
+        setTemplates(data.bayTemplates && data.bayTemplates.length ? data.bayTemplates : templates);
+        setBays(data.bays || []);
+        setSavedAt(data.updatedAt || '');
+      }
+      setLoaded(true);
+    });
+    return () => { mounted = false; };
+  }, []);
+
+  const addTemplate = () => {
+    const id = 't' + Date.now();
+    setTemplates(t => [...t, { id, name: 'New Template', maxRowPort: 8, maxRowStbd: 8, maxTierHold: 8, maxTierDeck: 6 }]);
+  };
+  const updateTemplate = (id, key, val) => {
+    setTemplates(t => t.map(tpl => tpl.id === id ? { ...tpl, [key]: val } : tpl));
+  };
+  const deleteTemplate = (id) => {
+    setTemplates(t => t.filter(tpl => tpl.id !== id));
+  };
+
+  const applyRangeToTemplate = () => {
+    const from = parseInt(rangeFrom, 10), to = parseInt(rangeTo, 10);
+    if (isNaN(from) || isNaN(to) || from > to) return;
+    const tpl = templates.find(t => t.id === rangeTemplateId);
+    if (!tpl) return;
+    const newBays = [];
+    for (let n = from; n <= to; n++) {
+      const bayStr = String(n).padStart(2, '0');
+      newBays.push({ bay: bayStr, templateId: tpl.id, maxRowPort: tpl.maxRowPort, maxRowStbd: tpl.maxRowStbd, maxTierHold: tpl.maxTierHold, maxTierDeck: tpl.maxTierDeck });
+    }
+    // Replace any existing entries in this range, keep everything outside it untouched.
+    setBays(prev => {
+      const outsideRange = prev.filter(b => { const n = parseInt(b.bay, 10); return n < from || n > to; });
+      return [...outsideRange, ...newBays].sort((a, b) => parseInt(a.bay, 10) - parseInt(b.bay, 10));
+    });
+  };
+
+  const updateBayOverride = (bayNum, key, val) => {
+    setBays(prev => prev.map(b => b.bay === bayNum ? { ...b, [key]: val, templateId: 'custom' } : b));
+  };
+
+  const removeBay = (bayNum) => {
+    setBays(prev => prev.filter(b => b.bay !== bayNum));
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    const record = await saveShipParticulars({ vesselName, bayTemplates: templates, bays });
+    setSavedAt(record.updatedAt);
+    setSaving(false);
+  };
+
+  const handleClear = async () => {
+    if (!window.confirm('Remove all ship particulars? This cannot be undone — you will need to set up bay configuration again.')) return;
+    await deleteShipParticulars();
+    setVesselName('');
+    setBays([]);
+    setSavedAt('');
+  };
+
+  if (!loaded) {
+    return <div style={{ textAlign:'center', padding:'30px 0', color:S.dm, fontSize:S.xs }}>Loading ship particulars…</div>;
+  }
+
+  return (
+    <div>
+      <Card style={{ marginBottom: 10 }}>
+        <SectionLabel text="Ship Particulars" color={ACC} />
+        <div style={{ color:S.dm, fontSize:S.xs, marginBottom:8, lineHeight:1.6 }}>
+          Define the vessel's actual bay/row/tier design once. This generates the full
+          empty stowage grid (every valid slot shown, whether occupied or not) and is
+          saved to Firestore so it persists until you change or remove it.
+        </div>
+        <Field label="Vessel Name" value={vesselName} onChange={e=>setVesselName(e.target.value)} placeholder="e.g. MSC AZRA" />
+        {savedAt && <div style={{ color:S.dm, fontSize:S.ti }}>Last saved: {savedAt}</div>}
+      </Card>
+
+      <Card style={{ marginBottom: 10 }}>
+        <SectionLabel text="Bay Templates" color={S.cy} />
+        <div style={{ color:S.dm, fontSize:S.ti, marginBottom:8 }}>
+          Rows: Port = even (02,04…), Starboard = odd (01,03…), counted from centerline.
+          Tiers: Hold = 02,04… up to your max; Deck = 72,74… for the number of deck levels you set.
+        </div>
+        {templates.map(t => (
+          <div key={t.id} style={{ background:S.bg3, borderRadius:7, padding:'8px 10px', marginBottom:6 }}>
+            <div style={{ display:'flex', gap:6, alignItems:'center', marginBottom:6 }}>
+              <input value={t.name} onChange={e=>updateTemplate(t.id,'name',e.target.value)}
+                style={{ flex:1, background:S.bg2, color:S.cy, border:`1px solid ${S.bd2}`, borderRadius:5, padding:'5px 7px', fontSize:S.xs }} />
+              <button onClick={()=>deleteTemplate(t.id)} style={{ background:'transparent', border:'none', color:S.rd, cursor:'pointer', fontSize:'0.8rem' }}>✕</button>
+            </div>
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr 1fr', gap:'0 6px' }}>
+              {[['maxRowPort','Port Rows'],['maxRowStbd','Stbd Rows'],['maxTierHold','Hold Tiers'],['maxTierDeck','Deck Tiers']].map(([k,l]) => (
+                <div key={k}>
+                  <div style={{ color:S.dm, fontSize:'0.5rem', marginBottom:2 }}>{l}</div>
+                  <input type="number" value={t[k]} min={0}
+                    onChange={e=>updateTemplate(t.id,k,parseInt(e.target.value)||0)}
+                    style={{ width:'100%', background:S.bg2, color:ACC, border:`1px solid ${S.bd2}`, borderRadius:4, padding:'4px 5px', fontSize:S.ti, fontFamily:'monospace' }} />
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+        <Btn onClick={addTemplate} color={S.cy} style={{ width:'100%' }}>+ Add Template</Btn>
+      </Card>
+
+      <Card style={{ marginBottom: 10 }}>
+        <SectionLabel text="Assign Template to Bay Range" color={S.gd} />
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'0 10px' }}>
+          <Field label="From Bay" value={rangeFrom} onChange={e=>setRangeFrom(e.target.value)} type="number" />
+          <Field label="To Bay" value={rangeTo} onChange={e=>setRangeTo(e.target.value)} type="number" />
+        </div>
+        <div style={{ marginBottom:8 }}>
+          <div style={{ color:S.dm, fontSize:S.lb, marginBottom:3 }}>Template</div>
+          <select value={rangeTemplateId} onChange={e=>setRangeTemplateId(e.target.value)}
+            style={{ width:'100%', background:S.bg3, color:S.cy, border:`1px solid ${S.bd2}`, borderRadius:5, padding:'6px 8px', fontSize:S.xs }}>
+            {templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+          </select>
+        </div>
+        <Btn onClick={applyRangeToTemplate} color={S.gd} style={{ width:'100%' }}>Apply to Bays {rangeFrom}–{rangeTo}</Btn>
+      </Card>
+
+      <Card style={{ marginBottom: 10 }}>
+        <SectionLabel text={`Configured Bays (${bays.length})`} color={S.dm} />
+        {bays.length === 0 ? (
+          <div style={{ color:S.vd, fontSize:S.xs, fontStyle:'italic', textAlign:'center', padding:'10px 0' }}>No bays configured yet — apply a template above</div>
+        ) : (
+          <div style={{ maxHeight:280, overflowY:'auto' }}>
+            {bays.map(b => (
+              <div key={b.bay} style={{ background:S.bg3, borderRadius:6, padding:'6px 8px', marginBottom:4 }}>
+                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}
+                  onClick={()=>setEditingBay(editingBay===b.bay?null:b.bay)}>
+                  <span style={{ color:ACC, fontFamily:'monospace', fontWeight:700, fontSize:S.xs, cursor:'pointer' }}>Bay {b.bay}</span>
+                  <span style={{ color:S.dm, fontSize:S.ti }}>
+                    Rows {b.maxRowPort}P/{b.maxRowStbd}S · Hold {b.maxTierHold} · Deck {b.maxTierDeck}
+                  </span>
+                  <button onClick={(e)=>{e.stopPropagation();removeBay(b.bay);}} style={{ background:'transparent', border:'none', color:S.rd, cursor:'pointer', fontSize:'0.7rem' }}>✕</button>
+                </div>
+                {editingBay === b.bay && (
+                  <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr 1fr', gap:'6px 6px', marginTop:6 }}>
+                    {[['maxRowPort','Port Rows'],['maxRowStbd','Stbd Rows'],['maxTierHold','Hold Tiers'],['maxTierDeck','Deck Tiers']].map(([k,l]) => (
+                      <div key={k}>
+                        <div style={{ color:S.dm, fontSize:'0.5rem', marginBottom:2 }}>{l}</div>
+                        <input type="number" value={b[k]} min={0}
+                          onChange={e=>updateBayOverride(b.bay,k,parseInt(e.target.value)||0)}
+                          style={{ width:'100%', background:S.bg2, color:S.gd, border:`1px solid ${S.bd2}`, borderRadius:4, padding:'4px 5px', fontSize:S.ti, fontFamily:'monospace' }} />
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+
+      <div style={{ display:'flex', gap:8 }}>
+        <Btn onClick={handleSave} color={S.gn} style={{ flex:1, padding:'10px' }}>{saving ? 'Saving…' : '💾 Save Ship Particulars'}</Btn>
+        <Btn onClick={handleClear} color={S.rd} style={{ padding:'10px 14px' }}>Clear</Btn>
+      </div>
+    </div>
+  );
+}
+
 function BaplieImport() {
   const SETUP_KEY = 'cargo_container_port_op'; // same key ContainerLiveOps/ContainerSearch use
   const SAVED_PLANS_KEY = 'cargo_container_saved_plans'; // array of {id, fileName, format, importedAt, summary, portOp}
@@ -3067,6 +3380,7 @@ const VESSEL_TABS = {
     { id: 'msds',    label: '☣ MSDS',            component: TankerMSDS         },
   ],
   container: [
+    { id: 'particulars', label: '🚢 Ship Particulars', component: ShipParticularsSetup },
     { id: 'liveops', label: '⚡ Live Cargo Ops',  component: ContainerLiveOps   },
     { id: 'import',  label: '📥 Import Plan',    component: BaplieImport       },
     { id: 'search',  label: '🔍 Container Search', component: ContainerSearch  },
@@ -3151,4 +3465,4 @@ export default function CargoOpsPage({ notify }) {
 
     </div>
   );
-}
+                  }
