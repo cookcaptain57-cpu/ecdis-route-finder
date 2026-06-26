@@ -878,6 +878,87 @@ function groupBaysByMasterBay(bays) {
   return groups;
 }
 
+// ─── PORT FILTER (loading/discharging/departure/all-plan view) ─────────────
+// A BAPLIE/MSC-XML file is a full-voyage snapshot — every container aboard
+// the ship, regardless of which port loaded it or which port discharges it.
+// This derives, for a given selected port and mode, which containers should
+// be highlighted vs dimmed, so the person can isolate just this port's
+// loading work, just this port's discharge work, the resulting departure
+// condition, or the unfiltered full plan.
+const PORT_FILTER_MODES = [
+  ['loading', 'Loading'],
+  ['discharging', 'Discharging'],
+  ['departure', 'Departure Plan'],
+  ['all', 'All Plan'],
+];
+
+// Collects every distinct port code appearing as a POL or POD across all
+// containers, so the dropdown reflects what's actually in the imported file
+// rather than a hardcoded list.
+function collectPortsFromContainers(containers) {
+  const ports = new Set();
+  containers.forEach(c => {
+    if (c.pol) ports.add(c.pol);
+    if (c.pod) ports.add(c.pod);
+  });
+  return [...ports].sort();
+}
+
+// Returns { highlightedIds: Set<string>, newIds: Set<string> }.
+// highlightedIds = containers relevant to the current mode (full color).
+// Everything else should render dimmed by the caller.
+// newIds (departure mode only) = containers loaded at this port and still
+// aboard after it — marked distinctly so they're not confused with cargo
+// that was already on the ship before this call.
+function getPortFilterState(containers, selectedPort, mode) {
+  const highlightedIds = new Set();
+  const newIds = new Set();
+  if (!selectedPort || mode === 'all') {
+    containers.forEach(c => highlightedIds.add(c.id));
+    return { highlightedIds, newIds };
+  }
+  containers.forEach(c => {
+    if (mode === 'loading' && c.pol === selectedPort) {
+      highlightedIds.add(c.id);
+    } else if (mode === 'discharging' && c.pod === selectedPort) {
+      highlightedIds.add(c.id);
+    } else if (mode === 'departure') {
+      // Remains aboard after this port = not discharged here.
+      if (c.pod !== selectedPort) {
+        highlightedIds.add(c.id);
+        if (c.pol === selectedPort) newIds.add(c.id); // newly loaded here, still aboard
+      }
+    }
+  });
+  return { highlightedIds, newIds };
+}
+
+function PortFilterBar({ ports, selectedPort, onSelectPort, mode, onSelectMode }) {
+  return (
+    <div style={{ background:S.bg3, borderRadius:8, padding:'8px 10px', marginBottom:8 }}>
+      <div style={{ display:'flex', gap:6, alignItems:'center', marginBottom:8, flexWrap:'wrap' }}>
+        <span style={{ color:S.dm, fontSize:S.lb }}>Port:</span>
+        <select value={selectedPort} onChange={e=>onSelectPort(e.target.value)} style={{
+          flex:1, minWidth:100, background:S.bg2, color:ACC, border:`1px solid ${S.bd2}`,
+          borderRadius:5, padding:'5px 7px', fontSize:S.xs, fontFamily:'monospace',
+        }}>
+          <option value=''>— Select Port —</option>
+          {ports.map(p => <option key={p} value={p}>{p}</option>)}
+        </select>
+      </div>
+      <div style={{ display:'flex', gap:4, flexWrap:'wrap' }}>
+        {PORT_FILTER_MODES.map(([v,l]) => (
+          <button key={v} onClick={()=>onSelectMode(v)} style={{
+            flex:'1 1 calc(50% - 4px)', background:mode===v?`${ACC}20`:'transparent',
+            border:`1px solid ${mode===v?ACC:S.vd}`, color:mode===v?ACC:S.dm,
+            borderRadius:5, padding:'6px 4px', fontSize:S.ti, cursor:'pointer', fontWeight:mode===v?700:400,
+          }}>{l}</button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function groupContainersForGrid(containers) {
   const list = containers || [];
   const deckList = list.filter(c => parseInt(c.tier, 10) >= 70 || c.holdDeck === 'Deck');
@@ -934,7 +1015,7 @@ function gridCellColor(container) {
   return ACC;
 }
 
-function BayGridSection({ title, section, filter, onCellClick }) {
+function BayGridSection({ title, section, filter, onCellClick, portFilterState }) {
   if (section.tiers.length === 0 || section.rows.length === 0) {
     return (
       <div style={{ marginBottom:10 }}>
@@ -961,23 +1042,31 @@ function BayGridSection({ title, section, filter, onCellClick }) {
               <div style={{ width:34, flexShrink:0, textAlign:'right', color:S.dm, fontSize:S.ti, fontFamily:'monospace', paddingRight:4 }}>{tier}</div>
               {section.rows.map(r => {
                 const c = section.cellMap[`${r}_${tier}`];
-                const matches = gridCellMatchesFilter(c, filter);
+                const attrMatches = gridCellMatchesFilter(c, filter);
+                // Combine the DG/Reefer/OOG attribute filter with the port filter
+                // (loading/discharging/departure/all) — a cell only stays full
+                // opacity if it matches both active filters.
+                const portMatches = !portFilterState || !c || portFilterState.highlightedIds.size === 0 || portFilterState.highlightedIds.has(c.id);
+                const matches = attrMatches && portMatches;
+                const isNew = portFilterState && c && portFilterState.newIds && portFilterState.newIds.has(c.id);
                 const color = gridCellColor(c);
                 // Cell shows the container's POD code (real destination port), not the container ID.
                 const podLabel = c ? (c.pod || '—') : '';
                 return (
-                  <div key={r} title={c ? `${c.id} → POD ${c.pod || '—'} (${c.size}'${c.type})` : ''}
+                  <div key={r} title={c ? `${c.id} → POD ${c.pod || '—'} (${c.size}'${c.type})${isNew ? ' [NEW]' : ''}` : ''}
                     onClick={() => c && onCellClick && onCellClick(c)}
                     style={{
-                    width:34, height:30, flexShrink:0, borderRadius:4,
+                    width:34, height:30, flexShrink:0, borderRadius:4, position:'relative',
                     background: c ? (matches ? `${color}25` : `${color}08`) : S.bg3,
                     border: `1px solid ${c ? (matches ? color : S.vd) : S.vd}`,
-                    opacity: c && !matches ? 0.35 : 1,
+                    borderWidth: isNew ? 2 : 1,
+                    opacity: c && !matches ? 0.3 : 1,
                     display:'flex', alignItems:'center', justifyContent:'center',
                     fontSize:'0.42rem', color: c ? color : S.vd, fontFamily:'monospace', fontWeight:700,
                     overflow:'hidden', cursor: c ? 'pointer' : 'default',
                   }}>
                     {podLabel}
+                    {isNew && <span style={{ position:'absolute', top:-2, right:-2, width:7, height:7, borderRadius:'50%', background:S.gn, border:`1px solid ${S.bg}` }} />}
                   </div>
                 );
               })}
@@ -989,7 +1078,7 @@ function BayGridSection({ title, section, filter, onCellClick }) {
   );
 }
 
-function BayGridView({ bay, onCellClick }) {
+function BayGridView({ bay, onCellClick, portFilterState }) {
   const [filter, setFilter] = useState('all');
   const containers = bay.containers || [];
 
@@ -1008,12 +1097,15 @@ function BayGridView({ bay, onCellClick }) {
   return (
     <div style={{ background:S.bg3, borderRadius:7, padding:'10px', marginBottom:6 }}>
       <GridFilterBar active={filter} onChange={setFilter} />
-      <BayGridSection title="Deck" section={grouped.deck} filter={filter} onCellClick={onCellClick} />
-      <BayGridSection title="Hold" section={grouped.hold} filter={filter} onCellClick={onCellClick} />
+      <BayGridSection title="Deck" section={grouped.deck} filter={filter} onCellClick={onCellClick} portFilterState={portFilterState} />
+      <BayGridSection title="Hold" section={grouped.hold} filter={filter} onCellClick={onCellClick} portFilterState={portFilterState} />
       <div style={{ display:'flex', gap:10, flexWrap:'wrap', marginTop:4 }}>
         {[['DG',S.rd],['Reefer',S.cy],['OOG',S.or],['Standard',ACC]].map(([l,c])=>(
           <span key={l} style={{ fontSize:S.ti, color:c }}>■ {l}</span>
         ))}
+        {portFilterState && portFilterState.newIds && portFilterState.newIds.size > 0 && (
+          <span style={{ fontSize:S.ti, color:S.gn }}>● NEW (loaded this port)</span>
+        )}
       </div>
     </div>
   );
@@ -1203,7 +1295,7 @@ function ContainerDetailModal({ container, onClose }) {
 // physical deck space as bays 21+23 (20ft). Each member bay still renders its
 // own full BayCard with independent status/progress — this is a display
 // grouping only, not a data merge.
-function MasterBayGroup({ group, gantries, movesPerHr, onUpdate, bayIndexMap }) {
+function MasterBayGroup({ group, gantries, movesPerHr, onUpdate, bayIndexMap, portFilterState }) {
   const totalContainers = group.members.reduce((s, b) => s + (b.containers ? b.containers.length : 0), 0);
   const label = group.members.length > 1
     ? `Bay ${group.members.map(b => b.bay).sort((a, b) => parseInt(a, 10) - parseInt(b, 10)).join(' / ')}`
@@ -1218,7 +1310,7 @@ function MasterBayGroup({ group, gantries, movesPerHr, onUpdate, bayIndexMap }) 
       {group.members.map(b => (
         <BayCard key={b.bay} bay={b} idx={bayIndexMap[b.bay]}
           gantries={gantries} movesPerHr={movesPerHr}
-          onUpdate={onUpdate} />
+          onUpdate={onUpdate} portFilterState={portFilterState} />
       ))}
     </div>
   );
@@ -1229,7 +1321,7 @@ function MasterBayGroup({ group, gantries, movesPerHr, onUpdate, bayIndexMap }) 
 // rendered from LiveOps (one heading per 40ft bay + its 20ft neighbors), but
 // each individual bay (40ft or 20ft) still tracks its own status/progress —
 // the merge is a display grouping, not a data merge.
-function BayCard({ bay, idx, gantries, onUpdate, movesPerHr }) {
+function BayCard({ bay, idx, gantries, onUpdate, movesPerHr, portFilterState }) {
   const [expanded, setExpanded] = useState(false);
   const [selectedContainer, setSelectedContainer] = useState(null);
   const col = STATUS_COLOR[bay.status] || S.vd;
@@ -1339,7 +1431,7 @@ function BayCard({ bay, idx, gantries, onUpdate, movesPerHr }) {
             ))}
           </div>
 
-          <BayGridView bay={bay} onCellClick={setSelectedContainer} />
+          <BayGridView bay={bay} onCellClick={setSelectedContainer} portFilterState={portFilterState} />
         </div>
       )}
 
@@ -1522,8 +1614,13 @@ function LiveOps({ portOp, onUpdate, onReset }) {
   const [sortBy,    setSortBy]    = useState('bay');
   const [tickMode,  setTickMode]  = useState(false); // quick-tick mode
   const [extraGantries, setExtraGantries] = useState(portOp.gantries);
+  const [portFilterPort, setPortFilterPort] = useState(portOp.port || '');
+  const [portFilterMode, setPortFilterMode] = useState('all');
 
   const bays = portOp.bays || [];
+  const allContainers = bays.flatMap(b => b.containers || []);
+  const availablePorts = collectPortsFromContainers(allContainers);
+  const portFilterState = getPortFilterState(allContainers, portFilterPort, portFilterMode);
 
   const updateBay = useCallback((idx, key, val) => {
     const updated = bays.map((b, i) => i === idx ? { ...b, [key]: val } : b);
@@ -1723,6 +1820,10 @@ function LiveOps({ portOp, onUpdate, onReset }) {
         </div>
       )}
 
+      {/* ── PORT FILTER (loading / discharging / departure / all plan) ── */}
+      <PortFilterBar ports={availablePorts} selectedPort={portFilterPort} onSelectPort={setPortFilterPort}
+        mode={portFilterMode} onSelectMode={setPortFilterMode} />
+
       {/* ── BAY LIST (grouped by master/40ft bay, per real vessel convention) ── */}
       <div style={{ fontSize:S.ti, color:S.dm, marginBottom:5 }}>
         Showing {filtered.length} of {total} bays
@@ -1734,7 +1835,8 @@ function LiveOps({ portOp, onUpdate, onReset }) {
         return groups.map(g => (
           <MasterBayGroup key={g.masterBay} group={g}
             gantries={portOp.gantries} movesPerHr={portOp.movesPerHr}
-            onUpdate={updateBay} bayIndexMap={bayIndexMap} />
+            onUpdate={updateBay} bayIndexMap={bayIndexMap}
+            portFilterState={portFilterState} />
         ));
       })()}
 
@@ -2158,6 +2260,8 @@ function ContainerSearch() {
   const [filterDg,  setFilterDg]  = useState('');
   const [filterReefer, setFilterReefer] = useState(false);
   const [filterOOG,    setFilterOOG]    = useState(false);
+  const [portFilterPort, setPortFilterPort] = useState('');
+  const [portFilterMode, setPortFilterMode] = useState('all');
 
   useEffect(() => {
     let mounted = true;
@@ -2165,6 +2269,7 @@ function ContainerSearch() {
       if (!mounted) return;
       setPortOp(data);
       setLoaded(true);
+      if (data && data.port) setPortFilterPort(data.port);
     });
     return () => { mounted = false; };
   }, []);
@@ -2204,6 +2309,8 @@ function ContainerSearch() {
   });
 
   const bayOptions = [...new Set((portOp.bays || []).map(b => b.bay))].sort();
+  const availablePorts = collectPortsFromContainers(allContainers);
+  const portFilterState = getPortFilterState(allContainers, portFilterPort, portFilterMode);
 
   return (
     <div>
@@ -2239,6 +2346,9 @@ function ContainerSearch() {
         </div>
       </Card>
 
+      <PortFilterBar ports={availablePorts} selectedPort={portFilterPort} onSelectPort={setPortFilterPort}
+        mode={portFilterMode} onSelectMode={setPortFilterMode} />
+
       <div style={{ color:S.dm, fontSize:S.ti, marginBottom:6 }}>
         {filtered.length} of {allContainers.length} container record{allContainers.length === 1 ? '' : 's'} match
       </div>
@@ -2250,8 +2360,11 @@ function ContainerSearch() {
             </div>
           : (
             <div style={{ display:'flex', flexDirection:'column', gap:5 }}>
-              {filtered.map((c, i) => (
-                <div key={c.id + i} style={{ background:S.bg3, borderRadius:7, padding:'8px 10px' }}>
+              {filtered.map((c, i) => {
+                const portMatches = portFilterState.highlightedIds.size === 0 || portFilterState.highlightedIds.has(c.id);
+                const isNew = portFilterState.newIds && portFilterState.newIds.has(c.id);
+                return (
+                <div key={c.id + i} style={{ background:S.bg3, borderRadius:7, padding:'8px 10px', opacity: portMatches ? 1 : 0.4, border: isNew ? `1px solid ${S.gn}` : '1px solid transparent' }}>
                   <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:4, flexWrap:'wrap', gap:4 }}>
                     <span style={{ color:ACC, fontFamily:'monospace', fontWeight:700, fontSize:S.xs }}>{c.id}</span>
                     <div style={{ display:'flex', gap:4 }}>
@@ -2259,6 +2372,7 @@ function ContainerSearch() {
                       {c.dgClass && <Badge text={`DG${c.dgClass}`} color={S.rd} />}
                       {c.reefer && <Badge text="RF" color={S.cy} />}
                       {c.oog && <Badge text="OOG" color={S.or} />}
+                      {isNew && <Badge text="NEW" color={S.gn} />}
                     </div>
                   </div>
                   <div style={{ display:'flex', gap:14, flexWrap:'wrap', fontSize:S.ti }}>
@@ -2269,7 +2383,8 @@ function ContainerSearch() {
                     <div><span style={{ color:S.dm }}>POD: </span><span style={{ color:S.tx }}>{c.pod || '—'}</span></div>
                   </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
           )}
       </Card>
@@ -3036,4 +3151,4 @@ export default function CargoOpsPage({ notify }) {
 
     </div>
   );
-              }
+}
