@@ -210,6 +210,8 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
   const [anchorAlarm,setAnchorAlarm]=useState(false);
   const [speedAlarmKn,setSpeedAlarmKn]=useState(()=>Number(ls('nav_speedAlarm')||0));
   const [speedAlarmTriggered,setSpeedAlarmTriggered]=useState(false);
+  const [alarmsMuted,setAlarmsMuted]=useState(()=>ls('nav_alarmsMuted')==='true');
+  const [alarmToggles,setAlarmToggles]=useState(()=>{try{return JSON.parse(ls('nav_alarmToggles')||'null')||{offtrack:true,speed:true,guard:true,anchor:true,wp:true,collision:true};}catch{return{offtrack:true,speed:true,guard:true,anchor:true,wp:true,collision:true};}});
   const [wpArrivalNM,setWpArrivalNM]=useState(0.3);
   const [weatherData,setWeatherData]=useState(null);
   const [weatherLoading,setWeatherLoading]=useState(false);
@@ -590,22 +592,24 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
   // CHANGE 3: Instant S-52 sounding recolor when mariner changes depth contour sliders
   useEffect(()=>{
     if(!scsEncLayerRef.current||!window.L)return;
-    scsEncLayerRef.current.eachLayer(layer=>{
-      try{
-        const ft=layer.feature;
-        if(!ft||ft.properties?.type!=='sounding')return;
-        const depth=ft.properties?.depth;
-        if(depth==null)return;
-        const col=getSoundingColor(depth);
-        const newIcon=window.L.divIcon({
-          html:`<div style="color:${col};font-size:9px;font-weight:700;font-family:monospace;white-space:nowrap;text-shadow:1px 1px 2px #000;pointer-events:none;">${depth}</div>`,
-          className:'',
-          iconSize:[0,0],
-          iconAnchor:[8,6]
-        });
-        if(typeof layer.setIcon==='function')layer.setIcon(newIcon);
-      }catch{}
-    });
+    try{
+      scsEncLayerRef.current.eachLayer(layer=>{
+        try{
+          const ft=layer.feature;
+          if(!ft||ft.properties?.type!=='sounding')return;
+          const depth=ft.properties?.depth;
+          if(depth==null)return;
+          const col=getSoundingColor(depth);
+          const newIcon=window.L.divIcon({
+            html:`<div style="color:${col};font-size:9px;font-weight:700;font-family:monospace;white-space:nowrap;text-shadow:1px 1px 2px #000;pointer-events:none;">${depth}</div>`,
+            className:'',
+            iconSize:[0,0],
+            iconAnchor:[8,6]
+          });
+          if(typeof layer.setIcon==='function')layer.setIcon(newIcon);
+        }catch{}
+      });
+    }catch{}
   },[shallowDepth,safetyDepth,deepDepth,getSoundingColor]);
 
   // Persist to localStorage
@@ -637,6 +641,8 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
   useEffect(()=>{localStorage.setItem('nav_cogPanelPos',JSON.stringify(cogPanelPos));},[cogPanelPos]);
   useEffect(()=>{localStorage.setItem('nav_cogPanel',cogPanelVisible);},[cogPanelVisible]);
   useEffect(()=>{localStorage.setItem('nav_speedAlarm',speedAlarmKn);},[speedAlarmKn]);
+  useEffect(()=>{localStorage.setItem('nav_alarmsMuted',alarmsMuted);},[alarmsMuted]);
+  useEffect(()=>{localStorage.setItem('nav_alarmToggles',JSON.stringify(alarmToggles));},[alarmToggles]);
   useEffect(()=>{localStorage.setItem('nav_offTrackNM',offTrackNM);},[offTrackNM]);
   useEffect(()=>{localStorage.setItem('nav_guardZoneNM',guardZoneRadiusNM);},[guardZoneRadiusNM]);
   useEffect(()=>{localStorage.setItem('nav_anchorLOA',anchorShipLengthM);},[anchorShipLengthM]);
@@ -835,7 +841,7 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
     const wps=activeRoute.waypoints;let minXTD=Infinity;
     for(let i=0;i<wps.length-1;i++){const legBrg=brg(wps[i].lat,wps[i].lon,wps[i+1].lat,wps[i+1].lon);const shipBrg=brg(wps[i].lat,wps[i].lon,livePos.lat,livePos.lon);const shipDist=distNM(wps[i].lat,wps[i].lon,livePos.lat,livePos.lon);const angle=((legBrg-shipBrg)+540)%360-180;const along=shipDist*Math.cos(angle*Math.PI/180);const legLen=distNM(wps[i].lat,wps[i].lon,wps[i+1].lat,wps[i+1].lon);if(along>=0&&along<=legLen+0.5){const xtd=Math.abs(shipDist*Math.sin(angle*Math.PI/180));if(xtd<minXTD)minXTD=xtd;}}
     if(minXTD===Infinity)minXTD=distNM(livePos.lat,livePos.lon,wps[selectedWpIdx]?.lat||wps[0].lat,wps[selectedWpIdx]?.lon||wps[0].lon);
-    const threshold=xtdNM;
+    const threshold=offTrackNM; // FIX: use offTrackNM alarm threshold, not xtdNM visual corridor
     if(minXTD>threshold){setOffTrackAlarm(true);const now=Date.now();if(!alarmCooldownRef.current.offtrack||now-alarmCooldownRef.current.offtrack>30000){alarmCooldownRef.current.offtrack=now;playAlarm('offtrack');notify(`⚠ OFF TRACK — ${minXTD.toFixed(2)}NM (limit ${threshold}NM)`,'error');}}
     else setOffTrackAlarm(false);
   },[livePos,activeRoute,offTrackNM,xtdNM,selectedWpIdx]);
@@ -899,7 +905,15 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
   const onTE=()=>{hudDragRef.current=null;};
   const toggleDepth=id=>{setDepthSources(prev=>{const next=new Set(prev);if(next.has(id))next.delete(id);else next.add(id);return next;});};
 
+  const alarmsMutedRef=useRef(alarmsMuted);
+  const alarmTogglesRef=useRef(alarmToggles);
+  useEffect(()=>{alarmsMutedRef.current=alarmsMuted;},[alarmsMuted]);
+  useEffect(()=>{alarmTogglesRef.current=alarmToggles;},[alarmToggles]);
+
   const playAlarm=useCallback((type='alert')=>{
+    // Check master mute and per-alarm toggle
+    if(alarmsMutedRef.current)return;
+    if(type!=='alert'&&alarmTogglesRef.current[type]===false)return;
     try{
       const ctx=new(window.AudioContext||window.webkitAudioContext)();
       const patterns={
@@ -926,7 +940,7 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
     }catch(e){console.warn('[alarm]',e);}
   },[]);
   const S={bg:'rgba(4,12,26,0.97)',bd:'rgba(0,212,255,0.28)',tx:'#D0E8F8',dm:'#5A7A90',vd:'#243850',cy:'#00D4FF',gn:'#00FF88',gd:'#FFD700',rd:'#FF4757',sm:'0.78rem',xs:'0.68rem',lb:'0.58rem'};
-  const aisPopupData=aisPopup?aisPopupDataRef.current:null;
+  const aisPopupData=aisPopup?(aisPopupDataRef.current||null):null;
 
   return(
     <div style={{flex:1,display:'flex',flexDirection:'column',background:'#040C1A',position:'relative',overflow:'hidden',minHeight:0,...(fullScreen?{position:'fixed',inset:0,zIndex:9999,minHeight:'100vh'}:{}),...(nightVision?{filter:'sepia(1) saturate(3) hue-rotate(300deg) brightness(0.7)'}:{})}}>
@@ -1108,7 +1122,7 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
       ):(
         <div style={{position:'absolute',top:56,right:8,background:S.bg,border:`1px solid ${S.bd}`,borderRadius:10,padding:'8px 10px',zIndex:500,width:172,backdropFilter:'blur(10px)',maxHeight:'82vh',display:'flex',flexDirection:'column',boxShadow:'0 4px 20px rgba(0,0,0,0.5)'}}>
           <div style={{display:'flex',alignItems:'center',marginBottom:8,gap:3,flexWrap:'wrap'}}>
-            {[['route','RTE'],['rb','R/B'],['charts','CHT'],['enc','ENC'],['zones','🌐'],['ais_src','📡'],['eta','ETA'],['db','🗄'],['anchor','⚓'],['guard','🔴'],['wx','🌤'],['tools','🔧']].map(([p,l])=>(<button key={p} onClick={()=>setActivePanel(p)} style={{flex:1,minWidth:32,background:activePanel===p?'rgba(0,212,255,0.18)':'transparent',border:`1px solid ${activePanel===p?S.cy:S.vd}`,color:activePanel===p?S.cy:S.dm,borderRadius:5,padding:'3px 1px',fontSize:'0.52rem',cursor:'pointer'}}>{l}</button>))}
+            {[['route','RTE'],['rb','R/B'],['charts','CHT'],['enc','ENC'],['zones','🌐'],['ais_src','📡'],['eta','ETA'],['db','🗄'],['anchor','⚓'],['guard','🔴'],['alarms','🔔'],['wx','🌤'],['tools','🔧']].map(([p,l])=>(<button key={p} onClick={()=>setActivePanel(p)} style={{flex:1,minWidth:32,background:activePanel===p?'rgba(0,212,255,0.18)':'transparent',border:`1px solid ${activePanel===p?S.cy:S.vd}`,color:activePanel===p?S.cy:S.dm,borderRadius:5,padding:'3px 1px',fontSize:'0.52rem',cursor:'pointer'}}>{l}</button>))}
             <button onClick={()=>setPanelCollapsed(true)} style={{background:'transparent',border:`1px solid ${S.vd}`,color:S.dm,borderRadius:5,padding:'3px 5px',fontSize:'0.65rem',cursor:'pointer'}}>▶</button>
           </div>
           <div style={{overflowY:'auto',overflowX:'hidden',flex:1,paddingRight:1}}>
@@ -1277,6 +1291,62 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
             <input type="number" min={0.1} max={50} step={0.1} value={guardZoneRadiusNM} onChange={e=>setGuardZoneRadiusNM(Number(e.target.value)||2)} style={{width:'100%',boxSizing:'border-box',background:'#06101C',color:S.cy,border:`1px solid ${S.vd}`,borderRadius:5,padding:'4px 7px',fontSize:S.xs,outline:'none',fontFamily:'monospace'}}/>
             <button onClick={()=>setGuardZoneOn(v=>!v)} style={{background:guardZoneOn?'rgba(255,32,32,0.2)':'rgba(255,107,53,0.1)',border:`2px solid ${guardZoneOn?'#FF2020':'#FF6B35'}`,color:guardZoneOn?'#FF2020':'#FF6B35',borderRadius:8,padding:'10px',fontSize:S.sm,cursor:'pointer',fontWeight:700,textAlign:'center'}}>{guardZoneOn?`🔴 ACTIVE — ${guardZoneRadiusNM}NM`:'🔴 Activate Guard Zone'}</button>
             {guardZoneOn&&(<div style={{background:guardZoneAlarm?'rgba(255,32,32,0.15)':'rgba(0,255,136,0.08)',border:`1px solid ${guardZoneAlarm?'#FF2020':S.gn}`,borderRadius:7,padding:'8px'}}><div style={{color:guardZoneAlarm?'#FF2020':S.gn,fontWeight:700,fontSize:S.xs,marginBottom:guardZoneTargets.length>0?4:0}}>{guardZoneAlarm?`⚠ ${guardZoneTargets.length} TARGET${guardZoneTargets.length!==1?'S':''} INSIDE`:'✓ Zone Clear'}</div>{guardZoneTargets.map((n,i)=>(<div key={i} style={{color:'#FF5050',fontSize:S.lb,fontFamily:'monospace'}}>▶ {n}</div>))}</div>)}
+          </div>)}
+
+          {activePanel==='alarms'&&(<div style={{display:'flex',flexDirection:'column',gap:6}}>
+            {/* Master mute */}
+            <button onClick={()=>setAlarmsMuted(v=>!v)} style={{width:'100%',background:alarmsMuted?'rgba(255,71,87,0.2)':'rgba(0,255,136,0.1)',border:`2px solid ${alarmsMuted?S.rd:S.gn}`,color:alarmsMuted?S.rd:S.gn,borderRadius:8,padding:'10px',fontSize:S.sm,cursor:'pointer',fontWeight:700,textAlign:'center'}}>
+              {alarmsMuted?'🔕 ALL ALARMS MUTED — Tap to Unmute':'🔔 Alarms Active — Tap to Mute All'}
+            </button>
+            {/* Current active alarms status */}
+            <div style={{background:'rgba(0,0,0,0.3)',border:'1px solid rgba(0,212,255,0.15)',borderRadius:6,padding:'7px 9px'}}>
+              <div style={{color:S.dm,fontSize:S.lb,marginBottom:5}}>ACTIVE ALARMS</div>
+              {[
+                [offTrackAlarm,'⚠ OFF TRACK','#FF4757'],
+                [speedAlarmTriggered,'⚡ OVERSPEED','#FF6B35'],
+                [guardZoneAlarm,'🔴 GUARD ZONE','#FF2020'],
+                [anchorAlarm,'⚓ ANCHOR DRAG','#FFD700'],
+              ].map(([active,label,col])=>(
+                <div key={label} style={{display:'flex',alignItems:'center',gap:6,marginBottom:3}}>
+                  <div style={{width:8,height:8,borderRadius:'50%',background:active?col:'#243850',flexShrink:0,boxShadow:active?`0 0 6px ${col}`:'none'}}/>
+                  <span style={{color:active?col:S.vd,fontSize:'0.65rem',fontWeight:active?700:400}}>{label}</span>
+                  {active&&<span style={{color:col,fontSize:'0.58rem',marginLeft:'auto',fontFamily:'monospace'}}>● ACTIVE</span>}
+                </div>
+              ))}
+              {!offTrackAlarm&&!speedAlarmTriggered&&!guardZoneAlarm&&!anchorAlarm&&(
+                <div style={{color:S.gn,fontSize:'0.62rem',fontStyle:'italic'}}>✓ All clear</div>
+              )}
+            </div>
+            {/* Per alarm toggles */}
+            <div style={{color:S.dm,fontSize:S.lb,marginTop:2}}>ALARM SETTINGS</div>
+            {[
+              ['offtrack','⚠ Off Track',`Alarm when XTD > ${offTrackNM}NM`],
+              ['collision','🚢 Collision CPA','CPA < 1.5NM & TCPA < 3h'],
+              ['guard','🔴 Guard Zone',`Vessel inside ${guardZoneRadiusNM}NM`],
+              ['anchor','⚓ Anchor Drag',`Outside ${anchorRadius}NM watch circle`],
+              ['speed','⚡ Overspeed',`SOG > ${speedAlarmKn||'—'}kn`],
+              ['wp','📍 WP Arrival',`Within ${wpArrivalNM}NM of waypoint`],
+            ].map(([key,label,desc])=>(
+              <div key={key} style={{display:'flex',alignItems:'center',gap:7,background:alarmToggles[key]?'rgba(0,212,255,0.06)':'rgba(0,0,0,0.2)',border:`1px solid ${alarmToggles[key]?'rgba(0,212,255,0.25)':S.vd}`,borderRadius:6,padding:'7px 9px'}}>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{color:alarmToggles[key]?S.tx:S.vd,fontSize:'0.68rem',fontWeight:600}}>{label}</div>
+                  <div style={{color:S.vd,fontSize:'0.55rem',marginTop:1}}>{desc}</div>
+                </div>
+                <button onClick={()=>setAlarmToggles(prev=>({...prev,[key]:!prev[key]}))} style={{background:alarmToggles[key]?'rgba(0,255,136,0.15)':'rgba(255,71,87,0.15)',border:`1px solid ${alarmToggles[key]?S.gn:S.rd}`,color:alarmToggles[key]?S.gn:S.rd,borderRadius:5,padding:'4px 8px',fontSize:'0.6rem',cursor:'pointer',flexShrink:0,fontWeight:700}}>
+                  {alarmToggles[key]?'ON':'OFF'}
+                </button>
+              </div>
+            ))}
+            {/* Off track threshold quick set */}
+            <div style={{borderTop:'1px solid rgba(0,212,255,0.1)',paddingTop:6}}>
+              <div style={{color:S.dm,fontSize:S.lb,marginBottom:3}}>OFF TRACK THRESHOLD</div>
+              <div style={{display:'flex',gap:2,flexWrap:'wrap'}}>{[0.1,0.25,0.5,1.0,2.0,3.0].map(v=>(<button key={v} onClick={()=>setOffTrackNM(v)} style={{background:offTrackNM===v?'rgba(255,71,87,0.2)':'transparent',border:`1px solid ${offTrackNM===v?S.rd:S.vd}`,color:offTrackNM===v?S.rd:S.dm,borderRadius:5,padding:'3px 5px',fontSize:S.xs,cursor:'pointer'}}>{v}NM</button>))}</div>
+            </div>
+            {/* Speed alarm quick set */}
+            <div style={{borderTop:'1px solid rgba(0,212,255,0.1)',paddingTop:6}}>
+              <div style={{color:S.dm,fontSize:S.lb,marginBottom:3}}>SPEED ALARM LIMIT</div>
+              <div style={{display:'flex',gap:2,flexWrap:'wrap',marginBottom:3}}>{[[0,'OFF'],[5,'5'],[8,'8'],[10,'10'],[12,'12'],[15,'15'],[18,'18'],[20,'20']].map(([v,l])=>(<button key={v} onClick={()=>{setSpeedAlarmKn(v);setSpeedAlarmTriggered(false);}} style={{background:speedAlarmKn===v?'rgba(255,107,53,0.2)':'transparent',border:`1px solid ${speedAlarmKn===v?'#FF6B35':S.vd}`,color:speedAlarmKn===v?'#FF6B35':S.dm,borderRadius:5,padding:'3px 4px',fontSize:S.xs,cursor:'pointer'}}>{l}</button>))}</div>
+            </div>
           </div>)}
 
           {activePanel==='wx'&&(<div style={{display:'flex',flexDirection:'column',gap:7}}>
