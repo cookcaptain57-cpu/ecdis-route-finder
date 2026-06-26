@@ -356,35 +356,32 @@ function LoginPage({ notify, onLogin, installPrompt=null, onInstallApp=null }) {
 
         {/* ── UPDATED: Install button replaces info-box, falls back to info-box if not available ── */}
         {installPrompt && onInstallApp ? (
-          <button onClick={onInstallApp}
-            style={{width:'100%',padding:'10px 14px',borderRadius:10,
-              border:'1px solid rgba(0,180,216,0.4)',
-              background:'linear-gradient(135deg,rgba(0,180,216,0.12),rgba(21,101,192,0.12))',
-              cursor:'pointer',display:'flex',alignItems:'center',gap:10,marginBottom:'1rem',
-              fontFamily:"'Exo 2',sans-serif",transition:'all 0.2s'}}
-            onMouseEnter={e=>{e.currentTarget.style.borderColor='rgba(0,180,216,0.7)';e.currentTarget.style.background='linear-gradient(135deg,rgba(0,180,216,0.2),rgba(21,101,192,0.2))';}}
-            onMouseLeave={e=>{e.currentTarget.style.borderColor='rgba(0,180,216,0.4)';e.currentTarget.style.background='linear-gradient(135deg,rgba(0,180,216,0.12),rgba(21,101,192,0.12))';}}>
-            <div style={{width:34,height:34,borderRadius:9,
-              background:'linear-gradient(135deg,var(--cyan),var(--blue))',
-              display:'flex',alignItems:'center',justifyContent:'center',
-              fontSize:'1.1rem',flexShrink:0,
-              boxShadow:'0 3px 10px rgba(0,180,216,0.4)'}}>📲</div>
-            <div style={{flex:1,textAlign:'left'}}>
-              <div style={{fontFamily:'Orbitron,monospace',fontSize:'0.68rem',
-                fontWeight:700,color:'var(--cyan)',marginBottom:1}}>
-                Install NavisphereX App
-              </div>
-              <div style={{fontSize:'0.62rem',color:'var(--text2)'}}>
-                Add to home screen for faster access
-              </div>
-            </div>
-            <div style={{fontSize:'0.72rem',color:'var(--cyan)',fontWeight:700}}>Install →</div>
-          </button>
-        ) : (
-          <div className="info-box" style={{ fontSize: '0.74rem' }}>
-            🆓 Free account · Access all RTZ routes &amp; ECDIS charts
-          </div>
-        )}
+        {installPrompt && onInstallApp && (
+  <button onClick={onInstallApp}
+    style={{width:'100%',padding:'10px 14px',borderRadius:10,
+      border:'1px solid rgba(0,180,216,0.4)',
+      background:'linear-gradient(135deg,rgba(0,180,216,0.12),rgba(21,101,192,0.12))',
+      cursor:'pointer',display:'flex',alignItems:'center',gap:10,marginBottom:'1rem',
+      fontFamily:"'Exo 2',sans-serif",transition:'all 0.2s'}}
+    onMouseEnter={e=>{e.currentTarget.style.borderColor='rgba(0,180,216,0.7)';e.currentTarget.style.background='linear-gradient(135deg,rgba(0,180,216,0.2),rgba(21,101,192,0.2))';}}
+    onMouseLeave={e=>{e.currentTarget.style.borderColor='rgba(0,180,216,0.4)';e.currentTarget.style.background='linear-gradient(135deg,rgba(0,180,216,0.12),rgba(21,101,192,0.12))';}}>
+    <div style={{width:34,height:34,borderRadius:9,
+      background:'linear-gradient(135deg,var(--cyan),var(--blue))',
+      display:'flex',alignItems:'center',justifyContent:'center',
+      fontSize:'1.1rem',flexShrink:0,
+      boxShadow:'0 3px 10px rgba(0,180,216,0.4)'}}>📲</div>
+    <div style={{flex:1,textAlign:'left'}}>
+      <div style={{fontFamily:'Orbitron,monospace',fontSize:'0.68rem',
+        fontWeight:700,color:'var(--cyan)',marginBottom:1}}>
+        Install NavisphereX App
+      </div>
+      <div style={{fontSize:'0.62rem',color:'var(--text2)'}}>
+        Add to home screen for faster access
+      </div>
+    </div>
+    <div style={{fontSize:'0.72rem',color:'var(--cyan)',fontWeight:700}}>Install →</div>
+  </button>
+)}
 
         {mode === 'signup' && (<>
           <div className="ff">
