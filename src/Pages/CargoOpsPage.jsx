@@ -1,5 +1,5 @@
 /* eslint-disable */
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, Component } from "react";
 import { db } from "../firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
@@ -1420,7 +1420,7 @@ function MasterBayGroup({ group, gantries, movesPerHr, onUpdate, bayIndexMap, po
         <BayCard key={b.bay} bay={b} idx={bayIndexMap[b.bay]}
           gantries={gantries} movesPerHr={movesPerHr}
           onUpdate={onUpdate} portFilterState={portFilterState}
-          bayParticulars={bayParticularsMap ? bayParticularsMap[b.bay] : null} />
+          bayParticulars={bayParticularsMap ? bayParticularsMap[parseInt(b.bay, 10)] : null} />
       ))}
     </div>
   );
@@ -1730,13 +1730,25 @@ function LiveOps({ portOp, onUpdate, onReset }) {
 
   useEffect(() => {
     let mounted = true;
-    loadShipParticulars().then(data => { if (mounted) setShipParticulars(data); });
+    loadShipParticulars().then(data => {
+      if (!mounted) return;
+      // Guard against a "deleted" marker doc (no bays array) or any other
+      // malformed/partial data — never set state that downstream code
+      // would call .forEach/.map on without a real bays array.
+      const safe = (data && !data.deleted && Array.isArray(data.bays)) ? data : null;
+      setShipParticulars(safe);
+    }).catch(() => { if (mounted) setShipParticulars(null); });
     return () => { mounted = false; };
   }, []);
 
+  // Keyed by numeric bay value, not the raw string — BAPLIE imports use
+  // 3-digit bay codes ('058') while MSC XML imports use 2-digit ('05') for
+  // the same physical bay. Ship Particulars is entered once per vessel and
+  // must match either import format, so we compare by parsed integer value
+  // rather than requiring identical string padding.
   const bayParticularsMap = {};
   if (shipParticulars && shipParticulars.bays) {
-    shipParticulars.bays.forEach(bp => { bayParticularsMap[bp.bay] = bp; });
+    shipParticulars.bays.forEach(bp => { bayParticularsMap[parseInt(bp.bay, 10)] = bp; });
   }
 
   const bays = portOp.bays || [];
@@ -2092,6 +2104,64 @@ function ReeferStatus({ portOp, onUpdateReefer }) {
 }
 
 // ─── MAIN EXPORT ─────────────────────────────────────────────────────────────
+// ─── NO-PLAN SKELETON PREVIEW ─────────────────────────────────────────────────
+// Shown when no loading plan is loaded yet but Ship Particulars have been
+// configured. Displays every configured bay's full empty grid (per the
+// confirmed requirement: blank boxes for every real slot, not nothing at
+// all) so the vessel's actual stowage layout is visible before any plan
+// is imported or manually set up.
+function NoPlanSkeletonPreview() {
+  const [shipParticulars, setShipParticulars] = useState(null);
+  const [loaded, setLoaded] = useState(false);
+  const [expandedBay, setExpandedBay] = useState(null);
+
+  useEffect(() => {
+    let mounted = true;
+    loadShipParticulars().then(data => {
+      if (!mounted) return;
+      const safe = (data && !data.deleted && Array.isArray(data.bays)) ? data : null;
+      setShipParticulars(safe);
+      setLoaded(true);
+    }).catch(() => { if (mounted) setLoaded(true); });
+    return () => { mounted = false; };
+  }, []);
+
+  if (!loaded) return null;
+  if (!shipParticulars || !shipParticulars.bays || shipParticulars.bays.length === 0) return null;
+
+  const bays = shipParticulars.bays;
+
+  return (
+    <Card style={{ marginBottom: 10 }}>
+      <SectionLabel text={`Ship Skeleton — ${bays.length} Bays Configured, No Plan Loaded`} color={S.dm} />
+      <div style={{ color:S.vd, fontSize:S.ti, fontStyle:'italic', marginBottom:8 }}>
+        Showing the vessel's full bay layout from Ship Particulars. All slots are empty — import a loading plan or use the manual setup below to populate them.
+      </div>
+      <div style={{ display:'flex', flexWrap:'wrap', gap:5, marginBottom: expandedBay ? 8 : 0 }}>
+        {bays.map(bp => (
+          <button key={bp.bay} onClick={()=>setExpandedBay(expandedBay===bp.bay?null:bp.bay)} style={{
+            background: expandedBay===bp.bay ? `${ACC}20` : S.bg3,
+            border:`1px solid ${expandedBay===bp.bay ? ACC : S.vd}`,
+            color: expandedBay===bp.bay ? ACC : S.dm,
+            borderRadius:5, padding:'5px 9px', fontSize:S.ti, cursor:'pointer', fontFamily:'monospace', fontWeight:700,
+          }}>{bp.bay}</button>
+        ))}
+      </div>
+      {expandedBay && (() => {
+        const bp = bays.find(b => b.bay === expandedBay);
+        const skeleton = buildEmptyGridFromParticulars(bp);
+        if (!skeleton) return null;
+        return (
+          <div style={{ background:S.bg3, borderRadius:7, padding:'10px', marginTop:8 }}>
+            <BayGridSection title="Deck" section={skeleton.deck} filter="all" onCellClick={null} portFilterState={null} />
+            <BayGridSection title="Hold" section={skeleton.hold} filter="all" onCellClick={null} portFilterState={null} />
+          </div>
+        );
+      })()}
+    </Card>
+  );
+}
+
 function ContainerLiveOps() {
   const SETUP_KEY = 'cargo_container_port_op';
   const [portOp, setPortOp] = useState(null);
@@ -2152,6 +2222,7 @@ function ContainerLiveOps() {
   if (!portOp) {
     return (
       <div>
+        <NoPlanSkeletonPreview />
         <SetupWizard onSave={handleSave} />
       </div>
     );
@@ -2851,7 +2922,7 @@ function ShipParticularsSetup() {
         setSavedAt(data.updatedAt || '');
       }
       setLoaded(true);
-    });
+    }).catch(() => { if (mounted) setLoaded(true); });
     return () => { mounted = false; };
   }, []);
 
@@ -3396,6 +3467,41 @@ const VESSEL_TABS = {
 // ══════════════════════════════════════════════════════════════════════════════
 // MAIN PAGE
 // ══════════════════════════════════════════════════════════════════════════════
+// ─── ERROR BOUNDARY ───────────────────────────────────────────────────────────
+// Wraps the active tab's content so an uncaught render error shows a message
+// and a recovery option instead of unmounting the whole app to a blank white
+// screen. Error boundaries must be class components — there is no hook
+// equivalent for catching render errors thrown by child components.
+class CargoOpsErrorBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+  componentDidCatch(error, info) {
+    console.error('CargoOps tab crashed:', error, info);
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{ padding: '20px 14px', textAlign: 'center' }}>
+          <div style={{ color: S.rd, fontSize: S.sm, fontWeight: 700, marginBottom: 8 }}>⚠ This tab hit an error</div>
+          <div style={{ color: S.dm, fontSize: S.xs, marginBottom: 14, lineHeight: 1.6 }}>
+            {this.state.error?.message || 'Something went wrong rendering this tab.'}
+          </div>
+          <button onClick={() => this.setState({ hasError: false, error: null })} style={{
+            background: `${ACC}18`, border: `1px solid ${ACC}55`, color: ACC,
+            borderRadius: 6, padding: '8px 16px', fontSize: S.xs, cursor: 'pointer', fontWeight: 600,
+          }}>Try Again</button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 export default function CargoOpsPage({ notify }) {
   const [vesselType, setVesselType] = useState(() => localStorage.getItem('cargoops_vesseltype') || 'bulk');
   const [activeTab,  setActiveTab]  = useState(() => localStorage.getItem('cargoops_tab') || 'hold');
@@ -3460,9 +3566,11 @@ export default function CargoOpsPage({ notify }) {
 
       {/* ACTIVE CONTENT */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '12px', minHeight: 0 }}>
-        <ActiveComp notify={notify} />
+        <CargoOpsErrorBoundary key={activeTab}>
+          <ActiveComp notify={notify} />
+        </CargoOpsErrorBoundary>
       </div>
 
     </div>
   );
-                                                                             }
+     }
