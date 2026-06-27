@@ -476,7 +476,8 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
     Object.values(aisTargets).forEach(v=>{
       if(!v.lat||!v.lon)return;
       if(ownMmsi&&String(v.mmsi)===ownMmsi)return;
-      if(ownPos&&distNM(ownPos.lat,ownPos.lon,v.lat,v.lon)<0.005)return;
+      // Stronger own-ship proximity filter for SafePilot (no MMSI match needed)
+      if(ownPos&&distNM(ownPos.lat,ownPos.lon,v.lat,v.lon)<0.05)return;
       if(rng>0&&ownPos&&distNM(ownPos.lat,ownPos.lon,v.lat,v.lon)>rng)return;
 
       const rangNM=ownPos?distNM(ownPos.lat,ownPos.lon,v.lat,v.lon):null;
@@ -848,22 +849,23 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
       const angle=((legBrg-shipBrg)+540)%360-180;
       const along=shipDist*Math.cos(angle*Math.PI/180);
       const legLen=distNM(wps[i].lat,wps[i].lon,wps[i+1].lat,wps[i+1].lon);
-      // Pure perpendicular XTD — sin of angle between leg bearing and ship bearing
+      // Pure perpendicular XTD
       const xtd=Math.abs(shipDist*Math.sin(angle*Math.PI/180));
-
-      if(along>=-legLen*0.1&&along<=legLen*1.1){
-        // Ship projects onto this leg (with 10% tolerance at each end)
-        if(xtd<minXTD)minXTD=xtd;
+      let legXTD;
+      if(along>=0&&along<=legLen){
+        // Ship projects cleanly onto this leg — pure perpendicular distance
+        legXTD=xtd;
+      } else if(along<0){
+        // Ship is before leg start — distance to start waypoint
+        legXTD=distNM(livePos.lat,livePos.lon,wps[i].lat,wps[i].lon);
       } else {
-        // Ship is before start or past end of leg — use distance to nearest endpoint
-        const dStart=distNM(livePos.lat,livePos.lon,wps[i].lat,wps[i].lon);
-        const dEnd=distNM(livePos.lat,livePos.lon,wps[i+1].lat,wps[i+1].lon);
-        const nearestEndpoint=Math.min(dStart,dEnd);
-        if(nearestEndpoint<minXTD)minXTD=nearestEndpoint;
+        // Ship is past leg end — distance to end waypoint
+        legXTD=distNM(livePos.lat,livePos.lon,wps[i+1].lat,wps[i+1].lon);
       }
+      if(legXTD<minXTD)minXTD=legXTD;
     }
 
-    // Final safety fallback — should never reach here with the above logic
+    // Safety fallback
     if(minXTD===Infinity||isNaN(minXTD)){
       let best=Infinity;
       wps.forEach(w=>{const d=distNM(livePos.lat,livePos.lon,w.lat,w.lon);if(d<best)best=d;});
@@ -943,15 +945,17 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
   const onTE=()=>{hudDragRef.current=null;};
   const toggleDepth=id=>{setDepthSources(prev=>{const next=new Set(prev);if(next.has(id))next.delete(id);else next.add(id);return next;});};
 
-  const alarmsMutedRef=useRef(alarmsMuted);
-  const alarmTogglesRef=useRef(alarmToggles);
+  const alarmsMutedRef=useRef(()=>{try{return localStorage.getItem('nav_alarmsMuted')==='true';}catch{return false;}});
+  const alarmTogglesRef=useRef(()=>{try{return JSON.parse(localStorage.getItem('nav_alarmToggles')||'null')||{offtrack:true,speed:true,guard:true,anchor:true,wp:true,collision:true};}catch{return{offtrack:true,speed:true,guard:true,anchor:true,wp:true,collision:true};}});
   useEffect(()=>{alarmsMutedRef.current=alarmsMuted;},[alarmsMuted]);
   useEffect(()=>{alarmTogglesRef.current=alarmToggles;},[alarmToggles]);
 
   const playAlarm=useCallback((type='alert')=>{
     // Check master mute and per-alarm toggle
-    if(alarmsMutedRef.current)return;
-    if(type!=='alert'&&alarmTogglesRef.current[type]===false)return;
+    const muted=typeof alarmsMutedRef.current==='function'?alarmsMutedRef.current():alarmsMutedRef.current;
+    const toggles=typeof alarmTogglesRef.current==='function'?alarmTogglesRef.current():alarmTogglesRef.current;
+    if(muted)return;
+    if(type!=='alert'&&toggles[type]===false)return;
     try{
       const ctx=new(window.AudioContext||window.webkitAudioContext)();
       const patterns={
@@ -1308,18 +1312,9 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
               <div style={{background:anchorAlarm?'rgba(255,32,32,0.2)':'rgba(0,255,136,0.1)',border:`1px solid ${anchorAlarm?S.rd:S.gn}`,borderRadius:7,padding:'8px',textAlign:'center'}}><div style={{color:anchorAlarm?S.rd:S.gn,fontWeight:700,fontSize:S.sm}}>{anchorAlarm?'⚠ DRAGGING!':'✓ Holding'}</div>{livePos&&anchorPos&&<div style={{color:S.dm,fontSize:S.xs}}>{distNM(livePos.lat,livePos.lon,anchorPos.lat,anchorPos.lon).toFixed(3)}NM from drop</div>}</div>
               <button onClick={()=>{setAnchorWatchOn(false);setAnchorPos(null);setAnchorAlarm(false);}} style={{background:'transparent',border:`1px solid ${S.rd}`,color:S.rd,borderRadius:6,padding:'7px',fontSize:S.xs,cursor:'pointer'}}>⛔ Stop Watch</button>
             </div>}
-            <div style={{borderTop:'1px solid rgba(0,212,255,0.1)',paddingTop:6}}>
-              <div style={{color:S.dm,fontSize:S.xs,marginBottom:3}}>⚠ OFF-TRACK ALARM</div>
-              <div style={{display:'flex',gap:2,flexWrap:'wrap'}}>{[0.1,0.25,0.5,1.0,2.0,3.0].map(v=>(<button key={v} onClick={()=>setOffTrackNM(v)} style={{background:offTrackNM===v?'rgba(255,71,87,0.2)':'transparent',border:`1px solid ${offTrackNM===v?S.rd:S.vd}`,color:offTrackNM===v?S.rd:S.dm,borderRadius:5,padding:'3px 4px',fontSize:S.xs,cursor:'pointer'}}>{v}NM</button>))}</div>
-              <div style={{color:offTrackAlarm?S.rd:S.dm,fontSize:S.lb,marginTop:3}}>{offTrackAlarm?`🚨 OFF TRACK`:`Alarm at ${offTrackNM}NM`}</div>
+            <div style={{borderTop:'1px solid rgba(0,212,255,0.1)',paddingTop:6,color:S.vd,fontSize:S.xs,fontStyle:'italic'}}>
+              ⚙ Alarm settings → 🔔 Alarms panel
             </div>
-            <div style={{borderTop:'1px solid rgba(0,212,255,0.1)',paddingTop:6}}>
-              <div style={{color:S.dm,fontSize:S.xs,marginBottom:3}}>⚡ SPEED ALARM</div>
-              <div style={{display:'flex',gap:2,flexWrap:'wrap',marginBottom:3}}>{[[0,'OFF'],[5,'5'],[8,'8'],[10,'10'],[12,'12'],[15,'15'],[18,'18'],[20,'20']].map(([v,l])=>(<button key={v} onClick={()=>{setSpeedAlarmKn(v);setSpeedAlarmTriggered(false);}} style={{background:speedAlarmKn===v?'rgba(255,107,53,0.2)':'transparent',border:`1px solid ${speedAlarmKn===v?'#FF6B35':S.vd}`,color:speedAlarmKn===v?'#FF6B35':S.dm,borderRadius:5,padding:'3px 4px',fontSize:S.xs,cursor:'pointer'}}>{l}</button>))}</div>
-              <input type="number" min={0} max={50} placeholder="Custom kn…" value={speedAlarmKn||''} onChange={e=>setSpeedAlarmKn(Number(e.target.value)||0)} style={{width:'100%',boxSizing:'border-box',background:'#06101C',color:S.cy,border:`1px solid ${S.vd}`,borderRadius:5,padding:'4px 7px',fontSize:S.xs,outline:'none',fontFamily:'monospace'}}/>
-              {speedAlarmTriggered&&<div style={{color:S.rd,fontSize:S.xs,fontWeight:700,marginTop:3}}>⚠ OVERSPEED {livePos?.sog?.toFixed(1)}kn</div>}
-            </div>
-            <div style={{borderTop:'1px solid rgba(0,212,255,0.1)',paddingTop:6}}><div style={{color:S.dm,fontSize:S.xs,marginBottom:3}}>📍 WP ARRIVAL</div><div style={{display:'flex',gap:3,flexWrap:'wrap'}}>{[[0.1,'0.1'],[0.2,'0.2'],[0.3,'0.3'],[0.5,'0.5'],[1.0,'1.0']].map(([v,l])=>(<button key={v} onClick={()=>setWpArrivalNM(v)} style={{background:wpArrivalNM===v?'rgba(0,200,150,0.2)':'transparent',border:`1px solid ${wpArrivalNM===v?S.gn:S.vd}`,color:wpArrivalNM===v?S.gn:S.dm,borderRadius:5,padding:'3px 5px',fontSize:S.xs,cursor:'pointer'}}>{l}NM</button>))}</div></div>
           </div>)}
 
           {activePanel==='guard'&&(<div style={{display:'flex',flexDirection:'column',gap:7}}>
