@@ -241,6 +241,7 @@ export default function OLPAssistantPage() {
                         <div style={styles.cardHeaderLeft}>
                           <span style={styles.qNum}>Q{idx + 1}</span>
                           {multiAnswer && <span style={styles.multiBadge}>Multi</span>}
+                          {qObj.hasImage && <span style={styles.imageBadge}>📷</span>}
                         </div>
                         <div style={styles.qText}>{highlight(qObj.q, searchQuery)}</div>
                         <span style={styles.chevron}>{isOpen ? "▲" : "▼"}</span>
@@ -248,6 +249,11 @@ export default function OLPAssistantPage() {
 
                       {isOpen && (
                         <div style={styles.cardBody}>
+                          {qObj.hasImage && (
+                            <div style={styles.imageNote}>
+                              ⚠️ This question contains an image or table — refer to your OLP module for the visual.
+                            </div>
+                          )}
                           {qObj.options.map((opt, oi) => (
                             <div key={oi} style={{
                               ...styles.option,
@@ -339,5 +345,7 @@ const styles = {
   optIconWrong: { color:"#475569", fontSize:14, flexShrink:0, marginTop:1 },
   optText: { fontSize:13, lineHeight:1.5 },
   multiNote: { fontSize:11, color:"#fb923c", padding:"6px 10px", marginTop:4, background:"#1c0a00", borderRadius:6, border:"1px solid #431407" },
+  imageNote: { fontSize:11, color:"#facc15", padding:"7px 10px", marginBottom:6, background:"#1c1a00", borderRadius:6, border:"1px solid #713f12", lineHeight:1.5 },
+  imageBadge: { fontSize:10, padding:"1px 3px", borderRadius:4, background:"#1c1a00", border:"1px solid #713f12" },
   mark: { background:"#854d0e", color:"#fef9c3", borderRadius:3, padding:"0 2px" },
 };
