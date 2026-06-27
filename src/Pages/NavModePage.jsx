@@ -838,12 +838,50 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
     const now=Date.now();
     if(now-offTrackThrottleRef.current<3000)return;
     offTrackThrottleRef.current=now;
-    const wps=activeRoute.waypoints;let minXTD=Infinity;
-    for(let i=0;i<wps.length-1;i++){const legBrg=brg(wps[i].lat,wps[i].lon,wps[i+1].lat,wps[i+1].lon);const shipBrg=brg(wps[i].lat,wps[i].lon,livePos.lat,livePos.lon);const shipDist=distNM(wps[i].lat,wps[i].lon,livePos.lat,livePos.lon);const angle=((legBrg-shipBrg)+540)%360-180;const along=shipDist*Math.cos(angle*Math.PI/180);const legLen=distNM(wps[i].lat,wps[i].lon,wps[i+1].lat,wps[i+1].lon);if(along>=0&&along<=legLen+0.5){const xtd=Math.abs(shipDist*Math.sin(angle*Math.PI/180));if(xtd<minXTD)minXTD=xtd;}}
-    if(minXTD===Infinity)minXTD=distNM(livePos.lat,livePos.lon,wps[selectedWpIdx]?.lat||wps[0].lat,wps[selectedWpIdx]?.lon||wps[0].lon);
-    const threshold=offTrackNM; // FIX: use offTrackNM alarm threshold, not xtdNM visual corridor
-    if(minXTD>threshold){setOffTrackAlarm(true);const now=Date.now();if(!alarmCooldownRef.current.offtrack||now-alarmCooldownRef.current.offtrack>30000){alarmCooldownRef.current.offtrack=now;playAlarm('offtrack');notify(`⚠ OFF TRACK — ${minXTD.toFixed(2)}NM (limit ${threshold}NM)`,'error');}}
-    else setOffTrackAlarm(false);
+    const wps=activeRoute.waypoints;
+    let minXTD=Infinity;
+
+    for(let i=0;i<wps.length-1;i++){
+      const legBrg=brg(wps[i].lat,wps[i].lon,wps[i+1].lat,wps[i+1].lon);
+      const shipBrg=brg(wps[i].lat,wps[i].lon,livePos.lat,livePos.lon);
+      const shipDist=distNM(wps[i].lat,wps[i].lon,livePos.lat,livePos.lon);
+      const angle=((legBrg-shipBrg)+540)%360-180;
+      const along=shipDist*Math.cos(angle*Math.PI/180);
+      const legLen=distNM(wps[i].lat,wps[i].lon,wps[i+1].lat,wps[i+1].lon);
+      // Pure perpendicular XTD — sin of angle between leg bearing and ship bearing
+      const xtd=Math.abs(shipDist*Math.sin(angle*Math.PI/180));
+
+      if(along>=-legLen*0.1&&along<=legLen*1.1){
+        // Ship projects onto this leg (with 10% tolerance at each end)
+        if(xtd<minXTD)minXTD=xtd;
+      } else {
+        // Ship is before start or past end of leg — use distance to nearest endpoint
+        const dStart=distNM(livePos.lat,livePos.lon,wps[i].lat,wps[i].lon);
+        const dEnd=distNM(livePos.lat,livePos.lon,wps[i+1].lat,wps[i+1].lon);
+        const nearestEndpoint=Math.min(dStart,dEnd);
+        if(nearestEndpoint<minXTD)minXTD=nearestEndpoint;
+      }
+    }
+
+    // Final safety fallback — should never reach here with the above logic
+    if(minXTD===Infinity||isNaN(minXTD)){
+      let best=Infinity;
+      wps.forEach(w=>{const d=distNM(livePos.lat,livePos.lon,w.lat,w.lon);if(d<best)best=d;});
+      minXTD=best;
+    }
+
+    const threshold=offTrackNM;
+    if(minXTD>threshold){
+      setOffTrackAlarm(true);
+      const nowTs=Date.now();
+      if(!alarmCooldownRef.current.offtrack||nowTs-alarmCooldownRef.current.offtrack>30000){
+        alarmCooldownRef.current.offtrack=nowTs;
+        playAlarm('offtrack');
+        notify(`⚠ OFF TRACK — ${minXTD.toFixed(2)}NM (limit ${threshold}NM)`,'error');
+      }
+    } else {
+      setOffTrackAlarm(false);
+    }
   },[livePos,activeRoute,offTrackNM,xtdNM,selectedWpIdx]);
   useEffect(()=>{
     if(!mapReady||!leafRef.current||!window.L)return;
