@@ -821,11 +821,17 @@ async function deleteShipParticulars() {
 // convention: Port = even numbers (02,04,06...), Starboard = odd (01,03,05...),
 // counting outward from the centerline up to the configured max count.
 function generateRowLabels(maxPort, maxStbd) {
+  // Port (even) and starboard (odd) are two independent counting sequences
+  // from the centerline, not one combined ascending sequence. Correct
+  // display order, confirmed against a real stowage plan: port descending
+  // from its outermost row down to 02, then starboard ascending from 01
+  // out to its outermost row — e.g. 12,10,08,06,04,02,01,03,05,07,09,11.
+  // The centerline pair (02 | 01) sits in the middle, not at either edge.
   const port = [];
-  for (let i = 1; i <= (maxPort || 0); i++) port.push(String(i * 2).padStart(2, '0'));
+  for (let i = (maxPort || 0); i >= 1; i--) port.push(String(i * 2).padStart(2, '0'));
   const stbd = [];
   for (let i = 0; i < (maxStbd || 0); i++) stbd.push(String(i * 2 + 1).padStart(2, '0'));
-  return [...port, ...stbd].sort((a, b) => parseInt(a, 10) - parseInt(b, 10));
+  return [...port, ...stbd];
 }
 
 // Generates tier labels per the confirmed convention: Hold = 02,04,06...
@@ -847,15 +853,19 @@ function buildEmptyGridFromParticulars(bayParticulars) {
   if (!bayParticulars) return null;
   const rows = generateRowLabels(bayParticulars.maxRowPort, bayParticulars.maxRowStbd);
   const { holdTiers, deckTiers } = generateTierLabels(bayParticulars.maxTierHold, bayParticulars.maxTierDeck);
+  // items must always be an array (even when empty) — BayGridSection reads
+  // section.items.length unconditionally once tiers/rows are non-empty.
   return {
-    deck: { tiers: deckTiers.slice().sort((a, b) => parseInt(b, 10) - parseInt(a, 10)), rows, cellMap: {} },
-    hold: { tiers: holdTiers.slice().sort((a, b) => parseInt(b, 10) - parseInt(a, 10)), rows, cellMap: {} },
+    deck: { tiers: deckTiers.slice().sort((a, b) => parseInt(b, 10) - parseInt(a, 10)), rows, cellMap: {}, items: [] },
+    hold: { tiers: holdTiers.slice().sort((a, b) => parseInt(b, 10) - parseInt(a, 10)), rows, cellMap: {}, items: [] },
   };
 }
 
 // Overlays real containers onto a blank skeleton (from buildEmptyGridFromParticulars)
 // without losing any blank slot — every position from the skeleton survives;
-// matching containers just populate their cellMap entry.
+// matching containers just populate their cellMap entry. items is rebuilt
+// from the actual matched containers so BayGridSection's count/length reads
+// stay accurate after the overlay.
 function overlayContainersOnGrid(skeleton, containers) {
   if (!skeleton) return skeleton;
   const deckCellMap = { ...skeleton.deck.cellMap };
@@ -866,8 +876,8 @@ function overlayContainersOnGrid(skeleton, containers) {
     else holdCellMap[key] = c;
   });
   return {
-    deck: { ...skeleton.deck, cellMap: deckCellMap },
-    hold: { ...skeleton.hold, cellMap: holdCellMap },
+    deck: { ...skeleton.deck, cellMap: deckCellMap, items: Object.values(deckCellMap) },
+    hold: { ...skeleton.hold, cellMap: holdCellMap, items: Object.values(holdCellMap) },
   };
 }
 
@@ -1014,7 +1024,7 @@ function getPortFilterState(containers, selectedPort, mode) {
   const newIds = new Set();
   if (!selectedPort || mode === 'all') {
     containers.forEach(c => highlightedIds.add(c.id));
-    return { highlightedIds, newIds };
+    return { highlightedIds, newIds, mode, selectedPort };
   }
   containers.forEach(c => {
     if (mode === 'loading' && c.pol === selectedPort) {
@@ -1029,7 +1039,7 @@ function getPortFilterState(containers, selectedPort, mode) {
       }
     }
   });
-  return { highlightedIds, newIds };
+  return { highlightedIds, newIds, mode, selectedPort };
 }
 
 function PortFilterBar({ ports, selectedPort, onSelectPort, mode, onSelectMode }) {
@@ -1115,7 +1125,7 @@ function gridCellColor(container) {
 }
 
 function BayGridSection({ title, section, filter, onCellClick, portFilterState }) {
-  if (section.tiers.length === 0 || section.rows.length === 0) {
+  if (!section || !Array.isArray(section.tiers) || !Array.isArray(section.rows) || section.tiers.length === 0 || section.rows.length === 0) {
     return (
       <div style={{ marginBottom:10 }}>
         <SectionLabel text={title} color={S.dm} />
@@ -1125,7 +1135,7 @@ function BayGridSection({ title, section, filter, onCellClick, portFilterState }
   }
   return (
     <div style={{ marginBottom:10 }}>
-      <SectionLabel text={`${title} (${section.items.length})`} color={S.dm} />
+      <SectionLabel text={`${title} (${(section.items || []).length})`} color={S.dm} />
       <div style={{ overflowX:'auto' }}>
         <div style={{ display:'inline-block', minWidth:'100%' }}>
           {/* Row header */}
@@ -1144,8 +1154,11 @@ function BayGridSection({ title, section, filter, onCellClick, portFilterState }
                 const attrMatches = gridCellMatchesFilter(c, filter);
                 // Combine the DG/Reefer/OOG attribute filter with the port filter
                 // (loading/discharging/departure/all) — a cell only stays full
-                // opacity if it matches both active filters.
-                const portMatches = !portFilterState || !c || portFilterState.highlightedIds.size === 0 || portFilterState.highlightedIds.has(c.id);
+                // opacity if it matches both active filters. Checks mode/
+                // selectedPort explicitly rather than inferring from set size,
+                // since 'all' mode populates highlightedIds with everything.
+                const portFilterActive = portFilterState && portFilterState.mode && portFilterState.mode !== 'all' && portFilterState.selectedPort;
+                const portMatches = !portFilterActive || !c || portFilterState.highlightedIds.has(c.id);
                 const matches = attrMatches && portMatches;
                 const isNew = portFilterState && c && portFilterState.newIds && portFilterState.newIds.has(c.id);
                 const color = gridCellColor(c);
@@ -1410,8 +1423,19 @@ function MasterBayGroup({ group, gantries, movesPerHr, onUpdate, bayIndexMap, po
     ? `Bay ${oddMember.bay}(${group.fortyFt.bay})`
     : `Bay ${group.masterBay}`;
 
+  // Bay-level port filter relevance: a group is only "highlighted" if at
+  // least one of its members has a container matching the active port
+  // filter (loading/discharging/departure). In 'all' mode, or when no port
+  // is selected, every group stays fully visible — this only dims groups
+  // with zero relevant cargo for a genuinely active loading/discharging/
+  // departure filter.
+  const filterIsActive = portFilterState && portFilterState.mode && portFilterState.mode !== 'all' && portFilterState.selectedPort;
+  const groupHasMatch = !filterIsActive || group.members.some(b =>
+    (b.containers || []).some(c => portFilterState.highlightedIds.has(c.id))
+  );
+
   return (
-    <div style={{ border:`1px solid ${S.bd2}`, borderRadius:10, padding:'8px', marginBottom:8, background:'rgba(255,255,255,0.01)' }}>
+    <div style={{ border:`1px solid ${S.bd2}`, borderRadius:10, padding:'8px', marginBottom:8, background:'rgba(255,255,255,0.01)', opacity: groupHasMatch ? 1 : 0.35 }}>
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:6, padding:'0 4px' }}>
         <span style={{ color:S.dm, fontSize:S.ti, fontWeight:700, letterSpacing:0.5 }}>{label}</span>
         {totalContainers > 0 && <span style={{ color:S.dm, fontSize:S.ti }}>📦 {totalContainers} total</span>}
@@ -2554,7 +2578,8 @@ function ContainerSearch() {
           : (
             <div style={{ display:'flex', flexDirection:'column', gap:5 }}>
               {filtered.map((c, i) => {
-                const portMatches = portFilterState.highlightedIds.size === 0 || portFilterState.highlightedIds.has(c.id);
+                const portFilterActive = portFilterState && portFilterState.mode && portFilterState.mode !== 'all' && portFilterState.selectedPort;
+                const portMatches = !portFilterActive || portFilterState.highlightedIds.has(c.id);
                 const isNew = portFilterState.newIds && portFilterState.newIds.has(c.id);
                 return (
                 <div key={c.id + i} style={{ background:S.bg3, borderRadius:7, padding:'8px 10px', opacity: portMatches ? 1 : 0.4, border: isNew ? `1px solid ${S.gn}` : '1px solid transparent' }}>
@@ -3573,4 +3598,4 @@ export default function CargoOpsPage({ notify }) {
 
     </div>
   );
-    }
+                             }
