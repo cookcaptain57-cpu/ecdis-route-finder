@@ -847,19 +847,15 @@ function buildEmptyGridFromParticulars(bayParticulars) {
   if (!bayParticulars) return null;
   const rows = generateRowLabels(bayParticulars.maxRowPort, bayParticulars.maxRowStbd);
   const { holdTiers, deckTiers } = generateTierLabels(bayParticulars.maxTierHold, bayParticulars.maxTierDeck);
-  // items must always be an array (even when empty) — BayGridSection reads
-  // section.items.length unconditionally once tiers/rows are non-empty.
   return {
-    deck: { tiers: deckTiers.slice().sort((a, b) => parseInt(b, 10) - parseInt(a, 10)), rows, cellMap: {}, items: [] },
-    hold: { tiers: holdTiers.slice().sort((a, b) => parseInt(b, 10) - parseInt(a, 10)), rows, cellMap: {}, items: [] },
+    deck: { tiers: deckTiers.slice().sort((a, b) => parseInt(b, 10) - parseInt(a, 10)), rows, cellMap: {} },
+    hold: { tiers: holdTiers.slice().sort((a, b) => parseInt(b, 10) - parseInt(a, 10)), rows, cellMap: {} },
   };
 }
 
 // Overlays real containers onto a blank skeleton (from buildEmptyGridFromParticulars)
 // without losing any blank slot — every position from the skeleton survives;
-// matching containers just populate their cellMap entry. items is rebuilt
-// from the actual matched containers so BayGridSection's count/length reads
-// stay accurate after the overlay.
+// matching containers just populate their cellMap entry.
 function overlayContainersOnGrid(skeleton, containers) {
   if (!skeleton) return skeleton;
   const deckCellMap = { ...skeleton.deck.cellMap };
@@ -870,8 +866,8 @@ function overlayContainersOnGrid(skeleton, containers) {
     else holdCellMap[key] = c;
   });
   return {
-    deck: { ...skeleton.deck, cellMap: deckCellMap, items: Object.values(deckCellMap) },
-    hold: { ...skeleton.hold, cellMap: holdCellMap, items: Object.values(holdCellMap) },
+    deck: { ...skeleton.deck, cellMap: deckCellMap },
+    hold: { ...skeleton.hold, cellMap: holdCellMap },
   };
 }
 
@@ -1119,7 +1115,7 @@ function gridCellColor(container) {
 }
 
 function BayGridSection({ title, section, filter, onCellClick, portFilterState }) {
-  if (!section || !Array.isArray(section.tiers) || !Array.isArray(section.rows) || section.tiers.length === 0 || section.rows.length === 0) {
+  if (section.tiers.length === 0 || section.rows.length === 0) {
     return (
       <div style={{ marginBottom:10 }}>
         <SectionLabel text={title} color={S.dm} />
@@ -1129,7 +1125,7 @@ function BayGridSection({ title, section, filter, onCellClick, portFilterState }
   }
   return (
     <div style={{ marginBottom:10 }}>
-      <SectionLabel text={`${title} (${(section.items || []).length})`} color={S.dm} />
+      <SectionLabel text={`${title} (${section.items.length})`} color={S.dm} />
       <div style={{ overflowX:'auto' }}>
         <div style={{ display:'inline-block', minWidth:'100%' }}>
           {/* Row header */}
@@ -3577,4 +3573,4 @@ export default function CargoOpsPage({ notify }) {
 
     </div>
   );
-                          }
+    }
