@@ -1,11 +1,12 @@
 /* eslint-disable */
-// src/Pages/CompassErrorPage.jsx — v4 (course as suggestion only, no formulas/sources shown)
-import { useState, useEffect, useCallback } from "react";
+// src/Pages/CompassErrorPage.jsx — v5
+// GPS COG suggestion · Full log copy/history · Body selector with rankings
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { db } from "../firebase";
 import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
 
 // ══════════════════════════════════════════════════════════════════════════════
-// WMM-2025 ENGINE (embedded, full degree 1-12)
+// WMM-2025 ENGINE
 // ══════════════════════════════════════════════════════════════════════════════
 const WMM_EPOCH=2025.0,WMM_A=6371.2;
 const WMM_COF=[[1,0,-29351.8,0,12.0,0],[1,1,-1410.8,4545.4,9.7,-21.5],[2,0,-2556.6,0,-11.6,0],[2,1,2951.1,-3133.6,-5.2,-27.7],[2,2,1649.3,-815.1,-8.0,-12.1],[3,0,1361.0,0,-1.3,0],[3,1,-2404.1,-56.6,-4.2,4.0],[3,2,1243.8,237.5,0.4,-0.3],[3,3,453.6,-549.5,-15.6,-4.1],[4,0,895.0,0,-1.6,0],[4,1,799.5,278.6,-2.4,-1.1],[4,2,55.7,-133.9,-6.0,4.1],[4,3,-281.1,212.0,5.6,1.6],[4,4,12.1,-375.6,-7.0,-4.4],[5,0,-233.2,0,0.6,0],[5,1,368.9,45.4,1.4,-0.5],[5,2,187.2,220.2,0.0,2.2],[5,3,-138.7,-122.9,0.6,0.4],[5,4,-142.0,43.0,2.2,1.7],[5,5,20.9,106.1,0.9,1.9],[6,0,64.4,0,-0.2,0],[6,1,63.8,-18.4,-0.4,0.3],[6,2,76.9,16.8,0.9,-1.6],[6,3,-115.7,48.8,1.2,-0.4],[6,4,-40.9,-59.8,-0.9,0.9],[6,5,14.9,10.9,0.3,0.7],[6,6,-60.7,72.7,0.9,0.9],[7,0,79.5,0,-0.0,0],[7,1,-77.0,-48.9,-0.1,0.6],[7,2,-8.8,-14.4,-0.1,0.5],[7,3,59.3,-1.0,0.5,-0.8],[7,4,15.8,23.4,-0.1,0.0],[7,5,2.5,-7.4,-0.8,-1.0],[7,6,-11.1,-25.1,-0.8,0.6],[7,7,14.2,-2.3,0.8,-0.2],[8,0,23.2,0,-0.1,0],[8,1,10.8,7.1,0.2,-0.2],[8,2,-17.5,-12.6,0.0,0.5],[8,3,2.0,11.4,0.5,-0.4],[8,4,-21.7,-9.7,-0.1,0.4],[8,5,16.9,12.7,0.3,-0.5],[8,6,15.0,0.7,0.2,-0.6],[8,7,-16.8,-5.2,-0.0,0.3],[8,8,0.9,3.9,0.2,0.2],[9,0,4.6,0,-0.0,0],[9,1,7.8,-24.8,-0.1,-0.3],[9,2,3.0,12.2,0.1,0.3],[9,3,-0.2,8.3,0.3,-0.3],[9,4,-2.5,-3.3,-0.3,0.3],[9,5,-13.1,-5.2,0.0,0.2],[9,6,2.4,7.2,0.3,-0.1],[9,7,8.6,-0.6,-0.1,-0.2],[9,8,-8.7,0.8,0.1,0.4],[9,9,-12.9,10.0,-0.1,0.1],[10,0,-1.3,0,0.1,0],[10,1,-6.4,3.3,0.0,0.0],[10,2,0.2,0.0,0.1,-0.0],[10,3,2.0,2.4,0.1,-0.2],[10,4,-1.0,5.3,-0.0,0.1],[10,5,-0.6,-9.1,-0.3,-0.1],[10,6,-0.9,0.4,0.0,0.1],[10,7,1.5,-4.2,-0.1,0.0],[10,8,0.9,-3.8,-0.1,-0.1],[10,9,-2.7,0.9,-0.0,0.2],[10,10,-3.9,-9.1,-0.0,-0.0],[11,0,2.9,0,0.0,0],[11,1,-1.5,0.0,-0.0,-0.0],[11,2,-2.5,2.9,0.0,0.1],[11,3,2.4,-0.6,0.0,-0.0],[11,4,-0.6,0.2,0.0,0.1],[11,5,-0.1,0.5,-0.1,-0.0],[11,6,-0.6,-0.3,0.0,-0.0],[11,7,-0.1,-1.2,-0.0,0.1],[11,8,1.1,-1.7,-0.1,-0.0],[11,9,-1.0,-2.9,-0.1,0.0],[11,10,-0.2,-1.8,-0.1,0.0],[11,11,2.6,-2.3,-0.1,0.0],[12,0,-2.0,0,0.0,0],[12,1,-0.2,-1.3,0.0,-0.0],[12,2,0.3,0.7,-0.0,0.0],[12,3,1.2,1.0,-0.0,-0.1],[12,4,-1.3,-1.4,-0.0,0.1],[12,5,0.6,-0.0,-0.0,-0.0],[12,6,0.6,0.6,0.1,-0.0],[12,7,0.5,-0.1,-0.0,-0.0],[12,8,-0.1,0.8,0.0,0.0],[12,9,-0.4,0.1,0.0,-0.0],[12,10,-0.2,-1.0,-0.1,-0.0],[12,11,-1.3,0.1,-0.0,0.0],[12,12,-0.7,0.2,-0.1,-0.1]];
@@ -38,15 +39,16 @@ const fmtDMS=(v,pos,neg)=>{const d=Math.floor(Math.abs(v)),m=((Math.abs(v)-d)*60
 const fmtBrg=v=>v===null||isNaN(v)?'—':`${norm360(v).toFixed(1)}°`;
 const fmtErr=v=>v===null||isNaN(v)?'—':`${Math.abs(v).toFixed(1)}° ${v>=0?'E':'W'}`;
 const eClr=v=>v===null?'#0a1628':v>=0?'#007a50':'#cc2233';
+const eClrD=v=>v===null?'var(--text)':v>=0?'var(--green)':'var(--red)';
 
 // ══════════════════════════════════════════════════════════════════════════════
-// CONSTANTS
+// CONSTANTS & STYLES
 // ══════════════════════════════════════════════════════════════════════════════
-const BODY_GROUPS=[{group:'☀️ Solar System',items:['Sun','Moon','Venus','Mars','Jupiter','Saturn']},{group:'⭐ Nav Stars + Polaris',items:NAV_STARS.map(s=>s.name)}];
 const BODY_ICON={Sun:'☀️',Moon:'🌙',Venus:'♀',Mars:'♂',Jupiter:'♃',Saturn:'♄','Polaris ⭐':'⭐'};
+const PLANET_LIST=['Sun','Moon','Venus','Mars','Jupiter','Saturn'];
 const DEV_HDGS=[0,45,90,135,180,225,270,315];
 const DEV_LBLS=['N','NE','E','SE','S','SW','W','NW'];
-const LS_HIST='cmp_history_v4';
+const LS_HIST='cmp_history_v5';
 const LT={card:{background:'#f2f7fc',border:'1px solid #ccd8e8',borderRadius:14,padding:'1.2rem',color:'#0a1628',fontFamily:"'Exo 2',sans-serif"},secHdr:{fontWeight:700,fontSize:'0.85rem',color:'#0a1628',textAlign:'center',margin:'0.8rem 0 0.35rem',paddingBottom:'0.3rem',borderBottom:'1.5px solid #ccd8e8'},row:{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'6px 0',borderBottom:'1px solid #e2ecf5'},lbl:{fontSize:'0.83rem',color:'#2a3a5a'},val:{fontFamily:"'Orbitron',monospace",fontSize:'0.87rem',color:'#0a1628',fontWeight:600},adjBtn:{padding:'4px 9px',background:'#e2ecf5',border:'1px solid #b0c2d4',borderRadius:6,color:'#2a3a5a',cursor:'pointer',fontSize:'0.9rem',fontWeight:700}};
 const DC={card:{background:'var(--card)',border:'1px solid var(--border)',borderRadius:12,padding:'1rem',marginBottom:'0.75rem'},hdr:{fontFamily:"'Orbitron',monospace",fontSize:'0.67rem',fontWeight:700,color:'var(--cyan)',marginBottom:'0.65rem'},inp:{width:'100%',padding:'9px 6px',background:'var(--bg2)',border:'1.5px solid var(--border2)',borderRadius:8,color:'var(--text)',fontFamily:"'Orbitron',monospace",fontSize:'0.9rem',outline:'none',textAlign:'center'}};
 
@@ -69,116 +71,78 @@ function DeviationChart({deviations}){
 // MAIN COMPONENT
 // ══════════════════════════════════════════════════════════════════════════════
 export default function CompassErrorPage({user}){
-  const[lockedPos,setLockedPos]=useState(null);
-  const[lockedTime,setLockedTime]=useState(null);
-  const[displayNow,setDisplayNow]=useState(new Date());
-  const[gpsLoading,setGpsLoading]=useState(false);
-  const[posErr,setPosErr]=useState('');
-  const[manualMode,setManualMode]=useState(false);
-  const[manualLat,setManualLat]=useState('');
-  const[manualLon,setManualLon]=useState('');
-  const[manualUTC,setManualUTC]=useState('');
-  // ⬇ FIX: device course shown as suggestion ONLY — never auto-fills heading
-  const[deviceCourse,setDeviceCourse]=useState(null);
-  const[body,setBody]=useState('Sun');
-  const[gyroHdg,setGyroHdg]=useState('');
-  const[stdHdg,setStdHdg]=useState('');
-  const[gyroObs,setGyroObs]=useState('');
-  const[gyroLock,setGyroLock]=useState(false);
-  const[varMag,setVarMag]=useState('0.0');
-  const[varDir,setVarDir]=useState('W');
-  const[varDDdt,setVarDDdt]=useState(null);
-  const[ampRising,setAmpRising]=useState(true);
-  const[ampCmpBrg,setAmpCmpBrg]=useState('');
-  const[ampGyroBrg,setAmpGyroBrg]=useState('');
-  const[polCmpBrg,setPolCmpBrg]=useState('');
-  const[polGyroBrg,setPolGyroBrg]=useState('');
-  const[activeTab,setActiveTab]=useState('calc');
-  const[history,setHistory]=useState(()=>{try{return JSON.parse(localStorage.getItem(LS_HIST)||'[]');}catch{return[];}});
-  const[shipName,setShipName]=useState('');
-  const[devCard,setDevCard]=useState(Array(8).fill(''));
-  const[devSaving,setDevSaving]=useState(false);
-  const[devSaved,setDevSaved]=useState(false);
-  const[devLoading,setDevLoading]=useState(false);
-  const[copied,setCopied]=useState(false);
-  const[isMob,setIsMob]=useState(window.innerWidth<720);
+  const[lockedPos,  setLockedPos]  = useState(null);
+  const[lockedTime, setLockedTime] = useState(null);
+  const[displayNow, setDisplayNow] = useState(new Date());
+  const[gpsLoading, setGpsLoading] = useState(false);
+  const[posErr,     setPosErr]     = useState('');
+  const[manualMode, setManualMode] = useState(false);
+  const[manualLat,  setManualLat]  = useState('');
+  const[manualLon,  setManualLon]  = useState('');
+  const[manualUTC,  setManualUTC]  = useState('');
+  // ── GPS COG/SOG (from Geolocation API — direction of travel, NOT device compass)
+  const[gpsCOG,     setGpsCOG]    = useState(null);  // Course Over Ground °
+  const[gpsSOG,     setGpsSOG]    = useState(null);  // Speed Over Ground kts
+  const[body,       setBody]       = useState('Sun');
+  const[gyroHdg,    setGyroHdg]   = useState('');
+  const[stdHdg,     setStdHdg]    = useState('');
+  const[gyroObs,    setGyroObs]   = useState('');
+  const[gyroLock,   setGyroLock]  = useState(false);
+  const[varMag,     setVarMag]    = useState('0.0');
+  const[varDir,     setVarDir]    = useState('W');
+  const[varDDdt,    setVarDDdt]   = useState(null);
+  const[ampRising,  setAmpRising] = useState(true);
+  const[ampCmpBrg,  setAmpCmpBrg]= useState('');
+  const[ampGyroBrg, setAmpGyroBrg]=useState('');
+  const[polCmpBrg,  setPolCmpBrg]= useState('');
+  const[polGyroBrg, setPolGyroBrg]=useState('');
+  const[activeTab,  setActiveTab] = useState('calc');
+  const[history,    setHistory]   = useState(()=>{try{return JSON.parse(localStorage.getItem(LS_HIST)||'[]');}catch{return[];}});
+  const[expandedHist,setExpandedHist]=useState(null); // which history entry is expanded
+  const[shipName,   setShipName]  = useState('');
+  const[devCard,    setDevCard]   = useState(Array(8).fill(''));
+  const[devSaving,  setDevSaving] = useState(false);
+  const[devSaved,   setDevSaved]  = useState(false);
+  const[devLoading, setDevLoading]= useState(false);
+  const[copied,     setCopied]    = useState(false);
+  const[isMob,      setIsMob]     = useState(window.innerWidth<720);
 
-  const calcPos=manualMode&&manualLat&&manualLon?{lat:parseFloat(manualLat),lon:parseFloat(manualLon)}:lockedPos;
-  const calcTime=manualMode&&manualUTC?(()=>{try{return new Date(manualUTC.includes('T')?manualUTC:`${new Date().toISOString().slice(0,10)}T${manualUTC}Z`);}catch{return lockedTime;}})():lockedTime;
+  const calcPos  = manualMode&&manualLat&&manualLon ? {lat:parseFloat(manualLat),lon:parseFloat(manualLon)} : lockedPos;
+  const calcTime = manualMode&&manualUTC ? (()=>{try{return new Date(manualUTC.includes('T')?manualUTC:`${new Date().toISOString().slice(0,10)}T${manualUTC}Z`);}catch{return lockedTime;}})() : lockedTime;
 
   useEffect(()=>{const o=()=>setIsMob(window.innerWidth<720);window.addEventListener('resize',o);return()=>window.removeEventListener('resize',o);},[]);
   useEffect(()=>{const t=setInterval(()=>setDisplayNow(new Date()),1000);return()=>clearInterval(t);},[]);
 
+  // ── GPS Lock — captures COG/SOG from Geolocation heading
   const fetchAndLockGPS=useCallback(()=>{
-    if(!navigator.geolocation){
-      setPosErr('GPS not available');
-      setManualMode(true);
-      return;
-    }
-    setGpsLoading(true);
-    setPosErr('');
-
+    if(!navigator.geolocation){setPosErr('GPS not available');setManualMode(true);return;}
+    setGpsLoading(true);setPosErr('');
     let watchId=null;
-
     const onSuccess=p=>{
       const pos={lat:p.coords.latitude,lon:p.coords.longitude};
-      setLockedPos(pos);
-      setLockedTime(new Date());
-      setGpsLoading(false);
-      setManualLat(p.coords.latitude.toFixed(6));
-      setManualLon(p.coords.longitude.toFixed(6));
-      try{
-        const w=computeWMM2025(pos.lat,pos.lon,0,new Date());
-        setVarMag(Math.abs(w.variation).toFixed(2));
-        setVarDir(w.variation>=0?'E':'W');
-        setVarDDdt(w.dDdt);
-      }catch(e){}
-      if(watchId!==null){
-        navigator.geolocation.clearWatch(watchId);
-        watchId=null;
+      setLockedPos(pos);setLockedTime(new Date());setGpsLoading(false);
+      setManualLat(p.coords.latitude.toFixed(6));setManualLon(p.coords.longitude.toFixed(6));
+      // ── GPS COG: direction of travel (null when stationary or unavailable)
+      if(p.coords.heading!=null&&!isNaN(p.coords.heading)){
+        setGpsCOG(parseFloat(p.coords.heading.toFixed(1)));
       }
+      if(p.coords.speed!=null&&!isNaN(p.coords.speed)){
+        setGpsSOG(parseFloat((p.coords.speed*1.94384).toFixed(1)));
+      }
+      try{const w=computeWMM2025(pos.lat,pos.lon,0,new Date());setVarMag(Math.abs(w.variation).toFixed(2));setVarDir(w.variation>=0?'E':'W');setVarDDdt(w.dDdt);}catch(e){}
+      if(watchId!=null){navigator.geolocation.clearWatch(watchId);watchId=null;}
     };
-
-    const onError=e=>{
-      setGpsLoading(false);
-      setPosErr(`GPS error code:${e.code} — ${e.message}`);
-      setManualMode(true);
-      if(watchId!==null){
-        navigator.geolocation.clearWatch(watchId);
-        watchId=null;
-      }
-    };
-
-    watchId=navigator.geolocation.watchPosition(
-      onSuccess,
-      onError,
-      {enableHighAccuracy:true,timeout:60000,maximumAge:0}
-    );
-
-    setTimeout(()=>{
-      if(watchId!==null){
-        navigator.geolocation.clearWatch(watchId);
-        watchId=null;
-      }
-      setGpsLoading(false);
-    },90000);
-
+    const onError=e=>{setGpsLoading(false);setPosErr(`GPS error: ${e.message}`);setManualMode(true);if(watchId!=null){navigator.geolocation.clearWatch(watchId);watchId=null;}};
+    watchId=navigator.geolocation.watchPosition(onSuccess,onError,{enableHighAccuracy:true,timeout:60000,maximumAge:0});
+    setTimeout(()=>{if(watchId!=null){navigator.geolocation.clearWatch(watchId);watchId=null;}setGpsLoading(false);},90000);
   },[]);
   useEffect(()=>{fetchAndLockGPS();},[fetchAndLockGPS]);
 
-  // Device orientation — show as suggestion badge ONLY, never auto-fill fields
-  useEffect(()=>{
-    const h=e=>{let c=null;if(e.webkitCompassHeading!=null)c=e.webkitCompassHeading;else if(e.absolute&&e.alpha!=null)c=norm360(360-e.alpha);if(c!=null)setDeviceCourse(c);};
-    const tryL=()=>{window.addEventListener('deviceorientationabsolute',h,true);window.addEventListener('deviceorientation',h,true);};
-    if(typeof DeviceOrientationEvent!=='undefined'&&typeof DeviceOrientationEvent.requestPermission==='function'){DeviceOrientationEvent.requestPermission().then(p=>{if(p==='granted')tryL();}).catch(()=>{});}else{tryL();}
-    return()=>{window.removeEventListener('deviceorientationabsolute',h,true);window.removeEventListener('deviceorientation',h,true);};
-  },[]);
-
+  // Firebase deviation card load
   useEffect(()=>{if(!user)return;setDevLoading(true);getDoc(doc(db,'users',user.uid,'compass','deviation_card')).then(s=>{if(s.exists()){const d=s.data();setShipName(d.shipName||'');setDevCard(d.deviations||Array(8).fill(''));}setDevLoading(false);}).catch(()=>setDevLoading(false));},[user?.uid]);
-
   const saveDevCard=async()=>{if(!user)return;setDevSaving(true);try{await setDoc(doc(db,'users',user.uid,'compass','deviation_card'),{shipName,deviations:devCard,updatedAt:serverTimestamp()});setDevSaved(true);setTimeout(()=>setDevSaved(false),3000);}catch(e){alert('Save failed: '+e.message);}setDevSaving(false);};
 
-  // Astronomical calculations
+  // ── Astronomical calculations
   const jd=calcTime?julianDate(calcTime):julianDate(displayNow);
   const ghaAr=calcPos?ghaAries(jd):null;
   const bp=calcPos?getBodyPos(body,jd):null;
@@ -193,6 +157,7 @@ export default function CompassErrorPage({user}){
   const stdErr=trueBrg!==null&&gyroHdg!==''&&stdHdg!==''?normErr(trueBrg-stdBrg):null;
   const deviation=stdErr!==null?stdErr-varSigned:null;
 
+  // Amplitude
   const ampA=bp&&calcPos?Math.asin(clamp(Math.sin(toRad(bp.Dec))/Math.cos(toRad(calcPos.lat)),-1,1))*180/Math.PI:null;
   const ampTrueBrg=ampA!==null?norm360(ampRising?(bp.Dec>=0?90-Math.abs(ampA):90+Math.abs(ampA)):(bp.Dec>=0?270+Math.abs(ampA):270-Math.abs(ampA))):null;
   useEffect(()=>{if(activeTab==='amplitude'&&az){if(!ampCmpBrg)setAmpCmpBrg(az.azimuth.toFixed(1));if(!ampGyroBrg)setAmpGyroBrg(az.azimuth.toFixed(1));}},[ activeTab,az?.azimuth]);
@@ -200,6 +165,7 @@ export default function CompassErrorPage({user}){
   const ampGyroErr=ampTrueBrg!==null&&ampGyroBrg?normErr(ampTrueBrg-parseFloat(ampGyroBrg)):null;
   const ampStdDev=ampCmpErr!==null?ampCmpErr-varSigned:null;
 
+  // Polaris
   const polBp=calcPos?getBodyPos('Polaris ⭐',jd):null;
   const polAz=polBp&&calcPos?calcAz(calcPos.lat,calcPos.lon,polBp.GHA,polBp.Dec):null;
   const polTrue=polAz?polAz.azimuth:null;
@@ -208,17 +174,123 @@ export default function CompassErrorPage({user}){
   const polGyroErr=polTrue!==null&&polGyroBrg?normErr(polTrue-parseFloat(polGyroBrg)):null;
   const polDev=polCmpErr!==null?polCmpErr-varSigned:null;
 
+  // ── Body rankings — best bodies for compass error at current position/time
+  const bodyRankings=useMemo(()=>{
+    if(!calcPos)return[];
+    const jdCalc=calcTime?julianDate(calcTime):julianDate(new Date());
+    const allBodies=[
+      {name:'Sun',icon:'☀️'},{name:'Moon',icon:'🌙'},{name:'Venus',icon:'♀'},{name:'Mars',icon:'♂'},{name:'Jupiter',icon:'♃'},{name:'Saturn',icon:'♄'},
+      ...NAV_STARS.map(s=>({name:s.name,icon:'⭐'})),
+    ];
+    return allBodies.map(b=>{
+      try{
+        const bp2=getBodyPos(b.name,jdCalc);if(!bp2)return{...b,alt:-99,az:0,dec:0,amp:null,visible:false,suitable:false};
+        const r=calcAz(calcPos.lat,calcPos.lon,bp2.GHA,bp2.Dec);
+        const altA=r.altitude+refraction(r.altitude);
+        const cosLat=Math.cos(toRad(calcPos.lat));
+        const sinA=cosLat>0.01?Math.sin(toRad(bp2.Dec))/cosLat:0;
+        const amp=Math.abs(sinA)<=1?Math.abs(toDeg(Math.asin(clamp(sinA,-1,1)))):null;
+        // Quality: ideal 25-65°, ok 10-25° or 65-80°
+        const quality=altA>25&&altA<65?'best':altA>10&&altA<80?'ok':'poor';
+        return{...b,alt:altA,az:r.azimuth,dec:bp2.Dec,amp,visible:altA>0,suitable:altA>10&&altA<80,quality};
+      }catch{return{...b,alt:-99,az:0,dec:0,amp:null,visible:false,suitable:false,quality:'poor'};}
+    }).sort((a,b2)=>{
+      if(a.quality==='best'&&b2.quality!=='best')return -1;
+      if(a.quality!=='best'&&b2.quality==='best')return 1;
+      if(a.suitable&&!b2.suitable)return -1;
+      if(!a.suitable&&b2.suitable)return 1;
+      return b2.alt-a.alt;
+    });
+  },[calcPos?.lat,calcPos?.lon,calcTime?.getTime()]);
+
+  // ── Full formatted log text (used for both copy and history save)
+  const buildFullLog=useCallback(()=>{
+    if(!calcPos||trueBrg===null)return'';
+    const LINE='═'.repeat(44);
+    const t=calcTime||displayNow;
+    return[
+      LINE,
+      '       COMPASS ERROR OBSERVATION',
+      LINE,
+      `Date/UTC  : ${fmtUTC(t)}`,
+      `LMT       : ${fmtLMT(t,calcPos.lon)}`,
+      `Position  : ${fmtDMS(calcPos.lat,'N','S')}   ${fmtDMS(calcPos.lon,'E','W')}`,
+      '',
+      `Body      : ${body}`,
+      `True Brg  : ${fmtBrg(trueBrg)}`,
+      az ? `Dec       : ${az.Dec>=0?'N':'S'} ${Math.abs(az.Dec).toFixed(2)}°` : '',
+      az ? `GHA       : ${az.GHA.toFixed(2)}°    LHA : ${az.LHA.toFixed(2)}°` : '',
+      altApp!==null ? `App. Alt  : ${altApp.toFixed(2)}°` : '',
+      '',
+      `SHIP'S HEADING`,
+      `  Gyro    : ${gyroHdg ? ghNum.toFixed(1)+'°' : '—'}`,
+      `  Standard: ${stdHdg  ? shNum.toFixed(1)+'°' : '—'}`,
+      '',
+      `OBSERVED BEARINGS`,
+      `  True     : ${fmtBrg(trueBrg)}`,
+      `  Gyro     : ${fmtBrg(gyroBrgNum)}`,
+      `  Standard : ${gyroHdg&&stdHdg ? fmtBrg(stdBrg) : '—'}`,
+      '',
+      `COMPASS ERROR`,
+      `  Gyro Err : ${gyroHdg&&stdHdg ? fmtErr(gyroErr) : '—'}`,
+      `  Std Err  : ${gyroHdg&&stdHdg ? fmtErr(stdErr)  : '—'}`,
+      '',
+      `Variation  : ${varMag}° ${varDir}${varDDdt!==null?`  (Annual Δ ${varDDdt>=0?'+':''}${(varDDdt*60).toFixed(2)}′/yr)`:''}`,
+      `Deviation  : ${gyroHdg&&stdHdg ? fmtErr(deviation) : '—'}`,
+      LINE,
+    ].join('\n');
+  },[calcPos,calcTime,displayNow,body,trueBrg,az,altApp,gyroHdg,stdHdg,ghNum,shNum,gyroBrgNum,stdBrg,gyroErr,stdErr,varMag,varDir,varDDdt,deviation]);
+
+  const copyLog=()=>{
+    const log=buildFullLog();
+    if(!log)return;
+    navigator.clipboard.writeText(log).then(()=>{setCopied(true);setTimeout(()=>setCopied(false),2500);});
+  };
+
   const adjGyro=d=>{setGyroLock(true);setGyroObs(p=>norm360((parseFloat(p!==''?p:(trueBrg??0))+d)).toFixed(1));};
   const adjVar=d=>setVarMag(p=>Math.max(0,parseFloat(((parseFloat(p)||0)+d).toFixed(2))).toFixed(2));
   const resetGyro=()=>{setGyroLock(false);setGyroObs('');};
 
-  const saveToHistory=()=>{if(!calcPos||trueBrg===null)return;const e={id:Date.now(),dt:fmtUTC(calcTime||displayNow),pos:`${fmtDMS(calcPos.lat,'N','S')} ${fmtDMS(calcPos.lon,'E','W')}`,body,trueBrg:trueBrg.toFixed(1),gyroErr:fmtErr(gyroErr),stdErr:fmtErr(stdErr),dev:fmtErr(deviation),varStr:`${varMag}° ${varDir}`,gyroHdg:ghNum.toFixed(1),stdHdg:shNum.toFixed(1)};const h=[e,...history].slice(0,10);setHistory(h);localStorage.setItem(LS_HIST,JSON.stringify(h));};
+  const saveToHistory=()=>{
+    if(!calcPos||trueBrg===null)return;
+    const t=calcTime||displayNow;
+    const entry={
+      id:Date.now(),
+      dt:fmtUTC(t),
+      pos:{lat:calcPos.lat,lon:calcPos.lon},
+      posStr:`${fmtDMS(calcPos.lat,'N','S')} ${fmtDMS(calcPos.lon,'E','W')}`,
+      body,
+      trueBrg:trueBrg.toFixed(1),
+      gyroBrg:gyroBrgNum.toFixed(1),
+      stdBrg:gyroHdg&&stdHdg?stdBrg.toFixed(1):'—',
+      gyroHdg:ghNum.toFixed(1),
+      stdHdg:shNum.toFixed(1),
+      gyroErr:gyroHdg&&stdHdg?fmtErr(gyroErr):'—',
+      stdErr:gyroHdg&&stdHdg?fmtErr(stdErr):'—',
+      dev:gyroHdg&&stdHdg?fmtErr(deviation):'—',
+      varStr:`${varMag}° ${varDir}`,
+      varDDdtStr:varDDdt!==null?`${varDDdt>=0?'+':''}${(varDDdt*60).toFixed(2)}′/yr`:null,
+      GHA:az?.GHA.toFixed(2),
+      LHA:az?.LHA.toFixed(2),
+      Dec:az?.Dec.toFixed(2),
+      altitude:altApp?.toFixed(2),
+      fullLog:buildFullLog(),
+    };
+    const h=[entry,...history].slice(0,15);
+    setHistory(h);localStorage.setItem(LS_HIST,JSON.stringify(h));
+  };
 
-  const copyLog=()=>{if(!calcPos||trueBrg===null)return;const t=[`COMPASS ERROR — ${fmtUTC(calcTime||displayNow)}`,`${fmtDMS(calcPos.lat,'N','S')}  ${fmtDMS(calcPos.lon,'E','W')}`,`Body: ${body}`,``,`HEADING  Gyro: ${gyroHdg||'—'}°  Std: ${stdHdg||'—'}°`,`BEARING  True: ${fmtBrg(trueBrg)}  Gyro: ${fmtBrg(gyroBrgNum)}  Std: ${fmtBrg(stdBrg)}`,`ERROR    Gyro: ${fmtErr(gyroErr)}  Std: ${fmtErr(stdErr)}`,`VARIATION: ${varMag}° ${varDir}  DEVIATION: ${fmtErr(deviation)}`,].join('\n');navigator.clipboard.writeText(t).then(()=>{setCopied(true);setTimeout(()=>setCopied(false),2500);});};
+  const copyHistoryEntry=e=>{navigator.clipboard.writeText(e.fullLog||'No log saved');};
 
+  // UI helpers
   const numInp=(val,onChange,extra={})=>(<input type="number" min="0" max="360" step="0.1" value={val} onChange={e=>onChange(e.target.value)} style={{...DC.inp,...extra}}/>);
   const adjBtn=(l,f)=>(<button onClick={f} style={{padding:'9px 13px',background:'var(--bg2)',border:'1px solid var(--border2)',borderRadius:7,color:'var(--text2)',cursor:'pointer',fontSize:'1rem',fontWeight:700}}>{l}</button>);
   const tabBtn=(k,icon,lbl)=>(<button key={k} onClick={()=>setActiveTab(k)} style={{padding:'8px 12px',border:'none',borderBottom:`2px solid ${activeTab===k?'var(--cyan)':'transparent'}`,background:'transparent',color:activeTab===k?'var(--cyan)':'var(--text3)',fontFamily:"'Exo 2',sans-serif",fontSize:'0.7rem',fontWeight:600,cursor:'pointer',textTransform:'uppercase',letterSpacing:'0.06em',display:'flex',alignItems:'center',gap:5,whiteSpace:'nowrap',transition:'all 0.2s'}}>{icon} {lbl}</button>);
+
+  // Body altitude quality color
+  const qClr=q=>q==='best'?'var(--green)':q==='ok'?'var(--gold)':'var(--text3)';
+  const qBg=q=>q==='best'?'rgba(0,200,150,0.1)':q==='ok'?'rgba(240,165,0,0.08)':'transparent';
+  const qBorder=q=>q==='best'?'rgba(0,200,150,0.35)':q==='ok'?'rgba(240,165,0,0.3)':'var(--border)';
 
   return(<div style={{padding:'1rem',maxWidth:980,margin:'0 auto',width:'100%'}}>
 
@@ -233,8 +305,10 @@ export default function CompassErrorPage({user}){
         <span style={{padding:'3px 9px',borderRadius:100,fontSize:'0.62rem',background:calcPos?'rgba(0,200,150,0.1)':'rgba(240,165,0,0.1)',border:`1px solid ${calcPos?'rgba(0,200,150,0.3)':'rgba(240,165,0,0.3)'}`,color:calcPos?'var(--green)':'var(--gold)'}}>
           {gpsLoading?'⏳ Locking…':calcPos?'📍 Position Locked':posErr?'⚠️ No GPS':'⏳ GPS…'}
         </span>
-        {/* ⬇ FIX: device course shown as SUGGESTION badge only */}
-        {deviceCourse!==null&&<span style={{padding:'3px 9px',borderRadius:100,fontSize:'0.62rem',background:'rgba(0,200,150,0.08)',border:'1px solid rgba(0,200,150,0.3)',color:'var(--green)',cursor:'default'}} title="Device compass heading — enter manually in Ship's Heading fields">🧭 Suggestion: {norm360(deviceCourse).toFixed(0)}°</span>}
+        {/* ── GPS COG badge — direction of travel from GPS, NOT device compass */}
+        {gpsCOG!==null&&<span style={{padding:'3px 9px',borderRadius:100,fontSize:'0.62rem',background:'rgba(0,200,150,0.08)',border:'1px solid rgba(0,200,150,0.3)',color:'var(--green)',cursor:'default'}} title="Course Over Ground — direction of ship's movement from GPS">
+          🛳 COG: {gpsCOG.toFixed(0)}°{gpsSOG!==null?` · ${gpsSOG}kt`:''}
+        </span>}
       </div>
     </div>
 
@@ -254,8 +328,7 @@ export default function CompassErrorPage({user}){
       </div>
       {manualMode&&(<div style={{marginTop:'0.8rem',paddingTop:'0.8rem',borderTop:'1px solid var(--border)',display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(180px,1fr))',gap:'0.6rem'}}>
         {[{l:'Latitude (+ N, − S)',v:manualLat,s:setManualLat,ph:'30.610'},{l:'Longitude (+ E, − W)',v:manualLon,s:setManualLon,ph:'122.080'},{l:'UTC Time HH:MM:SS',v:manualUTC,s:setManualUTC,ph:'14:30:00'}].map(({l,v,s,ph})=>(
-          <div key={l}><label style={{display:'block',fontSize:'0.6rem',color:'var(--text3)',textTransform:'uppercase',letterSpacing:'0.09em',marginBottom:4}}>{l}</label><input value={v} onChange={e=>s(e.target.value)} placeholder={ph} style={{...DC.inp,border:'1.5px solid var(--gold)',color:'var(--gold)'}}/></div>
-        ))}
+          <div key={l}><label style={{display:'block',fontSize:'0.6rem',color:'var(--text3)',textTransform:'uppercase',letterSpacing:'0.09em',marginBottom:4}}>{l}</label><input value={v} onChange={e=>s(e.target.value)} placeholder={ph} style={{...DC.inp,border:'1.5px solid var(--gold)',color:'var(--gold)'}}/></div>))}
         <div style={{display:'flex',alignItems:'flex-end'}}><button onClick={()=>{if(manualLat&&manualLon){const w=computeWMM2025(parseFloat(manualLat),parseFloat(manualLon),0,new Date());setVarMag(Math.abs(w.variation).toFixed(2));setVarDir(w.variation>=0?'E':'W');setVarDDdt(w.dDdt);}}} style={{width:'100%',padding:'9px',background:'rgba(0,180,216,0.1)',border:'1px solid rgba(0,180,216,0.3)',borderRadius:8,color:'var(--cyan)',fontFamily:"'Exo 2',sans-serif",fontSize:'0.72rem',fontWeight:600,cursor:'pointer'}}>🌐 Compute Variation</button></div>
       </div>)}
     </div>
@@ -268,26 +341,65 @@ export default function CompassErrorPage({user}){
     {/* ══ AZIMUTH TAB ══ */}
     {activeTab==='calc'&&(<div style={{display:'grid',gridTemplateColumns:isMob?'1fr':'1fr 1fr',gap:'1rem'}}>
       <div style={{display:'flex',flexDirection:'column',gap:'0.75rem'}}>
-        {/* Body */}
+
+        {/* ── BODY SELECTOR with rankings */}
         <div style={DC.card}>
           <div style={DC.hdr}>{BODY_ICON[body]||'⭐'} CELESTIAL BODY</div>
-          <select value={body} onChange={e=>{setBody(e.target.value);resetGyro();}} style={{...DC.inp,cursor:'pointer'}}>
-            {BODY_GROUPS.map(g=><optgroup key={g.group} label={g.group}>{g.items.map(it=><option key={it} value={it}>{it}</option>)}</optgroup>)}
+
+          {/* Best bodies quick-tap panel */}
+          {calcPos&&bodyRankings.length>0&&(<>
+            <div style={{fontSize:'0.58rem',color:'var(--text3)',textTransform:'uppercase',letterSpacing:'0.08em',marginBottom:6}}>
+              🌟 Best bodies now — tap to select
+            </div>
+            <div style={{display:'flex',flexWrap:'wrap',gap:5,marginBottom:'0.7rem'}}>
+              {bodyRankings.filter(b=>b.visible&&b.suitable).slice(0,8).map(b=>(
+                <button key={b.name} onClick={()=>{setBody(b.name);resetGyro();}}
+                  style={{padding:'5px 8px',borderRadius:8,border:`1px solid ${body===b.name?'var(--cyan)':qBorder(b.quality)}`,background:body===b.name?'rgba(0,180,216,0.15)':qBg(b.quality),color:body===b.name?'var(--cyan)':qClr(b.quality),fontSize:'0.63rem',cursor:'pointer',display:'flex',flexDirection:'column',alignItems:'center',gap:1,minWidth:52}}>
+                  <span style={{fontSize:'0.78rem'}}>{b.icon} {b.name.split(' ')[0]}</span>
+                  <span style={{fontSize:'0.56rem',opacity:0.85}}>{b.alt.toFixed(0)}° · Zn{b.az.toFixed(0)}°</span>
+                  {b.amp!==null&&<span style={{fontSize:'0.54rem',opacity:0.7}}>Amp {b.amp.toFixed(0)}°</span>}
+                </button>))}
+            </div>
+          </>)}
+
+          {/* Dropdown — all bodies with Dec + altitude info */}
+          <select value={body} onChange={e=>{setBody(e.target.value);resetGyro();}} style={{...DC.inp,cursor:'pointer',fontSize:'0.78rem'}}>
+            <optgroup label="─── Solar System ───">
+              {PLANET_LIST.map(b=>{
+                const r=bodyRankings.find(x=>x.name===b);
+                const info=r?` — Alt:${r.alt.toFixed(0)}° Dec:${r.dec.toFixed(1)}°${r.amp!=null?' Amp:'+r.amp.toFixed(0)+'°':''}`:' ';
+                const prefix=r?(r.quality==='best'?'✓ ':r.suitable?'◦ ':'✗ '):'';
+                return<option key={b} value={b}>{prefix}{b}{info}</option>;
+              })}
+            </optgroup>
+            <optgroup label="─── Navigation Stars ───">
+              {NAV_STARS.map(s=>{
+                const r=bodyRankings.find(x=>x.name===s.name);
+                const info=r&&r.visible?` — Alt:${r.alt.toFixed(0)}° Dec:${r.dec.toFixed(1)}°${r.amp!=null?' Amp:'+r.amp.toFixed(0)+'°':''}`:' (below horizon)';
+                const prefix=r?(r.quality==='best'?'✓ ':r.suitable?'◦ ':r.visible?'↓ ':'✗ '):'';
+                return<option key={s.name} value={s.name}>{prefix}{s.name}{info}</option>;
+              })}
+            </optgroup>
           </select>
+
           {az&&<div style={{marginTop:'0.7rem',display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:'0.4rem'}}>
-            {[{l:'TRUE BRG',v:fmtBrg(trueBrg),c:'var(--cyan)'},{l:'APP. ALT',v:`${(altApp??0).toFixed(1)}°`,c:(altApp??0)<-0.6?'var(--red)':'var(--green)'},{l:'DEC',v:`${bp.Dec.toFixed(1)}°`,c:'var(--text)'}].map(({l,v,c})=>(
+            {[{l:'TRUE BRG',v:fmtBrg(trueBrg),c:'var(--cyan)'},{l:'APP. ALT',v:`${(altApp??0).toFixed(1)}°`,c:(altApp??0)<-0.6?'var(--red)':bodyRankings.find(b=>b.name===body)?.quality==='best'?'var(--green)':'var(--gold)'},{l:'DEC',v:`${az.Dec.toFixed(1)}°`,c:'var(--text)'}].map(({l,v,c})=>(
               <div key={l} style={{background:'var(--bg2)',borderRadius:7,padding:'6px 8px',textAlign:'center'}}>
                 <div style={{fontSize:'0.55rem',color:'var(--text3)',marginBottom:2}}>{l}</div>
                 <div style={{fontFamily:"'Orbitron',monospace",fontSize:'0.76rem',color:c,fontWeight:700}}>{v}</div>
               </div>))}
           </div>}
           {altApp!==null&&altApp<-0.6&&<div style={{marginTop:8,padding:'7px 10px',background:'rgba(255,71,87,0.08)',border:'1px solid rgba(255,71,87,0.25)',borderRadius:8,fontSize:'0.7rem',color:'var(--red)'}}>⚠️ Below horizon — azimuth for reference only</div>}
+          {altApp!==null&&altApp>0&&altApp<15&&<div style={{marginTop:8,padding:'7px 10px',background:'rgba(240,165,0,0.08)',border:'1px solid rgba(240,165,0,0.25)',borderRadius:8,fontSize:'0.7rem',color:'var(--gold)'}}>⚠️ Low altitude ({altApp.toFixed(1)}°) — refraction errors likely. Best above 15°.</div>}
+          {altApp!==null&&altApp>75&&<div style={{marginTop:8,padding:'7px 10px',background:'rgba(240,165,0,0.08)',border:'1px solid rgba(240,165,0,0.25)',borderRadius:8,fontSize:'0.7rem',color:'var(--gold)'}}>⚠️ High altitude ({altApp.toFixed(1)}°) — azimuth changes rapidly. Best below 75°.</div>}
         </div>
 
-        {/* Ship Heading — NO auto-fill, user enters manually */}
+        {/* Ship Heading */}
         <div style={DC.card}>
           <div style={DC.hdr}>🚢 SHIP'S HEADING</div>
-          {deviceCourse!==null&&<div style={{marginBottom:'0.6rem',padding:'6px 9px',background:'rgba(0,200,150,0.06)',border:'1px solid rgba(0,200,150,0.2)',borderRadius:7,fontSize:'0.68rem',color:'var(--text3)'}}>💡 Device compass suggests <span style={{color:'var(--green)',fontWeight:700}}>{norm360(deviceCourse).toFixed(0)}°</span> — enter your actual compass readings below</div>}
+          {gpsCOG!==null&&<div style={{marginBottom:'0.6rem',padding:'6px 9px',background:'rgba(0,200,150,0.06)',border:'1px solid rgba(0,200,150,0.2)',borderRadius:7,fontSize:'0.68rem',color:'var(--text3)'}}>
+            🛳 GPS COG: <strong style={{color:'var(--green)'}}>{gpsCOG.toFixed(0)}°</strong>{gpsSOG!==null?` · ${gpsSOG}kt`:''} — direction of travel. Enter actual gyro/magnetic compass headings below.
+          </div>}
           <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'0.7rem'}}>
             {[{l:'Gyro Compass',v:gyroHdg,s:setGyroHdg},{l:'Standard (Mag.)',v:stdHdg,s:setStdHdg}].map(({l,v,s})=>(
               <div key={l}><label style={{display:'block',fontSize:'0.59rem',color:'var(--text3)',textTransform:'uppercase',letterSpacing:'0.1em',marginBottom:5}}>{l}</label>{numInp(v,s)}</div>))}
@@ -333,7 +445,7 @@ export default function CompassErrorPage({user}){
               <div style={{fontSize:'0.62rem',color:'#3a4a6a',marginTop:1}}>{fmtUTC(calcTime||displayNow)}</div>
             </div>
             <div style={{display:'flex',gap:5}}>
-              <button onClick={copyLog} disabled={!calcPos||trueBrg===null} style={{padding:'6px 11px',background:copied?'#e8f6ee':'#e2ecf5',border:`1px solid ${copied?'#007a50':'#b0c2d4'}`,borderRadius:8,color:copied?'#007a50':'#2a3a5a',fontSize:'0.69rem',fontWeight:600,cursor:'pointer'}}>{copied?'✅ Copied':'📋 Copy'}</button>
+              <button onClick={copyLog} disabled={!calcPos||trueBrg===null} style={{padding:'6px 11px',background:copied?'#e8f6ee':'#e2ecf5',border:`1px solid ${copied?'#007a50':'#b0c2d4'}`,borderRadius:8,color:copied?'#007a50':'#2a3a5a',fontSize:'0.69rem',fontWeight:600,cursor:'pointer'}}>{copied?'✅ Copied':'📋 Copy Log'}</button>
               <button onClick={saveToHistory} disabled={!calcPos||trueBrg===null} style={{padding:'6px 11px',background:'#e8f0fe',border:'1px solid #a0b8d8',borderRadius:8,color:'#1a3a8a',fontSize:'0.69rem',fontWeight:600,cursor:'pointer'}}>💾 Log</button>
             </div>
           </div>
@@ -357,6 +469,7 @@ export default function CompassErrorPage({user}){
                 <button onClick={()=>adjVar(-0.01)} style={LT.adjBtn}>‹</button><button onClick={()=>adjVar(0.01)} style={LT.adjBtn}>›</button>
               </div>
             </div>
+            {varDDdt!==null&&<div style={{fontSize:'0.62rem',color:'#6a7a9a',padding:'2px 0'}}>Annual Δ: {varDDdt>=0?'+':''}{(varDDdt*60).toFixed(2)}′/yr</div>}
             <div style={LT.secHdr}>Deviation:</div>
             <div style={{...LT.row,borderBottom:'none'}}><span style={LT.lbl}>Standard:</span><span style={{...LT.val,color:eClr(deviation),fontSize:'0.94rem',fontWeight:700}}>{gyroHdg&&stdHdg?fmtErr(deviation):'Enter headings'}</span></div>
             {az&&<div style={{marginTop:'0.8rem',paddingTop:'0.7rem',borderTop:'1px solid #d5e2ee',display:'grid',gridTemplateColumns:'1fr 1fr',gap:'4px 10px',fontSize:'0.65rem',color:'#5a6a8a',fontFamily:'monospace'}}>
@@ -411,7 +524,7 @@ export default function CompassErrorPage({user}){
     {activeTab==='polaris'&&(<div style={{display:'grid',gridTemplateColumns:isMob?'1fr':'1fr 1fr',gap:'1rem'}}>
       <div>
         <div style={{...DC.card,background:'rgba(0,180,216,0.06)',border:'1px solid rgba(0,180,216,0.2)'}}>
-          <div style={{fontSize:'0.74rem',color:'var(--text2)',lineHeight:1.8}}>Polaris (North Star) — always within ~1° of true north. Bearings auto-filled from computed position, edit as observed. <strong style={{color:'var(--gold)'}}>Valid Lat 10°N–75°N.</strong></div>
+          <div style={{fontSize:'0.74rem',color:'var(--text2)',lineHeight:1.8}}>Polaris (North Star) — always within ~1° of true north. Bearings auto-filled, edit as observed. <strong style={{color:'var(--gold)'}}>Valid Lat 10°N–75°N.</strong></div>
         </div>
         {polAz&&calcPos&&(<div style={DC.card}>
           <div style={DC.hdr}>⭐ POLARIS POSITION</div>
@@ -448,21 +561,43 @@ export default function CompassErrorPage({user}){
     {/* ══ HISTORY TAB ══ */}
     {activeTab==='history'&&(<div>
       <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'0.9rem'}}>
-        <div style={{fontFamily:"'Orbitron',monospace",fontSize:'0.82rem',fontWeight:700,color:'var(--cyan)'}}>📋 OBSERVATION HISTORY</div>
-        {history.length>0&&<button onClick={()=>{setHistory([]);localStorage.removeItem(LS_HIST);}} style={{padding:'5px 12px',background:'rgba(255,71,87,0.08)',border:'1px solid rgba(255,71,87,0.3)',borderRadius:7,color:'var(--red)',fontSize:'0.69rem',fontWeight:600,cursor:'pointer'}}>🗑 Clear</button>}
+        <div style={{fontFamily:"'Orbitron',monospace",fontSize:'0.82rem',fontWeight:700,color:'var(--cyan)'}}>📋 OBSERVATION HISTORY ({history.length}/15)</div>
+        {history.length>0&&<button onClick={()=>{setHistory([]);localStorage.removeItem(LS_HIST);}} style={{padding:'5px 12px',background:'rgba(255,71,87,0.08)',border:'1px solid rgba(255,71,87,0.3)',borderRadius:7,color:'var(--red)',fontSize:'0.69rem',fontWeight:600,cursor:'pointer'}}>🗑 Clear All</button>}
       </div>
       {history.length===0?(<div style={{textAlign:'center',padding:'3rem',color:'var(--text3)'}}><div style={{fontSize:'2.5rem',marginBottom:12}}>📋</div><div style={{fontFamily:"'Orbitron',monospace",fontSize:'0.78rem',marginBottom:6}}>No Saved Observations</div><div style={{fontSize:'0.72rem'}}>In Azimuth tab → 💾 Log to save</div></div>):(
         <div style={{display:'flex',flexDirection:'column',gap:'0.7rem'}}>
           {history.map((h,i)=>(
             <div key={h.id} style={{background:'var(--card)',border:'1px solid var(--border)',borderRadius:12,padding:'1rem'}}>
-              <div style={{display:'flex',justifyContent:'space-between',flexWrap:'wrap',gap:6,marginBottom:'0.6rem'}}>
-                <div style={{fontFamily:"'Orbitron',monospace",fontSize:'0.68rem',color:'var(--cyan)'}}>#{history.length-i} · {h.dt}</div>
-                <div style={{fontSize:'0.65rem',color:'var(--text3)'}}>{h.pos}</div>
+              <div style={{display:'flex',justifyContent:'space-between',flexWrap:'wrap',gap:6,marginBottom:'0.6rem',alignItems:'center'}}>
+                <div style={{fontFamily:"'Orbitron',monospace",fontSize:'0.68rem',color:'var(--cyan)'}}>#{history.length-i} · {h.body} · {h.dt}</div>
+                <div style={{display:'flex',gap:5}}>
+                  <button onClick={()=>copyHistoryEntry(h)} style={{padding:'3px 9px',background:'var(--bg2)',border:'1px solid var(--border2)',borderRadius:6,color:'var(--text2)',fontSize:'0.62rem',cursor:'pointer'}}>📋 Copy</button>
+                  <button onClick={()=>setExpandedHist(expandedHist===h.id?null:h.id)} style={{padding:'3px 9px',background:'var(--bg2)',border:'1px solid var(--border2)',borderRadius:6,color:'var(--text2)',fontSize:'0.62rem',cursor:'pointer'}}>{expandedHist===h.id?'▲ Hide':'▼ Full Log'}</button>
+                </div>
               </div>
-              <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(100px,1fr))',gap:'0.4rem'}}>
-                {[{l:'Body',v:h.body},{l:'True Brg',v:`${h.trueBrg}°`,c:'var(--cyan)'},{l:'Gyro Err',v:h.gyroErr,c:h.gyroErr?.includes('E')?'var(--green)':'var(--red)'},{l:'Std Error',v:h.stdErr,c:h.stdErr?.includes('E')?'var(--green)':'var(--red)'},{l:'Variation',v:h.varStr},{l:'Deviation',v:h.dev,c:h.dev==='—'?'var(--text3)':h.dev?.includes('E')?'var(--green)':'var(--red)'}].map(({l,v,c})=>(
-                  <div key={l} style={{background:'var(--bg2)',borderRadius:7,padding:'6px 8px',textAlign:'center'}}><div style={{fontSize:'0.55rem',color:'var(--text3)',marginBottom:2,textTransform:'uppercase'}}>{l}</div><div style={{fontFamily:"'Orbitron',monospace",fontSize:'0.72rem',color:c||'var(--text)',fontWeight:700,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{v}</div></div>))}
+              <div style={{fontSize:'0.63rem',color:'var(--text3)',fontFamily:'monospace',marginBottom:'0.5rem'}}>{h.posStr}</div>
+              <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(100px,1fr))',gap:'0.35rem'}}>
+                {[
+                  {l:'True Brg',v:`${h.trueBrg}°`,c:'var(--cyan)'},
+                  {l:'Gyro Brg',v:`${h.gyroBrg}°`,c:'var(--text2)'},
+                  {l:'Std Brg',v:h.stdBrg==='—'?'—':`${h.stdBrg}°`,c:'var(--text2)'},
+                  {l:'Gyro Err',v:h.gyroErr,c:h.gyroErr==='—'?'var(--text3)':h.gyroErr?.includes('E')?'var(--green)':'var(--red)'},
+                  {l:'Std Error',v:h.stdErr,c:h.stdErr==='—'?'var(--text3)':h.stdErr?.includes('E')?'var(--green)':'var(--red)'},
+                  {l:'Deviation',v:h.dev,c:h.dev==='—'?'var(--text3)':h.dev?.includes('E')?'var(--green)':'var(--red)'},
+                  {l:'Variation',v:h.varStr,c:'var(--text2)'},
+                  {l:'Altitude',v:h.altitude?`${h.altitude}°`:'—',c:'var(--text2)'},
+                ].map(({l,v,c})=>(
+                  <div key={l} style={{background:'var(--bg2)',borderRadius:7,padding:'5px 7px',textAlign:'center'}}>
+                    <div style={{fontSize:'0.54rem',color:'var(--text3)',marginBottom:2,textTransform:'uppercase'}}>{l}</div>
+                    <div style={{fontFamily:"'Orbitron',monospace",fontSize:'0.69rem',color:c,fontWeight:700,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{v}</div>
+                  </div>))}
               </div>
+              {/* Expanded full log view */}
+              {expandedHist===h.id&&h.fullLog&&(
+                <div style={{marginTop:'0.7rem',padding:'10px',background:'var(--bg2)',borderRadius:8,border:'1px solid var(--border)',fontFamily:'monospace',fontSize:'0.68rem',color:'var(--text2)',whiteSpace:'pre',overflowX:'auto',lineHeight:1.7}}>
+                  {h.fullLog}
+                </div>
+              )}
             </div>))}
         </div>)}
     </div>)}
@@ -497,15 +632,4 @@ export default function CompassErrorPage({user}){
           </div>
         </div>
         <div>
-          <div style={DC.card}><div style={DC.hdr}>📈 DEVIATION CURVE — {shipName||'Unnamed Vessel'}</div><DeviationChart deviations={devCard}/></div>
-          <div style={DC.card}>
-            <div style={DC.hdr}>📋 CARD SUMMARY</div>
-            <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:'0.35rem'}}>
-              {DEV_HDGS.map((h,i)=>{const v=parseFloat(devCard[i])||0;return(<div key={h} style={{background:'var(--bg2)',borderRadius:7,padding:'7px 6px',textAlign:'center'}}><div style={{fontSize:'0.6rem',color:'var(--text3)'}}>{DEV_LBLS[i]}<br/>{String(h).padStart(3,'0')}°</div><div style={{fontFamily:"'Orbitron',monospace",fontSize:'0.76rem',fontWeight:700,color:v>=0?'var(--green)':'var(--red)',marginTop:2}}>{v!==0?`${v>=0?'+':''}${v.toFixed(1)}`:' 0.0'}</div><div style={{fontSize:'0.55rem',color:v>=0?'var(--green)':'var(--red)'}}>{v>=0?'E':'W'}</div></div>);})}
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>)}
-  </div>);
-}
+          <div style={DC.card}><div style={DC.hdr
