@@ -498,6 +498,7 @@ const TOOLS = [
   { id:'cyclone',   emoji:'🌀', label:'Cyclone Tracker',           sub:'Windy live — GPS centred' },
   { id:'tide',      emoji:'🌊', label:'Tide / Wave Data',          sub:'Open-Meteo — GPS or manual' },
   { id:'sunrise',   emoji:'🌅', label:'Sunrise / Sunset',         sub:'7-day solar — GPS or manual' },
+  { id:'conditions',emoji:'🌡️', label:'Current Weather & Sea State', sub:'Live conditions — GPS or manual' },
   { id:'anchor',    emoji:'⚓', label:'Anchor Gear Calculator',    sub:'Scope, radius, chain weight' },
   { id:'radius',    emoji:'📐', label:'Safe Anchorage Radius',     sub:'Swinging circle planner' },
   { id:'milestone', emoji:'🏁', label:'Voyage Milestone Tracker',  sub:'Multi-leg ETA calculator' },
@@ -1043,6 +1044,134 @@ function SunrisePanel() {
   );
 }
 
+// ── CURRENT WEATHER & SEA STATE — GPS + manual, table format, device local time ──
+function ConditionsPanel() {
+  const [lat, setLat] = useState('');
+  const [lon, setLon] = useState('');
+  const [weather, setWeather] = useState(null);
+  const [marine, setMarine] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState('');
+  const [fetchedAt, setFetchedAt] = useState(null);
+  const { gpsLoading, gpsErr, getGPS } = useGPS();
+
+  const WMO = {0:'Clear sky',1:'Mainly clear',2:'Partly cloudy',3:'Overcast',45:'Fog',48:'Icing fog',51:'Light drizzle',53:'Moderate drizzle',55:'Dense drizzle',61:'Slight rain',63:'Moderate rain',65:'Heavy rain',71:'Slight snow',73:'Moderate snow',75:'Heavy snow',80:'Slight showers',81:'Moderate showers',82:'Violent showers',95:'Thunderstorm',96:'T-storm+hail',99:'T-storm+heavy hail'};
+
+  const beaufort = (kn) => {
+    if (kn < 1) return { n:0, l:'Calm' };
+    if (kn <= 3) return { n:1, l:'Light Air' };
+    if (kn <= 6) return { n:2, l:'Light Breeze' };
+    if (kn <= 10) return { n:3, l:'Gentle Breeze' };
+    if (kn <= 16) return { n:4, l:'Moderate Breeze' };
+    if (kn <= 21) return { n:5, l:'Fresh Breeze' };
+    if (kn <= 27) return { n:6, l:'Strong Breeze' };
+    if (kn <= 33) return { n:7, l:'Near Gale' };
+    if (kn <= 40) return { n:8, l:'Gale' };
+    if (kn <= 47) return { n:9, l:'Strong Gale' };
+    if (kn <= 55) return { n:10, l:'Storm' };
+    if (kn <= 63) return { n:11, l:'Violent Storm' };
+    return { n:12, l:'Hurricane Force' };
+  };
+
+  const seaState = (waveM) => {
+    if (waveM == null) return { n:'—', l:'Unknown' };
+    if (waveM === 0) return { n:0, l:'Calm (glassy)' };
+    if (waveM <= 0.1) return { n:1, l:'Calm (rippled)' };
+    if (waveM <= 0.5) return { n:2, l:'Smooth' };
+    if (waveM <= 1.25) return { n:3, l:'Slight' };
+    if (waveM <= 2.5) return { n:4, l:'Moderate' };
+    if (waveM <= 4) return { n:5, l:'Rough' };
+    if (waveM <= 6) return { n:6, l:'Very Rough' };
+    if (waveM <= 9) return { n:7, l:'High' };
+    if (waveM <= 14) return { n:8, l:'Very High' };
+    return { n:9, l:'Phenomenal' };
+  };
+
+  const doFetch = async () => {
+    if (!lat || !lon) { setErr('Enter or detect coordinates first.'); return; }
+    setLoading(true); setErr(''); setWeather(null); setMarine(null);
+    try {
+      const wUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,apparent_temperature,pressure_msl,wind_speed_10m,wind_direction_10m,weather_code,cloud_cover,visibility,dew_point_2m,uv_index,precipitation&wind_speed_unit=kn&timezone=auto`;
+      const mUrl = `https://marine-api.open-meteo.com/v1/marine?latitude=${lat}&longitude=${lon}&current=sea_surface_temperature,wave_height,wave_direction,wave_period,swell_wave_height,swell_wave_direction,swell_wave_period&timezone=auto`;
+      const [wRes, mRes] = await Promise.all([fetch(wUrl), fetch(mUrl)]);
+      const wJson = await wRes.json();
+      const mJson = await mRes.json();
+      if (wJson.error) throw new Error(wJson.reason);
+      setWeather(wJson);
+      if (!mJson.error) setMarine(mJson);
+      setFetchedAt(new Date());
+    } catch { setErr('Failed to fetch conditions. Check coordinates.'); }
+    setLoading(false);
+  };
+
+  const c = weather?.current;
+  const m = marine?.current;
+  const bf = c ? beaufort(c.wind_speed_10m) : null;
+  const ss = m ? seaState(m.wave_height) : null;
+  const dirLabel = (deg) => {
+    if (deg == null) return '—';
+    const dirs = ['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'];
+    return dirs[Math.round(deg / 22.5) % 16];
+  };
+
+  const rows = c ? [
+    { label:'🌡️ Air Temperature',  value:`${c.temperature_2m}°C`, sub:`Feels like ${c.apparent_temperature}°C` },
+    { label:'🌊 Sea Surface Temp',  value: m?.sea_surface_temperature!=null ? `${m.sea_surface_temperature}°C` : '— (no marine data)', sub:'' },
+    { label:'💧 Relative Humidity', value:`${c.relative_humidity_2m}%`, sub:`Dew point ${c.dew_point_2m}°C` },
+    { label:'📊 Barometric Pressure', value:`${c.pressure_msl} hPa`, sub:'' },
+    { label:'💨 Wind Speed',        value:`${c.wind_speed_10m} kn`, sub:bf ? `Beaufort ${bf.n} — ${bf.l}` : '' },
+    { label:'🧭 Wind Direction',    value:`${c.wind_direction_10m}° (${dirLabel(c.wind_direction_10m)})`, sub:'' },
+    { label:'🌊 Wave Height',       value: m?.wave_height!=null ? `${m.wave_height} m` : '— (no marine data)', sub: m?.wave_direction!=null ? `from ${m.wave_direction}° (${dirLabel(m.wave_direction)})` : '' },
+    { label:'🌀 Swell Height',      value: m?.swell_wave_height!=null ? `${m.swell_wave_height} m` : '—', sub: m?.swell_wave_direction!=null ? `from ${m.swell_wave_direction}° (${dirLabel(m.swell_wave_direction)}), period ${m.swell_wave_period}s` : '' },
+    { label:'🌊 Sea State',         value: ss ? `${ss.n} — ${ss.l}` : '—', sub:'WMO Sea State Code' },
+    { label:'☁️ Cloud Cover',       value:`${c.cloud_cover}%`, sub:WMO[c.weather_code] || '—' },
+    { label:'👁️ Visibility',        value: c.visibility!=null ? `${(c.visibility/1000).toFixed(1)} km` : '—', sub:'' },
+    { label:'🌧️ Precipitation',     value:`${c.precipitation} mm`, sub: c.precipitation > 0 ? 'Currently precipitating' : 'No precipitation' },
+    { label:'☀️ UV Index',          value: c.uv_index!=null ? c.uv_index : '—', sub: c.uv_index>7?'Very High':c.uv_index>4?'Moderate-High':'Low-Moderate' },
+  ] : [];
+
+  return (
+    <div>
+      <div style={S.info}>Live current conditions from Open-Meteo (weather) + Open-Meteo Marine (sea state). Marine data may be unavailable for inland or some near-shore coordinates.</div>
+      <GpsBar
+        lat={lat} lon={lon} setLat={setLat} setLon={setLon}
+        onFetch={doFetch}
+        fetchLabel="Get Current Conditions"
+        gpsLoading={gpsLoading} gpsErr={gpsErr}
+        getGPS={(onSuccess) => getGPS((la, lo) => { setLat(la); setLon(lo); onSuccess && onSuccess(la, lo); })}
+      />
+      {loading && <div style={S.spinner}>⏳ Fetching live conditions…</div>}
+      {err && <div style={S.error}>{err}</div>}
+      {c && (
+        <div style={{marginTop:12}}>
+          <div style={{...S.result, marginTop:0, marginBottom:12}}>
+            <b style={{color:'#7ec8f5'}}>📍 Position:</b> {parseFloat(lat).toFixed(4)}°, {parseFloat(lon).toFixed(4)}°
+            &nbsp;|&nbsp; <b style={{color:'#7ec8f5'}}>🕐 Local Time (this device):</b> {fetchedAt ? fetchedAt.toLocaleTimeString() : '—'}
+            &nbsp;|&nbsp; <b style={{color:'#7ec8f5'}}>📅</b> {fetchedAt ? fetchedAt.toLocaleDateString() : '—'}
+          </div>
+          <div style={{overflowX:'auto'}}>
+            <table style={S.table}>
+              <thead><tr>
+                <th style={S.th}>Parameter</th><th style={S.th}>Value</th><th style={S.th}>Detail</th>
+              </tr></thead>
+              <tbody>{rows.map((r,i)=>(
+                <tr key={i}>
+                  <td style={S.td}>{r.label}</td>
+                  <td style={S.td}><b style={{color:'#e8d040',fontSize:13}}>{r.value}</b></td>
+                  <td style={{...S.td,fontSize:10,color:'#7eb8d8'}}>{r.sub}</td>
+                </tr>
+              ))}</tbody>
+            </table>
+          </div>
+          <div style={{marginTop:10,fontSize:10,color:'#4a7a9b'}}>
+            💡 Sea State follows WMO code (0=calm glassy → 9=phenomenal). Beaufort scale describes wind force. Always cross-check with onboard instruments before making navigational decisions.
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AnchorPanel() {
   const [depth,setDepth]=useState(''); const [fb,setFb]=useState('');
   const [factor,setFactor]=useState('6'); const [dia,setDia]=useState('');
@@ -1255,6 +1384,7 @@ function renderPanel(id) {
     case 'cyclone':   return <CyclonePanel />;
     case 'tide':      return <TidePanel />;
     case 'sunrise':   return <SunrisePanel />;
+    case 'conditions': return <ConditionsPanel />;
     case 'anchor':    return <AnchorPanel />;
     case 'radius':    return <RadiusPanel />;
     case 'milestone': return <MilestonePanel />;
