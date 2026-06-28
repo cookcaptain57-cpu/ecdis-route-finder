@@ -163,6 +163,7 @@ function StarRating({ value, onChange }) {
   );
 }
 
+// ─── VOYAGE ANIMATION v10 — CLOSE SHIP FOLLOW + 7s SUMMARY CARD ─────────────
 // ─── VOYAGE ANIMATION v9 — FULL CANVAS + SUMMARY CARD + INSTAGRAM PERFECT ────
 function VoyageAnimation({ onClose, portsDb = [] }) {
 
@@ -392,31 +393,41 @@ function VoyageAnimation({ onClose, portsDb = [] }) {
   };
 
   // ── 4-PHASE ZOOM ──────────────────────────────────────────────────────────
-  // Phase 1 (0–12%):  Close follow ship at departure (baseZ+1, never blank)
-  // Phase 2 (12–82%): Follow ship en route at baseZ
-  // Phase 3 (82–92%): Pull back — full route reveal
-  // Phase 4 (92–100%): Summary card (handled separately in drawSummary)
+  // Phase 1 (0–10%):  Close follow ship at departure — baseZ+2 (ship clearly visible)
+  // Phase 2 (10–88%): Follow ship en route — baseZ+2 (zoomed in, see countries)
+  // Phase 3 (88–93%): Pull back — full route reveal
+  // Phase 4 (93–100% OR last 7s): Summary card (handled separately in drawSummary)
   const getZoomState = (t,interp,pts,fitResult) => {
-    const P1=0.12,P2=0.82,P3=0.92;
+    const P1=0.10,P2=0.88,P3=0.93;
     const total=interp.length-1;
     const idx=clamp(Math.floor(t*total),0,total-1);
     const frac=(t*total)-idx;
     const curLat=interp[idx].lat+(interp[Math.min(idx+1,total)].lat-interp[idx].lat)*frac;
     const curLng=interp[idx].lng+(interp[Math.min(idx+1,total)].lng-interp[idx].lng)*frac;
-    const baseZ=clamp(fitResult.z,2,7);
+    // baseZ+2 = zoomed in enough to see individual countries while ship moves
+    const baseZ=clamp(fitResult.z,2,6);
+    const shipZ=clamp(baseZ+2,3,7); // ship-following zoom
 
     if (t<=P1){
+      // Phase 1: start at shipZ, stabilise
       const e=easeIO(t/P1);
-      return {z:lerp(baseZ+1,baseZ+0.5,e), cLat:curLat, cLng:curLng};
+      return {z:lerp(shipZ+0.5,shipZ,e), cLat:curLat, cLng:curLng};
     } else if (t<=P2){
+      // Phase 2: follow ship closely at shipZ — center tracks ship
       const e=easeIO((t-P1)/(P2-P1));
-      return {z:baseZ, cLat:lerp(curLat,fitResult.lat,e*0.35), cLng:lerp(curLng,fitResult.lng,e*0.35)};
+      // Very gentle drift toward center so ship stays visible
+      return {z:shipZ, cLat:lerp(curLat,fitResult.lat,e*0.15), cLng:lerp(curLng,fitResult.lng,e*0.15)};
     } else if (t<=P3){
+      // Phase 3: zoom out to show full route
       const e=easeIO((t-P2)/(P3-P2));
-      return {z:lerp(baseZ,clamp(baseZ-0.5,2,7),e), cLat:lerp(lerp(curLat,fitResult.lat,0.35),fitResult.lat,e), cLng:lerp(lerp(curLng,fitResult.lng,0.35),fitResult.lng,e)};
+      return {
+        z:lerp(shipZ,clamp(baseZ-0.5,2,6),e),
+        cLat:lerp(lerp(curLat,fitResult.lat,0.15),fitResult.lat,e),
+        cLng:lerp(lerp(curLng,fitResult.lng,0.15),fitResult.lng,e),
+      };
     } else {
-      // Phase 4: keep at reveal zoom (summary card drawn on top)
-      return {z:clamp(baseZ-0.5,2,7), cLat:fitResult.lat, cLng:fitResult.lng};
+      // Phase 4: full route visible, summary card fades in on top
+      return {z:clamp(baseZ-0.5,2,6), cLat:fitResult.lat, cLng:fitResult.lng};
     }
   };
 
@@ -567,7 +578,7 @@ function VoyageAnimation({ onClose, portsDb = [] }) {
   const drawOverlay = (ctx,interp,t,z,cLat,cLng,pts,ctryList,trails,totalNM,totalKM,day,totalDays) => {
     const lpf=(la,lo)=>lp(la,lo,z,cLat,cLng);
     const total=interp.length-1;
-    const P2=0.82,P3=0.92;
+    const P2=0.88,P3=0.93;
     // For overlay t, use only 0→P3 range (P3→1 is summary)
     const tRoute=Math.min(t,P3)/P3;
     const idx=clamp(Math.floor(tRoute*total),0,total-1);
@@ -693,16 +704,27 @@ function VoyageAnimation({ onClose, portsDb = [] }) {
   };
 
   // ── Main animation loop ──
+  // Summary card always gets SUMMARY_SECS seconds minimum regardless of video length
+  const SUMMARY_SECS = 7;
   const runAnimation = (canvas,interp,pts,ctryList,stats,fitResult,secs,onDone) => {
     const ctx=canvas.getContext('2d');
-    const fps=30,frames=secs*fps;
+    const fps=30;
+    // Total frames = route frames + fixed summary frames
+    const summaryFrames=SUMMARY_SECS*fps;
+    const routeFrames=secs*fps;
+    const totalFrames=routeFrames+summaryFrames;
     let frame=0,trails=[];
     const totalDays=Math.max(pts.length,3);
-    const P3=0.92;
+    const P3=0.93; // when full-route reveal starts (within route portion)
 
     const tick=async()=>{
-      const t=Math.min(frame/frames,1);
-      const {z,cLat,cLng}=getZoomState(t,interp,pts,fitResult);
+      // t: 0→1 over routeFrames (route animation)
+      // after routeFrames, summaryT: 0→1 over summaryFrames
+      const inSummary=frame>routeFrames;
+      const t=Math.min(frame/routeFrames,1);
+      const summaryT=inSummary?Math.min((frame-routeFrames)/summaryFrames,1):0;
+
+      const {z,cLat,cLng}=getZoomState(Math.min(t,1),interp,pts,fitResult);
       const total=interp.length-1;
       const tRoute=Math.min(t,P3)/P3;
       const idx=clamp(Math.floor(tRoute*total),0,total-1);
@@ -710,21 +732,27 @@ function VoyageAnimation({ onClose, portsDb = [] }) {
       const curLat=interp[idx].lat+(interp[Math.min(idx+1,total)].lat-interp[idx].lat)*frac;
       const curLng=interp[idx].lng+(interp[Math.min(idx+1,total)].lng-interp[idx].lng)*frac;
       const bpx=lp(curLat,curLng,z,cLat,cLng);
-      if (t<P3){ trails.unshift({x:bpx.x,y:bpx.y,r:4+Math.random()*3,alpha:0.8}); if(trails.length>22)trails.pop(); }
+      if (!inSummary){ trails.unshift({x:bpx.x,y:bpx.y,r:4+Math.random()*3,alpha:0.8}); if(trails.length>22)trails.pop(); }
       const day=Math.max(1,Math.round(tRoute*totalDays));
+
       ctx.clearRect(0,0,CW,CH);
-      // Always draw tiles as background
+      // Tiles always as background
       await drawTiles(ctx,z,cLat,cLng);
-      // Route overlay (phases 1-3)
-      drawOverlay(ctx,interp,t,z,cLat,cLng,pts,ctryList,trails,stats?.totalNM||'0',stats?.totalKM||'0',day,totalDays);
-      // Phase 4: summary card fades in over map
-      if (t>P3){
-        const summaryT=(t-P3)/(1-P3);
+
+      if (!inSummary){
+        // Route overlay phases 1-3
+        drawOverlay(ctx,interp,t,z,cLat,cLng,pts,ctryList,trails,stats?.totalNM||'0',stats?.totalKM||'0',day,totalDays);
+      } else {
+        // Phase 4: full route still visible underneath
+        drawOverlay(ctx,interp,1,z,cLat,cLng,pts,ctryList,[],stats?.totalNM||'0',stats?.totalKM||'0',totalDays,totalDays);
+        // Summary card fades in — guaranteed 7s
         drawSummary(ctx,summaryT,stats?.totalNM||'0',stats?.totalKM||'0',totalDays,ctryList);
       }
-      setProgress(Math.round(t*100));
+
+      // Progress bar: route portion only (so it fills during route, stays full during summary)
+      setProgress(Math.min(Math.round(t*100),100));
       frame++;
-      if (frame<=frames){animRef.current=requestAnimationFrame(tick);}
+      if (frame<=totalFrames){animRef.current=requestAnimationFrame(tick);}
       else{onDone();}
     };
     animRef.current=requestAnimationFrame(tick);
@@ -865,7 +893,7 @@ function VoyageAnimation({ onClose, portsDb = [] }) {
         <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'0.7rem 1rem',borderBottom:'1px solid rgba(0,180,216,0.15)',background:'rgba(4,12,26,0.7)',flexShrink:0}}>
           <div>
             <div style={{fontFamily:'Orbitron,monospace',fontSize:'0.8rem',fontWeight:700,color:'#00B4D8'}}>🎬 VOYAGE ANIMATION STUDIO</div>
-            <div style={{fontSize:'0.6rem',color:'rgba(255,255,255,0.32)',marginTop:1}}>Portrait 9:16 · 4-Phase · Full Canvas · Summary Card</div>
+            <div style={{fontSize:'0.6rem',color:'rgba(255,255,255,0.32)',marginTop:1}}>Portrait 9:16 · Close Ship Follow · 7s Summary Card</div>
           </div>
           <button onClick={onClose} style={{background:'none',border:'none',color:'rgba(255,255,255,0.4)',fontSize:'1.4rem',cursor:'pointer',padding:'4px 8px'}}>✕</button>
         </div>
@@ -979,7 +1007,7 @@ function VoyageAnimation({ onClose, portsDb = [] }) {
 
           {/* 4-phase legend */}
           <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr 1fr',gap:4}}>
-            {[['🔍','Depart','0–12%','#00B4D8'],['🚢','Route','12–82%','#00C896'],['🌍','Reveal','82–92%','#F0A500'],['🏆','Summary','92–100%','#FFD166']].map(([icon,label,pct,col])=>(
+            {[['🔍','Depart','0–10%','#00B4D8'],['🚢','Route','10–88%','#00C896'],['🌍','Reveal','88–93%','#F0A500'],['🏆','Summary','7 secs','#FFD166']].map(([icon,label,pct,col])=>(
               <div key={label} style={{background:`${col}0f`,border:`1px solid ${col}28`,borderRadius:8,padding:'6px 4px',textAlign:'center'}}>
                 <div style={{fontSize:'0.75rem',marginBottom:2}}>{icon}</div>
                 <div style={{fontSize:'0.6rem',color:'rgba(255,255,255,0.5)'}}>{label}</div>
