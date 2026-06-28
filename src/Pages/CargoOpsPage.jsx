@@ -954,29 +954,54 @@ const StatBox = ({ label, value, color, sub }) => (
 // (40ft) bay number, each holding its own bay plus up to two 20ft neighbors.
 // Bays that don't fit this odd/even adjacency (e.g. unusual numbering from
 // an import) are kept as their own single-bay group so nothing is dropped.
-function groupBaysByMasterBay(bays) {
+function groupBaysByMasterBay(bays, bayParticularsMap) {
   const byNumber = {};
   bays.forEach(b => { byNumber[parseInt(b.bay, 10)] = b; });
 
   const used = new Set();
   const groups = [];
 
-  // Pass 1: even bays with odd neighbors present become a master group.
+  // Pass 1: even (40ft) bays pair with AT MOST ONE odd (20ft) neighbor —
+  // never both simultaneously, even if both have real cargo. A physical
+  // 40ft slot has exactly one forward-or-aft relationship to a 20ft bay;
+  // confirmed against real data where bay 005 and bay 007 (both flanking
+  // bay 006) share overlapping row/tier coordinates, proving they are two
+  // independent real bays, not two halves of one merged slot.
   bays.forEach(b => {
     const n = parseInt(b.bay, 10);
     if (isNaN(n) || n % 2 !== 0) return; // only even (40ft) bays anchor a group
     if (used.has(b.bay)) return;
+
     const oddBefore = byNumber[n - 1];
     const oddAfter = byNumber[n + 1];
+    const particulars = bayParticularsMap ? bayParticularsMap[n] : null;
+
+    let chosenOdd = null;
+    if (particulars && particulars.pairedOddBay) {
+      // Explicit vessel-design pairing from Ship Particulars takes priority.
+      const pairedNum = parseInt(particulars.pairedOddBay, 10);
+      if (pairedNum === n - 1) chosenOdd = oddBefore;
+      else if (pairedNum === n + 1) chosenOdd = oddAfter;
+    } else if (oddBefore && oddAfter) {
+      // Both neighbors have data but no explicit pairing configured —
+      // never merge with both; without vessel-design info there's no safe
+      // way to know which is real, so this bay stays standalone (Pass 2)
+      // and both odd bays render as their own separate, unmerged entries.
+      chosenOdd = null;
+    } else {
+      // Only one neighbor exists at all — safe to use it.
+      chosenOdd = oddBefore || oddAfter || null;
+    }
+
     const members = [b];
-    if (oddBefore) members.push(oddBefore);
-    if (oddAfter) members.push(oddAfter);
+    if (chosenOdd) members.push(chosenOdd);
     members.forEach(m => used.add(m.bay));
-    groups.push({ masterBay: b.bay, fortyFt: b, twentyFt: [oddBefore, oddAfter].filter(Boolean), members });
+    groups.push({ masterBay: b.bay, fortyFt: b, twentyFt: chosenOdd ? [chosenOdd] : [], members });
   });
 
-  // Pass 2: anything left over (odd bays with no even neighbor, or odd-only
-  // numbering schemes) becomes its own single-bay group.
+  // Pass 2: anything left over (odd bays with no chosen even partner,
+  // ambiguous pairs left unmerged above, or odd-only numbering schemes)
+  // becomes its own single-bay group.
   bays.forEach(b => {
     if (used.has(b.bay)) return;
     used.add(b.bay);
@@ -1097,8 +1122,16 @@ function buildMergedGroupGrid(group) {
     );
     const tiers = [...new Set(relevant.map(c => c.tier).filter(Boolean))]
       .sort((a, b) => parseInt(b, 10) - parseInt(a, 10));
-    const rows = [...new Set(relevant.map(c => c.row).filter(Boolean))]
-      .sort((a, b) => parseInt(a, 10) - parseInt(b, 10));
+    // Centerline-outward row order, derived from actual data present (not a
+    // fixed count like generateRowLabels): port (even) descending down to 02,
+    // then starboard (odd) ascending from 01 outward — e.g. 12,10,08,06,04,
+    // 02,01,03,05,07,09,11. Plain ascending sort was the same regression
+    // already fixed in generateRowLabels; this is the equivalent fix for
+    // rows derived from real container data instead of a configured count.
+    const rowSet = new Set(relevant.map(c => c.row).filter(Boolean));
+    const portRows = [...rowSet].filter(r => parseInt(r, 10) % 2 === 0).sort((a, b) => parseInt(b, 10) - parseInt(a, 10));
+    const stbdRows = [...rowSet].filter(r => parseInt(r, 10) % 2 !== 0).sort((a, b) => parseInt(a, 10) - parseInt(b, 10));
+    const rows = [...portRows, ...stbdRows];
 
     const cellMap = {};
     rows.forEach(row => {
@@ -1137,8 +1170,14 @@ function groupContainersForGrid(containers) {
   const buildSection = (items) => {
     const tiers = [...new Set(items.map(c => c.tier).filter(Boolean))]
       .sort((a, b) => parseInt(b, 10) - parseInt(a, 10)); // high tier at top
-    const rows = [...new Set(items.map(c => c.row).filter(Boolean))]
-      .sort((a, b) => parseInt(a, 10) - parseInt(b, 10)); // radiate outward (00 first)
+    // Centerline-outward row order: port (even) descending, then starboard
+    // (odd) ascending — e.g. 12,10,08,06,04,02,01,03,05,07,09,11. Plain
+    // ascending sort was a regression already fixed elsewhere; applying
+    // the same fix here for the container-derived (no particulars) path.
+    const rowSet = new Set(items.map(c => c.row).filter(Boolean));
+    const portRows = [...rowSet].filter(r => parseInt(r, 10) % 2 === 0).sort((a, b) => parseInt(b, 10) - parseInt(a, 10));
+    const stbdRows = [...rowSet].filter(r => parseInt(r, 10) % 2 !== 0).sort((a, b) => parseInt(a, 10) - parseInt(b, 10));
+    const rows = [...portRows, ...stbdRows];
     const cellMap = {};
     items.forEach(c => { cellMap[`${c.row}_${c.tier}`] = c; });
     return { tiers, rows, cellMap, items };
@@ -1585,6 +1624,7 @@ function ContainerDetailModal({ container, onClose }) {
 // grouping only, not a data merge.
 function MasterBayGroup({ group, gantries, movesPerHr, onUpdate, bayIndexMap, portFilterState, bayParticularsMap }) {
   const [selectedContainer, setSelectedContainer] = useState(null);
+  const [groupExpanded, setGroupExpanded] = useState(false);
   const totalContainers = group.members.reduce((s, b) => s + (b.containers ? b.containers.length : 0), 0);
   // Label format matches the real paper stowage plan convention: the odd
   // (20ft) bay number is shown as the heading, with the even (40ft, master)
@@ -1622,9 +1662,11 @@ function MasterBayGroup({ group, gantries, movesPerHr, onUpdate, bayIndexMap, po
           gantries={gantries} movesPerHr={movesPerHr}
           onUpdate={onUpdate} portFilterState={portFilterState}
           bayParticulars={bayParticularsMap ? bayParticularsMap[parseInt(b.bay, 10)] : null}
-          hideOwnGrid={isMergeable} />
+          hideOwnGrid={isMergeable}
+          externalExpanded={isMergeable ? groupExpanded : undefined}
+          onToggleExpand={isMergeable ? (() => setGroupExpanded(v => !v)) : undefined} />
       ))}
-      {isMergeable && (
+      {isMergeable && groupExpanded && (
         <div style={{ marginTop:6 }}>
           <SectionLabel text="Merged Bay Group Grid" color={ACC} />
           <MergedBayGridView group={group} onCellClick={setSelectedContainer} portFilterState={portFilterState} />
@@ -1640,8 +1682,13 @@ function MasterBayGroup({ group, gantries, movesPerHr, onUpdate, bayIndexMap, po
 // rendered from LiveOps (one heading per 40ft bay + its 20ft neighbors), but
 // each individual bay (40ft or 20ft) still tracks its own status/progress —
 // the merge is a display grouping, not a data merge.
-function BayCard({ bay, idx, gantries, onUpdate, movesPerHr, portFilterState, bayParticulars, hideOwnGrid }) {
-  const [expanded, setExpanded] = useState(false);
+function BayCard({ bay, idx, gantries, onUpdate, movesPerHr, portFilterState, bayParticulars, hideOwnGrid, externalExpanded, onToggleExpand }) {
+  const [internalExpanded, setInternalExpanded] = useState(false);
+  // When externalExpanded/onToggleExpand are provided (used by MasterBayGroup
+  // to gate the shared merged grid behind a single click), they take over;
+  // otherwise BayCard manages its own expand state exactly as before.
+  const expanded = onToggleExpand ? externalExpanded : internalExpanded;
+  const setExpanded = onToggleExpand ? onToggleExpand : setInternalExpanded;
   const [selectedContainer, setSelectedContainer] = useState(null);
   const col = STATUS_COLOR[bay.status] || S.vd;
 
@@ -1674,7 +1721,7 @@ function BayCard({ bay, idx, gantries, onUpdate, movesPerHr, portFilterState, ba
 
       {/* ── BAY HEADER ── */}
       <div style={{ display:'flex', alignItems:'center', gap:8, padding:'8px 10px',
-        cursor:'pointer', userSelect:'none' }} onClick={() => setExpanded(e => !e)}>
+        cursor:'pointer', userSelect:'none' }} onClick={() => setExpanded(!expanded)}>
 
         {/* Bay number */}
         <div style={{ background:`${col}20`, border:`1px solid ${col}50`,
@@ -2176,7 +2223,7 @@ function LiveOps({ portOp, onUpdate, onReset }) {
       {(() => {
         const bayIndexMap = {};
         bays.forEach((b, i) => { bayIndexMap[b.bay] = i; });
-        const groups = groupBaysByMasterBay(filtered);
+        const groups = groupBaysByMasterBay(filtered, bayParticularsMap);
         return groups.map(g => (
           <MasterBayGroup key={g.masterBay} group={g}
             gantries={portOp.gantries} movesPerHr={portOp.movesPerHr}
@@ -3267,15 +3314,33 @@ function ShipParticularsSetup() {
                   <button onClick={(e)=>{e.stopPropagation();removeBay(b.bay);}} style={{ background:'transparent', border:'none', color:S.rd, cursor:'pointer', fontSize:'0.7rem' }}>✕</button>
                 </div>
                 {editingBay === b.bay && (
-                  <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr 1fr', gap:'6px 6px', marginTop:6 }}>
-                    {[['maxRowPort','Port Rows'],['maxRowStbd','Stbd Rows'],['maxTierHold','Hold Tiers'],['maxTierDeck','Deck Tiers']].map(([k,l]) => (
-                      <div key={k}>
-                        <div style={{ color:S.dm, fontSize:'0.5rem', marginBottom:2 }}>{l}</div>
-                        <input type="number" value={b[k]} min={0}
-                          onChange={e=>updateBayOverride(b.bay,k,parseInt(e.target.value)||0)}
-                          style={{ width:'100%', background:S.bg2, color:S.gd, border:`1px solid ${S.bd2}`, borderRadius:4, padding:'4px 5px', fontSize:S.ti, fontFamily:'monospace' }} />
+                  <div>
+                    <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr 1fr', gap:'6px 6px', marginTop:6 }}>
+                      {[['maxRowPort','Port Rows'],['maxRowStbd','Stbd Rows'],['maxTierHold','Hold Tiers'],['maxTierDeck','Deck Tiers']].map(([k,l]) => (
+                        <div key={k}>
+                          <div style={{ color:S.dm, fontSize:'0.5rem', marginBottom:2 }}>{l}</div>
+                          <input type="number" value={b[k]} min={0}
+                            onChange={e=>updateBayOverride(b.bay,k,parseInt(e.target.value)||0)}
+                            style={{ width:'100%', background:S.bg2, color:S.gd, border:`1px solid ${S.bd2}`, borderRadius:4, padding:'4px 5px', fontSize:S.ti, fontFamily:'monospace' }} />
+                        </div>
+                      ))}
+                    </div>
+                    {parseInt(b.bay, 10) % 2 === 0 && (
+                      <div style={{ marginTop:8 }}>
+                        <div style={{ color:S.dm, fontSize:'0.55rem', marginBottom:3, lineHeight:1.5 }}>
+                          This is a 40ft bay. A 40ft slot physically pairs with only ONE 20ft
+                          neighbor (forward or aft), never both — set which one below to merge
+                          them correctly in the live grid. Leave unset if unsure; bays with both
+                          neighbors having real cargo will be shown separately rather than guessed.
+                        </div>
+                        <select value={b.pairedOddBay || ''} onChange={e=>updateBayOverride(b.bay,'pairedOddBay',e.target.value)}
+                          style={{ width:'100%', background:S.bg2, color:ACC, border:`1px solid ${S.bd2}`, borderRadius:4, padding:'5px 6px', fontSize:S.ti }}>
+                          <option value=''>— Not set (auto: only merge if one side is empty) —</option>
+                          <option value={String(parseInt(b.bay,10)-1).padStart(b.bay.length,'0')}>Forward: Bay {String(parseInt(b.bay,10)-1).padStart(b.bay.length,'0')}</option>
+                          <option value={String(parseInt(b.bay,10)+1).padStart(b.bay.length,'0')}>Aft: Bay {String(parseInt(b.bay,10)+1).padStart(b.bay.length,'0')}</option>
+                        </select>
                       </div>
-                    ))}
+                    )}
                   </div>
                 )}
               </div>
@@ -3785,4 +3850,4 @@ export default function CargoOpsPage({ notify }) {
 
     </div>
   );
-                   }
+        }
