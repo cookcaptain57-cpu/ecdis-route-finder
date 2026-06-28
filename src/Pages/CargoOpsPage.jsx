@@ -1068,6 +1068,67 @@ function PortFilterBar({ ports, selectedPort, onSelectPort, mode, onSelectMode }
   );
 }
 
+// ─── MERGED MASTER-BAY GRID (real paper-plan semantics) ────────────────────
+// Confirmed via research + the real stowage plan reference: a 20ft bay and
+// its 40ft "master" partner share the SAME physical row/tier slot space —
+// one square on the paper plan equals one 20ft unit. A 40ft container draws
+// as one wide block spanning two 20ft slots ("Russian"/mixed stowage is the
+// reverse: two 20ft containers filling what would otherwise be one 40ft
+// slot). This builds ONE unified grid per master-bay group instead of
+// separate grids per member bay, matching that real-world layout exactly.
+function buildMergedGroupGrid(group) {
+  const fortyFt = group.fortyFt;
+  const oddBays = group.twentyFt || [];
+
+  const fortyFtContainers = fortyFt ? (fortyFt.containers || []) : [];
+  // Two 20ft neighbors are possible (one fwd, one aft of the 40ft bay).
+  const oddContainersByBay = oddBays.map(b => ({ bay: b.bay, containers: b.containers || [] }));
+
+  // Union of every row/tier actually present across all member bays —
+  // rows/tiers are shared coordinates, so this is the merged grid's axes.
+  const allContainers = [
+    ...fortyFtContainers,
+    ...oddContainersByBay.flatMap(o => o.containers),
+  ];
+
+  const buildSection = (holdOrDeck) => {
+    const relevant = allContainers.filter(c =>
+      holdOrDeck === 'Deck' ? (parseInt(c.tier, 10) >= 70 || c.holdDeck === 'Deck') : !(parseInt(c.tier, 10) >= 70 || c.holdDeck === 'Deck')
+    );
+    const tiers = [...new Set(relevant.map(c => c.tier).filter(Boolean))]
+      .sort((a, b) => parseInt(b, 10) - parseInt(a, 10));
+    const rows = [...new Set(relevant.map(c => c.row).filter(Boolean))]
+      .sort((a, b) => parseInt(a, 10) - parseInt(b, 10));
+
+    const cellMap = {};
+    rows.forEach(row => {
+      tiers.forEach(tier => {
+        const key = `${row}_${tier}`;
+        const fortyC = fortyFtContainers.find(c => c.row === row && c.tier === tier);
+        if (fortyC) {
+          cellMap[key] = { type: '40ft', container: fortyC };
+          return;
+        }
+        const oddMatches = oddContainersByBay
+          .map(o => ({ bay: o.bay, container: o.containers.find(c => c.row === row && c.tier === tier) }))
+          .filter(m => m.container);
+        if (oddMatches.length === 2) {
+          // Both 20ft neighbor slots filled at this position — equivalent
+          // to the 40ft footprint being full ("Russian"/mixed stowage).
+          cellMap[key] = { type: '40ft-equivalent', containers: oddMatches.map(m => m.container), bays: oddMatches.map(m => m.bay) };
+        } else if (oddMatches.length === 1) {
+          cellMap[key] = { type: '20ft', container: oddMatches[0].container, bay: oddMatches[0].bay };
+        }
+        // else: leave unset -> renders as a blank slot
+      });
+    });
+
+    return { tiers, rows, cellMap, items: relevant };
+  };
+
+  return { deck: buildSection('Deck'), hold: buildSection('Hold') };
+}
+
 function groupContainersForGrid(containers) {
   const list = containers || [];
   const deckList = list.filter(c => parseInt(c.tier, 10) >= 70 || c.holdDeck === 'Deck');
@@ -1220,6 +1281,116 @@ function BayGridView({ bay, onCellClick, portFilterState, bayParticulars }) {
         {[['DG',S.rd],['Reefer',S.cy],['OOG',S.or],['Standard',ACC]].map(([l,c])=>(
           <span key={l} style={{ fontSize:S.ti, color:c }}>■ {l}</span>
         ))}
+        {portFilterState && portFilterState.newIds && portFilterState.newIds.size > 0 && (
+          <span style={{ fontSize:S.ti, color:S.gn }}>● NEW (loaded this port)</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── MERGED BAY GRID SECTION/VIEW (real paper-plan unified grid) ────────────
+// Renders ONE grid for an entire master-bay group (40ft bay + its 20ft
+// neighbors), with row/tier headers shown once — matching the real stowage
+// plan where one square = one 20ft slot, and a 40ft container draws as a
+// wider block spanning two slots. Replaces showing each member bay as a
+// separate grid.
+function MergedBayGridSection({ title, section, filter, onCellClick, portFilterState }) {
+  if (!section || !Array.isArray(section.tiers) || !Array.isArray(section.rows) || section.tiers.length === 0 || section.rows.length === 0) {
+    return (
+      <div style={{ marginBottom:10 }}>
+        <SectionLabel text={title} color={S.dm} />
+        <div style={{ color:S.vd, fontSize:S.ti, fontStyle:'italic', padding:'6px 0' }}>No {title.toLowerCase()} containers in this bay group</div>
+      </div>
+    );
+  }
+  return (
+    <div style={{ marginBottom:10 }}>
+      <SectionLabel text={`${title} (${(section.items || []).length})`} color={S.dm} />
+      <div style={{ overflowX:'auto' }}>
+        <div style={{ display:'inline-block', minWidth:'100%' }}>
+          <div style={{ display:'flex', gap:2, marginBottom:2 }}>
+            <div style={{ width:34, flexShrink:0 }} />
+            {section.rows.map(r => (
+              <div key={r} style={{ width:34, flexShrink:0, textAlign:'center', color:S.dm, fontSize:S.ti, fontFamily:'monospace' }}>{r}</div>
+            ))}
+          </div>
+          {section.tiers.map(tier => (
+            <div key={tier} style={{ display:'flex', gap:2, marginBottom:2 }}>
+              <div style={{ width:34, flexShrink:0, textAlign:'right', color:S.dm, fontSize:S.ti, fontFamily:'monospace', paddingRight:4 }}>{tier}</div>
+              {section.rows.map(r => {
+                const cell = section.cellMap[`${r}_${tier}`];
+                if (!cell) {
+                  return <div key={r} style={{ width:34, height:30, flexShrink:0, borderRadius:4, background:S.bg3, border:`1px solid ${S.vd}` }} />;
+                }
+
+                // Resolve display container(s), filter/port-filter matching,
+                // and the visual treatment per cell type.
+                const isFortyFt = cell.type === '40ft' || cell.type === '40ft-equivalent';
+                const displayContainers = cell.type === '40ft-equivalent' ? cell.containers : [cell.container];
+                const anyAttrMatch = displayContainers.some(c => gridCellMatchesFilter(c, filter));
+                const portFilterActive = portFilterState && portFilterState.mode && portFilterState.mode !== 'all' && portFilterState.selectedPort;
+                const anyPortMatch = !portFilterActive || displayContainers.some(c => portFilterState.highlightedIds.has(c.id));
+                const matches = anyAttrMatch && anyPortMatch;
+                const color = gridCellColor(displayContainers[0]);
+                const podLabel = isFortyFt ? '40FT' : (cell.container.pod || '—');
+                const tooltip = cell.type === '40ft-equivalent'
+                  ? `${cell.containers[0].id} + ${cell.containers[1].id} (2x20ft, bays ${cell.bays.join('/')})`
+                  : cell.type === '40ft'
+                    ? `${cell.container.id} (40ft, bay ${cell.container.bay})`
+                    : `${cell.container.id} → POD ${cell.container.pod || '—'} (20ft, bay ${cell.bay})`;
+
+                return (
+                  <div key={r} title={tooltip}
+                    onClick={() => onCellClick && onCellClick(displayContainers[0])}
+                    style={{
+                      width:34, height:30, flexShrink:0, borderRadius:4,
+                      background: matches ? `${color}25` : `${color}08`,
+                      border: `1px solid ${matches ? color : S.vd}`,
+                      borderStyle: isFortyFt ? 'double' : 'solid',
+                      opacity: matches ? 1 : 0.35,
+                      display:'flex', alignItems:'center', justifyContent:'center',
+                      fontSize: isFortyFt ? '0.38rem' : '0.42rem', color, fontFamily:'monospace', fontWeight:700,
+                      overflow:'hidden', cursor:'pointer',
+                    }}>
+                    {podLabel}
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MergedBayGridView({ group, onCellClick, portFilterState }) {
+  const [filter, setFilter] = useState('all');
+  const totalContainers = group.members.reduce((s, b) => s + (b.containers ? b.containers.length : 0), 0);
+
+  if (totalContainers === 0) {
+    return (
+      <div style={{ background:S.bg3, borderRadius:7, padding:'16px 12px', textAlign:'center', marginBottom:6 }}>
+        <div style={{ color:S.vd, fontSize:S.xs, fontStyle:'italic' }}>
+          No container-level data for this bay group yet — import a loading plan to see the grid
+        </div>
+      </div>
+    );
+  }
+
+  const merged = buildMergedGroupGrid(group);
+
+  return (
+    <div style={{ background:S.bg3, borderRadius:7, padding:'10px', marginBottom:6 }}>
+      <GridFilterBar active={filter} onChange={setFilter} />
+      <MergedBayGridSection title="Deck" section={merged.deck} filter={filter} onCellClick={onCellClick} portFilterState={portFilterState} />
+      <MergedBayGridSection title="Hold" section={merged.hold} filter={filter} onCellClick={onCellClick} portFilterState={portFilterState} />
+      <div style={{ display:'flex', gap:10, flexWrap:'wrap', marginTop:4 }}>
+        {[['DG',S.rd],['Reefer',S.cy],['OOG',S.or],['Standard',ACC]].map(([l,c])=>(
+          <span key={l} style={{ fontSize:S.ti, color:c }}>■ {l}</span>
+        ))}
+        <span style={{ fontSize:S.ti, color:S.dm }}>▭ double border = 40ft</span>
         {portFilterState && portFilterState.newIds && portFilterState.newIds.size > 0 && (
           <span style={{ fontSize:S.ti, color:S.gn }}>● NEW (loaded this port)</span>
         )}
@@ -1413,6 +1584,7 @@ function ContainerDetailModal({ container, onClose }) {
 // own full BayCard with independent status/progress — this is a display
 // grouping only, not a data merge.
 function MasterBayGroup({ group, gantries, movesPerHr, onUpdate, bayIndexMap, portFilterState, bayParticularsMap }) {
+  const [selectedContainer, setSelectedContainer] = useState(null);
   const totalContainers = group.members.reduce((s, b) => s + (b.containers ? b.containers.length : 0), 0);
   // Label format matches the real paper stowage plan convention: the odd
   // (20ft) bay number is shown as the heading, with the even (40ft, master)
@@ -1434,6 +1606,11 @@ function MasterBayGroup({ group, gantries, movesPerHr, onUpdate, bayIndexMap, po
     (b.containers || []).some(c => portFilterState.highlightedIds.has(c.id))
   );
 
+  // A merged grid only makes sense for an actual 40ft+20ft group (more than
+  // one member). A standalone bay (no odd/even partner found) falls back to
+  // its own BayCard-rendered grid, unchanged from before.
+  const isMergeable = group.members.length > 1;
+
   return (
     <div style={{ border:`1px solid ${S.bd2}`, borderRadius:10, padding:'8px', marginBottom:8, background:'rgba(255,255,255,0.01)', opacity: groupHasMatch ? 1 : 0.35 }}>
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:6, padding:'0 4px' }}>
@@ -1444,8 +1621,16 @@ function MasterBayGroup({ group, gantries, movesPerHr, onUpdate, bayIndexMap, po
         <BayCard key={b.bay} bay={b} idx={bayIndexMap[b.bay]}
           gantries={gantries} movesPerHr={movesPerHr}
           onUpdate={onUpdate} portFilterState={portFilterState}
-          bayParticulars={bayParticularsMap ? bayParticularsMap[parseInt(b.bay, 10)] : null} />
+          bayParticulars={bayParticularsMap ? bayParticularsMap[parseInt(b.bay, 10)] : null}
+          hideOwnGrid={isMergeable} />
       ))}
+      {isMergeable && (
+        <div style={{ marginTop:6 }}>
+          <SectionLabel text="Merged Bay Group Grid" color={ACC} />
+          <MergedBayGridView group={group} onCellClick={setSelectedContainer} portFilterState={portFilterState} />
+        </div>
+      )}
+      <ContainerDetailModal container={selectedContainer} onClose={()=>setSelectedContainer(null)} />
     </div>
   );
 }
@@ -1455,7 +1640,7 @@ function MasterBayGroup({ group, gantries, movesPerHr, onUpdate, bayIndexMap, po
 // rendered from LiveOps (one heading per 40ft bay + its 20ft neighbors), but
 // each individual bay (40ft or 20ft) still tracks its own status/progress —
 // the merge is a display grouping, not a data merge.
-function BayCard({ bay, idx, gantries, onUpdate, movesPerHr, portFilterState, bayParticulars }) {
+function BayCard({ bay, idx, gantries, onUpdate, movesPerHr, portFilterState, bayParticulars, hideOwnGrid }) {
   const [expanded, setExpanded] = useState(false);
   const [selectedContainer, setSelectedContainer] = useState(null);
   const col = STATUS_COLOR[bay.status] || S.vd;
@@ -1565,7 +1750,9 @@ function BayCard({ bay, idx, gantries, onUpdate, movesPerHr, portFilterState, ba
             ))}
           </div>
 
-          <BayGridView bay={bay} onCellClick={setSelectedContainer} portFilterState={portFilterState} bayParticulars={bayParticulars} />
+          {!hideOwnGrid && (
+            <BayGridView bay={bay} onCellClick={setSelectedContainer} portFilterState={portFilterState} bayParticulars={bayParticulars} />
+          )}
         </div>
       )}
 
@@ -3598,4 +3785,4 @@ export default function CargoOpsPage({ notify }) {
 
     </div>
   );
-                             }
+                   }
