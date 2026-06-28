@@ -632,4 +632,15 @@ export default function CompassErrorPage({user}){
           </div>
         </div>
         <div>
-          <div style={DC.card}><div style={DC.hdr
+          <div style={DC.hdr}>📈 DEVIATION CURVE — {shipName||'Unnamed Vessel'}</div><DeviationChart deviations={devCard}/></div>
+          <div style={DC.card}>
+            <div style={DC.hdr}>📋 CARD SUMMARY</div>
+            <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:'0.35rem'}}>
+              {DEV_HDGS.map((h,i)=>{const v=parseFloat(devCard[i])||0;return(<div key={h} style={{background:'var(--bg2)',borderRadius:7,padding:'7px 6px',textAlign:'center'}}><div style={{fontSize:'0.6rem',color:'var(--text3)'}}>{DEV_LBLS[i]}<br/>{String(h).padStart(3,'0')}°</div><div style={{fontFamily:"'Orbitron',monospace",fontSize:'0.76rem',fontWeight:700,color:v>=0?'var(--green)':'var(--red)',marginTop:2}}>{v!==0?`${v>=0?'+':''}${v.toFixed(1)}`:' 0.0'}</div><div style={{fontSize:'0.55rem',color:v>=0?'var(--green)':'var(--red)'}}>{v>=0?'E':'W'}</div></div>);})}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>)}
+  </div>);
+                             }
