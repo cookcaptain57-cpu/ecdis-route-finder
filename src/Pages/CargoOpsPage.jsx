@@ -961,36 +961,33 @@ function groupBaysByMasterBay(bays, bayParticularsMap) {
   const used = new Set();
   const groups = [];
 
-  // Pass 1: even (40ft) bays pair with AT MOST ONE odd (20ft) neighbor —
-  // never both simultaneously, even if both have real cargo. A physical
-  // 40ft slot has exactly one forward-or-aft relationship to a 20ft bay;
-  // confirmed against real data where bay 005 and bay 007 (both flanking
-  // bay 006) share overlapping row/tier coordinates, proving they are two
-  // independent real bays, not two halves of one merged slot.
+  // Pass 1: even (40ft) bays merge with their FORWARD 20ft neighbor only
+  // (bay N-1), never the aft neighbor (bay N+1). This is a fixed physical
+  // hatch-marking convention, not vessel-specific or data-dependent: a
+  // hatch unit is marked "01 02 03" where 01 (forward) and 02 (40ft) share
+  // one grid, and 03 (aft) is always shown as its own separate grid. A 40ft
+  // container physically requires BOTH the forward and aft 20ft slots, but
+  // the forward slot (N-1) is the one sharing the master bay's grid view —
+  // confirmed against real bay-marking convention and real vessel data
+  // (bay 006's forward partner 005 merges; aft partner 007 stays separate).
+  // bayParticularsMap's pairedOddBay can still override this for vessels
+  // with a genuinely different physical layout, but the default is fixed.
   bays.forEach(b => {
     const n = parseInt(b.bay, 10);
     if (isNaN(n) || n % 2 !== 0) return; // only even (40ft) bays anchor a group
     if (used.has(b.bay)) return;
 
-    const oddBefore = byNumber[n - 1];
-    const oddAfter = byNumber[n + 1];
+    const forwardOdd = byNumber[n - 1]; // always the merge partner by default
     const particulars = bayParticularsMap ? bayParticularsMap[n] : null;
 
-    let chosenOdd = null;
+    let chosenOdd = forwardOdd || null;
     if (particulars && particulars.pairedOddBay) {
-      // Explicit vessel-design pairing from Ship Particulars takes priority.
+      // Explicit vessel-design override, for ships where the physical
+      // layout genuinely differs from the standard forward-pairs convention.
       const pairedNum = parseInt(particulars.pairedOddBay, 10);
-      if (pairedNum === n - 1) chosenOdd = oddBefore;
+      const oddAfter = byNumber[n + 1];
+      if (pairedNum === n - 1) chosenOdd = forwardOdd;
       else if (pairedNum === n + 1) chosenOdd = oddAfter;
-    } else if (oddBefore && oddAfter) {
-      // Both neighbors have data but no explicit pairing configured —
-      // never merge with both; without vessel-design info there's no safe
-      // way to know which is real, so this bay stays standalone (Pass 2)
-      // and both odd bays render as their own separate, unmerged entries.
-      chosenOdd = null;
-    } else {
-      // Only one neighbor exists at all — safe to use it.
-      chosenOdd = oddBefore || oddAfter || null;
     }
 
     const members = [b];
@@ -999,9 +996,10 @@ function groupBaysByMasterBay(bays, bayParticularsMap) {
     groups.push({ masterBay: b.bay, fortyFt: b, twentyFt: chosenOdd ? [chosenOdd] : [], members });
   });
 
-  // Pass 2: anything left over (odd bays with no chosen even partner,
-  // ambiguous pairs left unmerged above, or odd-only numbering schemes)
-  // becomes its own single-bay group.
+  // Pass 2: anything left over (aft 20ft bays per the convention above, odd
+  // bays with no even partner, or odd-only numbering schemes) becomes its
+  // own single-bay group — shown as a separate grid, per the real hatch
+  // marking convention.
   bays.forEach(b => {
     if (used.has(b.bay)) return;
     used.add(b.bay);
@@ -3328,16 +3326,17 @@ function ShipParticularsSetup() {
                     {parseInt(b.bay, 10) % 2 === 0 && (
                       <div style={{ marginTop:8 }}>
                         <div style={{ color:S.dm, fontSize:'0.55rem', marginBottom:3, lineHeight:1.5 }}>
-                          This is a 40ft bay. A 40ft slot physically pairs with only ONE 20ft
-                          neighbor (forward or aft), never both — set which one below to merge
-                          them correctly in the live grid. Leave unset if unsure; bays with both
-                          neighbors having real cargo will be shown separately rather than guessed.
+                          This is a 40ft bay. By standard hatch-marking convention, the FORWARD
+                          20ft bay (one number lower) shares its grid view with this bay; the AFT
+                          20ft bay (one number higher) is always shown separately. This is set
+                          automatically — only override below if this vessel's physical layout
+                          genuinely differs from the standard convention.
                         </div>
                         <select value={b.pairedOddBay || ''} onChange={e=>updateBayOverride(b.bay,'pairedOddBay',e.target.value)}
                           style={{ width:'100%', background:S.bg2, color:ACC, border:`1px solid ${S.bd2}`, borderRadius:4, padding:'5px 6px', fontSize:S.ti }}>
-                          <option value=''>— Not set (auto: only merge if one side is empty) —</option>
+                          <option value=''>— Default: Forward bay {String(parseInt(b.bay,10)-1).padStart(b.bay.length,'0')} merges automatically —</option>
                           <option value={String(parseInt(b.bay,10)-1).padStart(b.bay.length,'0')}>Forward: Bay {String(parseInt(b.bay,10)-1).padStart(b.bay.length,'0')}</option>
-                          <option value={String(parseInt(b.bay,10)+1).padStart(b.bay.length,'0')}>Aft: Bay {String(parseInt(b.bay,10)+1).padStart(b.bay.length,'0')}</option>
+                          <option value={String(parseInt(b.bay,10)+1).padStart(b.bay.length,'0')}>Aft: Bay {String(parseInt(b.bay,10)+1).padStart(b.bay.length,'0')} (override)</option>
                         </select>
                       </div>
                     )}
@@ -3850,4 +3849,4 @@ export default function CargoOpsPage({ notify }) {
 
     </div>
   );
-        }
+                                                 }
