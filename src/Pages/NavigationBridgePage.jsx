@@ -494,9 +494,9 @@ const TOOLS = [
   { id:'flags',     emoji:'🚩', label:'Maritime Signal Flags',     sub:'A–Z flag meanings & colours' },
   { id:'smcp',      emoji:'💬', label:'SMCP Reference',            sub:'Standard phrases by category' },
   { id:'morse',     emoji:'·—', label:'Morse Code Reference',      sub:'Encode / decode + table' },
-  { id:'weather',   emoji:'🌦️', label:'Weather Forecast',         sub:'Open-Meteo — GPS or manual' },
-  { id:'cyclone',   emoji:'🌀', label:'Cyclone Tracker',           sub:'Windy live — GPS centred' },
-  { id:'tide',      emoji:'🌊', label:'Tide / Wave Data',          sub:'Open-Meteo — GPS or manual' },
+  { id:'weather',   emoji:'🌦️', label:'Weather Forecast',         sub:'Live forecast — GPS or manual' },
+  { id:'cyclone',   emoji:'🌀', label:'Cyclone Tracker',           sub:'Live cyclone tracking — GPS centred' },
+  { id:'tide',      emoji:'🌊', label:'Tide / Wave Data',          sub:'Live marine data — GPS or manual' },
   { id:'sunrise',   emoji:'🌅', label:'Sunrise / Sunset',         sub:'7-day solar — GPS or manual' },
   { id:'conditions',emoji:'🌡️', label:'Current Weather & Sea State', sub:'Live conditions — GPS or manual' },
   { id:'anchor',    emoji:'⚓', label:'Anchor Gear Calculator',    sub:'Scope, radius, chain weight' },
@@ -872,7 +872,7 @@ function CyclonePanel() {
 
   return (
     <div>
-      <div style={S.info}>Live cyclone / tropical storm tracking via Windy — active storms, forecast tracks & intensity.</div>
+      <div style={S.info}>Live cyclone / tropical storm tracking — active storms, forecast tracks &amp; intensity.</div>
 
       {/* GPS + manual controls */}
       <div style={{display:'flex',gap:8,marginBottom:10,flexWrap:'wrap',alignItems:'flex-end'}}>
@@ -915,14 +915,14 @@ function CyclonePanel() {
       <div style={{borderRadius:10,overflow:'hidden',border:'1.5px solid #1e4070'}}>
         <iframe
           key={windyUrl}
-          title="Windy Cyclone Tracker"
+          title="Cyclone Tracker"
           src={windyUrl}
           style={{width:'100%',height:500,border:'none',display:'block'}}
           allowFullScreen
         />
       </div>
       <div style={{marginTop:8,fontSize:10,color:'#4a7a9b'}}>
-        💡 Switch overlay to <b style={{color:'#7eb8d8'}}>Waves</b>, <b style={{color:'#7eb8d8'}}>Rain</b> or <b style={{color:'#7eb8d8'}}>Cyclone tracks</b> using the Windy layer menu.
+        💡 Switch overlay to <b style={{color:'#7eb8d8'}}>Waves</b>, <b style={{color:'#7eb8d8'}}>Rain</b> or <b style={{color:'#7eb8d8'}}>Cyclone tracks</b> using the map layer menu.
       </div>
     </div>
   );
@@ -951,7 +951,7 @@ function TidePanel() {
 
   return (
     <div>
-      <div style={S.info}>ℹ️ Open-Meteo Marine API — wave & swell data for open sea / coastal locations. For precise tidal prediction consult ADMIRALTY TotalTide or port tide tables.</div>
+      <div style={S.info}>ℹ️ Wave &amp; swell data for open sea / coastal locations. For precise tidal prediction consult ADMIRALTY TotalTide or port tide tables.</div>
       <GpsBar
         lat={lat} lon={lon} setLat={setLat} setLon={setLon}
         onFetch={doFetch}
@@ -1045,6 +1045,7 @@ function SunrisePanel() {
 }
 
 // ── CURRENT WEATHER & SEA STATE — GPS + manual, table format, device local time ──
+// True & Relative wind computed from auto-tracked COG/SOG (two GPS fixes via watchPosition)
 function ConditionsPanel() {
   const [lat, setLat] = useState('');
   const [lon, setLon] = useState('');
@@ -1053,6 +1054,12 @@ function ConditionsPanel() {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState('');
   const [fetchedAt, setFetchedAt] = useState(null);
+  const [cog, setCog] = useState(null);   // Course Over Ground, degrees — auto-derived
+  const [sog, setSog] = useState(null);   // Speed Over Ground, knots — auto-derived
+  const [tracking, setTracking] = useState(false);
+  const [trackErr, setTrackErr] = useState('');
+  const watchIdRef = useRef(null);
+  const firstFixRef = useRef(null);
   const { gpsLoading, gpsErr, getGPS } = useGPS();
 
   const WMO = {0:'Clear sky',1:'Mainly clear',2:'Partly cloudy',3:'Overcast',45:'Fog',48:'Icing fog',51:'Light drizzle',53:'Moderate drizzle',55:'Dense drizzle',61:'Slight rain',63:'Moderate rain',65:'Heavy rain',71:'Slight snow',73:'Moderate snow',75:'Heavy snow',80:'Slight showers',81:'Moderate showers',82:'Violent showers',95:'Thunderstorm',96:'T-storm+hail',99:'T-storm+heavy hail'};
@@ -1087,11 +1094,84 @@ function ConditionsPanel() {
     return { n:9, l:'Phenomenal' };
   };
 
+  // Sky condition label from total cloud cover %, plus low/mid/high breakdown
+  const skyCondition = (pct) => {
+    if (pct == null) return 'Unknown';
+    if (pct <= 10) return 'Clear';
+    if (pct <= 25) return 'Few Clouds';
+    if (pct <= 50) return 'Partly Cloudy';
+    if (pct <= 87) return 'Mostly Cloudy';
+    return 'Overcast';
+  };
+
+  const dirLabel = (deg) => {
+    if (deg == null) return '—';
+    const dirs = ['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'];
+    return dirs[Math.round(deg / 22.5) % 16];
+  };
+
+  // Haversine distance (m) + initial bearing — used to derive COG/SOG from two GPS fixes
+  const distAndBearing = (lat1, lon1, lat2, lon2) => {
+    const R = 6371000;
+    const toRad = d => d * Math.PI / 180;
+    const dLat = toRad(lat2 - lat1);
+    const dLon = toRad(lon2 - lon1);
+    const a = Math.sin(dLat/2)**2 + Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLon/2)**2;
+    const distM = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    const y = Math.sin(dLon) * Math.cos(toRad(lat2));
+    const x = Math.cos(toRad(lat1))*Math.sin(toRad(lat2)) - Math.sin(toRad(lat1))*Math.cos(toRad(lat2))*Math.cos(dLon);
+    const brng = (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+    return { distM, brng };
+  };
+
+  // Auto-derive COG/SOG: take a GPS fix, wait, take a second fix, compute vector
+  const trackCogSog = () => {
+    if (!navigator.geolocation) { setTrackErr('GPS not supported on this device.'); return; }
+    setTracking(true); setTrackErr(''); setCog(null); setSog(null);
+    firstFixRef.current = null;
+
+    const onFix = (pos) => {
+      const fix = { lat: pos.coords.latitude, lon: pos.coords.longitude, t: pos.timestamp };
+      if (!firstFixRef.current) {
+        firstFixRef.current = fix;
+        return;
+      }
+      const prev = firstFixRef.current;
+      const dtSec = (fix.t - prev.t) / 1000;
+      if (dtSec < 2) return; // need a meaningful time gap for accuracy
+      const { distM, brng } = distAndBearing(prev.lat, prev.lon, fix.lat, fix.lon);
+      const speedMs = distM / dtSec;
+      const speedKn = speedMs * 1.94384;
+      setCog(Math.round(brng));
+      setSog(Math.round(speedKn * 10) / 10);
+      setTracking(false);
+      if (watchIdRef.current != null) {
+        navigator.geolocation.clearWatch(watchIdRef.current);
+        watchIdRef.current = null;
+      }
+    };
+    const onErr = () => {
+      setTrackErr('Could not track movement. Ensure GPS/location is enabled and the device has line of sight.');
+      setTracking(false);
+      if (watchIdRef.current != null) { navigator.geolocation.clearWatch(watchIdRef.current); watchIdRef.current = null; }
+    };
+    watchIdRef.current = navigator.geolocation.watchPosition(onFix, onErr, { enableHighAccuracy:true, maximumAge:0, timeout:20000 });
+    // Safety timeout in case vessel isn't moving enough to register
+    setTimeout(() => {
+      if (watchIdRef.current != null) {
+        navigator.geolocation.clearWatch(watchIdRef.current);
+        watchIdRef.current = null;
+        setTracking(false);
+        if (cog == null) setTrackErr('No movement detected — vessel may be stationary. True wind will be shown only.');
+      }
+    }, 15000);
+  };
+
   const doFetch = async () => {
     if (!lat || !lon) { setErr('Enter or detect coordinates first.'); return; }
     setLoading(true); setErr(''); setWeather(null); setMarine(null);
     try {
-      const wUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,apparent_temperature,pressure_msl,wind_speed_10m,wind_direction_10m,weather_code,cloud_cover,visibility,dew_point_2m,uv_index,precipitation&wind_speed_unit=kn&timezone=auto`;
+      const wUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,apparent_temperature,pressure_msl,wind_speed_10m,wind_direction_10m,wind_gusts_10m,weather_code,cloud_cover,cloud_cover_low,cloud_cover_mid,cloud_cover_high,visibility,dew_point_2m,uv_index,precipitation,snowfall,cape&wind_speed_unit=kn&timezone=auto`;
       const mUrl = `https://marine-api.open-meteo.com/v1/marine?latitude=${lat}&longitude=${lon}&current=sea_surface_temperature,wave_height,wave_direction,wave_period,swell_wave_height,swell_wave_direction,swell_wave_period&timezone=auto`;
       const [wRes, mRes] = await Promise.all([fetch(wUrl), fetch(mUrl)]);
       const wJson = await wRes.json();
@@ -1108,31 +1188,50 @@ function ConditionsPanel() {
   const m = marine?.current;
   const bf = c ? beaufort(c.wind_speed_10m) : null;
   const ss = m ? seaState(m.wave_height) : null;
-  const dirLabel = (deg) => {
-    if (deg == null) return '—';
-    const dirs = ['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'];
-    return dirs[Math.round(deg / 22.5) % 16];
-  };
+
+  // Relative (apparent) wind from True wind + vessel velocity vector subtraction
+  let relWind = null;
+  if (c && cog != null && sog != null) {
+    const trueDirRad = (c.wind_direction_10m * Math.PI) / 180;
+    const cogRad = (cog * Math.PI) / 180;
+    // Wind vector (wind blows FROM trueDir, so velocity vector points opposite)
+    const windVx = -c.wind_speed_10m * Math.sin(trueDirRad);
+    const windVy = -c.wind_speed_10m * Math.cos(trueDirRad);
+    const shipVx = sog * Math.sin(cogRad);
+    const shipVy = sog * Math.cos(cogRad);
+    // Apparent wind velocity = wind velocity - ship velocity (vector as seen from moving ship)
+    const relVx = windVx - shipVx;
+    const relVy = windVy - shipVy;
+    const relSpeed = Math.sqrt(relVx*relVx + relVy*relVy);
+    let relDirFrom = (Math.atan2(-relVx, -relVy) * 180 / Math.PI + 360) % 360;
+    // Angle relative to bow (COG)
+    let relToBow = ((relDirFrom - cog) + 360) % 360;
+    relWind = { speed: Math.round(relSpeed*10)/10, dirTrue: Math.round(relDirFrom), dirRelBow: Math.round(relToBow) };
+  }
 
   const rows = c ? [
     { label:'🌡️ Air Temperature',  value:`${c.temperature_2m}°C`, sub:`Feels like ${c.apparent_temperature}°C` },
-    { label:'🌊 Sea Surface Temp',  value: m?.sea_surface_temperature!=null ? `${m.sea_surface_temperature}°C` : '— (no marine data)', sub:'' },
+    { label:'🌊 Sea Surface Temp',  value: m?.sea_surface_temperature!=null ? `${m.sea_surface_temperature}°C` : '— (unavailable for this position)', sub:'' },
     { label:'💧 Relative Humidity', value:`${c.relative_humidity_2m}%`, sub:`Dew point ${c.dew_point_2m}°C` },
     { label:'📊 Barometric Pressure', value:`${c.pressure_msl} hPa`, sub:'' },
-    { label:'💨 Wind Speed',        value:`${c.wind_speed_10m} kn`, sub:bf ? `Beaufort ${bf.n} — ${bf.l}` : '' },
-    { label:'🧭 Wind Direction',    value:`${c.wind_direction_10m}° (${dirLabel(c.wind_direction_10m)})`, sub:'' },
-    { label:'🌊 Wave Height',       value: m?.wave_height!=null ? `${m.wave_height} m` : '— (no marine data)', sub: m?.wave_direction!=null ? `from ${m.wave_direction}° (${dirLabel(m.wave_direction)})` : '' },
+    { label:'💨 True Wind Speed',   value:`${c.wind_speed_10m} kn`, sub:bf ? `Beaufort ${bf.n} — ${bf.l}` + (c.wind_gusts_10m!=null?` · Gusts ${c.wind_gusts_10m} kn`:'') : '' },
+    { label:'🧭 True Wind Direction', value:`${c.wind_direction_10m}° (${dirLabel(c.wind_direction_10m)})`, sub:'Direction wind is blowing FROM' },
+    { label:'⛵ Relative (Apparent) Wind', value: relWind ? `${relWind.speed} kn` : '— (auto-track COG/SOG below)', sub: relWind ? `${relWind.dirRelBow}° relative to bow (${relWind.dirTrue}° true)` : 'Needs vessel movement to compute' },
+    { label:'🌊 Wave Height',       value: m?.wave_height!=null ? `${m.wave_height} m` : '— (unavailable for this position)', sub: m?.wave_direction!=null ? `from ${m.wave_direction}° (${dirLabel(m.wave_direction)})` : '' },
     { label:'🌀 Swell Height',      value: m?.swell_wave_height!=null ? `${m.swell_wave_height} m` : '—', sub: m?.swell_wave_direction!=null ? `from ${m.swell_wave_direction}° (${dirLabel(m.swell_wave_direction)}), period ${m.swell_wave_period}s` : '' },
     { label:'🌊 Sea State',         value: ss ? `${ss.n} — ${ss.l}` : '—', sub:'WMO Sea State Code' },
-    { label:'☁️ Cloud Cover',       value:`${c.cloud_cover}%`, sub:WMO[c.weather_code] || '—' },
+    { label:'☁️ Sky Condition',     value: skyCondition(c.cloud_cover), sub: WMO[c.weather_code] || '—' },
+    { label:'☁️ Cloud Cover (Total)', value:`${c.cloud_cover}%`, sub:`Low ${c.cloud_cover_low}% · Mid ${c.cloud_cover_mid}% · High ${c.cloud_cover_high}%` },
     { label:'👁️ Visibility',        value: c.visibility!=null ? `${(c.visibility/1000).toFixed(1)} km` : '—', sub:'' },
     { label:'🌧️ Precipitation',     value:`${c.precipitation} mm`, sub: c.precipitation > 0 ? 'Currently precipitating' : 'No precipitation' },
+    { label:'❄️ Snowfall',          value: c.snowfall!=null ? `${c.snowfall} cm` : '—', sub: c.snowfall > 0 ? 'Currently snowing' : 'No snowfall' },
+    { label:'⛈️ Thunderstorm Potential (CAPE)', value: c.cape!=null ? `${c.cape} J/kg` : '—', sub: c.cape>2500?'High instability risk':c.cape>1000?'Moderate instability':'Low instability' },
     { label:'☀️ UV Index',          value: c.uv_index!=null ? c.uv_index : '—', sub: c.uv_index>7?'Very High':c.uv_index>4?'Moderate-High':'Low-Moderate' },
   ] : [];
 
   return (
     <div>
-      <div style={S.info}>Live current conditions from Open-Meteo (weather) + Open-Meteo Marine (sea state). Marine data may be unavailable for inland or some near-shore coordinates.</div>
+      <div style={S.info}>Live current conditions for your position, including marine/sea-state data where available for the selected coordinates.</div>
       <GpsBar
         lat={lat} lon={lon} setLat={setLat} setLon={setLon}
         onFetch={doFetch}
@@ -1140,6 +1239,30 @@ function ConditionsPanel() {
         gpsLoading={gpsLoading} gpsErr={gpsErr}
         getGPS={(onSuccess) => getGPS((la, lo) => { setLat(la); setLon(lo); onSuccess && onSuccess(la, lo); })}
       />
+
+      {/* COG/SOG auto-tracking for True vs Relative wind */}
+      <div style={{marginTop:14, padding:'10px 12px', background:'rgba(30,90,160,0.08)', border:'1px solid #1a4a70', borderRadius:8}}>
+        <div style={{fontSize:11, color:'#7eb8d8', marginBottom:8}}>
+          ⛵ <b>Course &amp; Speed Over Ground</b> — auto-detected from live GPS movement, used to compute Relative (Apparent) Wind.
+        </div>
+        <div style={{display:'flex', gap:10, alignItems:'center', flexWrap:'wrap'}}>
+          <button
+            style={{...S.btnGps, background: tracking ? 'rgba(40,120,60,0.4)' : 'linear-gradient(135deg,#1a6a3a,#0d4a2a)'}}
+            onClick={trackCogSog}
+            disabled={tracking}
+          >
+            {tracking ? '📡 Tracking movement…' : '🎯 Auto-Detect COG / SOG'}
+          </button>
+          {cog != null && sog != null && (
+            <div style={{fontSize:11, color:'#40c880'}}>
+              COG: <b>{cog}°</b> ({dirLabel(cog)}) &nbsp;|&nbsp; SOG: <b>{sog} kn</b>
+            </div>
+          )}
+        </div>
+        {trackErr && <div style={{...S.error, marginTop:8}}>{trackErr}</div>}
+        {tracking && <div style={{fontSize:10, color:'#4a8ab5', marginTop:6}}>Keep this open for a few seconds while underway — needs at least 2 GPS fixes with movement between them.</div>}
+      </div>
+
       {loading && <div style={S.spinner}>⏳ Fetching live conditions…</div>}
       {err && <div style={S.error}>{err}</div>}
       {c && (
@@ -1164,7 +1287,7 @@ function ConditionsPanel() {
             </table>
           </div>
           <div style={{marginTop:10,fontSize:10,color:'#4a7a9b'}}>
-            💡 Sea State follows WMO code (0=calm glassy → 9=phenomenal). Beaufort scale describes wind force. Always cross-check with onboard instruments before making navigational decisions.
+            💡 Sea State follows WMO code (0=calm glassy → 9=phenomenal). Beaufort scale describes wind force. Relative wind requires vessel movement to compute (use Auto-Detect above). Always cross-check with onboard instruments before making navigational decisions.
           </div>
         </div>
       )}
