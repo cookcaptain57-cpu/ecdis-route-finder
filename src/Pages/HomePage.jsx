@@ -266,8 +266,10 @@ function MaritimeAIWidget() {
   );
 }
 
-// ── Only change: added installPrompt and onInstallApp props ──────────────────
-export default function HomePage({ routes, charts, onSearch, setTab, user, portsDb=[], userProfile=null, installPrompt=null, onInstallApp=null }) {
+// ── allTabs prop is now the single source of truth, passed from App.jsx's
+// TABS array. Customise picker, feature cards, and pinned tabs all derive
+// from this — no more separate hardcoded ALL_FEATURES list to keep in sync. ──
+export default function HomePage({ routes, charts, onSearch, setTab, user, portsDb=[], userProfile=null, installPrompt=null, onInstallApp=null, allTabs=[] }) {
   const [q,              setQ]             = useState('');
   const [qResults,       setQResults]      = useState([]);
   const [tipIndex,       setTipIndex]      = useState(() => Math.floor(Date.now()/86400000) % MARITIME_TIPS.length);
@@ -352,27 +354,24 @@ export default function HomePage({ routes, charts, onSearch, setTab, user, ports
   };
   const wc = weather ? weatherIcon(weather.code) : null;
 
-  const ALL_FEATURES = [
-    {icon:'🚢',label:'ROUTES',          desc:'Browse, search & download routes.',          tab:'routes',    color:'#00B4D8',bg:'linear-gradient(135deg,#00B4D8,#1565C0)'},
-    {icon:'📡',label:'ECDIS CHARTS',    desc:'Charts for all major ECDIS brands.',         tab:'charts',    color:'#F0A500',bg:'linear-gradient(135deg,#F0A500,#D4900A)'},
-    {icon:'📐',label:'ROUTE PLANNER',   desc:'Plan optimised routes with advanced tools.', tab:'planner',   color:'#00C896',bg:'linear-gradient(135deg,#00C896,#00a87a)'},
-    {icon:'🧭',label:'NAV MODE',        desc:'Navigate with precision.',                   tab:'navmode',   color:'#A78BFA',bg:'linear-gradient(135deg,#7C3AED,#A78BFA)',badge:'NEW'},
-    {icon:'⚓',label:'PORTS DATABASE',  desc:'27,000+ global ports with coordinates.',     tab:'ports',     color:'#00B4D8',bg:'linear-gradient(135deg,#00B4D8,#0070cc)'},
-    {icon:'📚',label:'MARITIME LIBRARY',desc:'SOLAS, MARPOL, IMO, STCW & more.',         tab:'library',   color:'#F0A500',bg:'linear-gradient(135deg,#F0A500,#b07000)'},
-    {icon:'🛳',label:'VESSEL SEARCH',   desc:'Search by IMO, MMSI or flag state.',        tab:'vessel',    color:'#A78BFA',bg:'linear-gradient(135deg,#7C3AED,#A78BFA)'},
-    {icon:'🧮',label:'VOYAGE CALC',     desc:'Calculate distance, duration and fuel.',    tab:'voyage',    color:'#00C896',bg:'linear-gradient(135deg,#00C896,#00a87a)'},
-    {icon:'📜',label:'CERTIFICATES',    desc:'Track STCW certificate expiry dates.',      tab:'certs',     color:'#F0A500',bg:'linear-gradient(135deg,#F0A500,#b07000)'},
-    {icon:'⏱',label:'SEA TIME',        desc:'Log sea service time across all ships.',    tab:'seatime',   color:'#00B4D8',bg:'linear-gradient(135deg,#00B4D8,#1565C0)'},
-    {icon:'📢',label:'PORT NOTICES',    desc:'Closures, restrictions & warnings.',        tab:'notices',   color:'#ff6b35',bg:'linear-gradient(135deg,#ff6b35,#cc4400)'},
-    {icon:'🔭',label:'COMPASS ERROR',   desc:'Calculate and log compass errors.',         tab:'compass',   color:'#A78BFA',bg:'linear-gradient(135deg,#7C3AED,#A78BFA)'},
-    {icon:'🪢',label:'KNOTS & MOORING', desc:'Reference guide for knots and mooring.',    tab:'knots',     color:'#00C896',bg:'linear-gradient(135deg,#00C896,#00a87a)'},
-    {icon:'🚨',label:'EMERGENCY',       desc:'Emergency procedures & contacts.',          tab:'emergency', color:'#FF4757',bg:'linear-gradient(135deg,#FF4757,#cc2233)'},
-    {icon:'🗺',label:'NAV & BRIDGE',    desc:'Navigation and bridge procedures.',         tab:'navbridge', color:'#00B4D8',bg:'linear-gradient(135deg,#00B4D8,#1565C0)'},
-    {icon:'🧳',label:'CREW JOURNEY',    desc:'Track your career voyage.',                 tab:'crewjourney',color:'#A78BFA',bg:'linear-gradient(135deg,#7C3AED,#A78BFA)'},
-    {icon:'🏖',label:'PORT & SHORE',    desc:'Port info, shore leave & services.',        tab:'portshore', color:'#00C896',bg:'linear-gradient(135deg,#00C896,#00a87a)'},
-    {icon:'🌟',label:'CELESTIAL NAV',   desc:'Sight reduction & celestial navigation.',   tab:'sights',    color:'#F0A500',bg:'linear-gradient(135deg,#F0A500,#b07000)',badge:'NEW'},
-    {icon:'ℹ️',label:'HELP & INFO',     desc:'Contact, About, Legal, FAQ.',               tab:'info',      color:'#00B4D8',bg:'linear-gradient(135deg,#00B4D8,#1565C0)'},
-  ].filter((f,i,arr)=>arr.findIndex(x=>x.tab===f.tab)===i);
+  // ── DERIVED FROM allTabs PROP — this is the fix. ──
+  // Default fallback colour/gradient for any tab that doesn't define one
+  // (keeps things visually fine even if a future tab forgets to set color/bg).
+  const FALLBACK_COLOR = '#00B4D8';
+  const FALLBACK_BG    = 'linear-gradient(135deg,#00B4D8,#1565C0)';
+
+  const ALL_FEATURES = (allTabs || [])
+    .filter(t => !t.hideFromCustomise)
+    .map(t => ({
+      icon:  t.i,
+      label: (t.l || '').toUpperCase(),
+      desc:  t.desc || '',
+      tab:   t.k,
+      color: t.color || FALLBACK_COLOR,
+      bg:    t.bg || FALLBACK_BG,
+      badge: t.badge,
+    }))
+    .filter((f,i,arr)=>arr.findIndex(x=>x.tab===f.tab)===i); // dedupe just in case
 
   const validTabKeys = new Set(ALL_FEATURES.map(f=>f.tab));
   const safePinnedTabs = pinnedTabs.filter(k => validTabKeys.has(k));
@@ -504,7 +503,7 @@ export default function HomePage({ routes, charts, onSearch, setTab, user, ports
             </div>
           </div>
 
-          {/* ── PWA Install Button — below weather widget ── */}
+          {/* PWA Install Button */}
           {installPrompt && onInstallApp && (
             <div style={{marginTop:'0.8rem',maxWidth:540}}>
               <button onClick={onInstallApp}
@@ -682,4 +681,4 @@ export default function HomePage({ routes, charts, onSearch, setTab, user, ports
       `}</style>
     </div>
   );
-               }
+}
