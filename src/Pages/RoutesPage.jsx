@@ -78,13 +78,28 @@ const buildDriveUrl = (row) => {
   return url;
 };
 
-// ── Silent iframe download — no CORS, no Drive page jump ──────────────────
-// Creates a hidden iframe pointed at the export URL.
-// The browser's download manager intercepts the content-disposition header
-// and saves the file directly — zero page navigation, zero Drive viewer.
+// ── Detect if running as installed PWA (standalone mode) ──────────────────
+const isStandalonePWA = () =>
+  window.matchMedia('(display-mode: standalone)').matches ||
+  window.navigator.standalone === true;
+
+// ── PWA-aware download trigger ─────────────────────────────────────────────
+// PWA standalone mode on Android: iframe downloads are silently swallowed
+// by Chrome — the download manager never intercepts them.
+// Fix: use window.open() which opens a Chrome Custom Tab that DOES trigger
+// the download manager correctly, then the user returns to the app.
+// Regular browser: iframe still works fine and is less disruptive.
 const triggerIframeDownload = (driveUrl) => {
   return new Promise((resolve) => {
-    // Remove any stale iframe from a previous download
+    if (isStandalonePWA()) {
+      // PWA mode — open in Chrome Custom Tab so download manager fires
+      window.open(driveUrl, '_blank', 'noopener,noreferrer');
+      // Resolve quickly — the custom tab handles the rest independently
+      setTimeout(() => resolve(), 800);
+      return;
+    }
+
+    // Regular browser — hidden iframe approach (no page navigation)
     const old = document.getElementById('__mnav_dl_frame');
     if (old) old.remove();
 
@@ -96,12 +111,7 @@ const triggerIframeDownload = (driveUrl) => {
     iframe.src = driveUrl;
     document.body.appendChild(iframe);
 
-    // Give the browser time to start the download before resolving.
-    // We can't listen to iframe load reliably for file downloads,
-    // so we resolve after a safe delay.
-    setTimeout(() => {
-      resolve();
-    }, 3500);
+    setTimeout(() => resolve(), 3500);
   });
 };
 
