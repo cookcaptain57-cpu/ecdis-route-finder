@@ -52,13 +52,19 @@ self.addEventListener('fetch', (event) => {
   // Only handle GET requests
   if (request.method !== 'GET') return;
 
-  // Never intercept Firebase/Firestore/Google Sheets API calls with cache-first —
-  // those need network-first so data stays fresh, but fall back to cache when offline.
+  // ── CHANGED: Added drive.google.com to bypass list ────────────────────
+  // Google Drive download URLs must go straight to the network — the SW
+  // must never intercept them. Drive responds with redirects and
+  // content-disposition headers that trigger the Android download manager.
+  // If the SW caches or mishandles these responses, downloads silently fail
+  // in PWA standalone mode (and sometimes in regular browser too).
+  // ──────────────────────────────────────────────────────────────────────
   const isDataRequest =
     url.hostname.includes('firestore.googleapis.com') ||
     url.hostname.includes('googleapis.com') ||
     url.hostname.includes('firebaseio.com') ||
-    url.hostname.includes('open-meteo.com');
+    url.hostname.includes('open-meteo.com') ||
+    url.hostname.includes('drive.google.com'); // ← ADDED: bypass Drive downloads
 
   if (isDataRequest) {
     event.respondWith(
