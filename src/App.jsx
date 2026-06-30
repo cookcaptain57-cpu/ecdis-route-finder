@@ -517,33 +517,50 @@ export default function App() {
     localStorage.setItem('notif_read', JSON.stringify([...allIds]));
   };
 
+  // ── SINGLE SOURCE OF TRUTH for all navigable tabs/pages. ──
+  // Every tab here automatically becomes available in the sidebar, the
+  // mobile hamburger menu, AND the homepage's "Customise" picker — because
+  // HomePage now receives this exact array as a prop instead of keeping its
+  // own separate, hand-maintained list. Add a new page ONLY here.
+  //
+  // Fields:
+  //   k     – tab key (used everywhere to identify the page)
+  //   i     – icon (emoji)
+  //   l     – label (short, used in sidebar/menu)
+  //   cls   – optional CSS class for sidebar active-state colour
+  //   desc  – longer description shown on the homepage feature card
+  //   color – accent colour (hex) used for the feature card + icon glow
+  //   bg    – gradient background for the feature card icon tile
+  //   badge – optional small badge text (e.g. "NEW") shown on the card
+  //   hideFromCustomise – set true for tabs that shouldn't appear as a
+  //                        homepage feature card (home/login/admin/account/info)
   const TABS = [
-    { k:'home',        i:'🏠', l:'Dashboard' },
-    { k:'routes',      i:'🚢', l:'Routes' },
-    { k:'charts',      i:'📡', l:'ECDIS Charts',   cls:'gold' },
-    { k:'planner',     i:'📐', l:'Route Planner',  cls:'green' },
-    { k:'navmode',     i:'🧭', l:'Nav Mode',       cls:'green' },
-    { k:'ports',       i:'⚓', l:'Ports Database' },
-    { k:'vessel',      i:'🛳', l:'Vessel Search' },
-    { k:'voyage',      i:'🧮', l:'Voyage Calc' },
-    { k:'certs',       i:'📜', l:'Certificates' },
-    { k:'seatime',     i:'⏱', l:'Sea Time' },
-    { k:'notices',     i:'📢', l:'Port Notices' },
-    { k:'compass',     i:'🧭', l:'Compass Error' },
-    { k:'sights',      i:'🔭', l:'Celestial Nav' },
-    { k:'library',     i:'📚', l:'Library' },
-    { k:'knots',       i:'🪢', l:'Knots & Mooring' },
-    { k:'emergency',   i:'🚨', l:'Emergency',      cls:'red' },
-    { k:'navbridge',   i:'🗺', l:'Nav & Bridge' },
-    { k:'welfare',     i:'⚓', l:'Crew Welfare' },
-    { k:'crewjourney', i:'🧳', l:'Crew Journey' },
-    { k:'portshore',   i:'🏖', l:'Port & Shore' },
-    { k:'seadiary',    i:'📔', l:'Sea Diary' },
-    { k:'cargoops',    i:'🚢', l:'Cargo Ops' },
-    { k:'olp',         i:'🎓', l:'OLP Assistant' },
-    ...(user ? [{ k:'account', i:'👤', l:'My Account' }] : []),
-    ...(isAdmin ? [{ k:'admin', i:'🛡', l:'Admin' }] : []),
-    { k:'info', i:'ℹ️', l:'Help & Info' },
+    { k:'home',        i:'🏠', l:'Dashboard',       hideFromCustomise:true },
+    { k:'routes',      i:'🚢', l:'Routes',          desc:'Browse, search & download routes.',          color:'#00B4D8', bg:'linear-gradient(135deg,#00B4D8,#1565C0)' },
+    { k:'charts',      i:'📡', l:'ECDIS Charts',    cls:'gold',  desc:'Charts for all major ECDIS brands.',         color:'#F0A500', bg:'linear-gradient(135deg,#F0A500,#D4900A)' },
+    { k:'planner',     i:'📐', l:'Route Planner',   cls:'green', desc:'Plan optimised routes with advanced tools.', color:'#00C896', bg:'linear-gradient(135deg,#00C896,#00a87a)' },
+    { k:'navmode',     i:'🧭', l:'Nav Mode',        cls:'green', desc:'Navigate with precision.', color:'#A78BFA', bg:'linear-gradient(135deg,#7C3AED,#A78BFA)', badge:'NEW' },
+    { k:'ports',       i:'⚓', l:'Ports Database',  desc:'27,000+ global ports with coordinates.', color:'#00B4D8', bg:'linear-gradient(135deg,#00B4D8,#0070cc)' },
+    { k:'vessel',      i:'🛳', l:'Vessel Search',   desc:'Search by IMO, MMSI or flag state.', color:'#A78BFA', bg:'linear-gradient(135deg,#7C3AED,#A78BFA)' },
+    { k:'voyage',      i:'🧮', l:'Voyage Calc',     desc:'Calculate distance, duration and fuel.', color:'#00C896', bg:'linear-gradient(135deg,#00C896,#00a87a)' },
+    { k:'certs',       i:'📜', l:'Certificates',    desc:'Track STCW certificate expiry dates.', color:'#F0A500', bg:'linear-gradient(135deg,#F0A500,#b07000)' },
+    { k:'seatime',     i:'⏱', l:'Sea Time',        desc:'Log sea service time across all ships.', color:'#00B4D8', bg:'linear-gradient(135deg,#00B4D8,#1565C0)' },
+    { k:'notices',     i:'📢', l:'Port Notices',    desc:'Closures, restrictions & warnings.', color:'#ff6b35', bg:'linear-gradient(135deg,#ff6b35,#cc4400)' },
+    { k:'compass',     i:'🧭', l:'Compass Error',   desc:'Calculate and log compass errors.', color:'#A78BFA', bg:'linear-gradient(135deg,#7C3AED,#A78BFA)' },
+    { k:'sights',      i:'🔭', l:'Celestial Nav',   desc:'Sight reduction & celestial navigation.', color:'#F0A500', bg:'linear-gradient(135deg,#F0A500,#b07000)', badge:'NEW' },
+    { k:'library',     i:'📚', l:'Library',         desc:'SOLAS, MARPOL, IMO, STCW & more.', color:'#F0A500', bg:'linear-gradient(135deg,#F0A500,#b07000)' },
+    { k:'knots',       i:'🪢', l:'Knots & Mooring', desc:'Reference guide for knots and mooring.', color:'#00C896', bg:'linear-gradient(135deg,#00C896,#00a87a)' },
+    { k:'emergency',   i:'🚨', l:'Emergency',       cls:'red', desc:'Emergency procedures & contacts.', color:'#FF4757', bg:'linear-gradient(135deg,#FF4757,#cc2233)' },
+    { k:'navbridge',   i:'🗺', l:'Nav & Bridge',    desc:'Navigation and bridge procedures.', color:'#00B4D8', bg:'linear-gradient(135deg,#00B4D8,#1565C0)' },
+    { k:'welfare',     i:'⚓', l:'Crew Welfare',    desc:'Financial tools, leave planning & wellbeing.', color:'#00C896', bg:'linear-gradient(135deg,#00C896,#00a87a)' },
+    { k:'crewjourney', i:'🧳', l:'Crew Journey',    desc:'Track your career voyage.', color:'#A78BFA', bg:'linear-gradient(135deg,#7C3AED,#A78BFA)' },
+    { k:'portshore',   i:'🏖', l:'Port & Shore',    desc:'Port info, shore leave & services.', color:'#00C896', bg:'linear-gradient(135deg,#00C896,#00a87a)' },
+    { k:'seadiary',    i:'📔', l:'Sea Diary',       desc:'Keep a personal log of your voyages.', color:'#00B4D8', bg:'linear-gradient(135deg,#00B4D8,#1565C0)', badge:'NEW' },
+    { k:'cargoops',    i:'🚢', l:'Cargo Ops',       desc:'Cargo operations reference & tools.', color:'#F59E0B', bg:'linear-gradient(135deg,#F59E0B,#cc7a00)', badge:'NEW' },
+    { k:'olp',         i:'🎓', l:'OLP Assistant',   desc:'On-line program / training assistant.', color:'#A78BFA', bg:'linear-gradient(135deg,#7C3AED,#A78BFA)', badge:'NEW' },
+    ...(user ? [{ k:'account', i:'👤', l:'My Account', hideFromCustomise:true }] : []),
+    ...(isAdmin ? [{ k:'admin', i:'🛡', l:'Admin', hideFromCustomise:true }] : []),
+    { k:'info', i:'ℹ️', l:'Help & Info', hideFromCustomise:true },
   ];
 
   const handleSearch = (q) => { setSearchQ(q); setTab('routes'); setMenuOpen(false); };
@@ -669,7 +686,6 @@ export default function App() {
           </div>
         </nav>
 
-        {/* ── Mobile menu — fixed height with overflow-y:auto for scrolling ── */}
         <div className={`mob-menu ${menuOpen ? 'open' : ''}`}>
           {TABS.map(t => (
             <button key={t.k} className={`mtab ${tab===t.k?'active':''}`} onClick={() => switchTab(t.k)}>
@@ -719,11 +735,7 @@ export default function App() {
               <button key={t.k} className={`si-btn ${t.cls||''} ${tab===t.k?'active':''}`} onClick={() => switchTab(t.k)}>
                 <span className="si-icon">{t.i}</span>
                 {t.l}
-                {t.k==='navmode'  && <span style={{ marginLeft:'auto', padding:'1px 5px', borderRadius:4, fontSize:'0.5rem', background:'rgba(0,200,100,0.15)', color:'var(--green)', border:'1px solid rgba(0,200,100,0.25)', fontWeight:700, flexShrink:0 }}>NEW</span>}
-                {t.k==='sights'   && <span style={{ marginLeft:'auto', padding:'1px 5px', borderRadius:4, fontSize:'0.5rem', background:'rgba(240,165,0,0.15)', color:'var(--gold)', border:'1px solid rgba(240,165,0,0.25)', fontWeight:700, flexShrink:0 }}>NEW</span>}
-                {t.k==='seadiary' && <span style={{ marginLeft:'auto', padding:'1px 5px', borderRadius:4, fontSize:'0.5rem', background:'rgba(0,180,216,0.15)', color:'var(--cyan)', border:'1px solid rgba(0,180,216,0.25)', fontWeight:700, flexShrink:0 }}>NEW</span>}
-                {t.k==='cargoops' && <span style={{ marginLeft:'auto', padding:'1px 5px', borderRadius:4, fontSize:'0.5rem', background:'rgba(245,158,11,0.15)', color:'#F59E0B', border:'1px solid rgba(245,158,11,0.25)', fontWeight:700, flexShrink:0 }}>NEW</span>}
-                {t.k==='olp'      && <span style={{ marginLeft:'auto', padding:'1px 5px', borderRadius:4, fontSize:'0.5rem', background:'rgba(124,58,237,0.15)', color:'#a78bfa', border:'1px solid rgba(124,58,237,0.3)', fontWeight:700, flexShrink:0 }}>NEW</span>}
+                {t.badge && <span style={{ marginLeft:'auto', padding:'1px 5px', borderRadius:4, fontSize:'0.5rem', background:`${t.color||'#00B4D8'}26`, color:t.color||'var(--cyan)', border:`1px solid ${t.color||'#00B4D8'}40`, fontWeight:700, flexShrink:0 }}>{t.badge}</span>}
               </button>
             ))}
             {user && (
@@ -816,7 +828,9 @@ export default function App() {
               </div>
             )}
 
-            {tab==='home'        && <HomePage routes={routes} charts={charts} onSearch={handleSearch} setTab={switchTab} user={user} portsDb={portsDb} userProfile={userProfile} installPrompt={installPrompt} onInstallApp={handleInstallApp} />}
+            {/* ── HomePage now receives TABS so its Customise picker always
+                matches every page registered above — no second list to maintain. ── */}
+            {tab==='home'        && <HomePage routes={routes} charts={charts} onSearch={handleSearch} setTab={switchTab} user={user} portsDb={portsDb} userProfile={userProfile} installPrompt={installPrompt} onInstallApp={handleInstallApp} allTabs={TABS} />}
             {tab==='routes'      && <RoutesPage searchQuery={searchQ} notify={notify} user={user} setTab={switchTab} sheetRoutes={sheetRoutes} sheetLoading={routesLoading} />}
             {tab==='charts'      && <ChartsPage notify={notify} user={user} setTab={switchTab} isAdmin={isAdmin} sheetCharts={sheetCharts} sheetLoading={chartsLoading} />}
             {tab==='planner'     && <RoutePlannerPage notify={notify} sheetRoutes={[...routes,...sheetRoutes]} portsDb={portsDb} />}
@@ -840,7 +854,6 @@ export default function App() {
             {tab==='seadiary'    && user && <SeaDiaryPage user={user} notify={notify} portsDb={portsDb} />}
             {tab==='cargoops'    && user && <CargoOpsPage notify={notify} />}
             {tab==='olp'         && <OLPAssistantPage />}
-            {/* ── UPDATED: LoginPage now receives installPrompt + onInstallApp ── */}
             {tab==='login'       && <LoginPage notify={notify} installPrompt={installPrompt} onInstallApp={handleInstallApp} onLogin={(u, redirectTo, isNew, userName, userRank) => {
               setUser(u); setTab(redirectTo || 'home');
               if (!sessionStorage.getItem('welcome_shown')) {
