@@ -163,8 +163,7 @@ function StarRating({ value, onChange }) {
   );
 }
 
-// ─── VOYAGE ANIMATION v10 — CLOSE SHIP FOLLOW + 7s SUMMARY CARD ─────────────
-// ─── VOYAGE ANIMATION v9 — FULL CANVAS + SUMMARY CARD + INSTAGRAM PERFECT ────
+// ─── VOYAGE ANIMATION v11 — TILE RACE-CONDITION FIX + PREWARM ───────────────
 function VoyageAnimation({ onClose, portsDb = [] }) {
 
   // ── Refs ──
@@ -246,39 +245,55 @@ function VoyageAnimation({ onClose, portsDb = [] }) {
     return {x:CW/2+dx, y:CH/2+(p.y-c.y)};
   };
 
-  // ── Load tile (cached) ──
+  // ── Tile load diagnostics (dev-visible) ──
+  const tileLoadStats = useRef({ ok:0, fail:0 });
+
+  // ── Load tile (cached, with proper error surfacing) ──
   const loadTile = url => new Promise(res=>{
     if (tileCache.current[url]){res(tileCache.current[url]);return;}
-    const img=new Image(); img.crossOrigin='anonymous';
-    const t=setTimeout(()=>res(null),5000);
-    img.onload=()=>{clearTimeout(t);tileCache.current[url]=img;res(img);};
-    img.onerror=()=>{clearTimeout(t);res(null);};
+    const img=new Image();
+    img.crossOrigin='anonymous';
+    const t=setTimeout(()=>{ tileLoadStats.current.fail++; res(null); },6000);
+    img.onload=()=>{
+      clearTimeout(t);
+      tileCache.current[url]=img;
+      tileLoadStats.current.ok++;
+      res(img);
+    };
+    img.onerror=()=>{
+      clearTimeout(t);
+      tileLoadStats.current.fail++;
+      res(null);
+    };
     img.src=url;
   });
 
-  // ── Draw tiles — fills FULL canvas edge-to-edge ──
+  // ── Draw tiles — fills FULL canvas edge-to-edge, with safe fallback ──
   const drawTiles = async (ctx, z, cLat, cLng) => {
-    const zi =clamp(Math.round(z),1,18);
-    const num=Math.pow(2,zi);
+    const zi =clamp(Math.round(z),0,18);
+    const num=Math.max(1,Math.pow(2,zi));
     const ts =256;
     const worldW=num*ts;
-    // Enough tiles to fill CW×CH fully — critical for edge-to-edge
-    const rx=Math.ceil(CW/ts)+2;
-    const ry=Math.ceil(CH/ts)+2;
+    // Enough tiles to fill CW×CH fully, with generous margin for safety
+    const rx=Math.ceil(CW/ts/2)+3;
+    const ry=Math.ceil(CH/ts/2)+3;
     const tx0=lngToTileX(cLng,zi);
     const ty0=latToTileY(cLat,zi);
     const cp =worldPx(cLat,cLng,zi);
 
-    // Clear to ocean blue (fills any gaps between tiles)
+    // Clear to ocean blue first (visible if tiles fail to load)
     ctx.fillStyle='#a8d8ea';
     ctx.fillRect(0,0,CW,CH);
 
+    tileLoadStats.current={ok:0,fail:0};
     const proms=[];
+    let tileCount=0;
     for (let dy=-ry;dy<=ry;dy++){
       for (let dx=-rx;dx<=rx;dx++){
         const tx=((tx0+dx)%num+num)%num;
         const ty=ty0+dy;
         if (ty<0||ty>=num) continue;
+        tileCount++;
         const sub=['a','b','c','d'][(Math.abs(tx+ty))%4];
         const url=`https://${sub}.basemaps.cartocdn.com/rastertiles/voyager/${zi}/${tx}/${ty}.png`;
         const ox=worldPx(tileYToLat(ty,zi),tileXToLng(tx,zi),zi);
@@ -287,10 +302,38 @@ function VoyageAnimation({ onClose, portsDb = [] }) {
         while (ddx < -worldW/2) ddx+=worldW;
         const drawX=Math.round(CW/2+ddx);
         const drawY=Math.round(CH/2+(ox.y-cp.y));
-        proms.push(loadTile(url).then(img=>{if(img)ctx.drawImage(img,drawX,drawY,ts,ts);}));
+        // Skip tiles completely off-canvas (perf) but keep generous bounds
+        if (drawX>CW+ts||drawX<-ts*2||drawY>CH+ts||drawY<-ts*2) continue;
+        proms.push(
+          loadTile(url).then(img=>{
+            if (img){
+              try { ctx.drawImage(img,drawX,drawY,ts,ts); }
+              catch(e){ console.warn('[VoyageAnim] drawImage failed (likely CORS taint):', e.message); }
+            }
+          })
+        );
       }
     }
     await Promise.all(proms);
+
+    // If ALL tiles failed to load, draw a visible diagnostic + simple world outline
+    // so the recording never shows pure flat blue with no context
+    if (tileLoadStats.current.ok===0 && tileCount>0){
+      console.error(`[VoyageAnim] All ${tileCount} map tiles failed to load — check network/CORS`);
+      ctx.fillStyle='rgba(255,59,48,0.08)';
+      ctx.fillRect(0,0,CW,CH);
+      ctx.font='bold 11px "Exo 2",sans-serif';
+      ctx.fillStyle='rgba(255,59,48,0.5)';
+      ctx.textAlign='center';
+      ctx.fillText('⚠ Map tiles unavailable — check connection',CW/2,CH/2);
+    }
+  };
+
+  // ── Prewarm tile cache for a given zoom/center before animation starts ──
+  // Loads the tiles needed for phase-1 (departure) view so first frames aren't blank
+  const prewarmTiles = async (z, cLat, cLng) => {
+    const dummyCtx = document.createElement('canvas').getContext('2d');
+    await drawTiles(dummyCtx, z, cLat, cLng);
   };
 
   // ── Auto-fit: zoom+center — GUARANTEES no side gaps ──
@@ -752,10 +795,18 @@ function VoyageAnimation({ onClose, portsDb = [] }) {
       // Progress bar: route portion only (so it fills during route, stays full during summary)
       setProgress(Math.min(Math.round(t*100),100));
       frame++;
-      if (frame<=totalFrames){animRef.current=requestAnimationFrame(tick);}
-      else{onDone();}
+      if (frame<=totalFrames){
+        // CRITICAL: wait for next animation frame slot, THEN run next tick.
+        // tick() is async (awaits drawTiles network fetches) — using requestAnimationFrame(tick)
+        // directly would fire the next frame before tiles finish loading, causing race conditions
+        // and blank/blue frames. Instead we manually pace frames after each tick completes.
+        await new Promise(res => { animRef.current = requestAnimationFrame(res); });
+        tick();
+      } else {
+        onDone();
+      }
     };
-    animRef.current=requestAnimationFrame(tick);
+    tick();
   };
 
   // ── Load Leaflet ──
@@ -843,6 +894,10 @@ function VoyageAnimation({ onClose, portsDb = [] }) {
     const pts=pointsRef.current;
     if (pts.length<2){setStatus('⚠️ Add at least 2 points');return;}
     const interp=buildInterp(pts),stats=computeStats(pts),fitResult=autoFit(pts);
+    setStatus('🗺 Loading map tiles…');
+    // Prewarm tiles at departure zoom so first frames render immediately
+    const startZoom=getZoomState(0,interp,pts,fitResult);
+    await prewarmTiles(startZoom.z,startZoom.cLat,startZoom.cLng);
     setShowCanvas(true);setPlaying(true);setProgress(0);setStatus('');
     runAnimation(canvasRef.current,interp,pts,countriesRef.current,stats,fitResult,videoSecsRef.current,()=>{
       setPlaying(false);setStatus('✅ Preview done! Click ⏺ Record to export.');
@@ -856,6 +911,9 @@ function VoyageAnimation({ onClose, portsDb = [] }) {
     const pts=pointsRef.current;
     if (pts.length<2){setStatus('⚠️ Add at least 2 points');return;}
     const interp=buildInterp(pts),stats=computeStats(pts),fitResult=autoFit(pts);
+    setStatus('🗺 Preparing map tiles…');
+    const startZoom=getZoomState(0,interp,pts,fitResult);
+    await prewarmTiles(startZoom.z,startZoom.cLat,startZoom.cLng);
     const canvas=canvasRef.current;if(!canvas)return;
     chunksRef.current=[];
     const stream=canvas.captureStream(30);
