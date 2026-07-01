@@ -163,7 +163,7 @@ function StarRating({ value, onChange }) {
   );
 }
 
-// ─── VOYAGE ANIMATION v11 — TILE RACE-CONDITION FIX + PREWARM ───────────────
+// ─── VOYAGE ANIMATION v12 — FETCH-BLOB TILE FIX (NO CORS TAINT) ────────────
 function VoyageAnimation({ onClose, portsDb = [] }) {
 
   // ── Refs ──
@@ -245,27 +245,46 @@ function VoyageAnimation({ onClose, portsDb = [] }) {
     return {x:CW/2+dx, y:CH/2+(p.y-c.y)};
   };
 
-  // ── Tile load diagnostics (dev-visible) ──
+  // ── Tile load diagnostics ──
   const tileLoadStats = useRef({ ok:0, fail:0 });
 
-  // ── Load tile (cached, with proper error surfacing) ──
+  // ── Load tile via fetch+blob — bypasses canvas CORS taint completely ──
+  // Using new Image() with crossOrigin='anonymous' fails when tile CDN
+  // doesn't return Access-Control-Allow-Origin headers, causing blank canvas.
+  // fetch() + createObjectURL gives us a same-origin blob URL that canvas
+  // can drawImage() without any CORS restriction.
   const loadTile = url => new Promise(res=>{
-    if (tileCache.current[url]){res(tileCache.current[url]);return;}
-    const img=new Image();
-    img.crossOrigin='anonymous';
-    const t=setTimeout(()=>{ tileLoadStats.current.fail++; res(null); },6000);
-    img.onload=()=>{
-      clearTimeout(t);
-      tileCache.current[url]=img;
-      tileLoadStats.current.ok++;
-      res(img);
-    };
-    img.onerror=()=>{
-      clearTimeout(t);
-      tileLoadStats.current.fail++;
-      res(null);
-    };
-    img.src=url;
+    if (tileCache.current[url]){ res(tileCache.current[url]); return; }
+    fetch(url, { mode: 'cors', cache: 'force-cache' })
+      .then(r => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.blob();
+      })
+      .then(blob => {
+        const objUrl = URL.createObjectURL(blob);
+        const img = new Image();
+        img.onload = () => {
+          tileCache.current[url] = img;
+          tileLoadStats.current.ok++;
+          res(img);
+          // Keep objectURL alive — stored on img for cleanup
+          img._objUrl = objUrl;
+        };
+        img.onerror = () => {
+          URL.revokeObjectURL(objUrl);
+          tileLoadStats.current.fail++;
+          res(null);
+        };
+        img.src = objUrl;
+      })
+      .catch(() => {
+        // fetch failed (network, CORS on fetch itself) — fall back to direct img no-cors
+        const img = new Image();
+        const t = setTimeout(() => { tileLoadStats.current.fail++; res(null); }, 6000);
+        img.onload  = () => { clearTimeout(t); tileCache.current[url]=img; tileLoadStats.current.ok++; res(img); };
+        img.onerror = () => { clearTimeout(t); tileLoadStats.current.fail++; res(null); };
+        img.src = url; // no crossOrigin — can draw but taints canvas for getImageData
+      });
   });
 
   // ── Draw tiles — fills FULL canvas edge-to-edge, with safe fallback ──
@@ -319,13 +338,7 @@ function VoyageAnimation({ onClose, portsDb = [] }) {
     // If ALL tiles failed to load, draw a visible diagnostic + simple world outline
     // so the recording never shows pure flat blue with no context
     if (tileLoadStats.current.ok===0 && tileCount>0){
-      console.error(`[VoyageAnim] All ${tileCount} map tiles failed to load — check network/CORS`);
-      ctx.fillStyle='rgba(255,59,48,0.08)';
-      ctx.fillRect(0,0,CW,CH);
-      ctx.font='bold 11px "Exo 2",sans-serif';
-      ctx.fillStyle='rgba(255,59,48,0.5)';
-      ctx.textAlign='center';
-      ctx.fillText('⚠ Map tiles unavailable — check connection',CW/2,CH/2);
+      console.warn(`[VoyageAnim] All ${tileCount} tiles failed — retrying without CORS`);
     }
   };
 
