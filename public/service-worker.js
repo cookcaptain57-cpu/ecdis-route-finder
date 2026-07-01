@@ -64,7 +64,8 @@ self.addEventListener('fetch', (event) => {
     url.hostname.includes('googleapis.com') ||
     url.hostname.includes('firebaseio.com') ||
     url.hostname.includes('open-meteo.com') ||
-    url.hostname.includes('drive.google.com'); // ← ADDED: bypass Drive downloads
+    url.hostname.includes('drive.google.com') ||        // bypass Drive downloads
+    url.hostname.includes('drive.usercontent.google.com'); // bypass new Drive endpoint
 
   if (isDataRequest) {
     event.respondWith(
