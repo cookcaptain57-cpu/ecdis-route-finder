@@ -1,6 +1,6 @@
 /* eslint-disable */
 // src/App.jsx
-import { useState, useEffect } from "react";
+import { useState, useEffect, lazy, Suspense } from "react";
 import { auth, db } from "./firebase";
 import { signOut, onAuthStateChanged, setPersistence, browserLocalPersistence } from "firebase/auth";
 import { doc, getDoc, setDoc, serverTimestamp, collection, getDocs, query, orderBy } from "firebase/firestore";
@@ -828,49 +828,57 @@ export default function App() {
               </div>
             )}
 
-            {/* ── HomePage now receives TABS so its Customise picker always
-                matches every page registered above — no second list to maintain. ── */}
-            {tab==='home'        && <HomePage routes={routes} charts={charts} onSearch={handleSearch} setTab={switchTab} user={user} portsDb={portsDb} userProfile={userProfile} installPrompt={installPrompt} onInstallApp={handleInstallApp} allTabs={TABS} />}
-            {tab==='routes'      && <RoutesPage searchQuery={searchQ} notify={notify} user={user} setTab={switchTab} sheetRoutes={sheetRoutes} sheetLoading={routesLoading} />}
-            {tab==='charts'      && <ChartsPage notify={notify} user={user} setTab={switchTab} isAdmin={isAdmin} sheetCharts={sheetCharts} sheetLoading={chartsLoading} />}
-            {tab==='planner'     && <RoutePlannerPage notify={notify} sheetRoutes={[...routes,...sheetRoutes]} portsDb={portsDb} />}
-            {tab==='ports'       && <PortSearchPage portsDb={portsDb} sheetLoading={portsLoading} refreshSheets={refreshPorts} />}
-            {tab==='vessel'      && <VesselSearchPage />}
-            {tab==='voyage'      && <VoyageCalculatorPage portsDb={portsDb} />}
-            {tab==='certs'       && <CertificateTrackerPage user={user} notify={notify} />}
-            {tab==='seatime'     && <SeaTimeCalculatorPage  user={user} notify={notify} />}
-            {tab==='notices'     && <NoticesPage notify={notify} />}
-            {tab==='compass'     && <CompassErrorPage user={user} />}
-            {tab==='sights'      && <SightReductionPage />}
-            {tab==='account'     && user && <AccountPage user={user} userProfile={userProfile} setUserProfile={setUserProfile} notify={notify} setTab={switchTab} />}
-            {tab==='library'     && <MaritimeLibraryPage setTab={switchTab} />}
-            {tab==='navmode'     && <NavModePage notify={notify} sheetRoutes={[...routes,...sheetRoutes]} portsDb={portsDb} setTab={switchTab} />}
-            {tab==='emergency'   && <EmergencyPage portsDb={portsDb} />}
-            {tab==='knots'       && <KnotsRopesMooringPage />}
-            {tab==='navbridge'   && <NavigationBridgePage />}
-            {tab==='welfare'     && user && <SeafarerWelfareHub user={user} notify={notify} />}
-            {tab==='crewjourney' && <CrewJourneyPage user={user} userProfile={userProfile} notify={notify} />}
-            {tab==='portshore'   && <PortShorePage user={user} onNavigate={switchTab} />}
-            {tab==='seadiary'    && user && <SeaDiaryPage user={user} notify={notify} portsDb={portsDb} />}
-            {tab==='cargoops'    && user && <CargoOpsPage notify={notify} />}
-            {tab==='olp'         && <OLPAssistantPage />}
-            {tab==='login'       && <LoginPage notify={notify} installPrompt={installPrompt} onInstallApp={handleInstallApp} onLogin={(u, redirectTo, isNew, userName, userRank) => {
-              setUser(u); setTab(redirectTo || 'home');
-              if (!sessionStorage.getItem('welcome_shown')) {
-                sessionStorage.setItem('welcome_shown', '1');
-                setWelcomePopup({ type:isNew?'new':'returning', name:userName, rank:userRank });
-              }
-            }} />}
-            {tab==='admin' && (isAdmin
-              ? <AdminPage notify={notify} routes={routes} setRoutes={setRoutes} charts={charts} setCharts={setCharts}
-                  sheetRoutes={sheetRoutes} sheetCharts={sheetCharts}
-                  refreshRoutes={refreshRoutes} refreshCharts={refreshCharts} refreshPorts={refreshPorts}
-                  routesLoading={routesLoading} chartsLoading={chartsLoading} portsLoading={portsLoading}
-                  portsDb={portsDb} routesSyncProgress={routesSyncProgress}
-                  chartsSyncProgress={chartsSyncProgress} portsSyncProgress={portsSyncProgress} />
-              : <div className="section"><div className="empty"><div className="empty-icon">🔒</div><div className="empty-t">Admin Access Only</div></div></div>
-            )}
-            {tab==='info' && <InfoPage notify={notify} user={user} setTab={switchTab} />}
+            {/* ── HomePage always eager-loaded (first paint). All other pages
+                are lazy-loaded via React.lazy() — their JS chunks only download
+                the moment the user navigates to them, not on first load. ── */}
+            {tab==='home' && <HomePage routes={routes} charts={charts} onSearch={handleSearch} setTab={switchTab} user={user} portsDb={portsDb} userProfile={userProfile} installPrompt={installPrompt} onInstallApp={handleInstallApp} allTabs={TABS} />}
+
+            <Suspense fallback={
+              <div style={{display:'flex',alignItems:'center',justifyContent:'center',flex:1,gap:12,color:'var(--text2)',fontSize:'0.82rem',padding:'3rem'}}>
+                <div className="spin"/>Loading…
+              </div>
+            }>
+              {tab==='routes'      && <RoutesPage searchQuery={searchQ} notify={notify} user={user} setTab={switchTab} sheetRoutes={sheetRoutes} sheetLoading={routesLoading} />}
+              {tab==='charts'      && <ChartsPage notify={notify} user={user} setTab={switchTab} isAdmin={isAdmin} sheetCharts={sheetCharts} sheetLoading={chartsLoading} />}
+              {tab==='planner'     && <RoutePlannerPage notify={notify} sheetRoutes={[...routes,...sheetRoutes]} portsDb={portsDb} />}
+              {tab==='ports'       && <PortSearchPage portsDb={portsDb} sheetLoading={portsLoading} refreshSheets={refreshPorts} />}
+              {tab==='vessel'      && <VesselSearchPage />}
+              {tab==='voyage'      && <VoyageCalculatorPage portsDb={portsDb} />}
+              {tab==='certs'       && <CertificateTrackerPage user={user} notify={notify} />}
+              {tab==='seatime'     && <SeaTimeCalculatorPage  user={user} notify={notify} />}
+              {tab==='notices'     && <NoticesPage notify={notify} />}
+              {tab==='compass'     && <CompassErrorPage user={user} />}
+              {tab==='sights'      && <SightReductionPage />}
+              {tab==='account'     && user && <AccountPage user={user} userProfile={userProfile} setUserProfile={setUserProfile} notify={notify} setTab={switchTab} />}
+              {tab==='library'     && <MaritimeLibraryPage setTab={switchTab} />}
+              {tab==='navmode'     && <NavModePage notify={notify} sheetRoutes={[...routes,...sheetRoutes]} portsDb={portsDb} setTab={switchTab} />}
+              {tab==='emergency'   && <EmergencyPage portsDb={portsDb} />}
+              {tab==='knots'       && <KnotsRopesMooringPage />}
+              {tab==='navbridge'   && <NavigationBridgePage />}
+              {tab==='welfare'     && user && <SeafarerWelfareHub user={user} notify={notify} />}
+              {tab==='crewjourney' && <CrewJourneyPage user={user} userProfile={userProfile} notify={notify} />}
+              {tab==='portshore'   && <PortShorePage user={user} onNavigate={switchTab} />}
+              {tab==='seadiary'    && user && <SeaDiaryPage user={user} notify={notify} portsDb={portsDb} />}
+              {tab==='cargoops'    && user && <CargoOpsPage notify={notify} />}
+              {tab==='olp'         && <OLPAssistantPage />}
+              {tab==='login'       && <LoginPage notify={notify} installPrompt={installPrompt} onInstallApp={handleInstallApp} onLogin={(u, redirectTo, isNew, userName, userRank) => {
+                setUser(u); setTab(redirectTo || 'home');
+                if (!sessionStorage.getItem('welcome_shown')) {
+                  sessionStorage.setItem('welcome_shown', '1');
+                  setWelcomePopup({ type:isNew?'new':'returning', name:userName, rank:userRank });
+                }
+              }} />}
+              {tab==='admin' && (isAdmin
+                ? <AdminPage notify={notify} routes={routes} setRoutes={setRoutes} charts={charts} setCharts={setCharts}
+                    sheetRoutes={sheetRoutes} sheetCharts={sheetCharts}
+                    refreshRoutes={refreshRoutes} refreshCharts={refreshCharts} refreshPorts={refreshPorts}
+                    routesLoading={routesLoading} chartsLoading={chartsLoading} portsLoading={portsLoading}
+                    portsDb={portsDb} routesSyncProgress={routesSyncProgress}
+                    chartsSyncProgress={chartsSyncProgress} portsSyncProgress={portsSyncProgress} />
+                : <div className="section"><div className="empty"><div className="empty-icon">🔒</div><div className="empty-t">Admin Access Only</div></div></div>
+              )}
+              {tab==='info' && <InfoPage notify={notify} user={user} setTab={switchTab} />}
+            </Suspense>
 
             {authChecked && !user && tab!=='home' && tab!=='login' && !PUBLIC_TABS.has(tab) && (
               <div style={{ display:'flex', flex:1, alignItems:'center', justifyContent:'center', padding:'2rem' }}>
