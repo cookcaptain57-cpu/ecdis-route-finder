@@ -84,22 +84,28 @@ const isStandalonePWA = () =>
   window.navigator.standalone === true;
 
 // ── PWA-aware download trigger ─────────────────────────────────────────────
-// PWA standalone mode on Android: iframe downloads are silently swallowed
-// by Chrome — the download manager never intercepts them.
-// Fix: use window.open() which opens a Chrome Custom Tab that DOES trigger
-// the download manager correctly, then the user returns to the app.
-// Regular browser: iframe still works fine and is less disruptive.
-const triggerIframeDownload = (driveUrl) => {
+// PWA standalone: window.open() opens Drive viewer instead of downloading.
+// Fix: programmatic anchor click with rel="noopener" — Android Chrome
+// intercepts the content-disposition:attachment header and hands it to
+// the download manager without opening a viewer page.
+// Regular browser: hidden iframe (no page navigation needed).
+const triggerIframeDownload = (driveUrl, fname) => {
   return new Promise((resolve) => {
     if (isStandalonePWA()) {
-      // PWA mode — open in Chrome Custom Tab so download manager fires
-      window.open(driveUrl, '_blank', 'noopener,noreferrer');
-      // Resolve quickly — the custom tab handles the rest independently
-      setTimeout(() => resolve(), 800);
+      // PWA mode — anchor click, Android download manager intercepts it
+      const a = document.createElement('a');
+      a.href = driveUrl;
+      a.download = fname || '';
+      a.rel = 'noopener noreferrer';
+      a.style.display = 'none';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => resolve(), 1000);
       return;
     }
 
-    // Regular browser — hidden iframe approach (no page navigation)
+    // Regular browser — hidden iframe (works perfectly in browser)
     const old = document.getElementById('__mnav_dl_frame');
     if (old) old.remove();
 
@@ -341,7 +347,7 @@ function RoutesPage({ searchQuery, notify, user, setTab, sheetRoutes = [], sheet
       // ── FIXED: iframe silent download ──────────────────────────────────
       // Bypasses CORS entirely. Browser download manager intercepts the
       // content-disposition header and saves the file — no Drive page opens.
-      await triggerIframeDownload(driveUrl);
+      await triggerIframeDownload(driveUrl, fname);
 
       completeProgress();
 
