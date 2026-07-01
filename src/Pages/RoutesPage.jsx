@@ -65,16 +65,19 @@ const normalizeStr = (str) =>
   str.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
 
 // ── Build Google Drive direct download URL ─────────────────────────────────
+// Uses drive.usercontent.google.com — Google's newer direct-download endpoint.
+// Unlike drive.google.com/uc, this bypasses the viewer in PWA standalone mode
+// and forces a binary file download on both browser and installed PWA.
 const buildDriveUrl = (row) => {
   const fileId = row['Fileid'] || row['fileId'] || row['FileID'];
   if (fileId && fileId.trim()) {
-    return `https://drive.google.com/uc?export=download&id=${fileId.trim()}&confirm=t`;
+    return `https://drive.usercontent.google.com/download?id=${fileId.trim()}&export=download&authuser=0&confirm=t`;
   }
   const url = row['Fileurl'] || row['fileUrl'] || row['File URL'] || row['Drive Link'] ||
     Object.values(row).find(v => typeof v === 'string' && v.includes('drive.google'));
   if (!url) return null;
   const match = url.match(/\/d\/([a-zA-Z0-9_-]+)/);
-  if (match) return `https://drive.google.com/uc?export=download&id=${match[1]}&confirm=t`;
+  if (match) return `https://drive.usercontent.google.com/download?id=${match[1]}&export=download&authuser=0&confirm=t`;
   return url;
 };
 
