@@ -84,22 +84,28 @@ const isStandalonePWA = () =>
   window.navigator.standalone === true;
 
 // ── PWA-aware download trigger ─────────────────────────────────────────────
-// PWA standalone mode on Android: iframe downloads are silently swallowed
-// by Chrome — the download manager never intercepts them.
-// Fix: use window.open() which opens a Chrome Custom Tab that DOES trigger
-// the download manager correctly, then the user returns to the app.
-// Regular browser: iframe still works fine and is less disruptive.
-const triggerIframeDownload = (driveUrl) => {
+// PWA standalone: window.open() opens Drive viewer instead of downloading.
+// Fix: programmatic anchor click with rel="noopener" — Android Chrome
+// intercepts the content-disposition:attachment header and hands it to
+// the download manager without opening a viewer page.
+// Regular browser: hidden iframe (no page navigation needed).
+const triggerIframeDownload = (driveUrl, fname) => {
   return new Promise((resolve) => {
     if (isStandalonePWA()) {
-      // PWA mode — open in Chrome Custom Tab so download manager fires
-      window.open(driveUrl, '_blank', 'noopener,noreferrer');
-      // Resolve quickly — the custom tab handles the rest independently
-      setTimeout(() => resolve(), 800);
+      // PWA mode — anchor click, Android download manager intercepts it
+      const a = document.createElement('a');
+      a.href = driveUrl;
+      a.download = fname || '';
+      a.rel = 'noopener noreferrer';
+      a.style.display = 'none';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => resolve(), 1000);
       return;
     }
 
-    // Regular browser — hidden iframe approach (no page navigation)
+    // Regular browser — hidden iframe (works perfectly in browser)
     const old = document.getElementById('__mnav_dl_frame');
     if (old) old.remove();
 
@@ -295,7 +301,7 @@ function ChartsPage({ notify, user, setTab, isAdmin: isAdminProp, sheetCharts = 
       // ── FIXED: iframe silent download ──────────────────────────────────
       // Bypasses CORS entirely. Browser download manager intercepts the
       // content-disposition header and saves the file — no Drive page opens.
-      await triggerIframeDownload(driveUrl);
+      await triggerIframeDownload(driveUrl, fname);
 
       completeProgress();
 
@@ -445,6 +451,20 @@ function ChartsPage({ notify, user, setTab, isAdmin: isAdminProp, sheetCharts = 
           </div>
           <button className="btn btn-gold" style={{ padding: '0 14px' }} onClick={() => doGlobalSearch()}>Search</button>
           {globalQ && <button className="btn btn-secondary" onClick={() => { setGlobalQ(''); setGlobalResults([]); setGlobalSearched(false); }}>✕</button>}
+        </div>
+
+        {/* Search tips */}
+        <div style={{ background: 'rgba(240,165,0,0.04)', border: '1px solid rgba(240,165,0,0.12)', borderRadius: 8, padding: '8px 12px', marginBottom: '0.6rem' }}>
+          <div style={{ fontSize: '0.62rem', color: 'var(--gold)', fontWeight: 700, marginBottom: 4, letterSpacing: '0.04em' }}>💡 Search Tips</div>
+          <div style={{ fontSize: '0.65rem', color: 'var(--text3)', lineHeight: 1.7 }}>
+            Search ECDIS charts by port name or port code (UNLOCODE).<br />
+            <span style={{ color: 'var(--text2)' }}>Examples: </span>
+            <span style={{ fontFamily: 'monospace', color: 'var(--gold)', background: 'rgba(240,165,0,0.1)', borderRadius: 3, padding: '1px 5px', marginRight: 4 }}>Mundra</span>
+            <span style={{ fontFamily: 'monospace', color: 'var(--gold)', background: 'rgba(240,165,0,0.1)', borderRadius: 3, padding: '1px 5px', marginRight: 4 }}>INMUN</span>
+            <span style={{ fontFamily: 'monospace', color: 'var(--gold)', background: 'rgba(240,165,0,0.1)', borderRadius: 3, padding: '1px 5px', marginRight: 4 }}>MUN</span>
+            <span style={{ fontFamily: 'monospace', color: 'var(--gold)', background: 'rgba(240,165,0,0.1)', borderRadius: 3, padding: '1px 5px', marginRight: 4 }}>Singapore</span>
+            <span style={{ fontFamily: 'monospace', color: 'var(--gold)', background: 'rgba(240,165,0,0.1)', borderRadius: 3, padding: '1px 5px' }}>SGP</span>
+          </div>
         </div>
 
         {sheetLoading && !globalSearched && (
