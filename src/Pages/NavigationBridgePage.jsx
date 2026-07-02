@@ -1290,31 +1290,6 @@ function ConditionsPanel() {
     setLoading(false);
   };
 
-  const c = weather?.current;
-  const m = marine?.current;
-  const bf = c ? beaufort(c.wind_speed_10m) : null;
-  const ss = m ? seaState(m.wave_height) : null;
-
-  // Relative (apparent) wind from True wind + vessel velocity vector subtraction
-  let relWind = null;
-  if (c && cog != null && sog != null) {
-    const trueDirRad = (c.wind_direction_10m * Math.PI) / 180;
-    const cogRad = (cog * Math.PI) / 180;
-    // Wind vector (wind blows FROM trueDir, so velocity vector points opposite)
-    const windVx = -c.wind_speed_10m * Math.sin(trueDirRad);
-    const windVy = -c.wind_speed_10m * Math.cos(trueDirRad);
-    const shipVx = sog * Math.sin(cogRad);
-    const shipVy = sog * Math.cos(cogRad);
-    // Apparent wind velocity = wind velocity - ship velocity (vector as seen from moving ship)
-    const relVx = windVx - shipVx;
-    const relVy = windVy - shipVy;
-    const relSpeed = Math.sqrt(relVx*relVx + relVy*relVy);
-    let relDirFrom = (Math.atan2(-relVx, -relVy) * 180 / Math.PI + 360) % 360;
-    // Angle relative to bow (COG)
-    let relToBow = ((relDirFrom - cog) + 360) % 360;
-    relWind = { speed: Math.round(relSpeed*10)/10, dirTrue: Math.round(relDirFrom), dirRelBow: Math.round(relToBow) };
-  }
-
   // ── Derived computed values ──────────────────────────────────────────────
   const c = weather?.current;
   const m = marine?.current;
