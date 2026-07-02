@@ -171,7 +171,6 @@ function AccountPage({ user, userProfile, setUserProfile, notify, setTab }) {
       if (userProfile) populateForm(userProfile);
       setFetching(false);
     });
-    // Load download history
     loadDownloadHistory();
   }, [user?.uid]);
 
@@ -411,10 +410,10 @@ function AccountPage({ user, userProfile, setUserProfile, notify, setTab }) {
           <div style={{ background:'var(--card)', border:'1px solid var(--border)', borderRadius:12, padding:'1.1rem' }}>
             <div style={{ fontFamily:'Orbitron,monospace', fontSize:'0.72rem', color:'var(--text2)', marginBottom:'0.8rem' }}>🔒 Account Security</div>
             {[
-              {l:'Email', v:user?.email, i:'✉️'},
-              {l:'Last Login', v:lastLogin ? new Date(lastLogin).toLocaleString() : '—', i:'🕐'},
-              {l:'Account Created', v:userProfile?.createdAt ? new Date(userProfile.createdAt?.seconds*1000).toLocaleDateString() : '—', i:'📅'},
-              {l:'Email Verified', v:user?.emailVerified ? '✅ Verified' : '❌ Not Verified', i:'🛡'},
+              {l:'Email',          v:user?.email,                                                              i:'✉️'},
+              {l:'Last Login',     v:lastLogin ? new Date(lastLogin).toLocaleString() : '—',                  i:'🕐'},
+              {l:'Account Created',v:userProfile?.createdAt ? new Date(userProfile.createdAt?.seconds*1000).toLocaleDateString() : '—', i:'📅'},
+              // REMOVED: Email Verified row
             ].map((row,i) => (
               <div key={i} style={{ display:'flex', gap:10, alignItems:'center', padding:'6px 0', borderBottom:'1px solid rgba(255,255,255,0.04)' }}>
                 <span style={{ width:20, textAlign:'center', flexShrink:0 }}>{row.i}</span>
