@@ -1054,15 +1054,121 @@ function ConditionsPanel() {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState('');
   const [fetchedAt, setFetchedAt] = useState(null);
-  const [cog, setCog] = useState(null);   // Course Over Ground, degrees — auto-derived
-  const [sog, setSog] = useState(null);   // Speed Over Ground, knots — auto-derived
+  const [cog, setCog] = useState(null);
+  const [sog, setSog] = useState(null);
   const [tracking, setTracking] = useState(false);
   const [trackErr, setTrackErr] = useState('');
+  const [copied, setCopied] = useState(false);
   const watchIdRef = useRef(null);
   const firstFixRef = useRef(null);
   const { gpsLoading, gpsErr, getGPS } = useGPS();
 
-  const WMO = {0:'Clear sky',1:'Mainly clear',2:'Partly cloudy',3:'Overcast',45:'Fog',48:'Icing fog',51:'Light drizzle',53:'Moderate drizzle',55:'Dense drizzle',61:'Slight rain',63:'Moderate rain',65:'Heavy rain',71:'Slight snow',73:'Moderate snow',75:'Heavy snow',80:'Slight showers',81:'Moderate showers',82:'Violent showers',95:'Thunderstorm',96:'T-storm+hail',99:'T-storm+heavy hail'};
+  // ── FULL WMO Present Weather (ww) code table — from WMO No.306 / Beaufort image ──
+  const WW_CODES = {
+    0:  { code:'00', desc:'Cloud development not observed or not observable', group:'Change of Sky in Last Hour' },
+    1:  { code:'01', desc:'Clouds dissolving or becoming less developed', group:'Change of Sky in Last Hour' },
+    2:  { code:'02', desc:'State of sky on the whole unchanged', group:'Change of Sky in Last Hour' },
+    3:  { code:'03', desc:'Clouds forming or developing', group:'Change of Sky in Last Hour' },
+    4:  { code:'04', desc:'Visibility reduced by smoke or volcanic ash', group:'Haze, Dust, Sand or Smoke' },
+    5:  { code:'05', desc:'Haze', group:'Haze, Dust, Sand or Smoke' },
+    10: { code:'10', desc:'Mist (visibility 1000m or more)', group:'Shallow Fog or Mist' },
+    11: { code:'11', desc:'Shallow fog in patches', group:'Shallow Fog or Mist' },
+    12: { code:'12', desc:'Shallow fog, more or less continuous, not deeper than 10m at sea', group:'Shallow Fog or Mist' },
+    13: { code:'13', desc:'Lightning visible, no thunder heard', group:'Phenomena Within Sight but not at Station' },
+    14: { code:'14', desc:'Precipitation within sight, not reaching ground or sea surface', group:'Phenomena Within Sight but not at Station' },
+    15: { code:'15', desc:'Precipitation beyond 3 miles, reaching surface', group:'Phenomena Within Sight but not at Station' },
+    16: { code:'16', desc:'Precipitation within 3 miles, reaching surface', group:'Phenomena Within Sight but not at Station' },
+    17: { code:'17', desc:'Thunderstorm audible during the 10 min preceding but no precipitation at time of observation', group:'Thunder' },
+    18: { code:'18', desc:'Squalls within sight', group:'Phenomena Within Last Hour' },
+    19: { code:'19', desc:'Funnel cloud(s) / tornado / waterspout at or within sight of ship', group:'Phenomena Within Last Hour' },
+    20: { code:'20', desc:'Drizzle (not freezing) or snow grains — not in showers (within last hour, not at time of obs)', group:'Phenomena Within Last Hour but not at Time of Obs' },
+    21: { code:'21', desc:'Rain (not freezing) — within last hour, not at time of observation', group:'Phenomena Within Last Hour but not at Time of Obs' },
+    22: { code:'22', desc:'Snow — within last hour, not at time of observation', group:'Phenomena Within Last Hour but not at Time of Obs' },
+    23: { code:'23', desc:'Rain and snow, or ice pellets — within last hour, not at time of obs', group:'Phenomena Within Last Hour but not at Time of Obs' },
+    24: { code:'24', desc:'Freezing drizzle or freezing rain — within last hour, not at time of obs', group:'Phenomena Within Last Hour but not at Time of Obs' },
+    25: { code:'25', desc:'Shower(s) of rain — within last hour, not at time of observation', group:'Phenomena Within Last Hour but not at Time of Obs' },
+    26: { code:'26', desc:'Shower(s) of snow or rain and snow — within last hour, not at time of obs', group:'Phenomena Within Last Hour but not at Time of Obs' },
+    27: { code:'27', desc:'Shower(s) of hail, or rain and hail — within last hour, not at time of obs', group:'Phenomena Within Last Hour but not at Time of Obs' },
+    28: { code:'28', desc:'Fog (visibility less than 1000m) in last hour but not at time of observation', group:'Phenomena Within Last Hour but not at Time of Obs' },
+    29: { code:'29', desc:'Thunderstorm (with or without precipitation) — within last hour, not at time of obs', group:'Phenomena Within Last Hour but not at Time of Obs' },
+    40: { code:'40', desc:'Fog at a distance at time of observation but not at ship', group:'Fog at Time of Observation' },
+    41: { code:'41', desc:'Fog in patches', group:'Fog at Time of Observation' },
+    42: { code:'42', desc:'Fog, sky discernible, thinning during last hour', group:'Fog at Time of Observation' },
+    43: { code:'43', desc:'Fog, sky not discernible, thinning during last hour', group:'Fog at Time of Observation' },
+    44: { code:'44', desc:'Fog, sky discernible, unchanged during last hour', group:'Fog at Time of Observation' },
+    45: { code:'45', desc:'Fog, sky not discernible, unchanged during last hour', group:'Fog at Time of Observation' },
+    46: { code:'46', desc:'Fog, sky discernible, beginning or becoming thicker', group:'Fog at Time of Observation' },
+    47: { code:'47', desc:'Fog, sky not discernible, beginning or becoming thicker', group:'Fog at Time of Observation' },
+    48: { code:'48', desc:'Fog, depositing rime, sky discernible', group:'Fog at Time of Observation' },
+    49: { code:'49', desc:'Fog, depositing rime, sky not discernible', group:'Fog at Time of Observation' },
+    50: { code:'50', desc:'Drizzle, slight, intermittent — not freezing', group:'Drizzle' },
+    51: { code:'51', desc:'Drizzle, slight, continuous — not freezing', group:'Drizzle' },
+    52: { code:'52', desc:'Drizzle, moderate, intermittent — not freezing', group:'Drizzle' },
+    53: { code:'53', desc:'Drizzle, moderate, continuous — not freezing', group:'Drizzle' },
+    54: { code:'54', desc:'Drizzle, dense, intermittent — not freezing', group:'Drizzle' },
+    55: { code:'55', desc:'Drizzle, dense, continuous — not freezing', group:'Drizzle' },
+    56: { code:'56', desc:'Drizzle, slight, freezing', group:'Drizzle' },
+    57: { code:'57', desc:'Drizzle, moderate or dense, freezing', group:'Drizzle' },
+    58: { code:'58', desc:'Drizzle and rain, slight', group:'Drizzle' },
+    59: { code:'59', desc:'Drizzle and rain, moderate or dense', group:'Drizzle' },
+    60: { code:'60', desc:'Rain, slight, intermittent — not freezing', group:'Rain' },
+    61: { code:'61', desc:'Rain, slight, continuous — not freezing', group:'Rain' },
+    62: { code:'62', desc:'Rain, moderate, intermittent — not freezing', group:'Rain' },
+    63: { code:'63', desc:'Rain, moderate, continuous — not freezing', group:'Rain' },
+    64: { code:'64', desc:'Rain, heavy, intermittent — not freezing', group:'Rain' },
+    65: { code:'65', desc:'Rain, heavy, continuous — not freezing', group:'Rain' },
+    66: { code:'66', desc:'Rain, slight, freezing', group:'Rain' },
+    67: { code:'67', desc:'Rain (or drizzle and rain), moderate or heavy, freezing', group:'Rain' },
+    68: { code:'68', desc:'Rain or drizzle and snow, slight', group:'Rain' },
+    69: { code:'69', desc:'Rain or drizzle and snow, moderate or heavy', group:'Rain' },
+    70: { code:'70', desc:'Intermittent fall of snowflakes, slight', group:'Solid Precipitation, Not in Showers' },
+    71: { code:'71', desc:'Continuous fall of snowflakes, slight', group:'Solid Precipitation, Not in Showers' },
+    72: { code:'72', desc:'Intermittent fall of snowflakes, moderate', group:'Solid Precipitation, Not in Showers' },
+    73: { code:'73', desc:'Continuous fall of snowflakes, moderate', group:'Solid Precipitation, Not in Showers' },
+    74: { code:'74', desc:'Intermittent fall of snowflakes, heavy', group:'Solid Precipitation, Not in Showers' },
+    75: { code:'75', desc:'Continuous fall of snowflakes, heavy', group:'Solid Precipitation, Not in Showers' },
+    76: { code:'76', desc:'Ice prisms (with or without fog)', group:'Solid Precipitation, Not in Showers' },
+    77: { code:'77', desc:'Snow grains (with or without fog)', group:'Solid Precipitation, Not in Showers' },
+    78: { code:'78', desc:'Isolated starlike snow crystals (with or without fog)', group:'Solid Precipitation, Not in Showers' },
+    79: { code:'79', desc:'Ice pellets', group:'Solid Precipitation, Not in Showers' },
+    80: { code:'80', desc:'Rain shower(s), slight', group:'Showery Precipitation' },
+    81: { code:'81', desc:'Rain shower(s), moderate or heavy', group:'Showery Precipitation' },
+    82: { code:'82', desc:'Rain shower(s), violent', group:'Showery Precipitation' },
+    83: { code:'83', desc:'Shower(s) of rain and snow mixed, slight', group:'Showery Precipitation' },
+    84: { code:'84', desc:'Shower(s) of rain and snow mixed, moderate or heavy', group:'Showery Precipitation' },
+    85: { code:'85', desc:'Snow shower(s), slight', group:'Showery Precipitation' },
+    86: { code:'86', desc:'Snow shower(s), moderate or heavy', group:'Showery Precipitation' },
+    87: { code:'87', desc:'Shower(s) of soft or small hail (with or without rain)', group:'Showery Precipitation' },
+    88: { code:'88', desc:'Shower(s) of soft or small hail, moderate or heavy', group:'Showery Precipitation' },
+    89: { code:'89', desc:'Shower(s) of hail (with or without rain), not associated with thunder, slight', group:'Showery Precipitation' },
+    90: { code:'90', desc:'Shower(s) of hail, moderate or heavy, not associated with thunder', group:'Showery Precipitation' },
+    91: { code:'91', desc:'Slight rain at time of observation — thunderstorm in preceding hour', group:'Thunderstorm' },
+    92: { code:'92', desc:'Moderate or heavy rain at time of observation — thunderstorm in preceding hour', group:'Thunderstorm' },
+    93: { code:'93', desc:'Slight snow, or rain and snow mixed — thunderstorm in preceding hour', group:'Thunderstorm' },
+    94: { code:'94', desc:'Moderate or heavy snow, or rain and snow mixed — thunderstorm in preceding hour', group:'Thunderstorm' },
+    95: { code:'95', desc:'Thunderstorm, slight or moderate, without hail, but with rain and/or snow', group:'Thunderstorm at Time of Observation' },
+    96: { code:'96', desc:'Thunderstorm, slight or moderate, with hail', group:'Thunderstorm at Time of Observation' },
+    97: { code:'97', desc:'Thunderstorm, heavy, without hail', group:'Thunderstorm at Time of Observation' },
+    98: { code:'98', desc:'Thunderstorm combined with duststorm or sandstorm', group:'Thunderstorm at Time of Observation' },
+    99: { code:'99', desc:'Thunderstorm, heavy, with hail', group:'Thunderstorm at Time of Observation' },
+  };
+
+  // ── WMO Beaufort full table ──
+  const BF_TABLE = [
+    { n:0,  kn:'<1',    ms:'0–0.2',   mph:'<1',    desc:'Calm',           sea:'Calm (glassy)',   ds:0, waveM:'0',      crest:'—' },
+    { n:1,  kn:'1–3',   ms:'0.3–1.5', mph:'1–3',   desc:'Light Air',      sea:'Calm (rippled)',  ds:1, waveM:'0.1',    crest:'Ripples, no foam crests' },
+    { n:2,  kn:'4–6',   ms:'1.6–3.3', mph:'4–7',   desc:'Light Breeze',   sea:'Smooth',          ds:2, waveM:'0.1–0.5',crest:'Small wavelets, glassy crests' },
+    { n:3,  kn:'7–10',  ms:'3.4–5.4', mph:'8–12',  desc:'Gentle Breeze',  sea:'Slight',          ds:3, waveM:'0.5–1.25',crest:'Large wavelets, crests begin to break' },
+    { n:4,  kn:'11–16', ms:'5.5–7.9', mph:'13–18', desc:'Moderate Breeze',sea:'Slight',          ds:3, waveM:'1–2',    crest:'Small waves, fairly frequent whitecaps' },
+    { n:5,  kn:'17–21', ms:'8.0–10.7',mph:'19–24', desc:'Fresh Breeze',   sea:'Moderate',        ds:4, waveM:'2–2.5',  crest:'Moderate waves, many whitecaps, some spray' },
+    { n:6,  kn:'22–27', ms:'10.8–13.8',mph:'25–31',desc:'Strong Breeze',  sea:'Rough',           ds:5, waveM:'3–4',    crest:'Large waves, whitecaps everywhere, more spray' },
+    { n:7,  kn:'28–33', ms:'13.9–17.1',mph:'32–38',desc:'Near Gale',      sea:'Rough',           ds:5, waveM:'4–5.5',  crest:'Sea heaps up, foam begins to streak' },
+    { n:8,  kn:'34–40', ms:'17.2–20.7',mph:'39–46',desc:'Gale',           sea:'Very Rough',      ds:6, waveM:'5.5–7.5',crest:'Moderately high waves, foam in well-marked streaks' },
+    { n:9,  kn:'41–47', ms:'20.8–24.4',mph:'47–54',desc:'Strong Gale',    sea:'High',            ds:7, waveM:'7–10',   crest:'High waves, sea begins to roll, dense foam streaks' },
+    { n:10, kn:'48–55', ms:'24.5–28.4',mph:'55–63',desc:'Storm',          sea:'Very High',       ds:8, waveM:'9–12.5', crest:'Very high waves with overhanging crests' },
+    { n:11, kn:'56–63', ms:'28.5–32.6',mph:'64–72',desc:'Violent Storm',  sea:'Very High',       ds:8, waveM:'11.5–16',crest:'Exceptionally high waves, sea covered with foam' },
+    { n:12, kn:'64+',   ms:'32.7+',    mph:'73+',   desc:'Hurricane Force',sea:'Phenomenal',      ds:9, waveM:'14+',    crest:'Air filled with foam, visibility seriously affected' },
+  ];
 
   const beaufort = (kn) => {
     if (kn < 1) return { n:0, l:'Calm' };
@@ -1209,29 +1315,114 @@ function ConditionsPanel() {
     relWind = { speed: Math.round(relSpeed*10)/10, dirTrue: Math.round(relDirFrom), dirRelBow: Math.round(relToBow) };
   }
 
+  // ── Derived computed values ──────────────────────────────────────────────
+  const c = weather?.current;
+  const m = marine?.current;
+  const bf = c ? BF_TABLE.find(r => {
+    const kn = c.wind_speed_10m;
+    if (r.n === 0) return kn < 1;
+    if (r.n === 12) return kn >= 64;
+    const [lo, hi] = r.kn.split('–').map(Number);
+    return kn >= lo && kn <= hi;
+  }) || BF_TABLE[0] : null;
+  const ss = m ? seaState(m.wave_height) : null;
+
+  // WMO ww code matching — find the best single code from API weather_code
+  // API gives a simplified code; map to nearest WMO ww entry
+  const wwCode = c?.weather_code;
+  const wwMatch = wwCode != null ? WW_CODES[wwCode] : null;
+
+  // Also find all additional matching codes based on current conditions
+  const additionalWW = [];
+  if (c) {
+    const vis = c.visibility != null ? c.visibility / 1000 : null;
+    if (vis != null && vis < 1) additionalWW.push({ ...WW_CODES[45], reason: `Visibility ${vis.toFixed(1)}km < 1km → Fog` });
+    if (vis != null && vis >= 1 && vis < 5 && c.cloud_cover >= 50) additionalWW.push({ ...WW_CODES[10], reason: `Vis ${vis.toFixed(1)}km, overcast → Mist` });
+    if (c.precipitation > 0 && c.temperature_2m > 2) {
+      if (c.precipitation < 0.5) additionalWW.push({ ...WW_CODES[61], reason: `Precip ${c.precipitation}mm, temp ${c.temperature_2m}°C → Slight rain` });
+      else if (c.precipitation < 2) additionalWW.push({ ...WW_CODES[63], reason: `Precip ${c.precipitation}mm → Moderate rain` });
+      else additionalWW.push({ ...WW_CODES[65], reason: `Precip ${c.precipitation}mm → Heavy rain` });
+    }
+    if (c.snowfall > 0) {
+      if (c.snowfall < 1) additionalWW.push({ ...WW_CODES[71], reason: `Snowfall ${c.snowfall}cm → Slight snow` });
+      else if (c.snowfall < 3) additionalWW.push({ ...WW_CODES[73], reason: `Snowfall ${c.snowfall}cm → Moderate snow` });
+      else additionalWW.push({ ...WW_CODES[75], reason: `Snowfall ${c.snowfall}cm → Heavy snow` });
+    }
+    if (c.cape > 1000 && c.precipitation > 0) additionalWW.push({ ...WW_CODES[95], reason: `CAPE ${c.cape} J/kg + precipitation → Thunderstorm likely` });
+    if (c.cape > 2500) additionalWW.push({ ...WW_CODES[17], reason: `CAPE ${c.cape} J/kg → Thunderstorm risk` });
+    if (c.wind_speed_10m >= 34 && c.precipitation > 0) additionalWW.push({ ...WW_CODES[82], reason: `Wind ${c.wind_speed_10m}kn BF8+ with precip → Violent shower conditions` });
+  }
+  // Remove duplicates between main wwMatch and additionalWW
+  const allWW = wwMatch ? [{ ...wwMatch, reason: 'Primary weather code from observation' }, ...additionalWW.filter(w => w.code !== wwMatch.code)] : additionalWW;
+
+  // Relative (apparent) wind
+  let relWind = null;
+  if (c && cog != null && sog != null) {
+    const trueDirRad = (c.wind_direction_10m * Math.PI) / 180;
+    const cogRad = (cog * Math.PI) / 180;
+    const windVx = -c.wind_speed_10m * Math.sin(trueDirRad);
+    const windVy = -c.wind_speed_10m * Math.cos(trueDirRad);
+    const shipVx = sog * Math.sin(cogRad);
+    const shipVy = sog * Math.cos(cogRad);
+    const relVx = windVx - shipVx;
+    const relVy = windVy - shipVy;
+    const relSpeed = Math.sqrt(relVx*relVx + relVy*relVy);
+    const relDirFrom = (Math.atan2(-relVx, -relVy) * 180 / Math.PI + 360) % 360;
+    const relToBow = ((relDirFrom - cog) + 360) % 360;
+    relWind = { speed: Math.round(relSpeed*10)/10, dirTrue: Math.round(relDirFrom), dirRelBow: Math.round(relToBow) };
+  }
+
+  // Logbook weather entry string
+  const logbookEntry = c ? [
+    `DATE: ${fetchedAt ? fetchedAt.toLocaleDateString() : '—'}`,
+    `TIME: ${fetchedAt ? fetchedAt.toLocaleTimeString() : '—'} (LT)`,
+    `POS: ${parseFloat(lat).toFixed(4)}° ${parseFloat(lon).toFixed(4)}°`,
+    `WX CODE (ww): ${wwCode != null ? wwCode : '—'} — ${wwMatch ? wwMatch.desc : '—'}`,
+    `AIR TEMP: ${c.temperature_2m}°C  SEA TEMP: ${m?.sea_surface_temperature != null ? m.sea_surface_temperature+'°C' : '—'}`,
+    `HUMIDITY: ${c.relative_humidity_2m}%  DEW PT: ${c.dew_point_2m}°C`,
+    `BARO: ${c.pressure_msl} hPa`,
+    `WIND TRUE: ${c.wind_direction_10m}° (${dirLabel(c.wind_direction_10m)}) @ ${c.wind_speed_10m} kn  BF: ${bf ? bf.n : '—'}  GUSTS: ${c.wind_gusts_10m != null ? c.wind_gusts_10m+' kn' : '—'}`,
+    relWind ? `WIND REL: ${relWind.dirRelBow}° rel bow (${relWind.dirTrue}° T) @ ${relWind.speed} kn  COG: ${cog}°  SOG: ${sog} kn` : `WIND REL: — (vessel not underway)`,
+    `WAVE HT: ${m?.wave_height != null ? m.wave_height+'m' : '—'}  DIR: ${m?.wave_direction != null ? m.wave_direction+'° ('+dirLabel(m.wave_direction)+')' : '—'}  PERIOD: ${m?.wave_period != null ? m.wave_period+'s' : '—'}`,
+    `SWELL HT: ${m?.swell_wave_height != null ? m.swell_wave_height+'m' : '—'}  DIR: ${m?.swell_wave_direction != null ? m.swell_wave_direction+'° ('+dirLabel(m.swell_wave_direction)+')' : '—'}  PERIOD: ${m?.swell_wave_period != null ? m.swell_wave_period+'s' : '—'}`,
+    `SEA STATE: DS${ss ? ss.n : '—'} — ${ss ? ss.l : '—'}`,
+    `SKY: ${skyCondition(c.cloud_cover)}  CLOUD: ${c.cloud_cover}% (Low ${c.cloud_cover_low}% Mid ${c.cloud_cover_mid}% High ${c.cloud_cover_high}%)`,
+    `VIS: ${c.visibility != null ? (c.visibility/1000).toFixed(1)+'km' : '—'}`,
+    `PRECIP: ${c.precipitation} mm  SNOW: ${c.snowfall != null ? c.snowfall+' cm' : '—'}`,
+    `UV INDEX: ${c.uv_index != null ? c.uv_index : '—'}  CAPE: ${c.cape != null ? c.cape+' J/kg' : '—'}`,
+  ].join('\n') : '';
+
+  const copyLogbook = () => {
+    navigator.clipboard.writeText(logbookEntry).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2500);
+    });
+  };
+
   const rows = c ? [
-    { label:'🌡️ Air Temperature',  value:`${c.temperature_2m}°C`, sub:`Feels like ${c.apparent_temperature}°C` },
-    { label:'🌊 Sea Surface Temp',  value: m?.sea_surface_temperature!=null ? `${m.sea_surface_temperature}°C` : '— (unavailable for this position)', sub:'' },
-    { label:'💧 Relative Humidity', value:`${c.relative_humidity_2m}%`, sub:`Dew point ${c.dew_point_2m}°C` },
-    { label:'📊 Barometric Pressure', value:`${c.pressure_msl} hPa`, sub:'' },
-    { label:'💨 True Wind Speed',   value:`${c.wind_speed_10m} kn`, sub:bf ? `Beaufort ${bf.n} — ${bf.l}` + (c.wind_gusts_10m!=null?` · Gusts ${c.wind_gusts_10m} kn`:'') : '' },
-    { label:'🧭 True Wind Direction', value:`${c.wind_direction_10m}° (${dirLabel(c.wind_direction_10m)})`, sub:'Direction wind is blowing FROM' },
-    { label:'⛵ Relative (Apparent) Wind', value: relWind ? `${relWind.speed} kn` : '— (auto-track COG/SOG below)', sub: relWind ? `${relWind.dirRelBow}° relative to bow (${relWind.dirTrue}° true)` : 'Needs vessel movement to compute' },
-    { label:'🌊 Wave Height',       value: m?.wave_height!=null ? `${m.wave_height} m` : '— (unavailable for this position)', sub: m?.wave_direction!=null ? `from ${m.wave_direction}° (${dirLabel(m.wave_direction)})` : '' },
-    { label:'🌀 Swell Height',      value: m?.swell_wave_height!=null ? `${m.swell_wave_height} m` : '—', sub: m?.swell_wave_direction!=null ? `from ${m.swell_wave_direction}° (${dirLabel(m.swell_wave_direction)}), period ${m.swell_wave_period}s` : '' },
-    { label:'🌊 Sea State',         value: ss ? `${ss.n} — ${ss.l}` : '—', sub:'WMO Sea State Code' },
-    { label:'☁️ Sky Condition',     value: skyCondition(c.cloud_cover), sub: WMO[c.weather_code] || '—' },
-    { label:'☁️ Cloud Cover (Total)', value:`${c.cloud_cover}%`, sub:`Low ${c.cloud_cover_low}% · Mid ${c.cloud_cover_mid}% · High ${c.cloud_cover_high}%` },
-    { label:'👁️ Visibility',        value: c.visibility!=null ? `${(c.visibility/1000).toFixed(1)} km` : '—', sub:'' },
-    { label:'🌧️ Precipitation',     value:`${c.precipitation} mm`, sub: c.precipitation > 0 ? 'Currently precipitating' : 'No precipitation' },
-    { label:'❄️ Snowfall',          value: c.snowfall!=null ? `${c.snowfall} cm` : '—', sub: c.snowfall > 0 ? 'Currently snowing' : 'No snowfall' },
-    { label:'⛈️ Thunderstorm Potential (CAPE)', value: c.cape!=null ? `${c.cape} J/kg` : '—', sub: c.cape>2500?'High instability risk':c.cape>1000?'Moderate instability':'Low instability' },
-    { label:'☀️ UV Index',          value: c.uv_index!=null ? c.uv_index : '—', sub: c.uv_index>7?'Very High':c.uv_index>4?'Moderate-High':'Low-Moderate' },
+    { label:'🌡️ Air Temperature',   value:`${c.temperature_2m}°C`,                                       sub:`Feels like ${c.apparent_temperature}°C` },
+    { label:'🌊 Sea Surface Temp',   value: m?.sea_surface_temperature!=null ? `${m.sea_surface_temperature}°C` : '— (unavailable)',  sub:'' },
+    { label:'💧 Relative Humidity',  value:`${c.relative_humidity_2m}%`,                                  sub:`Dew point ${c.dew_point_2m}°C` },
+    { label:'📊 Barometric Pressure',value:`${c.pressure_msl} hPa`,                                       sub:'' },
+    { label:'💨 True Wind Speed',    value:`${c.wind_speed_10m} kn`,                                      sub: bf ? `Beaufort ${bf.n} (${bf.desc}) · ${bf.ms} m/s · Gusts ${c.wind_gusts_10m != null ? c.wind_gusts_10m+' kn' : '—'}` : '' },
+    { label:'🧭 True Wind Direction',value:`${c.wind_direction_10m}° (${dirLabel(c.wind_direction_10m)})`,sub:'Direction wind is blowing FROM' },
+    { label:'⛵ Relative (Apparent) Wind', value: relWind ? `${relWind.speed} kn` : '— (detect COG/SOG below)', sub: relWind ? `${relWind.dirRelBow}° rel. to bow · True: ${relWind.dirTrue}°` : 'Needs vessel movement to compute' },
+    { label:'🌊 Wave Height',        value: m?.wave_height!=null ? `${m.wave_height} m` : '—',            sub: m?.wave_direction!=null ? `from ${m.wave_direction}° (${dirLabel(m.wave_direction)}) · period ${m?.wave_period}s` : '' },
+    { label:'🌀 Swell Height',       value: m?.swell_wave_height!=null ? `${m.swell_wave_height} m` : '—',sub: m?.swell_wave_direction!=null ? `from ${m.swell_wave_direction}° (${dirLabel(m.swell_wave_direction)}) · period ${m.swell_wave_period}s` : '' },
+    { label:'🌊 Sea State (Douglas)',value: ss ? `DS${ss.n} — ${ss.l}` : '—',                             sub: bf ? `Sea: ${bf.sea} · Avg wave crest: ${bf.waveM} m` : 'WMO Sea Disturbance Scale' },
+    { label:'💨 Beaufort (Full)',    value: bf ? `BF${bf.n} — ${bf.desc}` : '—',                          sub: bf ? `${bf.kn} kn · ${bf.ms} m/s · ${bf.mph} mph · Sea: ${bf.sea}` : '' },
+    { label:'☁️ Sky Condition',      value: skyCondition(c.cloud_cover),                                  sub: `Total ${c.cloud_cover}% · Low ${c.cloud_cover_low}% · Mid ${c.cloud_cover_mid}% · High ${c.cloud_cover_high}%` },
+    { label:'👁️ Visibility',         value: c.visibility!=null ? `${(c.visibility/1000).toFixed(1)} km` : '—', sub:'' },
+    { label:'🌧️ Precipitation',      value:`${c.precipitation} mm`,                                       sub: c.precipitation > 0 ? 'Currently precipitating' : 'No precipitation' },
+    { label:'❄️ Snowfall',           value: c.snowfall!=null ? `${c.snowfall} cm` : '—',                  sub: c.snowfall > 0 ? 'Currently snowing' : 'No snowfall' },
+    { label:'⛈️ CAPE (Instability)', value: c.cape!=null ? `${c.cape} J/kg` : '—',                       sub: c.cape>2500?'HIGH — severe convection risk':c.cape>1000?'MODERATE instability':'LOW instability' },
+    { label:'☀️ UV Index',           value: c.uv_index!=null ? c.uv_index : '—',                         sub: c.uv_index>7?'Very High':c.uv_index>4?'Moderate-High':'Low-Moderate' },
   ] : [];
 
   return (
     <div>
-      <div style={S.info}>Live current conditions for your position, including marine/sea-state data where available for the selected coordinates.</div>
+      <div style={S.info}>Live current conditions including sea state, WMO weather codes and Beaufort scale for your position. Marine data available for open sea / coastal coordinates.</div>
+
       <GpsBar
         lat={lat} lon={lon} setLat={setLat} setLon={setLon}
         onFetch={doFetch}
@@ -1240,54 +1431,88 @@ function ConditionsPanel() {
         getGPS={(onSuccess) => getGPS((la, lo) => { setLat(la); setLon(lo); onSuccess && onSuccess(la, lo); })}
       />
 
-      {/* COG/SOG auto-tracking for True vs Relative wind */}
-      <div style={{marginTop:14, padding:'10px 12px', background:'rgba(30,90,160,0.08)', border:'1px solid #1a4a70', borderRadius:8}}>
-        <div style={{fontSize:11, color:'#7eb8d8', marginBottom:8}}>
-          ⛵ <b>Course &amp; Speed Over Ground</b> — auto-detected from live GPS movement, used to compute Relative (Apparent) Wind.
-        </div>
+      {/* COG/SOG tracking */}
+      <div style={{marginTop:12, padding:'10px 12px', background:'rgba(30,90,160,0.08)', border:'1px solid #1a4a70', borderRadius:8}}>
+        <div style={{fontSize:11, color:'#7eb8d8', marginBottom:8}}>⛵ <b>Course &amp; Speed Over Ground</b> — auto-detected from GPS movement, used to compute Relative Wind.</div>
         <div style={{display:'flex', gap:10, alignItems:'center', flexWrap:'wrap'}}>
-          <button
-            style={{...S.btnGps, background: tracking ? 'rgba(40,120,60,0.4)' : 'linear-gradient(135deg,#1a6a3a,#0d4a2a)'}}
-            onClick={trackCogSog}
-            disabled={tracking}
-          >
+          <button style={{...S.btnGps, background: tracking?'rgba(40,120,60,0.4)':'linear-gradient(135deg,#1a6a3a,#0d4a2a)'}} onClick={trackCogSog} disabled={tracking}>
             {tracking ? '📡 Tracking movement…' : '🎯 Auto-Detect COG / SOG'}
           </button>
-          {cog != null && sog != null && (
-            <div style={{fontSize:11, color:'#40c880'}}>
-              COG: <b>{cog}°</b> ({dirLabel(cog)}) &nbsp;|&nbsp; SOG: <b>{sog} kn</b>
-            </div>
-          )}
+          {cog!=null && sog!=null && <div style={{fontSize:11,color:'#40c880'}}>COG: <b>{cog}°</b> ({dirLabel(cog)}) &nbsp;|&nbsp; SOG: <b>{sog} kn</b></div>}
         </div>
-        {trackErr && <div style={{...S.error, marginTop:8}}>{trackErr}</div>}
-        {tracking && <div style={{fontSize:10, color:'#4a8ab5', marginTop:6}}>Keep this open for a few seconds while underway — needs at least 2 GPS fixes with movement between them.</div>}
+        {trackErr && <div style={{...S.error,marginTop:8}}>{trackErr}</div>}
+        {tracking && <div style={{fontSize:10,color:'#4a8ab5',marginTop:6}}>Keep open while underway — needs at least 2 GPS fixes with movement between them.</div>}
       </div>
 
       {loading && <div style={S.spinner}>⏳ Fetching live conditions…</div>}
       {err && <div style={S.error}>{err}</div>}
+
       {c && (
-        <div style={{marginTop:12}}>
-          <div style={{...S.result, marginTop:0, marginBottom:12}}>
-            <b style={{color:'#7ec8f5'}}>📍 Position:</b> {parseFloat(lat).toFixed(4)}°, {parseFloat(lon).toFixed(4)}°
-            &nbsp;|&nbsp; <b style={{color:'#7ec8f5'}}>🕐 Local Time (this device):</b> {fetchedAt ? fetchedAt.toLocaleTimeString() : '—'}
-            &nbsp;|&nbsp; <b style={{color:'#7ec8f5'}}>📅</b> {fetchedAt ? fetchedAt.toLocaleDateString() : '—'}
+        <div style={{marginTop:14}}>
+          {/* Position / time header */}
+          <div style={{...S.result, marginTop:0, marginBottom:14, lineHeight:1.8}}>
+            <b style={{color:'#7ec8f5'}}>📍</b> {parseFloat(lat).toFixed(4)}°, {parseFloat(lon).toFixed(4)}°
+            &nbsp;|&nbsp;<b style={{color:'#7ec8f5'}}>🕐 Local:</b> {fetchedAt ? fetchedAt.toLocaleTimeString() : '—'}
+            &nbsp;|&nbsp;<b style={{color:'#7ec8f5'}}>📅</b> {fetchedAt ? fetchedAt.toLocaleDateString() : '—'}
           </div>
-          <div style={{overflowX:'auto'}}>
+
+          {/* ── WMO Present Weather Codes matched ── */}
+          {allWW.length > 0 && (
+            <div style={{marginBottom:14}}>
+              <div style={{fontSize:11, color:'#e8d040', fontWeight:700, marginBottom:8, letterSpacing:0.5}}>
+                🌐 WMO PRESENT WEATHER (ww) — MATCHING CONDITIONS
+              </div>
+              {allWW.map((w, i) => (
+                <div key={i} style={{display:'flex', gap:12, alignItems:'flex-start', padding:'8px 12px', marginBottom:6, background:'rgba(20,50,90,0.4)', border:'1px solid #1e4070', borderRadius:8}}>
+                  <div style={{minWidth:36, textAlign:'center'}}>
+                    <span style={{fontSize:18, fontWeight:900, color:'#e8d040', fontFamily:'monospace'}}>{w.code}</span>
+                  </div>
+                  <div>
+                    <div style={{fontSize:12, color:'#d0e8ff', fontWeight:600}}>{w.desc}</div>
+                    <div style={{fontSize:10, color:'#4a8ab5', marginTop:2}}>{w.group}</div>
+                    {w.reason && <div style={{fontSize:10, color:'#7ec8f5', marginTop:2}}>→ {w.reason}</div>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* ── Main conditions table ── */}
+          <div style={{overflowX:'auto', marginBottom:14}}>
             <table style={S.table}>
               <thead><tr>
-                <th style={S.th}>Parameter</th><th style={S.th}>Value</th><th style={S.th}>Detail</th>
+                <th style={S.th}>Parameter</th>
+                <th style={S.th}>Value</th>
+                <th style={S.th}>Detail</th>
               </tr></thead>
-              <tbody>{rows.map((r,i)=>(
+              <tbody>{rows.map((r,i) => (
                 <tr key={i}>
                   <td style={S.td}>{r.label}</td>
-                  <td style={S.td}><b style={{color:'#e8d040',fontSize:13}}>{r.value}</b></td>
-                  <td style={{...S.td,fontSize:10,color:'#7eb8d8'}}>{r.sub}</td>
+                  <td style={S.td}><b style={{color:'#e8d040', fontSize:13}}>{r.value}</b></td>
+                  <td style={{...S.td, fontSize:10, color:'#7eb8d8'}}>{r.sub}</td>
                 </tr>
               ))}</tbody>
             </table>
           </div>
-          <div style={{marginTop:10,fontSize:10,color:'#4a7a9b'}}>
-            💡 Sea State follows WMO code (0=calm glassy → 9=phenomenal). Beaufort scale describes wind force. Relative wind requires vessel movement to compute (use Auto-Detect above). Always cross-check with onboard instruments before making navigational decisions.
+
+          {/* ── 📖 Logbook Weather Entry ── */}
+          <div style={{background:'rgba(10,30,60,0.6)', border:'1.5px solid #2a5a90', borderRadius:10, padding:14, marginBottom:10}}>
+            <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:10}}>
+              <div style={{fontSize:12, fontWeight:700, color:'#7ec8f5', letterSpacing:0.5}}>📖 LOGBOOK WEATHER ENTRY</div>
+              <button
+                onClick={copyLogbook}
+                style={{...S.btnSm, background: copied?'rgba(40,160,80,0.4)':'rgba(30,80,130,0.4)', borderColor: copied?'#40c880':'#2a6090', color: copied?'#40c880':'#90c8e8'}}
+              >
+                {copied ? '✓ COPIED' : '📋 Copy Entry'}
+              </button>
+            </div>
+            <pre style={{fontSize:10, color:'#a0c8e8', lineHeight:1.8, whiteSpace:'pre-wrap', margin:0, fontFamily:"'Courier New',monospace"}}>
+              {logbookEntry}
+            </pre>
+          </div>
+
+          <div style={{fontSize:10, color:'#4a7a9b'}}>
+            💡 DS = Douglas Sea Disturbance Scale. BF = Beaufort. ww = WMO Present Weather code. CAPE &gt; 1000 J/kg indicates convective instability. Always verify with onboard instruments before making navigational decisions.
           </div>
         </div>
       )}
