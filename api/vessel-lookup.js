@@ -33,9 +33,15 @@ export default async function handler(req, res) {
     }
 
     const searchJson = await searchRes.json();
-    const candidates  = searchJson?.data || [];
+    // TEMP: try a few likely field names, since docs vs actual response can drift
+    const candidates  = searchJson?.data || searchJson?.vessels || searchJson?.results || [];
     if (candidates.length === 0) {
-      return res.status(200).json({ found: false, candidates: [] });
+      // TEMP DEBUG — remove _debug once this is confirmed working
+      return res.status(200).json({
+        found: false,
+        candidates: [],
+        _debug: { httpStatus: searchRes.status, rawBody: searchJson }
+      });
     }
 
     // Step 2: pull full particulars for the best match
