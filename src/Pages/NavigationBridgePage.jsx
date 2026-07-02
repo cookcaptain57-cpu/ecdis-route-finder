@@ -1895,36 +1895,53 @@ function ShipWeatherMapPanel() {
 
   // ── Load Leaflet from CDN then init map ──
   useEffect(() => {
-    if (mapObjRef.current || !mapRef.current) return;
-    const loadLeaflet = () => {
-      if (window.L) { initMap(); return; }
+    let destroyed = false;
+
+    const initMap = () => {
+      if (destroyed || mapObjRef.current || !mapRef.current) return;
+      const L = window.L;
+      if (!L) return;
+      leafletRef.current = L;
+      const map = L.map(mapRef.current, { zoomControl:true, attributionControl:false }).setView([15, 80], 4);
+      L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { maxZoom:18 }).addTo(map);
+      mapObjRef.current = map;
+      drLayerRef.current = L.layerGroup().addTo(map);
+      wpLayerRef.current = L.layerGroup().addTo(map);
+      setMapReady(true);
+      // Invalidate size after a tick so accordion height is resolved
+      setTimeout(() => { if (!destroyed && mapObjRef.current) mapObjRef.current.invalidateSize(); }, 200);
+    };
+
+    if (window.L) {
+      // Leaflet already loaded — small delay to let accordion fully expand
+      setTimeout(initMap, 100);
+    } else {
       const link = document.createElement('link');
       link.rel = 'stylesheet';
       link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
       document.head.appendChild(link);
       const script = document.createElement('script');
       script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
-      script.onload = initMap;
+      script.onload = () => setTimeout(initMap, 100);
+      script.onerror = () => { if (!destroyed) setTrackErr('Map library failed to load. Check internet connection.'); };
       document.head.appendChild(script);
-    };
-    const initMap = () => {
-      if (mapObjRef.current || !mapRef.current) return;
-      const L = window.L;
-      leafletRef.current = L;
-      const map = L.map(mapRef.current, { zoomControl: true, attributionControl: false }).setView([15, 80], 4);
-      // Base layer — dark maritime style
-      L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { maxZoom:18 }).addTo(map);
-      mapObjRef.current = map;
-      drLayerRef.current  = L.layerGroup().addTo(map);
-      wpLayerRef.current  = L.layerGroup().addTo(map);
-      setMapReady(true);
-    };
-    loadLeaflet();
+    }
+
     return () => {
-      if (mapObjRef.current) { mapObjRef.current.remove(); mapObjRef.current = null; }
+      destroyed = true;
       if (watchIdRef.current != null) { navigator.geolocation.clearWatch(watchIdRef.current); watchIdRef.current = null; }
+      if (mapObjRef.current) { try { mapObjRef.current.remove(); } catch(e){} mapObjRef.current = null; }
+      shipMarkerRef.current = null;
     };
   }, []);
+
+  // ── Invalidate map size when mapReady changes (accordion expansion fix) ──
+  useEffect(() => {
+    if (!mapReady || !mapObjRef.current) return;
+    const t1 = setTimeout(() => { try { mapObjRef.current?.invalidateSize(); } catch(e){} }, 150);
+    const t2 = setTimeout(() => { try { mapObjRef.current?.invalidateSize(); } catch(e){} }, 500);
+    return () => { clearTimeout(t1); clearTimeout(t2); };
+  }, [mapReady]);
 
   // ── Update ship marker when position/COG changes ──
   useEffect(() => {
