@@ -365,7 +365,7 @@ function VoyageAnimation({ onClose, portsDb = [] }) {
     // minFillZoom: ensure map tiles always fill CW width (no blue side gaps)
     const minFillZoom=Math.ceil(Math.log2(CW/256));
     const padX=CW*0.10,padY=CH*0.12;
-    for (let z=7;z>=minFillZoom;z--){
+    for (let z=5;z>=minFillZoom;z--){  // cap at 5 — z>5 shows streets not regions
       const corners=[
         lp(minLat,minLng,z,cLat,cLng),lp(minLat,maxLng,z,cLat,cLng),
         lp(maxLat,minLng,z,cLat,cLng),lp(maxLat,maxLng,z,cLat,cLng),
@@ -449,41 +449,56 @@ function VoyageAnimation({ onClose, portsDb = [] }) {
   };
 
   // ── 4-PHASE ZOOM ──────────────────────────────────────────────────────────
-  // Phase 1 (0–10%):  Close follow ship at departure — baseZ+2 (ship clearly visible)
-  // Phase 2 (10–88%): Follow ship en route — baseZ+2 (zoomed in, see countries)
-  // Phase 3 (88–93%): Pull back — full route reveal
-  // Phase 4 (93–100% OR last 7s): Summary card (handled separately in drawSummary)
-  const getZoomState = (t,interp,pts,fitResult) => {
-    const P1=0.10,P2=0.88,P3=0.93;
+  // ── 4-PHASE ZOOM — always shows land/context, never pure ocean ──────────────
+  // shipZ is chosen so the canvas shows ~1500-3000km region around ship
+  // (enough to see the country the ship is near, not just ocean)
+  // We derive shipZ from the route span: longer routes = more zoomed out
+  const getShipZ = (fitResult) => {
+    // fitResult.z is the zoom to show the FULL route
+    // shipZ should be fitResult.z + 1.5 capped so we see land context
+    // For short routes (fitResult.z=5+) ship zoom = fitResult.z (already close enough)
+    // For long routes (fitResult.z=2-3) ship zoom = fitResult.z + 2 (need to zoom in more)
+    const base = fitResult.z;
+    if (base <= 2) return clamp(base + 2, 3, 5);   // world route: show sub-continent
+    if (base <= 3) return clamp(base + 2, 4, 5);   // ocean route: show country
+    if (base <= 4) return clamp(base + 1, 4, 5);   // regional: show country/sea area
+    return clamp(base, 4, 6);                        // short route: use autoFit zoom
+  };
+
+  const getZoomState = (t, interp, pts, fitResult) => {
+    const P1=0.10, P2=0.88, P3=0.93;
     const total=interp.length-1;
     const idx=clamp(Math.floor(t*total),0,total-1);
     const frac=(t*total)-idx;
     const curLat=interp[idx].lat+(interp[Math.min(idx+1,total)].lat-interp[idx].lat)*frac;
     const curLng=interp[idx].lng+(interp[Math.min(idx+1,total)].lng-interp[idx].lng)*frac;
-    // baseZ+2 = zoomed in enough to see individual countries while ship moves
-    const baseZ=clamp(fitResult.z,2,6);
-    const shipZ=clamp(baseZ+2,3,7); // ship-following zoom
+    const baseZ  = clamp(fitResult.z, 2, 6);
+    const shipZ  = getShipZ(fitResult); // smart zoom showing land context
+    const revealZ= clamp(baseZ - 0.5, 2, 5);
 
-    if (t<=P1){
-      // Phase 1: start at shipZ, stabilise
-      const e=easeIO(t/P1);
-      return {z:lerp(shipZ+0.5,shipZ,e), cLat:curLat, cLng:curLng};
-    } else if (t<=P2){
-      // Phase 2: follow ship closely at shipZ — center tracks ship
-      const e=easeIO((t-P1)/(P2-P1));
-      // Very gentle drift toward center so ship stays visible
-      return {z:shipZ, cLat:lerp(curLat,fitResult.lat,e*0.15), cLng:lerp(curLng,fitResult.lng,e*0.15)};
-    } else if (t<=P3){
-      // Phase 3: zoom out to show full route
-      const e=easeIO((t-P2)/(P3-P2));
+    if (t <= P1) {
+      // Phase 1: depart — ease into ship-follow zoom
+      const e = easeIO(t / P1);
+      return { z: lerp(shipZ + 0.5, shipZ, e), cLat: curLat, cLng: curLng };
+    } else if (t <= P2) {
+      // Phase 2: en route — follow ship at shipZ, very gently drift toward center
+      const e = easeIO((t - P1) / (P2 - P1));
       return {
-        z:lerp(shipZ,clamp(baseZ-0.5,2,6),e),
-        cLat:lerp(lerp(curLat,fitResult.lat,0.15),fitResult.lat,e),
-        cLng:lerp(lerp(curLng,fitResult.lng,0.15),fitResult.lng,e),
+        z: shipZ,
+        cLat: lerp(curLat, fitResult.lat, e * 0.12),
+        cLng: lerp(curLng, fitResult.lng, e * 0.12),
+      };
+    } else if (t <= P3) {
+      // Phase 3: pull back to show full route
+      const e = easeIO((t - P2) / (P3 - P2));
+      return {
+        z:    lerp(shipZ, revealZ, e),
+        cLat: lerp(lerp(curLat, fitResult.lat, 0.12), fitResult.lat, e),
+        cLng: lerp(lerp(curLng, fitResult.lng, 0.12), fitResult.lng, e),
       };
     } else {
-      // Phase 4: full route visible, summary card fades in on top
-      return {z:clamp(baseZ-0.5,2,6), cLat:fitResult.lat, cLng:fitResult.lng};
+      // Phase 4: full route + summary card
+      return { z: revealZ, cLat: fitResult.lat, cLng: fitResult.lng };
     }
   };
 
