@@ -1,7 +1,7 @@
 /* eslint-disable */
 import { useState, useRef, useEffect } from "react";
 import { auth, db } from "../firebase";
-import { signInWithEmailAndPassword, createUserWithEmailAndPassword, sendPasswordResetEmail, sendEmailVerification, signOut } from "firebase/auth";
+import { signInWithEmailAndPassword, createUserWithEmailAndPassword, sendPasswordResetEmail } from "firebase/auth";
 import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
 
 const COUNTRY_CODES = [
@@ -246,14 +246,10 @@ function LoginPage({ notify, onLogin, installPrompt=null, onInstallApp=null }) {
     setLoading(true); setErr('');
     try {
       const c = await signInWithEmailAndPassword(auth, email, pass);
-      if (!c.user.emailVerified) {
-        await signOut(auth);
-        setErr('⚠️ Email not verified. Check your inbox and click the link, then log in again.');
-        setLoading(false); return;
-      }
+      // REMOVED: email verification check — users log in directly
       const snap = await getDoc(doc(db, 'users', c.user.uid));
       if (snap.exists() && snap.data().blocked) {
-        await signOut(auth);
+        await import('firebase/auth').then(({ signOut }) => signOut(auth));
         setErr('⚠️ ACCESS SUSPENDED — Contact: @manish_the_navigator on Instagram');
         setLoading(false); return;
       }
@@ -284,10 +280,10 @@ function LoginPage({ notify, onLogin, installPrompt=null, onInstallApp=null }) {
         email, name:name.trim(), phone:`${countryCode} ${phone.trim()}`,
         rank:finalRank, tier, createdAt:serverTimestamp(), role:'user',
       });
-      await sendEmailVerification(c.user);
-      await signOut(auth);
-      setMode('verify');
-      notify('Verification email sent! 📧','success');
+      // REMOVED: sendEmailVerification, signOut, setMode('verify')
+      // User lands directly on home dashboard after signup
+      notify('Welcome to NavisphereX! 🚢', 'success');
+      onLogin(c.user, 'home', false, name.trim(), finalRank);
     } catch (e) {
       setErr(e.code==='auth/email-already-in-use'?'Email already registered. Login instead.':'Error: '+e.message);
     }
@@ -301,38 +297,6 @@ function LoginPage({ notify, onLogin, installPrompt=null, onInstallApp=null }) {
     catch { setErr('Email not found.'); }
     setLoading(false);
   };
-
-  const resendVerification = async () => {
-    if (!email||!pass) { setErr('Enter email and password to resend.'); return; }
-    setLoading(true); setErr('');
-    try {
-      const c = await signInWithEmailAndPassword(auth,email,pass);
-      await sendEmailVerification(c.user); await signOut(auth);
-      setOk('Verification email resent! Check your inbox.');
-    } catch { setErr('Could not resend. Check your credentials.'); }
-    setLoading(false);
-  };
-
-  if (mode==='verify') return (
-    <div className="auth-wrap"><div className="auth-card" style={{textAlign:'center'}}>
-      <div style={{fontSize:'3rem',marginBottom:'1rem'}}>📧</div>
-      <div className="auth-title" style={{marginBottom:'0.5rem'}}>Verify Your Email</div>
-      <div className="auth-sub" style={{marginBottom:'1.4rem',lineHeight:1.7}}>
-        A link was sent to<br/><strong style={{color:'var(--cyan)'}}>{email}</strong><br/>
-        Click it, then come back to log in.
-      </div>
-      <div className="info-box" style={{textAlign:'left',fontSize:'0.74rem'}}>
-        📌 Check your <strong>spam/junk</strong> folder if you don't see it.
-      </div>
-      {err&&<div className="err-box">{err}</div>}
-      {ok&&<div className="ok-box">{ok}</div>}
-      <button className="btn btn-secondary" style={{width:'100%',justifyContent:'center',marginBottom:8}}
-        onClick={resendVerification} disabled={loading}>
-        {loading?'Sending…':'🔄 Resend Verification Email'}
-      </button>
-      <button className="submit-btn" onClick={()=>resetForm('login')}>✅ Go to Login</button>
-    </div></div>
-  );
 
   return (
     <>
@@ -352,7 +316,7 @@ function LoginPage({ notify, onLogin, installPrompt=null, onInstallApp=null }) {
           </div>
         )}
 
-        {/* Install button — no fallback, nothing shown if already installed */}
+        {/* Install button */}
         {installPrompt && onInstallApp ? (
           <button onClick={onInstallApp}
             style={{width:'100%',padding:'10px 14px',borderRadius:10,
@@ -492,12 +456,7 @@ function LoginPage({ notify, onLogin, installPrompt=null, onInstallApp=null }) {
 
         {mode==='login'&&<div className="link-txt" onClick={()=>resetForm('reset')}>Forgot password?</div>}
         {mode==='reset'&&<div className="link-txt" onClick={()=>resetForm('login')}>← Back to login</div>}
-        {mode==='login'&&(
-          <div style={{textAlign:'center',marginTop:8}}>
-            <span style={{fontSize:'0.7rem',color:'var(--text3)',cursor:'pointer'}}
-              onClick={()=>resetForm('verify')}>Didn't receive verification email?</span>
-          </div>
-        )}
+        {/* REMOVED: "Didn't receive verification email?" link */}
       </div></div>
     </>
   );
