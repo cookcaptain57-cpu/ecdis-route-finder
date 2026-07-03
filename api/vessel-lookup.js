@@ -33,32 +33,14 @@ export default async function handler(req, res) {
     }
 
     const searchJson = await searchRes.json();
-    // TEMP: try a few likely field names, since docs vs actual response can drift
     const candidates  = searchJson?.data || searchJson?.vessels || searchJson?.results || [];
     if (candidates.length === 0) {
-      // TEMP DEBUG — remove _debug once this is confirmed working
-      return res.status(200).json({
-        found: false,
-        candidates: [],
-        _debug: { httpStatus: searchRes.status, rawBody: searchJson }
-      });
+      return res.status(200).json({ found: false, candidates: [] });
     }
 
-    // Step 2: pull full particulars for the best match
-    const top    = candidates[0];
-    const idType = top.imo ? 'imo' : 'mmsi';
-    const idVal  = top.imo || top.mmsi;
-
-    const detailUrl = `https://api.vesselapi.com/v1/vessel/${idVal}?filter.idType=${idType}`;
-    const detailRes = await fetch(detailUrl, { headers: authHeader });
-
-    if (!detailRes.ok) {
-      // Search worked but detail lookup failed — still return the candidate list
-      return res.status(200).json({ found: true, vessel: null, candidates });
-    }
-
-    const vessel = await detailRes.json();
-    return res.status(200).json({ found: true, vessel, candidates });
+    // NOTE: search results already contain full particulars (GT, DWT, etc) —
+    // no second "detail" call needed. This is what cut quota use in half.
+    return res.status(200).json({ found: true, candidates });
 
   } catch (e) {
     return res.status(502).json({ error: 'upstream_failed', message: e.message });
