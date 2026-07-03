@@ -547,37 +547,6 @@ export default function HomePage({ routes, charts, onSearch, setTab, user, ports
             </div>
           )}
 
-          {/* ─── ADDED: Share App Button ─────────────────────────────────── */}
-          <div style={{marginTop:'0.7rem',maxWidth:540}}>
-            <button onClick={shareApp}
-              style={{width:'100%',padding:'11px 16px',borderRadius:12,
-                border:'1px solid rgba(0,200,150,0.35)',
-                background:'linear-gradient(135deg,rgba(0,200,150,0.1),rgba(0,168,122,0.08))',
-                cursor:'pointer',display:'flex',alignItems:'center',gap:12,
-                fontFamily:"'Exo 2',sans-serif",backdropFilter:'blur(10px)',transition:'all 0.2s'}}
-              onMouseEnter={e=>{e.currentTarget.style.borderColor='rgba(0,200,150,0.65)';e.currentTarget.style.background='linear-gradient(135deg,rgba(0,200,150,0.18),rgba(0,168,122,0.15))';}}
-              onMouseLeave={e=>{e.currentTarget.style.borderColor='rgba(0,200,150,0.35)';e.currentTarget.style.background='linear-gradient(135deg,rgba(0,200,150,0.1),rgba(0,168,122,0.08))';}}>
-              <div style={{width:38,height:38,borderRadius:10,
-                background:'linear-gradient(135deg,#00C896,#00a87a)',
-                display:'flex',alignItems:'center',justifyContent:'center',
-                fontSize:'1.3rem',flexShrink:0,
-                boxShadow:'0 4px 14px rgba(0,200,150,0.35)'}}>
-                {shareCopied ? '✅' : '📤'}
-              </div>
-              <div style={{flex:1,textAlign:'left'}}>
-                <div style={{fontFamily:'Orbitron,monospace',fontSize:'0.72rem',fontWeight:700,color:'var(--green)',marginBottom:2}}>
-                  {shareCopied ? 'Link Copied!' : 'Share NavisphereX'}
-                </div>
-                <div style={{fontSize:'0.66rem',color:'var(--text2)'}}>
-                  {shareCopied ? 'Paste anywhere to share with fellow mariners' : 'Share with fellow mariners via WhatsApp, Telegram & more'}
-                </div>
-              </div>
-              <div style={{fontSize:'0.8rem',color:'var(--green)',flexShrink:0,fontWeight:700}}>
-                {shareCopied ? '✓' : 'Share →'}
-              </div>
-            </button>
-          </div>
-          {/* ─── END ADDED ───────────────────────────────────────────────── */}
 
         </div>
       </div>
@@ -727,6 +696,36 @@ export default function HomePage({ routes, charts, onSearch, setTab, user, ports
               <button className="btn btn-secondary" style={{marginTop:'0.7rem',padding:'4px 10px',fontSize:'0.64rem'}}
                 onClick={()=>setTipIndex(i=>(i+1)%MARITIME_TIPS.length)}>Next tip →</button>
             </div>
+          </div>
+
+          {/* Share App - below Tip of the Day, above footer */}
+          <div style={{marginBottom:'1.2rem'}}>
+            <button onClick={shareApp}
+              style={{width:'100%',padding:'14px 16px',borderRadius:13,
+                border:'1px solid rgba(0,200,150,0.35)',
+                background:'linear-gradient(135deg,rgba(0,200,150,0.08),rgba(0,168,122,0.05))',
+                cursor:'pointer',display:'flex',alignItems:'center',gap:14,
+                fontFamily:"'Exo 2',sans-serif",transition:'all 0.2s',textAlign:'left'}}
+              onMouseEnter={e=>{e.currentTarget.style.borderColor='rgba(0,200,150,0.6)';e.currentTarget.style.background='linear-gradient(135deg,rgba(0,200,150,0.15),rgba(0,168,122,0.1))'}}
+              onMouseLeave={e=>{e.currentTarget.style.borderColor='rgba(0,200,150,0.35)';e.currentTarget.style.background='linear-gradient(135deg,rgba(0,200,150,0.08),rgba(0,168,122,0.05))}}>
+              <div style={{width:44,height:44,borderRadius:12,flexShrink:0,
+                background:'linear-gradient(135deg,#00C896,#00a87a)',
+                display:'flex',alignItems:'center',justifyContent:'center',
+                fontSize:'1.4rem',boxShadow:'0 4px 14px rgba(0,200,150,0.35)'}}>
+                {shareCopied ? '\u2705' : '\U0001F4E4'}
+              </div>
+              <div style={{flex:1}}>
+                <div style={{fontFamily:'Orbitron,monospace',fontSize:'0.74rem',fontWeight:700,color:'var(--green)',marginBottom:3}}>
+                  {shareCopied ? 'Link Copied!' : 'Share NavisphereX with Fellow Mariners'}
+                </div>
+                <div style={{fontSize:'0.68rem',color:'var(--text2)'}}>
+                  {shareCopied ? 'Paste anywhere to share' : 'Spread the word via WhatsApp, Telegram, Instagram & more'}
+                </div>
+              </div>
+              <div style={{fontSize:'0.8rem',color:'var(--green)',flexShrink:0,fontWeight:700}}>
+                {shareCopied ? '\u2713' : 'Share \u2192'}
+              </div>
+            </button>
           </div>
 
         </div>
