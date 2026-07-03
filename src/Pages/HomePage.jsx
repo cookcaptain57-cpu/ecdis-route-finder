@@ -72,6 +72,11 @@ const AI_EXAMPLES = [
   "Anchoring in deep water tips?",
 ];
 
+// ─── ADDED: Share app constants ───────────────────────────────────────────────
+const APP_URL     = 'https://navispherex.vercel.app';
+const APP_SHARE_TEXT = '🚢 NavisphereX Marine — Free maritime app for seafarers!\n✅ Routes, Charts, Port Search, AI Assistant & more\n📲 ' + APP_URL;
+// ─── END ADDED ────────────────────────────────────────────────────────────────
+
 function MaritimeAIWidget() {
   const [isOpen,     setIsOpen]     = useState(false);
   const [messages,   setMessages]   = useState([]);
@@ -266,9 +271,6 @@ function MaritimeAIWidget() {
   );
 }
 
-// ── allTabs prop is now the single source of truth, passed from App.jsx's
-// TABS array. Customise picker, feature cards, and pinned tabs all derive
-// from this — no more separate hardcoded ALL_FEATURES list to keep in sync. ──
 export default function HomePage({ routes, charts, onSearch, setTab, user, portsDb=[], userProfile=null, installPrompt=null, onInstallApp=null, allTabs=[] }) {
   const [q,              setQ]             = useState('');
   const [qResults,       setQResults]      = useState([]);
@@ -285,7 +287,12 @@ export default function HomePage({ routes, charts, onSearch, setTab, user, ports
   const [cachedRoutes,   setCachedRoutes]  = useState([]);
   const [cachedCharts,   setCachedCharts]  = useState([]);
   const [showTabSettings,setShowTabSettings]= useState(false);
-  const [pinnedTabs,     setPinnedTabs]    = useState(() => {
+
+  // ─── ADDED: Share state ───────────────────────────────────────────────────
+  const [shareCopied, setShareCopied] = useState(false);
+  // ─── END ADDED ────────────────────────────────────────────────────────────
+
+  const [pinnedTabs, setPinnedTabs] = useState(() => {
     try { const s=JSON.parse(localStorage.getItem('hp_pinned_tabs')||'null'); return s||['routes','charts','planner','navmode','ports','library']; }
     catch { return ['routes','charts','planner','navmode','ports','library']; }
   });
@@ -343,6 +350,29 @@ export default function HomePage({ routes, charts, onSearch, setTab, user, ports
       ()=>{ setGpsLoading(false); }
     );
   };
+
+  // ─── ADDED: Share app function ────────────────────────────────────────────
+  const shareApp = async () => {
+    // Use native Web Share API if available (Android, iOS)
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: 'NavisphereX Marine',
+          text: '🚢 Free maritime app for seafarers — Routes, Charts, Port Search, AI Assistant & more!',
+          url: APP_URL,
+        });
+      } catch {}  // User cancelled share — no error needed
+    } else {
+      // Fallback: copy link to clipboard
+      try {
+        await navigator.clipboard.writeText(APP_SHARE_TEXT);
+        setShareCopied(true);
+        setTimeout(() => setShareCopied(false), 2500);
+      } catch {}
+    }
+  };
+  // ─── END ADDED ────────────────────────────────────────────────────────────
+
   const doSearch = (sq) => {
     const s=(sq!==undefined?sq:q).trim();
     if (!s||s.length<2) { setQResults([]); return; }
@@ -354,9 +384,6 @@ export default function HomePage({ routes, charts, onSearch, setTab, user, ports
   };
   const wc = weather ? weatherIcon(weather.code) : null;
 
-  // ── DERIVED FROM allTabs PROP — this is the fix. ──
-  // Default fallback colour/gradient for any tab that doesn't define one
-  // (keeps things visually fine even if a future tab forgets to set color/bg).
   const FALLBACK_COLOR = '#00B4D8';
   const FALLBACK_BG    = 'linear-gradient(135deg,#00B4D8,#1565C0)';
 
@@ -371,7 +398,7 @@ export default function HomePage({ routes, charts, onSearch, setTab, user, ports
       bg:    t.bg || FALLBACK_BG,
       badge: t.badge,
     }))
-    .filter((f,i,arr)=>arr.findIndex(x=>x.tab===f.tab)===i); // dedupe just in case
+    .filter((f,i,arr)=>arr.findIndex(x=>x.tab===f.tab)===i);
 
   const validTabKeys = new Set(ALL_FEATURES.map(f=>f.tab));
   const safePinnedTabs = pinnedTabs.filter(k => validTabKeys.has(k));
@@ -519,6 +546,38 @@ export default function HomePage({ routes, charts, onSearch, setTab, user, ports
               </button>
             </div>
           )}
+
+          {/* ─── ADDED: Share App Button ─────────────────────────────────── */}
+          <div style={{marginTop:'0.7rem',maxWidth:540}}>
+            <button onClick={shareApp}
+              style={{width:'100%',padding:'11px 16px',borderRadius:12,
+                border:'1px solid rgba(0,200,150,0.35)',
+                background:'linear-gradient(135deg,rgba(0,200,150,0.1),rgba(0,168,122,0.08))',
+                cursor:'pointer',display:'flex',alignItems:'center',gap:12,
+                fontFamily:"'Exo 2',sans-serif",backdropFilter:'blur(10px)',transition:'all 0.2s'}}
+              onMouseEnter={e=>{e.currentTarget.style.borderColor='rgba(0,200,150,0.65)';e.currentTarget.style.background='linear-gradient(135deg,rgba(0,200,150,0.18),rgba(0,168,122,0.15))';}}
+              onMouseLeave={e=>{e.currentTarget.style.borderColor='rgba(0,200,150,0.35)';e.currentTarget.style.background='linear-gradient(135deg,rgba(0,200,150,0.1),rgba(0,168,122,0.08))';}}>
+              <div style={{width:38,height:38,borderRadius:10,
+                background:'linear-gradient(135deg,#00C896,#00a87a)',
+                display:'flex',alignItems:'center',justifyContent:'center',
+                fontSize:'1.3rem',flexShrink:0,
+                boxShadow:'0 4px 14px rgba(0,200,150,0.35)'}}>
+                {shareCopied ? '✅' : '📤'}
+              </div>
+              <div style={{flex:1,textAlign:'left'}}>
+                <div style={{fontFamily:'Orbitron,monospace',fontSize:'0.72rem',fontWeight:700,color:'var(--green)',marginBottom:2}}>
+                  {shareCopied ? 'Link Copied!' : 'Share NavisphereX'}
+                </div>
+                <div style={{fontSize:'0.66rem',color:'var(--text2)'}}>
+                  {shareCopied ? 'Paste anywhere to share with fellow mariners' : 'Share with fellow mariners via WhatsApp, Telegram & more'}
+                </div>
+              </div>
+              <div style={{fontSize:'0.8rem',color:'var(--green)',flexShrink:0,fontWeight:700}}>
+                {shareCopied ? '✓' : 'Share →'}
+              </div>
+            </button>
+          </div>
+          {/* ─── END ADDED ───────────────────────────────────────────────── */}
 
         </div>
       </div>
