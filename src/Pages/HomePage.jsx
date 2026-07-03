@@ -706,8 +706,8 @@ export default function HomePage({ routes, charts, onSearch, setTab, user, ports
                 background:'linear-gradient(135deg,rgba(0,200,150,0.08),rgba(0,168,122,0.05))',
                 cursor:'pointer',display:'flex',alignItems:'center',gap:14,
                 fontFamily:"'Exo 2',sans-serif",transition:'all 0.2s',textAlign:'left'}}
-              onMouseEnter={e=>{e.currentTarget.style.borderColor='rgba(0,200,150,0.6)';e.currentTarget.style.background='linear-gradient(135deg,rgba(0,200,150,0.15),rgba(0,168,122,0.1))';}
-              onMouseLeave={e=>{e.currentTarget.style.borderColor='rgba(0,200,150,0.35)';e.currentTarget.style.background='linear-gradient(135deg,rgba(0,200,150,0.08),rgba(0,168,122,0.05));}}>
+              onMouseEnter={e=>{e.currentTarget.style.borderColor='rgba(0,200,150,0.6)';e.currentTarget.style.background='linear-gradient(135deg,rgba(0,200,150,0.15),rgba(0,168,122,0.1))';}}
+              onMouseLeave={e=>{e.currentTarget.style.borderColor='rgba(0,200,150,0.35)';e.currentTarget.style.background='linear-gradient(135deg,rgba(0,200,150,0.08),rgba(0,168,122,0.05))';}}>
               <div style={{width:44,height:44,borderRadius:12,flexShrink:0,
                 background:'linear-gradient(135deg,#00C896,#00a87a)',
                 display:'flex',alignItems:'center',justifyContent:'center',
