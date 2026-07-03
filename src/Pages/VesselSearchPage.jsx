@@ -145,19 +145,13 @@ function VesselSearchPage() {
 
   // ── NEW: fall back to live VesselAPI when local search comes up empty ──
   useEffect(() => {
-    if (selected) return; // already picked a ship, don't keep searching
-    if (!q || q.trim().length < 3) {
-      setApiCandidates([]); setNotFoundAnywhere(false); return;
-    }
-    if (sugg.length > 0) {
-      setApiCandidates([]); setNotFoundAnywhere(false); return; // local match exists
-    }
-    const ql = q.trim().toLowerCase();
-    if (missCacheRef.current.has(ql)) { setNotFoundAnywhere(true); return; }
-
-    const t = setTimeout(() => runLiveLookup(q.trim()), 600);
-    return () => clearTimeout(t);
-  }, [q, sugg, selected]);
+    // CHANGED: no longer auto-fires on typing pause — that was burning API
+    // quota on partial/in-progress text (e.g. pausing after "MSC" before
+    // finishing "GULSUN"). Now this just clears stale results when the
+    // query changes, so the search button reappears for the new text.
+    setApiCandidates([]);
+    setNotFoundAnywhere(false);
+  }, [q]);
 
   const runLiveLookup = async (name) => {
     setApiLoading(true);
@@ -324,9 +318,17 @@ function VesselSearchPage() {
           </div>
         )}
 
-        {/* ── NEW: live-lookup status + API candidates + manual entry ────── */}
+        {/* ── NEW: live-lookup button + status + API candidates + manual entry ── */}
         {!selected && q.trim().length >= 3 && sugg.length === 0 && (
           <div style={{ marginTop: 10 }}>
+
+            {/* NEW: manual trigger — replaces the old auto-fire-on-pause behaviour */}
+            {!apiLoading && !notFoundAnywhere && apiCandidates.length === 0 && (
+              <button className="btn btn-primary" style={{ width: '100%', justifyContent: 'center', padding: '12px' }}
+                onClick={() => runLiveLookup(q.trim())}>
+                🔍 Search Live Database
+              </button>
+            )}
 
             {apiLoading && (
               <div className="info-box" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
