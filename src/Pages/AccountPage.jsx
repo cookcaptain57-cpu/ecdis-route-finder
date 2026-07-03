@@ -37,6 +37,9 @@ const COUNTRY_CODES = [
   {dial:'+84',name:'Vietnam'},{dial:'+95',name:'Myanmar'},{dial:'+960',name:'Maldives'},
 ];
 
+// ADDED: App URL constant
+const APP_URL = 'https://navispherex.vercel.app';
+
 const parsePhone = (fullPhone) => {
   if (!fullPhone) return { code:'+91', number:'' };
   const match = fullPhone.match(/^(\+\d+)\s(.+)$/);
@@ -82,7 +85,7 @@ function CountryCodePicker({ value, onChange }) {
       <input className="fi" placeholder="+xx" style={{ flex:1, padding:'10px 8px' }}
         value={manualVal} onChange={e => { setManualVal(e.target.value); onChange(e.target.value); }} />
       <button className="btn btn-secondary" style={{ padding:'0 8px', fontSize:'0.7rem' }}
-        onClick={() => { setManual(false); onChange('+91'); setManualVal(''); }}>✕</button>
+        onClick={() => { setManual(false); onChange('+91'); setManualVal(''); }}>X</button>
     </div>
   );
   return (
@@ -91,15 +94,15 @@ function CountryCodePicker({ value, onChange }) {
         background:'var(--bg2)', border:'1px solid var(--border2)', borderRadius:9, color:'var(--text)',
         fontFamily:'Exo 2,sans-serif', fontSize:'0.82rem', cursor:'pointer',
         textAlign:'left', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-        <span><strong>{value}</strong> {selected?.name?.slice(0,8)}{(selected?.name?.length||0)>8?'…':''}</span>
-        <span style={{ color:'var(--text3)', fontSize:'0.7rem' }}>▾</span>
+        <span><strong>{value}</strong> {selected?.name?.slice(0,8)}{(selected?.name?.length||0)>8?'...':''}</span>
+        <span style={{ color:'var(--text3)', fontSize:'0.7rem' }}>v</span>
       </button>
       {open && (
         <div style={{ position:'absolute', top:'calc(100% + 4px)', left:0, zIndex:500, width:240,
           background:'var(--card)', border:'1px solid var(--border2)', borderRadius:10,
           boxShadow:'0 12px 40px rgba(0,0,0,0.6)', overflow:'hidden' }}>
           <div style={{ padding:'8px 10px', borderBottom:'1px solid var(--border)' }}>
-            <input className="fi" autoFocus placeholder="Search country or code…"
+            <input className="fi" autoFocus placeholder="Search country or code"
               style={{ margin:0, padding:'7px 10px', fontSize:'0.8rem' }}
               value={search} onChange={e => setSearch(e.target.value)} />
           </div>
@@ -118,7 +121,7 @@ function CountryCodePicker({ value, onChange }) {
               style={{ padding:'10px 12px', cursor:'pointer', fontSize:'0.78rem', color:'var(--gold)', borderTop:'1px solid var(--border)' }}
               onMouseEnter={e=>e.currentTarget.style.background='rgba(240,165,0,0.06)'}
               onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
-              ✏️ Enter code manually
+              Enter code manually
             </div>
           </div>
         </div>
@@ -139,16 +142,15 @@ function AccountPage({ user, userProfile, setUserProfile, notify, setTab }) {
   const [rank, setRank]                 = useState('');
   const [customRank, setCustomRank]     = useState('');
   const [showCustomRank, setShowCustomRank] = useState(false);
-
-  // Extra data
   const [seaTimeData,   setSeaTimeData]   = useState(null);
   const [certsData,     setCertsData]     = useState([]);
   const [dlHistory,     setDlHistory]     = useState([]);
   const [notifPrefs,    setNotifPrefs]    = useState({ newRoutes:true, portNotices:true, certReminders:true });
   const [activeSection, setActiveSection] = useState('profile');
+  // ADDED: share copied state
+  const [shareCopied, setShareCopied] = useState(false);
 
-  // Referral code = first 8 chars of UID
-  const referralCode = user?.uid?.slice(0,8).toUpperCase() || '—';
+  const referralCode = user?.uid?.slice(0,8).toUpperCase() || '-';
 
   useEffect(() => {
     if (!user) return;
@@ -207,14 +209,14 @@ function AccountPage({ user, userProfile, setUserProfile, notify, setTab }) {
       const updates = { name:name.trim(), phone:fullPhone, address, shipName, rank:finalRank, updatedAt:new Date().toISOString() };
       await setDoc(doc(db, 'users', user.uid), updates, { merge:true });
       setUserProfile(prev => ({ ...prev, ...updates }));
-      setEditing(false); notify('✅ Profile updated', 'success');
+      setEditing(false); notify('Profile updated', 'success');
     } catch (e) { notify('Update failed: ' + e.message, 'error'); }
     setLoading(false);
   };
 
   const saveNotifPrefs = async (prefs) => {
     setNotifPrefs(prefs);
-    try { await setDoc(doc(db, 'users', user.uid), { notifPrefs:prefs }, { merge:true }); notify('✅ Preferences saved', 'success'); }
+    try { await setDoc(doc(db, 'users', user.uid), { notifPrefs:prefs }, { merge:true }); notify('Preferences saved', 'success'); }
     catch {}
   };
 
@@ -226,7 +228,7 @@ function AccountPage({ user, userProfile, setUserProfile, notify, setTab }) {
       await reauthenticateWithCredential(user, credential);
       await deleteDoc(doc(db, 'users', user.uid));
       await deleteUser(user);
-      notify('Account deleted. Goodbye! 👋', 'info');
+      notify('Account deleted. Goodbye!', 'info');
       setTab('home');
     } catch (e) {
       if (e.code === 'auth/wrong-password') notify('Wrong password.', 'error');
@@ -234,20 +236,35 @@ function AccountPage({ user, userProfile, setUserProfile, notify, setTab }) {
     }
   };
 
-  const rankEmoji = RANK_EMOJI[finalRank] || RANK_EMOJI[userProfile?.rank] || '👤';
+  // ADDED: Share app with referral code
+  const shareAppWithReferral = async () => {
+    const shareText = '🚢 NavisphereX Marine — Free maritime app for seafarers!\n✅ Routes, Charts, Port Search, AI Assistant & more\n🎁 Use my referral code: ' + referralCode + '\n📲 ' + APP_URL;
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: 'NavisphereX Marine',
+          text: '🚢 Free maritime app for seafarers! Use my referral code: ' + referralCode,
+          url: APP_URL,
+        });
+      } catch {}
+    } else {
+      try {
+        await navigator.clipboard.writeText(shareText);
+        setShareCopied(true);
+        setTimeout(() => setShareCopied(false), 2500);
+        notify('Share text copied to clipboard!', 'success');
+      } catch {}
+    }
+  };
 
-  // Sea time summary
+  const rankEmoji = RANK_EMOJI[finalRank] || RANK_EMOJI[userProfile?.rank] || '👤';
   const totalSeaDays = seaTimeData?.entries?.reduce((s,e) => s + calcDays(e.signOn, e.signOff), 0) || 0;
   const shipCount    = seaTimeData?.entries?.length || 0;
-
-  // Cert expiry alerts
   const expiringCerts = certsData.filter(c => {
     if (!c.expiryDate) return false;
     const days = Math.floor((new Date(c.expiryDate) - new Date()) / 86400000);
     return days >= 0 && days <= 90;
   });
-
-  // Last login
   const lastLogin = user?.metadata?.lastSignInTime;
 
   const sections = [
@@ -261,7 +278,7 @@ function AccountPage({ user, userProfile, setUserProfile, notify, setTab }) {
   ];
 
   if (fetching) return (
-    <div className="section"><div className="loading"><div className="spin"/><span>Loading your profile…</span></div></div>
+    <div className="section"><div className="loading"><div className="spin"/><span>Loading your profile...</span></div></div>
   );
 
   return (
@@ -272,7 +289,6 @@ function AccountPage({ user, userProfile, setUserProfile, notify, setTab }) {
           onClick={() => { signOut(auth); notify('Logged out','info'); setTab('home'); }}>🚪 Logout</button>
       </div>
 
-      {/* Profile card */}
       <div style={{ background:'var(--card)', border:'1px solid var(--border)', borderRadius:16,
         padding:'1.2rem', marginBottom:'1rem', display:'flex', alignItems:'center', gap:14, flexWrap:'wrap' }}>
         <div style={{ width:58, height:58, borderRadius:'50%', flexShrink:0,
@@ -288,7 +304,6 @@ function AccountPage({ user, userProfile, setUserProfile, notify, setTab }) {
           {userProfile?.shipName && <div style={{ fontSize:'0.72rem', color:'var(--text2)' }}>🚢 {userProfile.shipName}</div>}
           <div style={{ fontSize:'0.68rem', color:'var(--text3)' }}>{user?.email}</div>
         </div>
-        {/* Quick stats */}
         <div style={{ display:'flex', gap:10, flexWrap:'wrap' }}>
           {totalSeaDays > 0 && (
             <div style={{ background:'rgba(0,180,216,0.08)', border:'1px solid rgba(0,180,216,0.2)', borderRadius:8, padding:'6px 10px', textAlign:'center', cursor:'pointer' }} onClick={() => setTab('seatime')}>
@@ -305,10 +320,9 @@ function AccountPage({ user, userProfile, setUserProfile, notify, setTab }) {
         </div>
       </div>
 
-      {/* Certificate expiry alert */}
       {expiringCerts.length > 0 && (
         <div style={{ background:'rgba(255,71,87,0.08)', border:'1px solid rgba(255,71,87,0.25)', borderRadius:10, padding:'0.8rem 1rem', marginBottom:'1rem' }}>
-          <div style={{ fontFamily:'Orbitron,monospace', fontSize:'0.7rem', color:'#ff4757', marginBottom:'0.4rem' }}>⚠️ CERTIFICATE EXPIRY ALERT</div>
+          <div style={{ fontFamily:'Orbitron,monospace', fontSize:'0.7rem', color:'#ff4757', marginBottom:'0.4rem' }}>CERTIFICATE EXPIRY ALERT</div>
           {expiringCerts.map((c,i) => {
             const days = Math.floor((new Date(c.expiryDate) - new Date()) / 86400000);
             return <div key={i} style={{ fontSize:'0.74rem', color:'var(--text2)', padding:'2px 0' }}>
@@ -321,7 +335,6 @@ function AccountPage({ user, userProfile, setUserProfile, notify, setTab }) {
         </div>
       )}
 
-      {/* Section tabs */}
       <div style={{ display:'flex', gap:4, marginBottom:'1.2rem', flexWrap:'wrap', borderBottom:'1px solid var(--border)', paddingBottom:4 }}>
         {sections.map(s => (
           <button key={s.k} onClick={() => setActiveSection(s.k)}
@@ -333,12 +346,11 @@ function AccountPage({ user, userProfile, setUserProfile, notify, setTab }) {
         ))}
       </div>
 
-      {/* ── PROFILE SECTION ── */}
       {activeSection === 'profile' && (
         <>
           <div style={{ display:'flex', justifyContent:'flex-end', marginBottom:'0.8rem' }}>
             <button className="btn btn-primary" style={{ padding:'6px 14px', fontSize:'0.74rem' }} onClick={() => setEditing(e=>!e)}>
-              {editing ? '✕ Cancel' : '✏️ Edit Profile'}
+              {editing ? 'Cancel' : 'Edit Profile'}
             </button>
           </div>
           {editing ? (
@@ -351,11 +363,11 @@ function AccountPage({ user, userProfile, setUserProfile, notify, setTab }) {
                 <div className="ff" style={{ margin:0 }}>
                   <label className="fl">Rank</label>
                   <select className="fi" value={showCustomRank?'__other__':rank} onChange={e=>{ if(e.target.value==='__other__'){setShowCustomRank(true);setRank('');}else{setShowCustomRank(false);setRank(e.target.value);}}}>
-                    <option value="">— Select —</option>
+                    <option value="">Select</option>
                     {MARITIME_RANKS.map(r=><option key={r} value={r}>{r}</option>)}
-                    <option value="__other__">✏️ Other</option>
+                    <option value="__other__">Other</option>
                   </select>
-                  {showCustomRank && <input className="fi" style={{ marginTop:6 }} placeholder="Enter rank…" value={customRank} onChange={e=>setCustomRank(e.target.value)} />}
+                  {showCustomRank && <input className="fi" style={{ marginTop:6 }} placeholder="Enter rank" value={customRank} onChange={e=>setCustomRank(e.target.value)} />}
                 </div>
                 <div className="ff" style={{ margin:0 }}>
                   <label className="fl">Phone</label>
@@ -378,7 +390,7 @@ function AccountPage({ user, userProfile, setUserProfile, notify, setTab }) {
                 </div>
               </div>
               <div style={{ display:'flex', gap:8, marginTop:10 }}>
-                <button className="btn btn-primary" onClick={saveProfile} disabled={loading}>{loading?'Saving…':'✅ Save'}</button>
+                <button className="btn btn-primary" onClick={saveProfile} disabled={loading}>{loading?'Saving...':'Save'}</button>
                 <button className="btn btn-secondary" onClick={()=>{setEditing(false);populateForm(userProfile||{});}}>Cancel</button>
               </div>
             </div>
@@ -391,7 +403,7 @@ function AccountPage({ user, userProfile, setUserProfile, notify, setTab }) {
                 {l:'Phone',     v:userProfile?.phone, i:'📱'},
                 {l:'Email',     v:user?.email, i:'✉️'},
                 {l:'Address',   v:userProfile?.address, i:'📍'},
-                {l:'Tier',      v:userProfile?.tier==='paid'?'⭐ Paid':'🆓 Free', i:'🎫'},
+                {l:'Tier',      v:userProfile?.tier==='paid'?'Paid':'Free', i:'🎫'},
               ].map((row,i) => (
                 <div key={i} style={{ display:'flex', gap:10, alignItems:'center', padding:'7px 0', borderBottom:'1px solid rgba(255,255,255,0.04)' }}>
                   <span style={{ width:20, textAlign:'center', flexShrink:0 }}>{row.i}</span>
@@ -404,16 +416,14 @@ function AccountPage({ user, userProfile, setUserProfile, notify, setTab }) {
         </>
       )}
 
-      {/* ── SECURITY SECTION ── */}
       {activeSection === 'security' && (
         <div style={{ display:'grid', gap:'0.8rem' }}>
           <div style={{ background:'var(--card)', border:'1px solid var(--border)', borderRadius:12, padding:'1.1rem' }}>
             <div style={{ fontFamily:'Orbitron,monospace', fontSize:'0.72rem', color:'var(--text2)', marginBottom:'0.8rem' }}>🔒 Account Security</div>
             {[
-              {l:'Email',          v:user?.email,                                                              i:'✉️'},
-              {l:'Last Login',     v:lastLogin ? new Date(lastLogin).toLocaleString() : '—',                  i:'🕐'},
-              {l:'Account Created',v:userProfile?.createdAt ? new Date(userProfile.createdAt?.seconds*1000).toLocaleDateString() : '—', i:'📅'},
-              // REMOVED: Email Verified row
+              {l:'Email',          v:user?.email,                                                                                                  i:'✉️'},
+              {l:'Last Login',     v:lastLogin ? new Date(lastLogin).toLocaleString() : '-',                                                       i:'🕐'},
+              {l:'Account Created',v:userProfile?.createdAt ? new Date(userProfile.createdAt?.seconds*1000).toLocaleDateString() : '-',             i:'📅'},
             ].map((row,i) => (
               <div key={i} style={{ display:'flex', gap:10, alignItems:'center', padding:'6px 0', borderBottom:'1px solid rgba(255,255,255,0.04)' }}>
                 <span style={{ width:20, textAlign:'center', flexShrink:0 }}>{row.i}</span>
@@ -430,7 +440,6 @@ function AccountPage({ user, userProfile, setUserProfile, notify, setTab }) {
         </div>
       )}
 
-      {/* ── SEA TIME SECTION ── */}
       {activeSection === 'seatime' && (
         <div style={{ background:'var(--card)', border:'1px solid var(--border)', borderRadius:14, padding:'1.2rem' }}>
           {seaTimeData?.entries?.length > 0 ? (
@@ -448,7 +457,7 @@ function AccountPage({ user, userProfile, setUserProfile, notify, setTab }) {
                 ))}
               </div>
               <button className="btn btn-primary" style={{ width:'100%', justifyContent:'center' }} onClick={() => setTab('seatime')}>
-                ⏱ View Full Sea Time Records →
+                View Full Sea Time Records
               </button>
             </>
           ) : (
@@ -461,14 +470,13 @@ function AccountPage({ user, userProfile, setUserProfile, notify, setTab }) {
         </div>
       )}
 
-      {/* ── CERTIFICATES SECTION ── */}
       {activeSection === 'certs' && (
         <div style={{ background:'var(--card)', border:'1px solid var(--border)', borderRadius:14, padding:'1.2rem' }}>
           {certsData.length > 0 ? (
             <>
               {expiringCerts.length > 0 && (
                 <div style={{ background:'rgba(255,71,87,0.08)', border:'1px solid rgba(255,71,87,0.25)', borderRadius:8, padding:'8px 12px', marginBottom:'1rem', fontSize:'0.74rem', color:'#ff4757' }}>
-                  ⚠️ {expiringCerts.length} certificate(s) expiring within 90 days
+                  {expiringCerts.length} certificate(s) expiring within 90 days
                 </div>
               )}
               {certsData.slice(0,5).map((c,i) => {
@@ -478,13 +486,13 @@ function AccountPage({ user, userProfile, setUserProfile, notify, setTab }) {
                   <div key={i} style={{ display:'flex', justifyContent:'space-between', padding:'7px 0', borderBottom:'1px solid rgba(255,255,255,0.04)', alignItems:'center' }}>
                     <span style={{ fontSize:'0.78rem', color:'var(--text2)' }}>{c.name}</span>
                     <span style={{ fontSize:'0.7rem', color, fontWeight:600 }}>
-                      {days===null?'—':days<0?'EXPIRED':`${days}d left`}
+                      {days===null?'-':days<0?'EXPIRED':`${days}d left`}
                     </span>
                   </div>
                 );
               })}
               <button className="btn btn-primary" style={{ width:'100%', justifyContent:'center', marginTop:'0.8rem' }} onClick={() => setTab('certs')}>
-                📜 View All Certificates →
+                View All Certificates
               </button>
             </>
           ) : (
@@ -497,15 +505,14 @@ function AccountPage({ user, userProfile, setUserProfile, notify, setTab }) {
         </div>
       )}
 
-      {/* ── DOWNLOADS SECTION ── */}
       {activeSection === 'downloads' && (
         <div style={{ background:'var(--card)', border:'1px solid var(--border)', borderRadius:14, padding:'1.2rem' }}>
           <div style={{ fontFamily:'Orbitron,monospace', fontSize:'0.72rem', color:'var(--text2)', marginBottom:'0.8rem' }}>📥 Today's Downloads</div>
           {dlHistory.length > 0 ? dlHistory.map((d,i) => (
             <div key={i}>
               <div style={{ display:'flex', gap:16, fontSize:'0.82rem', color:'var(--text2)' }}>
-                <span>🛤 Route files: <strong style={{ color:'var(--cyan)' }}>{d.routes}</strong></span>
-                <span>📊 Chart files: <strong style={{ color:'var(--gold)' }}>{d.charts}</strong></span>
+                <span>Route files: <strong style={{ color:'var(--cyan)' }}>{d.routes}</strong></span>
+                <span>Chart files: <strong style={{ color:'var(--gold)' }}>{d.charts}</strong></span>
               </div>
               <div style={{ fontSize:'0.68rem', color:'var(--text3)', marginTop:4 }}>Date: {d.date}</div>
             </div>
@@ -513,12 +520,11 @@ function AccountPage({ user, userProfile, setUserProfile, notify, setTab }) {
             <div style={{ fontSize:'0.78rem', color:'var(--text3)', textAlign:'center', padding:'1rem 0' }}>No downloads today. Visit Routes or Charts to download files.</div>
           )}
           <div className="info-box" style={{ marginTop:'1rem', fontSize:'0.72rem' }}>
-            📊 Full download history will be available in a future update.
+            Full download history will be available in a future update.
           </div>
         </div>
       )}
 
-      {/* ── NOTIFICATIONS SECTION ── */}
       {activeSection === 'notifs' && (
         <div style={{ background:'var(--card)', border:'1px solid var(--border)', borderRadius:14, padding:'1.2rem' }}>
           <div style={{ fontFamily:'Orbitron,monospace', fontSize:'0.72rem', color:'var(--text2)', marginBottom:'1rem' }}>🔔 Notification Preferences</div>
@@ -543,20 +549,57 @@ function AccountPage({ user, userProfile, setUserProfile, notify, setTab }) {
         </div>
       )}
 
-      {/* ── REFERRAL SECTION ── */}
+      {/* REFERRAL SECTION — ADDED share button and preview card */}
       {activeSection === 'referral' && (
         <div style={{ background:'var(--card)', border:'1px solid var(--border)', borderRadius:14, padding:'1.4rem' }}>
           <div style={{ fontFamily:'Orbitron,monospace', fontSize:'0.76rem', color:'var(--gold)', marginBottom:'0.8rem' }}>🎁 Your Referral Code</div>
+
+          {/* Referral code display */}
           <div style={{ background:'rgba(240,165,0,0.08)', border:'1px solid rgba(240,165,0,0.3)', borderRadius:12, padding:'1.2rem', textAlign:'center', marginBottom:'1rem' }}>
             <div style={{ fontFamily:'Orbitron,monospace', fontSize:'1.6rem', fontWeight:900, color:'var(--gold)', letterSpacing:'0.15em', marginBottom:6 }}>
               {referralCode}
             </div>
             <div style={{ fontSize:'0.72rem', color:'var(--text3)' }}>Your unique referral code</div>
           </div>
-          <button className="btn btn-gold" style={{ width:'100%', justifyContent:'center', marginBottom:'0.8rem' }}
-            onClick={() => { navigator.clipboard?.writeText(referralCode); notify('✅ Referral code copied!', 'success'); }}>
-            📋 Copy Code
-          </button>
+
+          {/* ADDED: Two button row — copy code + share app */}
+          <div style={{ display:'flex', gap:8, marginBottom:'1rem' }}>
+            <button className="btn btn-gold" style={{ flex:1, justifyContent:'center' }}
+              onClick={() => { navigator.clipboard?.writeText(referralCode); notify('Referral code copied!', 'success'); }}>
+              📋 Copy Code
+            </button>
+            <button
+              onClick={shareAppWithReferral}
+              style={{
+                flex:1, display:'flex', alignItems:'center', justifyContent:'center', gap:7,
+                padding:'10px 14px', borderRadius:10, cursor:'pointer',
+                border:'1px solid rgba(0,200,150,0.4)',
+                background: shareCopied ? 'rgba(0,200,150,0.15)' : 'rgba(0,200,150,0.08)',
+                color:'var(--green)', fontFamily:'Exo 2,sans-serif',
+                fontSize:'0.78rem', fontWeight:600, transition:'all 0.2s',
+              }}>
+              <span style={{ fontSize:'1rem' }}>{shareCopied ? '✅' : '📤'}</span>
+              {shareCopied ? 'Copied!' : 'Share App'}
+            </button>
+          </div>
+
+          {/* ADDED: Share preview card */}
+          <div style={{
+            background:'rgba(0,0,0,0.2)', border:'1px solid var(--border)',
+            borderRadius:10, padding:'0.8rem', marginBottom:'1rem',
+            fontSize:'0.72rem', lineHeight:1.8,
+          }}>
+            <div style={{ fontSize:'0.62rem', color:'var(--text3)', textTransform:'uppercase', letterSpacing:'0.08em', marginBottom:6 }}>
+              📤 What gets shared
+            </div>
+            <div style={{ color:'var(--text2)' }}>
+              🚢 NavisphereX Marine — Free maritime app for seafarers!<br/>
+              ✅ Routes, Charts, Port Search, AI Assistant and more<br/>
+              🎁 Use my referral code: <strong style={{ color:'var(--gold)', fontFamily:'Orbitron,monospace' }}>{referralCode}</strong><br/>
+              📲 {APP_URL}
+            </div>
+          </div>
+
           <div className="info-box" style={{ fontSize:'0.72rem' }}>
             🎁 Share this code with fellow mariners. When they sign up using your code, you may be upgraded to the Paid tier. Referral rewards are managed by admin.
           </div>
