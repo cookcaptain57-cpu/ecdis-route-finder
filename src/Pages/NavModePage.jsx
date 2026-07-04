@@ -795,9 +795,14 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
 
     if(displayMode==='north'){
       mapBearingRef.current=0;
+      bearingSmoothBuf.current=[];
       if(typeof leafRef.current.setBearing==='function'){
         try{leafRef.current.setBearing(0);}catch{}
       }
+      // Also clear any CSS pane rotation from fallback
+      const mapPane=mapRef.current?.querySelector('.leaflet-map-pane');
+      if(mapPane){mapPane.style.transform='';mapPane.style.transformOrigin='';}
+      mapRef.current.style.transform='none';
       return;
     }
 
@@ -808,12 +813,17 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
         :(livePosRef.current?.heading||livePosRef.current?.cog||0);
       const b=smoothBearing(raw);
       mapBearingRef.current=b;
-      // Use leaflet-rotate plugin only — no CSS fallback (CSS rotates UI overlays too)
+      // Use leaflet-rotate plugin if available — rotates only map tiles/layers
       if(typeof leafRef.current?.setBearing==='function'){
-        try{leafRef.current.setBearing(b);}catch(e){console.warn('[setBearing]',e);}
+        try{leafRef.current.setBearing(b);return;}catch(e){console.warn('[setBearing]',e);}
       }
-      // Note: if leaflet-rotate plugin is not loaded, orientation stays at North Up
-      // which is safe — never distort UI layout with CSS transform
+      // Plugin not available — rotate the Leaflet map pane container only (not the whole div)
+      // This keeps HUD/panel/banners upright while rotating the chart
+      const mapPane=mapRef.current?.querySelector('.leaflet-map-pane');
+      if(mapPane){
+        mapPane.style.transform=`rotate(${b}deg)`;
+        mapPane.style.transformOrigin='center center';
+      }
     };
 
     applyBearing();
@@ -826,8 +836,11 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
     if(leafRef.current)return;
     const init=()=>{
       if(!mapRef.current||!window.L)return;
-      const L=window.L,opts={center:[20,70],zoom:4,worldCopyJump:true};
-      if(typeof L.Map.prototype.setBearing==='function'){try{opts.rotate=true;opts.rotateControl=false;}catch{}}
+      const L=window.L;
+      // Check if rotate plugin extended L.Map — if yes use it, always pass rotate:true
+      const hasRotate=typeof L.Map.prototype.setBearing==='function';
+      const opts={center:[20,70],zoom:4,worldCopyJump:true};
+      if(hasRotate){opts.rotate=true;opts.rotateControl=false;}
       leafRef.current=L.map(mapRef.current,opts);
       L.control.scale({position:'bottomleft',imperial:true,metric:true,maxWidth:120}).addTo(leafRef.current);
       leafRef.current.on('zoomend',()=>{
@@ -844,7 +857,18 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
       });
       setMapReady(true);safeInvalidate();[100,300,600,1200].forEach(t=>setTimeout(()=>{try{leafRef.current?.invalidateSize({animate:false});}catch{}},t));
     };
-    const load=()=>{if(!document.getElementById('lrotate')){const s=document.createElement('script');s.id='lrotate';s.src='https://cdn.jsdelivr.net/npm/leaflet-rotate@0.3.0/dist/leaflet-rotate-src.js';s.onload=init;s.onerror=init;document.head.appendChild(s);}else init();};
+    // Load order: leaflet CSS → leaflet JS → rotate plugin → init
+    // Plugin MUST load after Leaflet but BEFORE init() so it extends L.Map.prototype
+    const loadRotatePlugin=(cb)=>{
+      if(document.getElementById('lrotate')){cb();return;}
+      const s=document.createElement('script');
+      s.id='lrotate';
+      s.src='https://cdn.jsdelivr.net/npm/leaflet-rotate@0.3.0/dist/leaflet-rotate-src.js';
+      s.onload=cb;
+      s.onerror=cb; // still init even if plugin fails — will fall back gracefully
+      document.head.appendChild(s);
+    };
+    const load=()=>loadRotatePlugin(init);
     if(window.L){load();return;}
     if(!document.getElementById('lcss')){const l=document.createElement('link');l.id='lcss';l.rel='stylesheet';l.href='https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css';document.head.appendChild(l);}
     if(!document.getElementById('ljs')){const s=document.createElement('script');s.id='ljs';s.src='https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js';s.onload=load;document.head.appendChild(s);}
@@ -907,6 +931,10 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
 
     // XTD limit = both corridor width AND alarm threshold — one single value controls both
     const threshold=xtdNM;
+    // Respect alarm toggle — if offtrack alarm is OFF, clear visual and return
+    const curToggles=typeof alarmTogglesRef.current==='function'?alarmTogglesRef.current():alarmTogglesRef.current;
+    if(curToggles?.offtrack===false){setOffTrackAlarm(false);return;}
+
     if(minXTD>threshold){
       setOffTrackAlarm(true);
       const nowTs=Date.now();
