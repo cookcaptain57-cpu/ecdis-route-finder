@@ -222,7 +222,7 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
   const [portSearchResults,setPortSearchResults]=useState([]);
   const [editingWpNote,setEditingWpNote]=useState(0);
   const [wpNotes,setWpNotes]=useState({});
-  const [offTrackNM,setOffTrackNM]=useState(()=>Number(ls('nav_offTrackNM')||1.0));
+  // offTrackNM removed — off track alarm now uses xtdNM as the single threshold
   const [guardZoneOn,setGuardZoneOn]=useState(false);
   const [guardZoneRadiusNM,setGuardZoneRadiusNM]=useState(()=>Number(ls('nav_guardZoneNM')||2));
   const [guardZoneAlarm,setGuardZoneAlarm]=useState(false);
@@ -491,7 +491,9 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
       const liveData={...v,rangNM,brgDeg,cpaTcpa,cl};
       seen.add(String(v.mmsi));
 
-      const aisIcon=L.divIcon({html:`<div style="transform:rotate(${v.cog||0}deg);transform-origin:center;width:16px;height:22px;"><svg width="16" height="22" viewBox="0 0 16 22" fill="none"><polygon points="8,1 15,21 8,16 1,21" fill="${col}" stroke="#fff" stroke-width="1.2"/></svg></div>`,className:'',iconSize:[16,22],iconAnchor:[8,11]});
+      // Counter-rotate AIS icons by map bearing so they always point true direction in Course-Up/Head-Up
+      const aisRot=((v.cog||0)-mapBearingRef.current+360)%360;
+      const aisIcon=L.divIcon({html:`<div style="transform:rotate(${aisRot}deg);transform-origin:center;width:16px;height:22px;"><svg width="16" height="22" viewBox="0 0 16 22" fill="none"><polygon points="8,1 15,21 8,16 1,21" fill="${col}" stroke="#fff" stroke-width="1.2"/></svg></div>`,className:'',iconSize:[16,22],iconAnchor:[8,11]});
 
       if(layersRef.current.ais[v.mmsi]?.mk){
         layersRef.current.ais[v.mmsi].mk.setLatLng([v.lat,v.lon]);
@@ -644,7 +646,7 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
   useEffect(()=>{localStorage.setItem('nav_speedAlarm',speedAlarmKn);},[speedAlarmKn]);
   useEffect(()=>{localStorage.setItem('nav_alarmsMuted',alarmsMuted);},[alarmsMuted]);
   useEffect(()=>{localStorage.setItem('nav_alarmToggles',JSON.stringify(alarmToggles));},[alarmToggles]);
-  useEffect(()=>{localStorage.setItem('nav_offTrackNM',offTrackNM);},[offTrackNM]);
+  // nav_offTrackNM persist removed — xtdNM is persisted separately and used as threshold
   useEffect(()=>{localStorage.setItem('nav_guardZoneNM',guardZoneRadiusNM);},[guardZoneRadiusNM]);
   useEffect(()=>{localStorage.setItem('nav_anchorLOA',anchorShipLengthM);},[anchorShipLengthM]);
   useEffect(()=>{localStorage.setItem('nav_anchorShackles',anchorShackles);},[anchorShackles]);
@@ -770,22 +772,53 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
   },[livePos,activeRoute,selectedWpIdx]);
 
   const bearingThrottleRef=useRef(0);
+  // Rolling COG/HDG buffer for smoothing — prevents map spin from GPS jitter
+  const bearingSmoothBuf=useRef([]);
+  const smoothBearing=(raw)=>{
+    const buf=bearingSmoothBuf.current;
+    buf.push(raw);
+    if(buf.length>5)buf.shift();
+    if(buf.length===1)return raw;
+    // Circular mean — handles 359→001 wrap correctly
+    let sinSum=0,cosSum=0;
+    buf.forEach(b=>{sinSum+=Math.sin(b*Math.PI/180);cosSum+=Math.cos(b*Math.PI/180);});
+    const avg=(Math.atan2(sinSum/buf.length,cosSum/buf.length)*180/Math.PI+360)%360;
+    return Math.round(avg*10)/10;
+  };
+
   useEffect(()=>{
     if(!mapReady||!mapRef.current||!leafRef.current)return;
+    // Always clear CSS transform — never use it for rotation
+    mapRef.current.style.transform='none';
+    // Reset smooth buffer when mode changes
+    bearingSmoothBuf.current=[];
+
     if(displayMode==='north'){
       mapBearingRef.current=0;
-      if(typeof leafRef.current.setBearing==='function'){try{leafRef.current.setBearing(0);}catch{}}
-      mapRef.current.style.transform='none';
+      if(typeof leafRef.current.setBearing==='function'){
+        try{leafRef.current.setBearing(0);}catch{}
+      }
       return;
     }
+
     const applyBearing=()=>{
-      const b=displayMode==='course'?(livePosRef.current?.cog||0):(livePosRef.current?.heading||livePosRef.current?.cog||0);
+      // Course Up = COG, Head Up = heading (gyro/HDG), fallback to COG if no heading
+      const raw=displayMode==='course'
+        ?(livePosRef.current?.cog||0)
+        :(livePosRef.current?.heading||livePosRef.current?.cog||0);
+      const b=smoothBearing(raw);
       mapBearingRef.current=b;
-      if(typeof leafRef.current?.setBearing==='function'){try{leafRef.current.setBearing(b);return;}catch{}}
-      if(mapRef.current)mapRef.current.style.transform=`rotate(${b}deg)`;
+      // Use leaflet-rotate plugin only — no CSS fallback (CSS rotates UI overlays too)
+      if(typeof leafRef.current?.setBearing==='function'){
+        try{leafRef.current.setBearing(b);}catch(e){console.warn('[setBearing]',e);}
+      }
+      // Note: if leaflet-rotate plugin is not loaded, orientation stays at North Up
+      // which is safe — never distort UI layout with CSS transform
     };
+
     applyBearing();
-    const timer=setInterval(applyBearing,2000);
+    // Poll every 1.5s — smooth buffer prevents jitter, fast enough for real navigation
+    const timer=setInterval(applyBearing,1500);
     return()=>clearInterval(timer);
   },[displayMode,mapReady]);
 
@@ -872,7 +905,8 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
       minXTD=best;
     }
 
-    const threshold=offTrackNM;
+    // XTD limit = both corridor width AND alarm threshold — one single value controls both
+    const threshold=xtdNM;
     if(minXTD>threshold){
       setOffTrackAlarm(true);
       const nowTs=Date.now();
@@ -884,7 +918,7 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
     } else {
       setOffTrackAlarm(false);
     }
-  },[livePos,activeRoute,offTrackNM,xtdNM,selectedWpIdx]);
+  },[livePos,activeRoute,xtdNM,selectedWpIdx]);
   useEffect(()=>{
     if(!mapReady||!leafRef.current||!window.L)return;
     const L=window.L,m=leafRef.current;
@@ -1353,7 +1387,7 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
             {/* Per alarm toggles */}
             <div style={{color:S.dm,fontSize:S.lb,marginTop:2}}>ALARM SETTINGS</div>
             {[
-              ['offtrack','⚠ Off Track',`Alarm when XTD > ${offTrackNM}NM`],
+              ['offtrack','⚠ Off Track',`Alarm when ship exceeds XTD limit (${xtdNM}NM)`],
               ['collision','🚢 Collision CPA','CPA < 1.5NM & TCPA < 3h'],
               ['guard','🔴 Guard Zone',`Vessel inside ${guardZoneRadiusNM}NM`],
               ['anchor','⚓ Anchor Drag',`Outside ${anchorRadius}NM watch circle`],
@@ -1370,10 +1404,13 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
                 </button>
               </div>
             ))}
-            {/* Off track threshold quick set */}
+            {/* Off track uses xtdNM — change XTD in HUD or Settings */}
             <div style={{borderTop:'1px solid rgba(0,212,255,0.1)',paddingTop:6}}>
               <div style={{color:S.dm,fontSize:S.lb,marginBottom:3}}>OFF TRACK THRESHOLD</div>
-              <div style={{display:'flex',gap:2,flexWrap:'wrap'}}>{[0.1,0.25,0.5,1.0,2.0,3.0].map(v=>(<button key={v} onClick={()=>setOffTrackNM(v)} style={{background:offTrackNM===v?'rgba(255,71,87,0.2)':'transparent',border:`1px solid ${offTrackNM===v?S.rd:S.vd}`,color:offTrackNM===v?S.rd:S.dm,borderRadius:5,padding:'3px 5px',fontSize:S.xs,cursor:'pointer'}}>{v}NM</button>))}</div>
+              <div style={{background:'rgba(0,212,255,0.06)',border:`1px solid rgba(0,212,255,0.2)`,borderRadius:6,padding:'7px 9px'}}>
+                <div style={{color:S.cy,fontSize:'0.68rem',fontWeight:700}}>XTD Limit: {xtdNM}NM</div>
+                <div style={{color:S.vd,fontSize:'0.58rem',marginTop:2}}>Alarm fires when ship crosses either side of the XTD corridor. Change XTD value in the HUD controls or ☰ Settings.</div>
+              </div>
             </div>
             {/* Speed alarm quick set */}
             <div style={{borderTop:'1px solid rgba(0,212,255,0.1)',paddingTop:6}}>
