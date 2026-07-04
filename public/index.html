@@ -76,14 +76,21 @@
         height: 100%;
         border-radius: 4px;
         background: linear-gradient(90deg, #00B4D8, #1565C0);
-        animation: nx-load 3s ease-in-out forwards;
+        animation: nx-load 45s ease-out forwards, nx-pulse 2s ease-in-out infinite;
       }
       @keyframes nx-load {
         0%   { width: 0%; }
-        30%  { width: 40%; }
-        60%  { width: 65%; }
-        85%  { width: 80%; }
-        100% { width: 85%; }
+        10%  { width: 20%; }
+        30%  { width: 45%; }
+        50%  { width: 60%; }
+        70%  { width: 72%; }
+        90%  { width: 82%; }
+        100% { width: 87%; }
+      }
+      /* Pulse the bar so user knows it's alive, not frozen */
+      @keyframes nx-pulse {
+        0%, 100% { opacity: 1; }
+        50%       { opacity: 0.7; }
       }
       #nx-splash-hint {
         font-size: 0.62rem;
@@ -95,6 +102,23 @@
     </style>
 
     <title>NavisphereX Marine</title>
+
+    <!-- ── Google Fonts loaded NON-BLOCKING ──
+         media="print" trick: browser downloads font CSS without blocking render.
+         onload switches it to "all" so fonts apply once downloaded.
+         noscript fallback for browsers with JS disabled.
+         This means the app renders immediately with system fonts,
+         then Orbitron/Exo 2 swap in once loaded — no waiting. ── -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet"
+          href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700;900&family=Exo+2:wght@300;400;500;600&display=swap"
+          media="print"
+          onload="this.media='all'" />
+    <noscript>
+      <link rel="stylesheet"
+            href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700;900&family=Exo+2:wght@300;400;500;600&display=swap" />
+    </noscript>
   </head>
   <body>
     <noscript>You need to enable JavaScript to run this app.</noscript>
@@ -119,28 +143,25 @@
          the React app shows through cleanly. ── -->
     <script>
       (function() {
-        // Poll until #root has children (React mounted)
-        var attempts = 0;
-        var interval = setInterval(function() {
-          attempts++;
-          var root = document.getElementById('root');
+        // Expose a global function React calls once it's fully rendered.
+        // This is more reliable than polling DOM children, which can fire
+        // early when React adds placeholder nodes before full render.
+        window.__NX_HIDE_SPLASH__ = function() {
           var splash = document.getElementById('nx-splash');
-          if (!splash) { clearInterval(interval); return; }
-          // React has mounted when root has child elements
-          if (root && root.children.length > 0) {
-            splash.style.transition = 'opacity 0.4s ease';
-            splash.style.opacity = '0';
-            setTimeout(function() {
-              if (splash && splash.parentNode) splash.parentNode.removeChild(splash);
-            }, 400);
-            clearInterval(interval);
-          }
-          // Safety: remove after 30s regardless
-          if (attempts > 300) {
+          if (!splash) return;
+          splash.style.transition = 'opacity 0.5s ease';
+          splash.style.opacity = '0';
+          setTimeout(function() {
             if (splash && splash.parentNode) splash.parentNode.removeChild(splash);
-            clearInterval(interval);
-          }
-        }, 100);
+          }, 500);
+        };
+
+        // Safety net: if React never calls __NX_HIDE_SPLASH__
+        // (e.g. very slow connection), hide after 60 seconds anyway
+        // so the user isn't stuck on splash forever.
+        setTimeout(function() {
+          window.__NX_HIDE_SPLASH__ && window.__NX_HIDE_SPLASH__();
+        }, 60000);
       })();
     </script>
   </body>
