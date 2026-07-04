@@ -1893,55 +1893,58 @@ function ShipWeatherMapPanel() {
     </div>`;
   };
 
-  // ── Load Leaflet from CDN then init map ──
-  useEffect(() => {
-    let destroyed = false;
+  // ── Callback ref — fires exactly when DOM node mounts (accordion-safe) ──
+  const mapCallbackRef = useCallback((node) => {
+    if (!node || mapObjRef.current) return;
+    mapRef.current = node;
 
-    const initMap = () => {
-      if (destroyed || mapObjRef.current || !mapRef.current) return;
-      const L = window.L;
-      if (!L) return;
-      leafletRef.current = L;
-      const map = L.map(mapRef.current, { zoomControl:true, attributionControl:false }).setView([15, 80], 4);
+    const initMap = (L) => {
+      if (mapObjRef.current) return;
+      const map = L.map(node, { zoomControl:true, attributionControl:false }).setView([15, 80], 4);
       L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { maxZoom:18 }).addTo(map);
       mapObjRef.current = map;
       drLayerRef.current = L.layerGroup().addTo(map);
       wpLayerRef.current = L.layerGroup().addTo(map);
+      leafletRef.current = L;
       setMapReady(true);
-      // Invalidate size after a tick so accordion height is resolved
-      setTimeout(() => { if (!destroyed && mapObjRef.current) mapObjRef.current.invalidateSize(); }, 200);
+      // Multiple invalidateSize calls to handle CSS transition timing
+      [100, 300, 600, 1000].forEach(ms =>
+        setTimeout(() => { try { map.invalidateSize(); } catch(e){} }, ms)
+      );
     };
 
     if (window.L) {
-      // Leaflet already loaded — small delay to let accordion fully expand
-      setTimeout(initMap, 100);
+      initMap(window.L);
     } else {
-      const link = document.createElement('link');
-      link.rel = 'stylesheet';
-      link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
-      document.head.appendChild(link);
-      const script = document.createElement('script');
-      script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
-      script.onload = () => setTimeout(initMap, 100);
-      script.onerror = () => { if (!destroyed) setTrackErr('Map library failed to load. Check internet connection.'); };
-      document.head.appendChild(script);
+      if (!document.querySelector('link[href*="leaflet"]')) {
+        const link = document.createElement('link');
+        link.rel = 'stylesheet';
+        link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+        document.head.appendChild(link);
+      }
+      if (!document.querySelector('script[src*="leaflet"]')) {
+        const script = document.createElement('script');
+        script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+        script.onload = () => initMap(window.L);
+        script.onerror = () => setTrackErr('Map failed to load. Check internet.');
+        document.head.appendChild(script);
+      } else {
+        // Script tag exists but still loading — poll for window.L
+        const poll = setInterval(() => {
+          if (window.L) { clearInterval(poll); initMap(window.L); }
+        }, 100);
+        setTimeout(() => clearInterval(poll), 10000);
+      }
     }
-
-    return () => {
-      destroyed = true;
-      if (watchIdRef.current != null) { navigator.geolocation.clearWatch(watchIdRef.current); watchIdRef.current = null; }
-      if (mapObjRef.current) { try { mapObjRef.current.remove(); } catch(e){} mapObjRef.current = null; }
-      shipMarkerRef.current = null;
-    };
   }, []);
 
-  // ── Invalidate map size when mapReady changes (accordion expansion fix) ──
+  // ── Cleanup on unmount ──
   useEffect(() => {
-    if (!mapReady || !mapObjRef.current) return;
-    const t1 = setTimeout(() => { try { mapObjRef.current?.invalidateSize(); } catch(e){} }, 150);
-    const t2 = setTimeout(() => { try { mapObjRef.current?.invalidateSize(); } catch(e){} }, 500);
-    return () => { clearTimeout(t1); clearTimeout(t2); };
-  }, [mapReady]);
+    return () => {
+      if (watchIdRef.current != null) { navigator.geolocation.clearWatch(watchIdRef.current); watchIdRef.current = null; }
+      if (mapObjRef.current) { try { mapObjRef.current.remove(); } catch(e){} mapObjRef.current = null; shipMarkerRef.current = null; }
+    };
+  }, []);
 
   // ── Update ship marker when position/COG changes ──
   useEffect(() => {
@@ -2038,37 +2041,93 @@ function ShipWeatherMapPanel() {
     setWxLoading(false);
   };
 
-  // ── Auto COG/SOG track ──
+  // ── Auto COG/SOG — 5 GPS fixes averaged over 30s for accuracy ──
+  const fixesRef = useRef([]);
+  const [trackStatus, setTrackStatus] = useState('');
+
   const trackCogSog = () => {
     if (!navigator.geolocation) { setTrackErr('GPS not supported.'); return; }
-    setTracking(true); setTrackErr(''); setCog(null); setSog(null);
-    firstFixRef.current = null;
+    setTracking(true); setTrackErr(''); setTrackStatus('Fix 0/5 — keep device stationary or moving…');
+    setCog(null); setSog(null);
+    fixesRef.current = [];
+
     const onFix = (pos) => {
-      const fix = { lat: pos.coords.latitude, lon: pos.coords.longitude, t: pos.timestamp };
+      // Reject fixes with poor accuracy (>30m)
+      if (pos.coords.accuracy > 30) return;
+      const fix = {
+        lat: pos.coords.latitude,
+        lon: pos.coords.longitude,
+        t:   pos.timestamp,
+        acc: pos.coords.accuracy,
+      };
+      // Update ship position continuously
       setShipPos({ lat: fix.lat, lon: fix.lon });
-      if (!firstFixRef.current) { firstFixRef.current = fix; return; }
-      const prev = firstFixRef.current;
-      const dtSec = (fix.t - prev.t) / 1000;
-      if (dtSec < 2) return;
+      // Only store fix if it's at least 2s after previous
+      const fixes = fixesRef.current;
+      if (fixes.length > 0 && (fix.t - fixes[fixes.length-1].t) < 2000) return;
+      fixes.push(fix);
+      setTrackStatus(`Fix ${fixes.length}/5 — accuracy ${fix.acc.toFixed(0)}m…`);
+
+      if (fixes.length < 5) return;
+
+      // Got 5 good fixes — compute COG/SOG from first to last (best span)
+      const first = fixes[0];
+      const last  = fixes[fixes.length - 1];
+      const dtSec = (last.t - first.t) / 1000;
       const R=6371000, toRad=d=>d*Math.PI/180;
-      const dLat=toRad(fix.lat-prev.lat), dLon=toRad(fix.lon-prev.lon);
-      const a=Math.sin(dLat/2)**2+Math.cos(toRad(prev.lat))*Math.cos(toRad(fix.lat))*Math.sin(dLon/2)**2;
+      const dLat=toRad(last.lat-first.lat), dLon=toRad(last.lon-first.lon);
+      const a=Math.sin(dLat/2)**2+Math.cos(toRad(first.lat))*Math.cos(toRad(last.lat))*Math.sin(dLon/2)**2;
       const distM=R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
-      const y=Math.sin(dLon)*Math.cos(toRad(fix.lat));
-      const x=Math.cos(toRad(prev.lat))*Math.sin(toRad(fix.lat))-Math.sin(toRad(prev.lat))*Math.cos(toRad(fix.lat))*Math.cos(dLon);
-      const brng=(Math.atan2(y,x)*180/Math.PI+360)%360;
-      const speedKn=(distM/dtSec)*1.94384;
-      setCog(Math.round(brng));
-      setSog(Math.round(speedKn*10)/10);
+
+      // Require minimum 10m displacement to avoid stationary noise
+      if (distM < 10) {
+        setTrackErr('Less than 10m displacement across 5 fixes — vessel appears stationary or GPS accuracy insufficient.');
+        setTracking(false); setTrackStatus('');
+        navigator.geolocation.clearWatch(watchIdRef.current); watchIdRef.current = null;
+        return;
+      }
+
+      // Average bearing from consecutive fix pairs (unit vector averaging for accuracy)
+      let sinSum = 0, cosSum = 0;
+      for (let i = 1; i < fixes.length; i++) {
+        const prev = fixes[i-1], cur = fixes[i];
+        const dLo = toRad(cur.lon - prev.lon);
+        const y = Math.sin(dLo)*Math.cos(toRad(cur.lat));
+        const x = Math.cos(toRad(prev.lat))*Math.sin(toRad(cur.lat)) - Math.sin(toRad(prev.lat))*Math.cos(toRad(cur.lat))*Math.cos(dLo);
+        const brng = Math.atan2(y, x);
+        sinSum += Math.sin(brng); cosSum += Math.cos(brng);
+      }
+      const avgBrng = ((Math.atan2(sinSum, cosSum) * 180 / Math.PI) + 360) % 360;
+      const speedKn = (distM / dtSec) * 1.94384;
+
+      setCog(Math.round(avgBrng));
+      setSog(Math.round(speedKn * 10) / 10);
       setTracking(false);
-      navigator.geolocation.clearWatch(watchIdRef.current);
-      watchIdRef.current = null;
+      setTrackStatus(`✅ COG/SOG computed from ${fixes.length} fixes over ${dtSec.toFixed(0)}s · avg accuracy ${(fixes.reduce((s,f)=>s+f.acc,0)/fixes.length).toFixed(0)}m`);
+      navigator.geolocation.clearWatch(watchIdRef.current); watchIdRef.current = null;
+      fixesRef.current = [];
     };
-    const onErr = () => { setTrackErr('GPS unavailable.'); setTracking(false); };
-    watchIdRef.current = navigator.geolocation.watchPosition(onFix, onErr, { enableHighAccuracy:true, maximumAge:0, timeout:20000 });
+
+    const onErr = (e) => {
+      const msg = e.code===1?'Location permission denied.':e.code===2?'GPS position unavailable.':'GPS timed out.';
+      setTrackErr(msg); setTracking(false); setTrackStatus('');
+    };
+
+    watchIdRef.current = navigator.geolocation.watchPosition(onFix, onErr, {
+      enableHighAccuracy: true, maximumAge: 0, timeout: 30000,
+    });
+
+    // Safety timeout — 60s max
     setTimeout(() => {
-      if (watchIdRef.current!=null) { navigator.geolocation.clearWatch(watchIdRef.current); watchIdRef.current=null; setTracking(false); if(!cog) setTrackErr('No movement detected — vessel may be stationary.'); }
-    }, 15000);
+      if (watchIdRef.current != null) {
+        navigator.geolocation.clearWatch(watchIdRef.current); watchIdRef.current = null;
+        if (fixesRef.current.length < 5) {
+          setTracking(false);
+          setTrackErr(`Only got ${fixesRef.current.length}/5 fixes. Try again in open sky.`);
+          setTrackStatus('');
+        }
+      }
+    }, 60000);
   };
 
   const addManualWP = () => {
@@ -2098,7 +2157,7 @@ function ShipWeatherMapPanel() {
           onClick={trackCogSog}
           disabled={tracking}
         >
-          {tracking ? '📡 Tracking…' : '🎯 Auto-Detect COG/SOG'}
+          {tracking ? `📡 ${trackStatus||'Collecting fixes…'}` : '🎯 Auto-Detect COG/SOG (5 fixes)'}
         </button>
         {/* Route file upload */}
         <label style={{...S.btnGps, background:'linear-gradient(135deg,#4a1a8a,#2a0a6a)', borderColor:'#8a50d0', color:'#c090f8', cursor:'pointer'}}>
@@ -2150,7 +2209,7 @@ function ShipWeatherMapPanel() {
 
       {/* ── Leaflet Map ── */}
       <div style={{borderRadius:10, overflow:'hidden', border:'1.5px solid #1e4070', marginBottom:12}}>
-        <div ref={mapRef} style={{width:'100%', height:480, background:'#0a1628'}} />
+        <div ref={mapCallbackRef} style={{width:'100%', height:480, background:'#0a1628'}} />
         {!mapReady && <div style={{...S.spinner, position:'absolute', top:'50%', left:'50%', transform:'translate(-50%,-50%)'}}>⏳ Loading map…</div>}
       </div>
 
