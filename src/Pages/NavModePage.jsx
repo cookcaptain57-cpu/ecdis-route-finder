@@ -899,25 +899,53 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
     const wps=activeRoute.waypoints;
     let minXTD=Infinity;
 
+    // ── Correct haversine cross-track distance formula ──────────────────────
+    // Standard maritime/aviation formula — exact on sphere, works at any distance
+    // xtd = asin(sin(d_ship_to_start/R) × sin(bearing_ship_to_start − leg_bearing)) × R
+    const R=3440.065; // Earth radius in NM
+    const toRad=d=>d*Math.PI/180;
+
+    const haversineXTD=(shipLat,shipLon,wpALat,wpALon,wpBLat,wpBLon)=>{
+      // Distance from leg start (A) to ship
+      const dA=distNM(wpALat,wpALon,shipLat,shipLon);
+      if(dA<0.001)return 0; // ship is at waypoint A
+      // Bearing from leg start to ship
+      const brgAS=brg(wpALat,wpALon,shipLat,shipLon);
+      // Bearing of the leg (A→B)
+      const brgAB=brg(wpALat,wpALon,wpBLat,wpBLon);
+      // Cross-track distance (signed — positive = right of track, negative = left)
+      const xtd=Math.asin(Math.sin(dA/R)*Math.sin(toRad(brgAS-brgAB)))*R;
+      return Math.abs(xtd);
+    };
+
+    const haversineAlong=(shipLat,shipLon,wpALat,wpALon,wpBLat,wpBLon)=>{
+      // Along-track distance — how far along the leg the ship projects
+      const dA=distNM(wpALat,wpALon,shipLat,shipLon);
+      if(dA<0.001)return 0;
+      const brgAS=brg(wpALat,wpALon,shipLat,shipLon);
+      const brgAB=brg(wpALat,wpALon,wpBLat,wpBLon);
+      const xtd=Math.asin(Math.sin(dA/R)*Math.sin(toRad(brgAS-brgAB)))*R;
+      return Math.acos(Math.cos(dA/R)/Math.cos(xtd/R))*R;
+    };
+
     for(let i=0;i<wps.length-1;i++){
-      const legBrg=brg(wps[i].lat,wps[i].lon,wps[i+1].lat,wps[i+1].lon);
-      const shipBrg=brg(wps[i].lat,wps[i].lon,livePos.lat,livePos.lon);
-      const shipDist=distNM(wps[i].lat,wps[i].lon,livePos.lat,livePos.lon);
-      const angle=((legBrg-shipBrg)+540)%360-180;
-      const along=shipDist*Math.cos(angle*Math.PI/180);
-      const legLen=distNM(wps[i].lat,wps[i].lon,wps[i+1].lat,wps[i+1].lon);
-      // Pure perpendicular XTD
-      const xtd=Math.abs(shipDist*Math.sin(angle*Math.PI/180));
+      const A=wps[i],B=wps[i+1];
+      const legLen=distNM(A.lat,A.lon,B.lat,B.lon);
+      if(legLen<0.001)continue;
+
+      const xtd=haversineXTD(livePos.lat,livePos.lon,A.lat,A.lon,B.lat,B.lon);
+      const along=haversineAlong(livePos.lat,livePos.lon,A.lat,A.lon,B.lat,B.lon);
+
       let legXTD;
       if(along>=0&&along<=legLen){
-        // Ship projects cleanly onto this leg — pure perpendicular distance
+        // Ship projects onto this leg — use true perpendicular XTD
         legXTD=xtd;
       } else if(along<0){
-        // Ship is before leg start — distance to start waypoint
-        legXTD=distNM(livePos.lat,livePos.lon,wps[i].lat,wps[i].lon);
+        // Ship is before leg start — use distance to start waypoint
+        legXTD=distNM(livePos.lat,livePos.lon,A.lat,A.lon);
       } else {
-        // Ship is past leg end — distance to end waypoint
-        legXTD=distNM(livePos.lat,livePos.lon,wps[i+1].lat,wps[i+1].lon);
+        // Ship is past leg end — use distance to end waypoint
+        legXTD=distNM(livePos.lat,livePos.lon,B.lat,B.lon);
       }
       if(legXTD<minXTD)minXTD=legXTD;
     }
