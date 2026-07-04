@@ -245,46 +245,43 @@ function VoyageAnimation({ onClose, portsDb = [] }) {
     return {x:CW/2+dx, y:CH/2+(p.y-c.y)};
   };
 
-  // ── Tile load diagnostics ──
+  // ── Tile load stats ──
   const tileLoadStats = useRef({ ok:0, fail:0 });
 
-  // ── Load tile via fetch+blob — bypasses canvas CORS taint completely ──
-  // Using new Image() with crossOrigin='anonymous' fails when tile CDN
-  // doesn't return Access-Control-Allow-Origin headers, causing blank canvas.
-  // fetch() + createObjectURL gives us a same-origin blob URL that canvas
-  // can drawImage() without any CORS restriction.
-  const loadTile = url => new Promise(res=>{
-    if (tileCache.current[url]){ res(tileCache.current[url]); return; }
-    fetch(url, { mode: 'cors', cache: 'force-cache' })
-      .then(r => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return r.blob();
-      })
-      .then(blob => {
-        const objUrl = URL.createObjectURL(blob);
-        const img = new Image();
-        img.onload = () => {
-          tileCache.current[url] = img;
-          tileLoadStats.current.ok++;
-          res(img);
-          // Keep objectURL alive — stored on img for cleanup
-          img._objUrl = objUrl;
-        };
-        img.onerror = () => {
-          URL.revokeObjectURL(objUrl);
-          tileLoadStats.current.fail++;
-          res(null);
-        };
-        img.src = objUrl;
-      })
-      .catch(() => {
-        // fetch failed (network, CORS on fetch itself) — fall back to direct img no-cors
-        const img = new Image();
-        const t = setTimeout(() => { tileLoadStats.current.fail++; res(null); }, 6000);
-        img.onload  = () => { clearTimeout(t); tileCache.current[url]=img; tileLoadStats.current.ok++; res(img); };
-        img.onerror = () => { clearTimeout(t); tileLoadStats.current.fail++; res(null); };
-        img.src = url; // no crossOrigin — can draw but taints canvas for getImageData
-      });
+  // ── Load tile — NO crossOrigin attribute (KEY FIX) ────────────────────────
+  // Setting crossOrigin='anonymous' requires the CDN to return
+  // Access-Control-Allow-Origin headers. Carto/OSM don't always do this,
+  // causing silent load failure → blank canvas.
+  // Without crossOrigin the image loads normally. We only call drawImage()
+  // (never getImageData/toBlob on the canvas) so the "tainted canvas"
+  // restriction never triggers during recording via captureStream().
+  const loadTile = url => new Promise(res => {
+    if (tileCache.current[url]) { res(tileCache.current[url]); return; }
+
+    // First try: reuse already-loaded tile from Leaflet's DOM (zero network cost)
+    if (mapDivRef.current) {
+      const leafletTiles = mapDivRef.current.querySelectorAll('img.leaflet-tile');
+      for (const img of leafletTiles) {
+        if (img.complete && img.naturalWidth > 0 && img.src) {
+          const srcPath = img.src.split('/').slice(-3).join('/');
+          const urlPath = url.split('/').slice(-3).join('/');
+          if (srcPath === urlPath) {
+            tileCache.current[url] = img;
+            tileLoadStats.current.ok++;
+            res(img);
+            return;
+          }
+        }
+      }
+    }
+
+    // Second try: load fresh without crossOrigin — works for drawImage()
+    const img = new Image();
+    // NO img.crossOrigin = 'anonymous' — this is the critical fix
+    const timer = setTimeout(() => { tileLoadStats.current.fail++; res(null); }, 8000);
+    img.onload  = () => { clearTimeout(timer); tileCache.current[url]=img; tileLoadStats.current.ok++; res(img); };
+    img.onerror = () => { clearTimeout(timer); tileLoadStats.current.fail++; res(null); };
+    img.src = url;
   });
 
   // ── Draw tiles — fills FULL canvas edge-to-edge, with safe fallback ──
@@ -342,11 +339,11 @@ function VoyageAnimation({ onClose, portsDb = [] }) {
     }
   };
 
-  // ── Prewarm tile cache for a given zoom/center before animation starts ──
-  // Loads the tiles needed for phase-1 (departure) view so first frames aren't blank
+  // ── Prewarm: pre-load tiles into cache before animation starts ──
   const prewarmTiles = async (z, cLat, cLng) => {
-    const dummyCtx = document.createElement('canvas').getContext('2d');
-    await drawTiles(dummyCtx, z, cLat, cLng);
+    const dummy = document.createElement('canvas');
+    dummy.width = CW; dummy.height = CH;
+    await drawTiles(dummy.getContext('2d'), z, cLat, cLng);
   };
 
   // ── Auto-fit: zoom+center — GUARANTEES no side gaps ──
