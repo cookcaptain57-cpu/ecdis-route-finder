@@ -163,7 +163,54 @@ function StarRating({ value, onChange }) {
   );
 }
 
-// ─── VOYAGE ANIMATION v12 — FETCH-BLOB TILE FIX (NO CORS TAINT) ────────────
+// ─── VOYAGE ANIMATION v13 — SELF-CONTAINED MAP (NO TILES, NO CORS) ───────────
+// Uses canvas-drawn world map polygons — works 100% offline, zero network deps
+
+// ── Simplified world country polygons (Natural Earth, Web Mercator projected) ─
+// Each country is an array of [lng,lat] rings
+const WORLD_COUNTRIES = [
+  // Format: {n:"Name", c:"#color", p:[[[lng,lat],...]] }
+  // Major landmasses only — enough to clearly show maritime context
+  {n:"Greenland",c:"#d4e8c2",p:[[[-73,76],[-68,76],[-52,82],[-20,83],[-18,77],[-25,71],[-44,60],[-52,68],[-60,76],[-73,76]]]},
+  {n:"North America",c:"#d4e8c2",p:[[[-168,72],[-130,55],[-125,49],[-117,32],[-97,26],[-90,30],[-80,25],[-80,42],[-70,47],[-55,47],[-53,46],[-60,46],[-65,44],[-67,45],[-66,44],[-60,47],[-64,60],[-68,70],[-83,70],[-90,72],[-120,72],[-140,70],[-168,72]]]},
+  {n:"Central America",c:"#d4e8c2",p:[[[-117,32],[-97,26],[-90,16],[-83,10],[-77,8],[-77,9],[-83,11],[-85,15],[-92,18],[-104,19],[-117,32]]]},
+  {n:"Caribbean",c:"#d4e8c2",p:[[[-85,22],[-83,22],[-80,23],[-74,18],[-72,18],[-74,19],[-80,22],[-85,22]]]},
+  {n:"South America",c:"#d4e8c2",p:[[[-77,8],[-62,12],[-52,5],[-50,0],[-35,-5],[-35,-10],[-40,-20],[-44,-23],[-48,-28],[-55,-34],[-58,-38],[-65,-55],[-68,-55],[-72,-42],[-74,-30],[-70,-18],[-75,-8],[-80,0],[-77,8]]]},
+  {n:"Europe",c:"#d4e8c2",p:[[[-9,36],[0,36],[14,37],[18,40],[28,41],[30,45],[32,46],[34,47],[28,54],[22,54],[18,56],[14,55],[10,55],[5,51],[2,51],[-2,49],[-5,48],[-9,44],[-9,36]]]},
+  {n:"Scandinavia",c:"#d4e8c2",p:[[[5,57],[10,55],[12,56],[18,60],[24,65],[28,71],[25,71],[18,68],[14,65],[7,58],[5,57]]]},
+  {n:"UK Ireland",c:"#d4e8c2",p:[[[-5,50],[-2,51],[2,51],[-2,54],[-3,58],[-5,58],[-6,56],[-5,54],[-5,50]]]},
+  {n:"Iceland",c:"#d4e8c2",p:[[[-24,64],[-14,63],[-13,65],[-20,66],[-24,65],[-24,64]]]},
+  {n:"Africa",c:"#d4e8c2",p:[[[-5,36],[10,37],[18,37],[32,30],[36,22],[43,11],[50,12],[44,10],[42,12],[38,15],[36,20],[34,30],[32,31],[32,30],[36,22],[10,37],[10,36],[2,36],[-5,36]],
+    [[-5,36],[2,36],[8,5],[0,5],[-5,5],[-15,10],[-17,15],[-17,20],[-14,23],[-8,28],[-5,36]],
+    [[8,5],[10,5],[15,0],[18,-5],[20,-10],[26,-18],[32,-28],[32,-30],[28,-33],[18,-34],[15,-34],[12,-28],[10,-22],[6,-12],[2,-5],[-2,2],[2,4],[8,5]]]},
+  {n:"Madagascar",c:"#d4e8c2",p:[[[44,-12],[50,-16],[50,-25],[44,-25],[44,-12]]]},
+  {n:"Asia Minor",c:"#d4e8c2",p:[[[26,38],[36,36],[42,37],[44,40],[40,42],[34,42],[28,42],[26,38]]]},
+  {n:"Middle East",c:"#d4e8c2",p:[[[36,36],[42,37],[56,24],[60,22],[56,12],[44,12],[38,14],[36,22],[36,28],[36,36]]]},
+  {n:"Central Asia",c:"#d4e8c2",p:[[[50,38],[60,36],[68,36],[76,34],[80,30],[75,28],[72,24],[64,22],[56,24],[50,28],[48,34],[50,38]]]},
+  {n:"Russia",c:"#d4e8c2",p:[[[-168,65],[-168,72],[-140,72],[-100,72],[-68,70],[-52,68],[-60,62],[0,66],[10,58],[28,54],[32,46],[38,46],[50,46],[60,54],[68,60],[80,68],[100,72],[130,70],[140,60],[160,60],[168,64],[168,60],[150,50],[140,46],[136,48],[132,44],[130,42],[140,54],[150,58],[160,60],[168,60],[168,52],[160,46],[150,44],[136,34],[130,30],[124,40],[120,50],[110,54],[100,52],[88,50],[80,50],[70,50],[60,54],[50,46],[44,42],[40,42],[36,44],[32,46],[28,54],[22,54],[18,56],[14,55],[10,55],[5,57],[5,59],[14,62],[24,66],[28,70],[20,70],[10,70],[0,66],[-10,62],[-20,64],[-24,65],[-24,64],[-14,63],[-40,65],[-52,68],[-60,62],[-80,66],[-100,68],[-168,65]]]},
+  {n:"South Asia",c:"#d4e8c2",p:[[[60,22],[68,22],[74,22],[80,12],[80,8],[76,8],[72,18],[66,24],[60,22]]]},
+  {n:"India",c:"#d4e8c2",p:[[[68,22],[72,22],[80,12],[80,8],[76,8],[72,8],[76,14],[72,22],[68,22]]]},
+  {n:"Sri Lanka",c:"#d4e8c2",p:[[[80,10],[82,8],[82,6],[80,7],[80,10]]]},
+  {n:"SE Asia",c:"#d4e8c2",p:[[[92,28],[100,20],[100,14],[104,2],[100,2],[100,6],[98,6],[96,18],[92,22],[88,28],[92,28]]]},
+  {n:"Thailand Cambodia",c:"#d4e8c2",p:[[[98,6],[104,2],[108,12],[104,14],[100,14],[98,6]]]},
+  {n:"Vietnam",c:"#d4e8c2",p:[[[104,22],[108,16],[108,12],[104,14],[104,22]]]},
+  {n:"Malaysia Peninsula",c:"#d4e8c2",p:[[[100,6],[104,2],[104,1],[102,1],[100,2],[100,6]]]},
+  {n:"Sumatra",c:"#d4e8c2",p:[[[96,5],[100,4],[106,0],[104,-4],[100,-4],[96,2],[96,5]]]},
+  {n:"Java",c:"#d4e8c2",p:[[[106,-6],[112,-6],[114,-8],[108,-8],[106,-7],[106,-6]]]},
+  {n:"Borneo",c:"#d4e8c2",p:[[[108,1],[116,6],[118,4],[118,0],[114,-4],[108,-4],[108,1]]]},
+  {n:"Sulawesi",c:"#d4e8c2",p:[[[120,1],[124,0],[124,-4],[120,-4],[120,1]]]},
+  {n:"Philippines",c:"#d4e8c2",p:[[[118,18],[122,18],[124,12],[122,8],[118,10],[118,18]]]},
+  {n:"China",c:"#d4e8c2",p:[[[76,36],[80,40],[86,42],[96,42],[110,40],[120,40],[124,52],[130,42],[124,40],[122,30],[116,22],[110,20],[108,20],[108,22],[104,22],[100,24],[96,28],[92,28],[88,28],[80,30],[76,34],[76,36]]]},
+  {n:"Japan",c:"#d4e8c2",p:[[[130,32],[132,34],[136,34],[140,40],[140,44],[142,44],[142,40],[138,36],[136,34],[132,33],[130,32]]]},
+  {n:"Korea",c:"#d4e8c2",p:[[[126,34],[128,36],[130,38],[128,38],[126,36],[126,34]]]},
+  {n:"Taiwan",c:"#d4e8c2",p:[[[120,22],[122,24],[122,22],[120,22]]]},
+  {n:"New Guinea",c:"#d4e8c2",p:[[[132,-2],[140,-4],[148,-6],[142,-8],[134,-8],[132,-4],[132,-2]]]},
+  {n:"Australia",c:"#d4e8c2",p:[[[114,-22],[118,-20],[122,-18],[130,-12],[136,-12],[138,-14],[130,-14],[136,-26],[130,-32],[116,-34],[114,-34],[110,-28],[114,-22]]]},
+  {n:"Australia East",c:"#d4e8c2",p:[[[138,-26],[148,-20],[152,-24],[152,-30],[148,-38],[144,-38],[140,-36],[138,-34],[136,-34],[138,-26]]]},
+  {n:"New Zealand",c:"#d4e8c2",p:[[[172,-36],[174,-36],[178,-38],[174,-42],[170,-44],[168,-46],[170,-46],[172,-44],[172,-36]]]},
+  {n:"Antarctica",c:"#e8f4f8",p:[[[-180,-75],[-150,-72],[-120,-72],[-90,-72],[-60,-72],[-30,-72],[0,-72],[30,-72],[60,-72],[90,-72],[120,-72],[150,-72],[180,-72],[180,-90],[-180,-90],[-180,-75]]]},
+];
+
 function VoyageAnimation({ onClose, portsDb = [] }) {
 
   // ── Refs ──
@@ -176,7 +223,6 @@ function VoyageAnimation({ onClose, portsDb = [] }) {
   const animRef      = useRef(null);
   const recorderRef  = useRef(null);
   const chunksRef    = useRef([]);
-  const tileCache    = useRef({});
   const countriesRef = useRef([]);
   const pointsRef    = useRef([]);
   const videoSecsRef = useRef(30);
@@ -198,7 +244,6 @@ function VoyageAnimation({ onClose, portsDb = [] }) {
   useEffect(() => { videoSecsRef.current = videoSecs; }, [videoSecs]);
   useEffect(() => { countriesRef.current = countries; }, [countries]);
 
-  // ── Canvas: true 9:16 portrait ──
   const CW = 540, CH = 960;
 
   // ── Math ──
@@ -214,139 +259,83 @@ function VoyageAnimation({ onClose, portsDb = [] }) {
     return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
   };
 
-  // ── Tile math ──
-  const latToTileY = (lat,z) => {
-    const r=toRad(clamp(lat,-85.051129,85.051129));
-    return Math.floor((1-Math.log(Math.tan(r)+1/Math.cos(r))/Math.PI)/2*Math.pow(2,z));
-  };
-  const lngToTileX = (lng,z) => Math.floor(((((lng%360)+360)%360-180)+180)/360*Math.pow(2,z));
-  const tileXToLng = (x,z)  => x/Math.pow(2,z)*360-180;
-  const tileYToLat = (y,z)  => {
-    const n=Math.PI-2*Math.PI*y/Math.pow(2,z);
-    return 180/Math.PI*Math.atan(0.5*(Math.exp(n)-Math.exp(-n)));
-  };
-
-  const worldPx = (lat,lng,z) => {
-    const s=Math.pow(2,z)*256;
-    const l2=((lng%360)+360)%360-180;
-    const x=(l2+180)/360*s;
-    const r=toRad(clamp(lat,-85.051129,85.051129));
-    const y=(1-Math.log(Math.tan(r)+1/Math.cos(r))/Math.PI)/2*s;
-    return {x,y};
+  // ── Mercator projection: [lng,lat] → canvas [x,y] ──
+  // cLat/cLng = map center, zoom = 0..10
+  const project = (lat, lng, zoom, cLat, cLng) => {
+    const scale = Math.pow(2, zoom) * 256;
+    const toMercX = lo => ((((lo%360)+360)%360-180)+180)/360 * scale;
+    const toMercY = la => {
+      const r = toRad(clamp(la,-85.051129,85.051129));
+      return (1-Math.log(Math.tan(r)+1/Math.cos(r))/Math.PI)/2 * scale;
+    };
+    const cx = toMercX(cLng), cy = toMercY(cLat);
+    const worldW = scale;
+    let dx = toMercX(lng) - cx;
+    while (dx >  worldW/2) dx -= worldW;
+    while (dx < -worldW/2) dx += worldW;
+    return { x: CW/2 + dx, y: CH/2 + (toMercY(lat) - cy) };
   };
 
-  // ── lat/lng → canvas pixel (antimeridian-safe) ──
-  const lp = (lat,lng,z,cLat,cLng) => {
-    const worldW=Math.pow(2,z)*256;
-    const c=worldPx(cLat,cLng,z), p=worldPx(lat,lng,z);
-    let dx=p.x-c.x;
-    while (dx >  worldW/2) dx-=worldW;
-    while (dx < -worldW/2) dx+=worldW;
-    return {x:CW/2+dx, y:CH/2+(p.y-c.y)};
-  };
-
-  // ── Tile load stats ──
-  const tileLoadStats = useRef({ ok:0, fail:0 });
-
-  // ── Load tile — NO crossOrigin attribute (KEY FIX) ────────────────────────
-  // Setting crossOrigin='anonymous' requires the CDN to return
-  // Access-Control-Allow-Origin headers. Carto/OSM don't always do this,
-  // causing silent load failure → blank canvas.
-  // Without crossOrigin the image loads normally. We only call drawImage()
-  // (never getImageData/toBlob on the canvas) so the "tainted canvas"
-  // restriction never triggers during recording via captureStream().
-  const loadTile = url => new Promise(res => {
-    if (tileCache.current[url]) { res(tileCache.current[url]); return; }
-
-    // First try: reuse already-loaded tile from Leaflet's DOM (zero network cost)
-    if (mapDivRef.current) {
-      const leafletTiles = mapDivRef.current.querySelectorAll('img.leaflet-tile');
-      for (const img of leafletTiles) {
-        if (img.complete && img.naturalWidth > 0 && img.src) {
-          const srcPath = img.src.split('/').slice(-3).join('/');
-          const urlPath = url.split('/').slice(-3).join('/');
-          if (srcPath === urlPath) {
-            tileCache.current[url] = img;
-            tileLoadStats.current.ok++;
-            res(img);
-            return;
-          }
-        }
-      }
-    }
-
-    // Second try: load fresh without crossOrigin — works for drawImage()
-    const img = new Image();
-    // NO img.crossOrigin = 'anonymous' — this is the critical fix
-    const timer = setTimeout(() => { tileLoadStats.current.fail++; res(null); }, 8000);
-    img.onload  = () => { clearTimeout(timer); tileCache.current[url]=img; tileLoadStats.current.ok++; res(img); };
-    img.onerror = () => { clearTimeout(timer); tileLoadStats.current.fail++; res(null); };
-    img.src = url;
-  });
-
-  // ── Draw tiles — fills FULL canvas edge-to-edge, with safe fallback ──
-  const drawTiles = async (ctx, z, cLat, cLng) => {
-    const zi =clamp(Math.round(z),0,18);
-    const num=Math.max(1,Math.pow(2,zi));
-    const ts =256;
-    const worldW=num*ts;
-    // Enough tiles to fill CW×CH fully, with generous margin for safety
-    const rx=Math.ceil(CW/ts/2)+3;
-    const ry=Math.ceil(CH/ts/2)+3;
-    const tx0=lngToTileX(cLng,zi);
-    const ty0=latToTileY(cLat,zi);
-    const cp =worldPx(cLat,cLng,zi);
-
-    // Clear to ocean blue first (visible if tiles fail to load)
-    ctx.fillStyle='#a8d8ea';
+  // ── Draw self-contained world map on canvas ──────────────────────────────────
+  // Ocean gradient background + country polygons — zero network calls
+  const drawWorldMap = (ctx, zoom, cLat, cLng) => {
+    // Ocean background
+    const oceanGrad = ctx.createLinearGradient(0,0,0,CH);
+    oceanGrad.addColorStop(0,'#b8dff0');
+    oceanGrad.addColorStop(0.5,'#a8d4e8');
+    oceanGrad.addColorStop(1,'#98c8e0');
+    ctx.fillStyle = oceanGrad;
     ctx.fillRect(0,0,CW,CH);
 
-    tileLoadStats.current={ok:0,fail:0};
-    const proms=[];
-    let tileCount=0;
-    for (let dy=-ry;dy<=ry;dy++){
-      for (let dx=-rx;dx<=rx;dx++){
-        const tx=((tx0+dx)%num+num)%num;
-        const ty=ty0+dy;
-        if (ty<0||ty>=num) continue;
-        tileCount++;
-        const sub=['a','b','c','d'][(Math.abs(tx+ty))%4];
-        const url=`https://${sub}.basemaps.cartocdn.com/rastertiles/voyager/${zi}/${tx}/${ty}.png`;
-        const ox=worldPx(tileYToLat(ty,zi),tileXToLng(tx,zi),zi);
-        let ddx=ox.x-cp.x;
-        while (ddx >  worldW/2) ddx-=worldW;
-        while (ddx < -worldW/2) ddx+=worldW;
-        const drawX=Math.round(CW/2+ddx);
-        const drawY=Math.round(CH/2+(ox.y-cp.y));
-        // Skip tiles completely off-canvas (perf) but keep generous bounds
-        if (drawX>CW+ts||drawX<-ts*2||drawY>CH+ts||drawY<-ts*2) continue;
-        proms.push(
-          loadTile(url).then(img=>{
-            if (img){
-              try { ctx.drawImage(img,drawX,drawY,ts,ts); }
-              catch(e){ console.warn('[VoyageAnim] drawImage failed (likely CORS taint):', e.message); }
-            }
-          })
-        );
-      }
+    // Subtle grid lines (latitude/longitude)
+    ctx.strokeStyle='rgba(100,160,200,0.15)';ctx.lineWidth=0.5;
+    for (let lo=-180;lo<=180;lo+=30){
+      ctx.beginPath();
+      for (let la=-80;la<=80;la+=5){
+        const p=project(la,lo,zoom,cLat,cLng);
+        la===-80?ctx.moveTo(p.x,p.y):ctx.lineTo(p.x,p.y);
+      }ctx.stroke();
     }
-    await Promise.all(proms);
+    for (let la=-60;la<=80;la+=30){
+      ctx.beginPath();
+      for (let lo=-180;lo<=180;lo+=5){
+        const p=project(la,lo,zoom,cLat,cLng);
+        lo===-180?ctx.moveTo(p.x,p.y):ctx.lineTo(p.x,p.y);
+      }ctx.stroke();
+    }
 
-    // If ALL tiles failed to load, draw a visible diagnostic + simple world outline
-    // so the recording never shows pure flat blue with no context
-    if (tileLoadStats.current.ok===0 && tileCount>0){
-      console.warn(`[VoyageAnim] All ${tileCount} tiles failed — retrying without CORS`);
-    }
+    // Draw country polygons
+    WORLD_COUNTRIES.forEach(country => {
+      country.p.forEach(ring => {
+        if (ring.length < 3) return;
+        ctx.beginPath();
+        ring.forEach(([lo,la],i) => {
+          const p = project(la,lo,zoom,cLat,cLng);
+          // Skip if wildly off screen to avoid antimeridian artifacts
+          if (Math.abs(p.x) > CW*3 || Math.abs(p.y) > CH*3) { ctx.beginPath(); return; }
+          i===0 ? ctx.moveTo(p.x,p.y) : ctx.lineTo(p.x,p.y);
+        });
+        ctx.closePath();
+        // Land fill — warm beige like Carto Voyager
+        const landGrad = ctx.createLinearGradient(0,0,0,CH);
+        landGrad.addColorStop(0,'#f0ebe0');
+        landGrad.addColorStop(1,'#e8e0d0');
+        ctx.fillStyle = landGrad;
+        ctx.fill();
+        ctx.strokeStyle='rgba(180,160,130,0.6)';ctx.lineWidth=0.8;
+        ctx.stroke();
+      });
+    });
+
+    // Equator line
+    const eq1=project(0,-180,zoom,cLat,cLng);
+    const eq2=project(0,180,zoom,cLat,cLng);
+    ctx.strokeStyle='rgba(100,160,200,0.3)';ctx.lineWidth=1;ctx.setLineDash([4,4]);
+    ctx.beginPath();ctx.moveTo(eq1.x,eq1.y);ctx.lineTo(eq2.x,eq2.y);ctx.stroke();
+    ctx.setLineDash([]);
   };
 
-  // ── Prewarm: pre-load tiles into cache before animation starts ──
-  const prewarmTiles = async (z, cLat, cLng) => {
-    const dummy = document.createElement('canvas');
-    dummy.width = CW; dummy.height = CH;
-    await drawTiles(dummy.getContext('2d'), z, cLat, cLng);
-  };
-
-  // ── Auto-fit: zoom+center — GUARANTEES no side gaps ──
+  // ── Auto-fit zoom+center for all points ──
   const autoFit = pts => {
     if (!pts||pts.length===0) return {z:2,lat:20,lng:0};
     if (pts.length===1) return {z:4,lat:pts[0].lat,lng:pts[0].lng};
@@ -354,25 +343,53 @@ function VoyageAnimation({ onClose, portsDb = [] }) {
     const minLat=Math.min(...lats),maxLat=Math.max(...lats);
     const cLat=(minLat+maxLat)/2;
     let minLng=Math.min(...lngs),maxLng=Math.max(...lngs);
-    if (maxLng-minLng>180){
-      const adj=lngs.map(l=>l<0?l+360:l);
-      minLng=Math.min(...adj);maxLng=Math.max(...adj);
-    }
+    if (maxLng-minLng>180){const adj=lngs.map(l=>l<0?l+360:l);minLng=Math.min(...adj);maxLng=Math.max(...adj);}
     const cLng=((minLng+maxLng)/2+180)%360-180;
-    // minFillZoom: ensure map tiles always fill CW width (no blue side gaps)
-    const minFillZoom=Math.ceil(Math.log2(CW/256));
-    const padX=CW*0.10,padY=CH*0.12;
-    for (let z=5;z>=minFillZoom;z--){  // cap at 5 — z>5 shows streets not regions
+    const padX=CW*0.12,padY=CH*0.12;
+    for (let z=5;z>=1;z--){
       const corners=[
-        lp(minLat,minLng,z,cLat,cLng),lp(minLat,maxLng,z,cLat,cLng),
-        lp(maxLat,minLng,z,cLat,cLng),lp(maxLat,maxLng,z,cLat,cLng),
+        project(minLat,minLng,z,cLat,cLng),project(minLat,maxLng,z,cLat,cLng),
+        project(maxLat,minLng,z,cLat,cLng),project(maxLat,maxLng,z,cLat,cLng),
       ];
       const xs=corners.map(c=>c.x),ys=corners.map(c=>c.y);
-      if (Math.min(...xs)>=padX&&Math.max(...xs)<=CW-padX&&
-          Math.min(...ys)>=padY&&Math.max(...ys)<=CH-padY)
+      if(Math.min(...xs)>=padX&&Math.max(...xs)<=CW-padX&&Math.min(...ys)>=padY&&Math.max(...ys)<=CH-padY)
         return {z,lat:cLat,lng:cLng};
     }
-    return {z:minFillZoom,lat:cLat,lng:cLng};
+    return {z:1,lat:cLat,lng:cLng};
+  };
+
+  // ── Smart ship-following zoom ──
+  const getShipZ = fitResult => {
+    const base=fitResult.z;
+    if (base<=2) return clamp(base+2,3,5);
+    if (base<=3) return clamp(base+2,4,5);
+    if (base<=4) return clamp(base+1,4,5);
+    return clamp(base,4,5);
+  };
+
+  // ── 4-Phase zoom ──
+  const getZoomState = (t,interp,pts,fitResult) => {
+    const P1=0.10,P2=0.88,P3=0.93;
+    const total=interp.length-1;
+    const idx=clamp(Math.floor(t*total),0,total-1);
+    const frac=(t*total)-idx;
+    const curLat=interp[idx].lat+(interp[Math.min(idx+1,total)].lat-interp[idx].lat)*frac;
+    const curLng=interp[idx].lng+(interp[Math.min(idx+1,total)].lng-interp[idx].lng)*frac;
+    const baseZ=clamp(fitResult.z,1,5);
+    const shipZ=getShipZ(fitResult);
+    const revealZ=clamp(baseZ-0.5,1,4);
+    if (t<=P1){
+      const e=easeIO(t/P1);
+      return {z:lerp(shipZ+0.5,shipZ,e),cLat:curLat,cLng:curLng};
+    } else if (t<=P2){
+      const e=easeIO((t-P1)/(P2-P1));
+      return {z:shipZ,cLat:lerp(curLat,fitResult.lat,e*0.12),cLng:lerp(curLng,fitResult.lng,e*0.12)};
+    } else if (t<=P3){
+      const e=easeIO((t-P2)/(P3-P2));
+      return {z:lerp(shipZ,revealZ,e),cLat:lerp(lerp(curLat,fitResult.lat,0.12),fitResult.lat,e),cLng:lerp(lerp(curLng,fitResult.lng,0.12),fitResult.lng,e)};
+    } else {
+      return {z:revealZ,cLat:fitResult.lat,cLng:fitResult.lng};
+    }
   };
 
   // ── Build interpolated route (antimeridian-aware) ──
@@ -382,8 +399,8 @@ function VoyageAnimation({ onClose, portsDb = [] }) {
     for (let i=0;i<pts.length-1;i++){
       const a=pts[i],b=pts[i+1];
       let bLng=b.lng;
-      if (a.lng-b.lng > 180)  bLng+=360;
-      if (a.lng-b.lng < -180) bLng-=360;
+      if (a.lng-b.lng>180) bLng+=360;
+      if (a.lng-b.lng<-180) bLng-=360;
       for (let j=0;j<80;j++){
         const f=j/80;
         let lng=a.lng+(bLng-a.lng)*f;
@@ -391,7 +408,7 @@ function VoyageAnimation({ onClose, portsDb = [] }) {
         out.push({lat:a.lat+(b.lat-a.lat)*f,lng});
       }
     }
-    out.push({lat:pts[pts.length-1].lat,lng:pts[pts.length-1].lng});
+    out.push({...pts[pts.length-1]});
     return out;
   };
 
@@ -402,11 +419,10 @@ function VoyageAnimation({ onClose, portsDb = [] }) {
     return {totalNM:nm.toFixed(0),totalKM:(nm*1.852).toFixed(0)};
   };
 
-  // ── 30 NM COUNTRY DETECTION (auto-runs on finish) ──
+  // ── 30 NM country detection ──
   const detectCountries = async pts => {
     if (pts.length<2) return;
-    setDetectingCtry(true);
-    setStatus('🔍 Detecting countries (30 NM proximity)…');
+    setDetectingCtry(true);setStatus('🔍 Detecting countries (30 NM proximity)…');
     const seen=new Set(),result=[];
     const DEG=0.55;
     const step=Math.max(1,Math.floor(pts.length/16));
@@ -421,11 +437,9 @@ function VoyageAnimation({ onClose, portsDb = [] }) {
     for (const pt of sample){
       await new Promise(r=>setTimeout(r,110));
       try{
-        // Layer 1: exact point
         const r1=await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${pt.lat}&lon=${pt.lng}&zoom=5`,{headers:{'Accept-Language':'en','User-Agent':'NavisphereX/1.0'}});
         const d1=await r1.json();
-        if (d1.address?.country) add(d1.address.country,d1.address.country_code);
-        // Layer 2: 30 NM bbox
+        if(d1.address?.country) add(d1.address.country,d1.address.country_code);
         await new Promise(r=>setTimeout(r,80));
         const r2=await fetch(`https://nominatim.openstreetmap.org/search?format=json&viewbox=${pt.lng-DEG},${pt.lat+DEG},${pt.lng+DEG},${pt.lat-DEG}&bounded=1&featuretype=country&limit=5`,{headers:{'Accept-Language':'en','User-Agent':'NavisphereX/1.0'}});
         const d2=await r2.json();
@@ -434,288 +448,76 @@ function VoyageAnimation({ onClose, portsDb = [] }) {
           try{
             const r3=await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${item.lat}&lon=${item.lon}&zoom=3`,{headers:{'Accept-Language':'en','User-Agent':'NavisphereX/1.0'}});
             const d3=await r3.json();
-            if (d3.address?.country) add(d3.address.country,d3.address.country_code);
+            if(d3.address?.country) add(d3.address.country,d3.address.country_code);
           }catch{}
         }
       }catch(e){console.warn('Country detect:',e);}
     }
-    setCountries(result);
-    countriesRef.current=result;
+    setCountries(result);countriesRef.current=result;
     setDetectingCtry(false);
     setStatus(result.length>0?`✅ ${result.length} countries detected — ready to record!`:'✅ Route finished — ready to record!');
   };
 
-  // ── 4-PHASE ZOOM ──────────────────────────────────────────────────────────
-  // ── 4-PHASE ZOOM — always shows land/context, never pure ocean ──────────────
-  // shipZ is chosen so the canvas shows ~1500-3000km region around ship
-  // (enough to see the country the ship is near, not just ocean)
-  // We derive shipZ from the route span: longer routes = more zoomed out
-  const getShipZ = (fitResult) => {
-    // fitResult.z is the zoom to show the FULL route
-    // shipZ should be fitResult.z + 1.5 capped so we see land context
-    // For short routes (fitResult.z=5+) ship zoom = fitResult.z (already close enough)
-    // For long routes (fitResult.z=2-3) ship zoom = fitResult.z + 2 (need to zoom in more)
-    const base = fitResult.z;
-    if (base <= 2) return clamp(base + 2, 3, 5);   // world route: show sub-continent
-    if (base <= 3) return clamp(base + 2, 4, 5);   // ocean route: show country
-    if (base <= 4) return clamp(base + 1, 4, 5);   // regional: show country/sea area
-    return clamp(base, 4, 6);                        // short route: use autoFit zoom
-  };
-
-  const getZoomState = (t, interp, pts, fitResult) => {
-    const P1=0.10, P2=0.88, P3=0.93;
-    const total=interp.length-1;
-    const idx=clamp(Math.floor(t*total),0,total-1);
-    const frac=(t*total)-idx;
-    const curLat=interp[idx].lat+(interp[Math.min(idx+1,total)].lat-interp[idx].lat)*frac;
-    const curLng=interp[idx].lng+(interp[Math.min(idx+1,total)].lng-interp[idx].lng)*frac;
-    const baseZ  = clamp(fitResult.z, 2, 6);
-    const shipZ  = getShipZ(fitResult); // smart zoom showing land context
-    const revealZ= clamp(baseZ - 0.5, 2, 5);
-
-    if (t <= P1) {
-      // Phase 1: depart — ease into ship-follow zoom
-      const e = easeIO(t / P1);
-      return { z: lerp(shipZ + 0.5, shipZ, e), cLat: curLat, cLng: curLng };
-    } else if (t <= P2) {
-      // Phase 2: en route — follow ship at shipZ, very gently drift toward center
-      const e = easeIO((t - P1) / (P2 - P1));
-      return {
-        z: shipZ,
-        cLat: lerp(curLat, fitResult.lat, e * 0.12),
-        cLng: lerp(curLng, fitResult.lng, e * 0.12),
-      };
-    } else if (t <= P3) {
-      // Phase 3: pull back to show full route
-      const e = easeIO((t - P2) / (P3 - P2));
-      return {
-        z:    lerp(shipZ, revealZ, e),
-        cLat: lerp(lerp(curLat, fitResult.lat, 0.12), fitResult.lat, e),
-        cLng: lerp(lerp(curLng, fitResult.lng, 0.12), fitResult.lng, e),
-      };
-    } else {
-      // Phase 4: full route + summary card
-      return { z: revealZ, cLat: fitResult.lat, cLng: fitResult.lng };
-    }
-  };
-
-  // ── Draw SUMMARY CARD (Phase 4 — Instagram-friendly full screen) ──────────
-  const drawSummary = (ctx, t, totalNM, totalKM, totalDays, ctryList) => {
-    // t goes 0→1 during phase 4 (92%→100%)
-    const alpha=clamp(easeOut(t*2),0,1); // fast fade-in
-
-    // Full dark overlay
-    ctx.fillStyle=`rgba(4,12,26,${alpha*0.96})`;
-    ctx.fillRect(0,0,CW,CH);
-
-    if (alpha<0.05) return;
-    ctx.globalAlpha=alpha;
-
-    // ── Background gradient ──
-    const bg=ctx.createLinearGradient(0,0,CW,CH);
-    bg.addColorStop(0,'rgba(4,12,26,0.98)');
-    bg.addColorStop(0.5,'rgba(7,20,40,0.98)');
-    bg.addColorStop(1,'rgba(4,12,26,0.98)');
-    ctx.fillStyle=bg;ctx.fillRect(0,0,CW,CH);
-
-    // Grid overlay (brand feel)
-    ctx.strokeStyle='rgba(0,180,216,0.04)';ctx.lineWidth=1;
-    for (let x=0;x<CW;x+=54){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,CH);ctx.stroke();}
-    for (let y=0;y<CH;y+=54){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(CW,y);ctx.stroke();}
-
-    // ── Radial glow center ──
-    const cg=ctx.createRadialGradient(CW/2,CH/2,0,CW/2,CH/2,CW*0.8);
-    cg.addColorStop(0,'rgba(0,180,216,0.08)');
-    cg.addColorStop(1,'transparent');
-    ctx.fillStyle=cg;ctx.fillRect(0,0,CW,CH);
-
-    // ── SHIP ICON — large centered ──
-    ctx.font=`${80+10*Math.sin(t*Math.PI*4)}px serif`;
-    ctx.textAlign='center';ctx.textBaseline='middle';
-    ctx.fillText('🚢',CW/2,CH*0.20);
-
-    // Glow under ship
-    const sg=ctx.createRadialGradient(CW/2,CH*0.22,0,CW/2,CH*0.22,120);
-    sg.addColorStop(0,'rgba(0,180,216,0.18)');sg.addColorStop(1,'transparent');
-    ctx.fillStyle=sg;ctx.fillRect(0,0,CW,CH);
-
-    // ── BRAND ──
-    ctx.font='bold 13px "Exo 2",sans-serif';
-    ctx.fillStyle='rgba(0,180,216,0.7)';
-    ctx.letterSpacing='0.3em';
-    ctx.fillText('NAVISPHERE X',CW/2,CH*0.30);
-    ctx.letterSpacing='0';
-
-    // ── VOYAGE COMPLETE ──
-    ctx.font='bold 34px "Orbitron",monospace';
-    const goldGrad=ctx.createLinearGradient(0,CH*0.34,CW,CH*0.40);
-    goldGrad.addColorStop(0,'#F0A500');
-    goldGrad.addColorStop(0.5,'#FFD166');
-    goldGrad.addColorStop(1,'#F0A500');
-    ctx.fillStyle=goldGrad;
-    ctx.fillText('VOYAGE',CW/2,CH*0.36);
-    ctx.fillText('COMPLETE',CW/2,CH*0.42);
-
-    // ── Divider line ──
-    const lineAlpha=clamp(easeOut((t-0.2)*2),0,1);
-    ctx.strokeStyle=`rgba(0,180,216,${0.6*lineAlpha})`;ctx.lineWidth=1.5;
-    const lineW=CW*0.7*lineAlpha;
-    ctx.beginPath();ctx.moveTo(CW/2-lineW/2,CH*0.46);ctx.lineTo(CW/2+lineW/2,CH*0.46);ctx.stroke();
-
-    // ── STATS CARDS ──
-    const statsAlpha=clamp(easeOut((t-0.25)*2),0,1);
-    ctx.globalAlpha=alpha*statsAlpha;
-
-    const cardY=CH*0.49;
-    const cardW=CW*0.42,cardH=100,gap=16;
-    const card1X=(CW/2)-cardW-gap/2;
-    const card2X=(CW/2)+gap/2;
-
-    // Card backgrounds
-    [[card1X,'rgba(0,200,150,0.1)','rgba(0,200,150,0.35)'],[card2X,'rgba(0,180,216,0.1)','rgba(0,180,216,0.35)']].forEach(([x,bg,border])=>{
-      ctx.fillStyle=bg;ctx.strokeStyle=border;ctx.lineWidth=1.5;
-      ctx.beginPath();ctx.roundRect(x,cardY,cardW,cardH,12);
-      ctx.fill();ctx.stroke();
-    });
-
-    // NM stat
-    ctx.font='bold 30px "Orbitron",monospace';ctx.fillStyle='#00C896';ctx.textAlign='center';
-    ctx.fillText(`${parseInt(totalNM).toLocaleString()}`,card1X+cardW/2,cardY+42);
-    ctx.font='bold 10px "Exo 2",sans-serif';ctx.fillStyle='rgba(0,200,150,0.7)';
-    ctx.fillText('NAUTICAL MILES',card1X+cardW/2,cardY+62);
-    ctx.font='13px "Exo 2",sans-serif';ctx.fillStyle='rgba(0,200,150,0.5)';
-    ctx.fillText(`${parseInt(totalKM).toLocaleString()} km`,card1X+cardW/2,cardY+82);
-
-    // Days stat
-    ctx.font='bold 30px "Orbitron",monospace';ctx.fillStyle='#00B4D8';
-    ctx.fillText(`${totalDays}`,card2X+cardW/2,cardY+42);
-    ctx.font='bold 10px "Exo 2",sans-serif';ctx.fillStyle='rgba(0,180,216,0.7)';
-    ctx.fillText('DAYS AT SEA',card2X+cardW/2,cardY+62);
-    ctx.font='13px "Exo 2",sans-serif';ctx.fillStyle='rgba(0,180,216,0.5)';
-    ctx.fillText(`${ctryList.length} countries`,card2X+cardW/2,cardY+82);
-
-    // ── COUNTRIES FLAGS ──
-    const flagAlpha=clamp(easeOut((t-0.4)*2),0,1);
-    ctx.globalAlpha=alpha*flagAlpha;
-    if (ctryList.length>0){
-      const flagY=CH*0.68;
-      ctx.font='bold 9px "Exo 2",sans-serif';
-      ctx.fillStyle='rgba(255,255,255,0.4)';ctx.textAlign='center';
-      ctx.fillText('COUNTRIES / TERRITORIES PASSED',CW/2,flagY-14);
-
-      // Flags row — centered
-      const flagSize=32;
-      const totalFlagW=Math.min(ctryList.length,10)*(flagSize+8);
-      let fx=CW/2-totalFlagW/2;
-      ctryList.slice(0,10).forEach((c,i)=>{
-        ctx.font=`${flagSize}px serif`;ctx.textAlign='left';ctx.fillStyle='#fff';
-        ctx.fillText(c.flag,fx,flagY+flagSize/2);
-        fx+=flagSize+6;
-      });
-
-      // Country names (up to 4)
-      ctx.font='11px "Exo 2",sans-serif';ctx.fillStyle='rgba(255,255,255,0.45)';ctx.textAlign='center';
-      const names=ctryList.slice(0,5).map(c=>c.country).join('  ·  ');
-      ctx.fillText(names,CW/2,flagY+flagSize+18);
-    }
-
-    // ── HASHTAGS ──
-    const tagAlpha=clamp(easeOut((t-0.55)*2),0,1);
-    ctx.globalAlpha=alpha*tagAlpha;
-    ctx.font='bold 13px "Exo 2",sans-serif';ctx.textAlign='center';
-    ctx.fillStyle='rgba(0,180,216,0.55)';
-    ctx.fillText('#SeaDiary  #NavisphereX  #Seafarer',CW/2,CH*0.83);
-    ctx.fillStyle='rgba(255,255,255,0.2)';
-    ctx.fillText('#MaritimeLife  #OceanVoyage',CW/2,CH*0.86);
-
-    // ── BOTTOM BRAND BAR ──
-    ctx.globalAlpha=alpha;
-    ctx.fillStyle='rgba(0,180,216,0.12)';
-    ctx.fillRect(0,CH*0.90,CW,CH*0.10);
-    ctx.strokeStyle='rgba(0,180,216,0.3)';ctx.lineWidth=1;
-    ctx.beginPath();ctx.moveTo(0,CH*0.90);ctx.lineTo(CW,CH*0.90);ctx.stroke();
-    ctx.font='bold 11px "Orbitron",monospace';ctx.fillStyle='rgba(0,180,216,0.7)';ctx.textAlign='center';
-    ctx.fillText('NAVISPHERE X  ·  MARINE SYSTEMS',CW/2,CH*0.94);
-    ctx.font='10px "Exo 2",sans-serif';ctx.fillStyle='rgba(255,255,255,0.25)';
-    ctx.fillText('navisphere.app',CW/2,CH*0.97);
-
-    ctx.globalAlpha=1;
-  };
-
-  // ── Draw route overlay ──
-  const drawOverlay = (ctx,interp,t,z,cLat,cLng,pts,ctryList,trails,totalNM,totalKM,day,totalDays) => {
-    const lpf=(la,lo)=>lp(la,lo,z,cLat,cLng);
+  // ── Draw overlay (route, boat, UI bars) ──
+  const drawOverlay = (ctx,interp,t,zoom,cLat,cLng,pts,ctryList,trails,totalNM,totalKM,day,totalDays) => {
+    const pj=(la,lo)=>project(la,lo,zoom,cLat,cLng);
     const total=interp.length-1;
     const P2=0.88,P3=0.93;
-    // For overlay t, use only 0→P3 range (P3→1 is summary)
     const tRoute=Math.min(t,P3)/P3;
     const idx=clamp(Math.floor(tRoute*total),0,total-1);
     const frac=(tRoute*total)-idx;
 
-    ctx.fillStyle='rgba(0,10,30,0.08)';ctx.fillRect(0,0,CW,CH);
-
-    // Full dashed route (antimeridian segments)
-    ctx.save();ctx.setLineDash([6,5]);ctx.strokeStyle='rgba(255,255,255,0.2)';ctx.lineWidth=1.5;
-    ctx.beginPath();let penDown=false;
+    // Full dashed route
+    ctx.save();ctx.setLineDash([7,5]);ctx.strokeStyle='rgba(255,255,255,0.35)';ctx.lineWidth=1.5;
+    ctx.beginPath();let pd=false;
     pts.forEach((pt,i)=>{
-      const p=lpf(pt.lat,pt.lng);
-      if (penDown&&i>0){const prev=lpf(pts[i-1].lat,pts[i-1].lng);if(Math.abs(p.x-prev.x)>CW*0.5){ctx.stroke();ctx.beginPath();penDown=false;}}
-      penDown?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y);penDown=true;
-    });
-    ctx.stroke();ctx.setLineDash([]);ctx.restore();
+      const p=pj(pt.lat,pt.lng);
+      if(pd&&i>0){const prev=pj(pts[i-1].lat,pts[i-1].lng);if(Math.abs(p.x-prev.x)>CW*0.5){ctx.stroke();ctx.beginPath();pd=false;}}
+      pd?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y);pd=true;
+    });ctx.stroke();ctx.setLineDash([]);ctx.restore();
 
-    // Travelled route (antimeridian segments)
+    // Travelled route (red)
     ctx.save();ctx.strokeStyle='#FF3B30';ctx.lineWidth=3.5;
     ctx.lineJoin='round';ctx.lineCap='round';
     ctx.shadowColor='rgba(255,59,48,0.7)';ctx.shadowBlur=12;
-    ctx.beginPath();penDown=false;
+    ctx.beginPath();pd=false;
     for (let i=0;i<=idx+1&&i<interp.length;i++){
-      const pt=i<=idx?interp[i]:{
-        lat:interp[idx].lat+(interp[Math.min(idx+1,total)].lat-interp[idx].lat)*frac,
-        lng:interp[idx].lng+(interp[Math.min(idx+1,total)].lng-interp[idx].lng)*frac,
-      };
-      const p=lpf(pt.lat,pt.lng);
-      if (penDown&&i>0){const prev=lpf(interp[Math.max(i-1,0)].lat,interp[Math.max(i-1,0)].lng);if(Math.abs(p.x-prev.x)>CW*0.5){ctx.stroke();ctx.beginPath();penDown=false;}}
-      penDown?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y);penDown=true;
-    }
-    ctx.stroke();ctx.shadowBlur=0;ctx.restore();
+      const pt=i<=idx?interp[i]:{lat:interp[idx].lat+(interp[Math.min(idx+1,total)].lat-interp[idx].lat)*frac,lng:interp[idx].lng+(interp[Math.min(idx+1,total)].lng-interp[idx].lng)*frac};
+      const p=pj(pt.lat,pt.lng);
+      if(pd&&i>0){const prev=pj(interp[Math.max(i-1,0)].lat,interp[Math.max(i-1,0)].lng);if(Math.abs(p.x-prev.x)>CW*0.5){ctx.stroke();ctx.beginPath();pd=false;}}
+      pd?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y);pd=true;
+    }ctx.stroke();ctx.shadowBlur=0;ctx.restore();
 
-    // Wake trails
-    trails.forEach((tr,ti)=>{
-      const a=tr.alpha*(1-ti/trails.length)*0.8;
-      ctx.beginPath();ctx.arc(tr.x,tr.y,tr.r,0,Math.PI*2);
-      ctx.fillStyle=`rgba(255,100,80,${a})`;ctx.fill();
-    });
+    // Trails
+    trails.forEach((tr,ti)=>{const a=tr.alpha*(1-ti/trails.length)*0.8;ctx.beginPath();ctx.arc(tr.x,tr.y,tr.r,0,Math.PI*2);ctx.fillStyle=`rgba(255,100,80,${a})`;ctx.fill();});
 
     // Boat
     const curLat=interp[idx].lat+(interp[Math.min(idx+1,total)].lat-interp[idx].lat)*frac;
     const curLng=interp[idx].lng+(interp[Math.min(idx+1,total)].lng-interp[idx].lng)*frac;
-    const bp=lpf(curLat,curLng);
+    const bp=pj(curLat,curLng);
     const pulse=0.7+0.3*Math.sin(t*Math.PI*50);
     const glow=ctx.createRadialGradient(bp.x,bp.y,0,bp.x,bp.y,28*pulse);
     glow.addColorStop(0,'rgba(255,59,48,0.55)');glow.addColorStop(1,'transparent');
     ctx.fillStyle=glow;ctx.beginPath();ctx.arc(bp.x,bp.y,28*pulse,0,Math.PI*2);ctx.fill();
-    ctx.font='26px serif';ctx.textAlign='center';ctx.textBaseline='middle';
-    ctx.fillText('🚢',bp.x,bp.y);
+    ctx.font='26px serif';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('🚢',bp.x,bp.y);
 
-    // Waypoint flags (show all in Phase 3)
+    // Waypoint flags
     const showAll=t>P2;
     pts.forEach((pt,i)=>{
       const pct=i/Math.max(pts.length-1,1);
-      if (!showAll&&pct>tRoute+0.02) return;
-      const p=lpf(pt.lat,pt.lng);
-      if (p.x<-30||p.x>CW+30||p.y<-30||p.y>CH+30) return;
+      if(!showAll&&pct>tRoute+0.02) return;
+      const p=pj(pt.lat,pt.lng);
+      if(p.x<-30||p.x>CW+30||p.y<-30||p.y>CH+30) return;
       const a=showAll?clamp(easeIO((t-P2)/(P3-P2)),0,1):1;
       ctx.globalAlpha=a;
       ctx.beginPath();ctx.arc(p.x,p.y,5,0,Math.PI*2);
       ctx.fillStyle=pt.type==='start'?'#00C896':pt.type==='end'?'#FF3B30':'#00B4D8';ctx.fill();
-      ctx.font='16px serif';ctx.textAlign='center';ctx.textBaseline='middle';
-      ctx.fillText(pt.flag,p.x,p.y-22);ctx.globalAlpha=1;
+      ctx.font='16px serif';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(pt.flag,p.x,p.y-22);ctx.globalAlpha=1;
     });
 
     // Phase 3 finish glow
-    if (t>P2&&pts.length>0){
-      const ep=lpf(pts[pts.length-1].lat,pts[pts.length-1].lng);
+    if(t>P2&&pts.length>0){
+      const ep=pj(pts[pts.length-1].lat,pts[pts.length-1].lng);
       const re=clamp(easeIO((t-P2)/(P3-P2)),0,1);
       const gr=ctx.createRadialGradient(ep.x,ep.y,0,ep.x,ep.y,55*re);
       gr.addColorStop(0,`rgba(255,215,0,${0.6*re})`);gr.addColorStop(1,'transparent');
@@ -724,74 +526,113 @@ function VoyageAnimation({ onClose, portsDb = [] }) {
 
     // TOP BAR
     const topH=72;
-    ctx.fillStyle='rgba(4,12,26,0.90)';ctx.fillRect(0,0,CW,topH);
-    ctx.font='bold 16px "Orbitron",monospace';ctx.fillStyle='#00B4D8';ctx.textAlign='left';
-    ctx.fillText('NAVISPHERE X',18,30);
-    ctx.font='11px "Exo 2",sans-serif';ctx.fillStyle='rgba(255,255,255,0.45)';
-    ctx.fillText('SEA DIARY  ·  VOYAGE ANIMATION',18,52);
+    ctx.fillStyle='rgba(4,12,26,0.92)';ctx.fillRect(0,0,CW,topH);
+    ctx.font='bold 16px "Orbitron",monospace';ctx.fillStyle='#00B4D8';ctx.textAlign='left';ctx.fillText('NAVISPHERE X',18,30);
+    ctx.font='11px "Exo 2",sans-serif';ctx.fillStyle='rgba(255,255,255,0.45)';ctx.fillText('SEA DIARY  ·  VOYAGE ANIMATION',18,52);
     ctx.font='22px serif';ctx.textAlign='right';ctx.fillText('🚢',CW-18,38);
-    const phaseLabel=t<=0.12?'DEPARTURE':t<=P2?'EN VOYAGE':t<=P3?'FULL ROUTE REVEAL':'VOYAGE COMPLETE';
-    ctx.font='bold 9px "Exo 2",sans-serif';ctx.fillStyle='rgba(0,180,216,0.65)';
-    ctx.fillText(phaseLabel,CW-18,55);
-    ctx.strokeStyle='rgba(0,180,216,0.5)';ctx.lineWidth=1;
-    ctx.beginPath();ctx.moveTo(0,topH);ctx.lineTo(CW,topH);ctx.stroke();
+    const phaseLabel=t<=0.10?'DEPARTURE':t<=P2?'EN VOYAGE':t<=P3?'FULL ROUTE REVEAL':'VOYAGE COMPLETE';
+    ctx.font='bold 9px "Exo 2",sans-serif';ctx.fillStyle='rgba(0,180,216,0.65)';ctx.fillText(phaseLabel,CW-18,55);
+    ctx.strokeStyle='rgba(0,180,216,0.5)';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(0,topH);ctx.lineTo(CW,topH);ctx.stroke();
 
     // BOTTOM BAR
     const botH=165;
     ctx.fillStyle='rgba(4,12,26,0.92)';ctx.fillRect(0,CH-botH,CW,botH);
-    ctx.strokeStyle='rgba(0,180,216,0.5)';ctx.lineWidth=1.5;
-    ctx.beginPath();ctx.moveTo(0,CH-botH);ctx.lineTo(CW,CH-botH);ctx.stroke();
+    ctx.strokeStyle='rgba(0,180,216,0.5)';ctx.lineWidth=1.5;ctx.beginPath();ctx.moveTo(0,CH-botH);ctx.lineTo(CW,CH-botH);ctx.stroke();
     const nmNow=Math.round(parseFloat(totalNM)*Math.min(t/P3,1));
     const kmNow=Math.round(parseFloat(totalKM)*Math.min(t/P3,1));
     ctx.textAlign='left';
-    ctx.font='bold 10px "Exo 2",sans-serif';ctx.fillStyle='rgba(255,255,255,0.4)';
-    ctx.fillText('DISTANCE COVERED',18,CH-botH+20);
-    ctx.font='bold 28px "Orbitron",monospace';ctx.fillStyle='#00C896';
-    ctx.fillText(`${nmNow.toLocaleString()} NM`,18,CH-botH+52);
-    ctx.font='13px "Exo 2",sans-serif';ctx.fillStyle='rgba(0,200,150,0.6)';
-    ctx.fillText(`${kmNow.toLocaleString()} km`,18,CH-botH+70);
+    ctx.font='bold 10px "Exo 2",sans-serif';ctx.fillStyle='rgba(255,255,255,0.4)';ctx.fillText('DISTANCE COVERED',18,CH-botH+20);
+    ctx.font='bold 28px "Orbitron",monospace';ctx.fillStyle='#00C896';ctx.fillText(`${nmNow.toLocaleString()} NM`,18,CH-botH+52);
+    ctx.font='13px "Exo 2",sans-serif';ctx.fillStyle='rgba(0,200,150,0.6)';ctx.fillText(`${kmNow.toLocaleString()} km`,18,CH-botH+70);
     ctx.textAlign='right';
-    ctx.font='bold 24px "Orbitron",monospace';ctx.fillStyle='#F0A500';
-    ctx.fillText(`DAY ${day}`,CW-18,CH-botH+52);
-    ctx.font='10px "Exo 2",sans-serif';ctx.fillStyle='rgba(240,165,0,0.55)';
-    ctx.fillText(`of ${totalDays}`,CW-18,CH-botH+70);
-    if (ctryList.length>0){
-      ctx.textAlign='left';
-      ctx.font='bold 9px "Exo 2",sans-serif';ctx.fillStyle='rgba(255,255,255,0.35)';
+    ctx.font='bold 24px "Orbitron",monospace';ctx.fillStyle='#F0A500';ctx.fillText(`DAY ${day}`,CW-18,CH-botH+52);
+    ctx.font='10px "Exo 2",sans-serif';ctx.fillStyle='rgba(240,165,0,0.55)';ctx.fillText(`of ${totalDays}`,CW-18,CH-botH+70);
+    if(ctryList.length>0){
+      ctx.textAlign='left';ctx.font='bold 9px "Exo 2",sans-serif';ctx.fillStyle='rgba(255,255,255,0.35)';
       ctx.fillText('COUNTRIES / TERRITORIES PASSED',18,CH-botH+92);
       let cx=18;
       ctryList.forEach((c,ci)=>{
-        if (cx>CW-40) return;
-        ctx.font='20px serif';ctx.textAlign='left';ctx.fillStyle='#fff';
-        ctx.fillText(c.flag,cx,CH-botH+118);cx+=28;
-        if (ci<ctryList.length-1&&cx<CW-50){ctx.font='10px sans-serif';ctx.fillStyle='rgba(255,255,255,0.2)';ctx.fillText('›',cx,CH-botH+118);cx+=14;}
+        if(cx>CW-40) return;
+        ctx.font='20px serif';ctx.textAlign='left';ctx.fillStyle='#fff';ctx.fillText(c.flag,cx,CH-botH+118);cx+=28;
+        if(ci<ctryList.length-1&&cx<CW-50){ctx.font='10px sans-serif';ctx.fillStyle='rgba(255,255,255,0.2)';ctx.fillText('›',cx,CH-botH+118);cx+=14;}
       });
     }
     ctx.fillStyle='rgba(255,255,255,0.06)';ctx.fillRect(0,CH-8,CW,8);
     ctx.fillStyle='#FF3B30';ctx.fillRect(0,CH-8,CW*Math.min(t,1),8);
   };
 
-  // ── Main animation loop ──
-  // Summary card always gets SUMMARY_SECS seconds minimum regardless of video length
-  const SUMMARY_SECS = 7;
-  const runAnimation = (canvas,interp,pts,ctryList,stats,fitResult,secs,onDone) => {
+  // ── Summary card (Phase 4) ──
+  const drawSummary = (ctx,t,totalNM,totalKM,totalDays,ctryList) => {
+    const alpha=clamp(easeOut(t*2),0,1);
+    ctx.fillStyle=`rgba(4,12,26,${alpha*0.96})`;ctx.fillRect(0,0,CW,CH);
+    if(alpha<0.05) return;
+    ctx.globalAlpha=alpha;
+    const bg=ctx.createLinearGradient(0,0,CW,CH);
+    bg.addColorStop(0,'rgba(4,12,26,0.98)');bg.addColorStop(0.5,'rgba(7,20,40,0.98)');bg.addColorStop(1,'rgba(4,12,26,0.98)');
+    ctx.fillStyle=bg;ctx.fillRect(0,0,CW,CH);
+    ctx.strokeStyle='rgba(0,180,216,0.04)';ctx.lineWidth=1;
+    for(let x=0;x<CW;x+=54){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,CH);ctx.stroke();}
+    for(let y=0;y<CH;y+=54){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(CW,y);ctx.stroke();}
+    ctx.font=`${80+10*Math.sin(t*Math.PI*4)}px serif`;ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillStyle='#fff';ctx.fillText('🚢',CW/2,CH*0.20);
+    ctx.font='bold 13px "Exo 2",sans-serif';ctx.fillStyle='rgba(0,180,216,0.7)';ctx.fillText('NAVISPHERE X',CW/2,CH*0.30);
+    const goldGrad=ctx.createLinearGradient(0,CH*0.34,CW,CH*0.42);
+    goldGrad.addColorStop(0,'#F0A500');goldGrad.addColorStop(0.5,'#FFD166');goldGrad.addColorStop(1,'#F0A500');
+    ctx.font='bold 34px "Orbitron",monospace';ctx.fillStyle=goldGrad;
+    ctx.fillText('VOYAGE',CW/2,CH*0.36);ctx.fillText('COMPLETE',CW/2,CH*0.42);
+    const lA=clamp(easeOut((t-0.2)*2),0,1);
+    ctx.strokeStyle=`rgba(0,180,216,${0.6*lA})`;ctx.lineWidth=1.5;
+    ctx.beginPath();ctx.moveTo(CW/2-CW*0.35*lA,CH*0.46);ctx.lineTo(CW/2+CW*0.35*lA,CH*0.46);ctx.stroke();
+    const sA=clamp(easeOut((t-0.25)*2),0,1);
+    ctx.globalAlpha=alpha*sA;
+    const cW2=CW*0.42,cH2=100,gap=16;
+    const c1x=(CW/2)-cW2-gap/2,c2x=(CW/2)+gap/2,cY=CH*0.49;
+    [[c1x,'rgba(0,200,150,0.1)','rgba(0,200,150,0.35)'],[c2x,'rgba(0,180,216,0.1)','rgba(0,180,216,0.35)']].forEach(([x,bg2,border])=>{
+      ctx.fillStyle=bg2;ctx.strokeStyle=border;ctx.lineWidth=1.5;
+      ctx.beginPath();if(ctx.roundRect)ctx.roundRect(x,cY,cW2,cH2,12);else ctx.rect(x,cY,cW2,cH2);ctx.fill();ctx.stroke();
+    });
+    ctx.font='bold 30px "Orbitron",monospace';ctx.fillStyle='#00C896';ctx.textAlign='center';
+    ctx.fillText(`${parseInt(totalNM).toLocaleString()}`,c1x+cW2/2,cY+42);
+    ctx.font='bold 10px "Exo 2",sans-serif';ctx.fillStyle='rgba(0,200,150,0.7)';ctx.fillText('NAUTICAL MILES',c1x+cW2/2,cY+62);
+    ctx.font='13px "Exo 2",sans-serif';ctx.fillStyle='rgba(0,200,150,0.5)';ctx.fillText(`${parseInt(totalKM).toLocaleString()} km`,c1x+cW2/2,cY+82);
+    ctx.font='bold 30px "Orbitron",monospace';ctx.fillStyle='#00B4D8';ctx.fillText(`${totalDays}`,c2x+cW2/2,cY+42);
+    ctx.font='bold 10px "Exo 2",sans-serif';ctx.fillStyle='rgba(0,180,216,0.7)';ctx.fillText('DAYS AT SEA',c2x+cW2/2,cY+62);
+    ctx.font='13px "Exo 2",sans-serif';ctx.fillStyle='rgba(0,180,216,0.5)';ctx.fillText(`${ctryList.length} countries`,c2x+cW2/2,cY+82);
+    const fA=clamp(easeOut((t-0.4)*2),0,1);
+    ctx.globalAlpha=alpha*fA;
+    if(ctryList.length>0){
+      const fY=CH*0.68;ctx.font='bold 9px "Exo 2",sans-serif';ctx.fillStyle='rgba(255,255,255,0.4)';ctx.textAlign='center';
+      ctx.fillText('COUNTRIES / TERRITORIES PASSED',CW/2,fY-14);
+      const fs=32,tw=Math.min(ctryList.length,10)*(fs+8);let fx=CW/2-tw/2;
+      ctryList.slice(0,10).forEach(c=>{ctx.font=`${fs}px serif`;ctx.textAlign='left';ctx.fillStyle='#fff';ctx.fillText(c.flag,fx,fY+fs/2);fx+=fs+6;});
+      ctx.font='11px "Exo 2",sans-serif';ctx.fillStyle='rgba(255,255,255,0.45)';ctx.textAlign='center';
+      ctx.fillText(ctryList.slice(0,5).map(c=>c.country).join('  ·  '),CW/2,fY+fs+18);
+    }
+    const tA=clamp(easeOut((t-0.55)*2),0,1);
+    ctx.globalAlpha=alpha*tA;
+    ctx.font='bold 13px "Exo 2",sans-serif';ctx.textAlign='center';
+    ctx.fillStyle='rgba(0,180,216,0.55)';ctx.fillText('#SeaDiary  #NavisphereX  #Seafarer',CW/2,CH*0.83);
+    ctx.fillStyle='rgba(255,255,255,0.2)';ctx.fillText('#MaritimeLife  #OceanVoyage',CW/2,CH*0.86);
+    ctx.globalAlpha=alpha;
+    ctx.fillStyle='rgba(0,180,216,0.12)';ctx.fillRect(0,CH*0.90,CW,CH*0.10);
+    ctx.strokeStyle='rgba(0,180,216,0.3)';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(0,CH*0.90);ctx.lineTo(CW,CH*0.90);ctx.stroke();
+    ctx.font='bold 11px "Orbitron",monospace';ctx.fillStyle='rgba(0,180,216,0.7)';ctx.textAlign='center';
+    ctx.fillText('NAVISPHERE X  ·  MARINE SYSTEMS',CW/2,CH*0.94);
+    ctx.globalAlpha=1;
+  };
+
+  // ── Animation loop — sync (no network = no await needed) ──
+  const SUMMARY_SECS=7;
+  const runAnimation=(canvas,interp,pts,ctryList,stats,fitResult,secs,onDone)=>{
     const ctx=canvas.getContext('2d');
-    const fps=30;
-    // Total frames = route frames + fixed summary frames
-    const summaryFrames=SUMMARY_SECS*fps;
-    const routeFrames=secs*fps;
-    const totalFrames=routeFrames+summaryFrames;
+    const fps=30,routeFrames=secs*fps,summaryFrames=SUMMARY_SECS*fps,totalFrames=routeFrames+summaryFrames;
     let frame=0,trails=[];
     const totalDays=Math.max(pts.length,3);
-    const P3=0.93; // when full-route reveal starts (within route portion)
+    const P3=0.93;
 
-    const tick=async()=>{
-      // t: 0→1 over routeFrames (route animation)
-      // after routeFrames, summaryT: 0→1 over summaryFrames
+    const tick=()=>{
       const inSummary=frame>routeFrames;
       const t=Math.min(frame/routeFrames,1);
       const summaryT=inSummary?Math.min((frame-routeFrames)/summaryFrames,1):0;
-
       const {z,cLat,cLng}=getZoomState(Math.min(t,1),interp,pts,fitResult);
       const total=interp.length-1;
       const tRoute=Math.min(t,P3)/P3;
@@ -799,63 +640,49 @@ function VoyageAnimation({ onClose, portsDb = [] }) {
       const frac=(tRoute*total)-idx;
       const curLat=interp[idx].lat+(interp[Math.min(idx+1,total)].lat-interp[idx].lat)*frac;
       const curLng=interp[idx].lng+(interp[Math.min(idx+1,total)].lng-interp[idx].lng)*frac;
-      const bpx=lp(curLat,curLng,z,cLat,cLng);
-      if (!inSummary){ trails.unshift({x:bpx.x,y:bpx.y,r:4+Math.random()*3,alpha:0.8}); if(trails.length>22)trails.pop(); }
+      const bpx=project(curLat,curLng,z,cLat,cLng);
+      if(!inSummary){trails.unshift({x:bpx.x,y:bpx.y,r:4+Math.random()*3,alpha:0.8});if(trails.length>22)trails.pop();}
       const day=Math.max(1,Math.round(tRoute*totalDays));
 
+      // Draw world map (instant — no network)
       ctx.clearRect(0,0,CW,CH);
-      // Tiles always as background
-      await drawTiles(ctx,z,cLat,cLng);
+      drawWorldMap(ctx,z,cLat,cLng);
 
-      if (!inSummary){
-        // Route overlay phases 1-3
+      if(!inSummary){
         drawOverlay(ctx,interp,t,z,cLat,cLng,pts,ctryList,trails,stats?.totalNM||'0',stats?.totalKM||'0',day,totalDays);
       } else {
-        // Phase 4: full route still visible underneath
         drawOverlay(ctx,interp,1,z,cLat,cLng,pts,ctryList,[],stats?.totalNM||'0',stats?.totalKM||'0',totalDays,totalDays);
-        // Summary card fades in — guaranteed 7s
         drawSummary(ctx,summaryT,stats?.totalNM||'0',stats?.totalKM||'0',totalDays,ctryList);
       }
-
-      // Progress bar: route portion only (so it fills during route, stays full during summary)
       setProgress(Math.min(Math.round(t*100),100));
       frame++;
-      if (frame<=totalFrames){
-        // CRITICAL: wait for next animation frame slot, THEN run next tick.
-        // tick() is async (awaits drawTiles network fetches) — using requestAnimationFrame(tick)
-        // directly would fire the next frame before tiles finish loading, causing race conditions
-        // and blank/blue frames. Instead we manually pace frames after each tick completes.
-        await new Promise(res => { animRef.current = requestAnimationFrame(res); });
-        tick();
-      } else {
-        onDone();
-      }
+      if(frame<=totalFrames){animRef.current=requestAnimationFrame(tick);}
+      else{onDone();}
     };
     tick();
   };
 
-  // ── Load Leaflet ──
-  const loadLeaflet = () => new Promise((res,rej)=>{
-    if (window.L){res();return;}
+  // ── Load Leaflet (for interactive map only) ──
+  const loadLeaflet=()=>new Promise((res,rej)=>{
+    if(window.L){res();return;}
     const link=document.createElement('link');link.rel='stylesheet';link.href='https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';document.head.appendChild(link);
     const s=document.createElement('script');s.src='https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';s.onload=res;s.onerror=rej;document.head.appendChild(s);
   });
 
-  // ── Init Leaflet ──
   useEffect(()=>{
     let mounted=true;
     const init=async()=>{
-      if (!mapDivRef.current||leafletReady.current) return;
+      if(!mapDivRef.current||leafletReady.current) return;
       leafletReady.current=true;
       try{await loadLeaflet();}catch(e){console.error('Leaflet failed',e);return;}
-      if (!mounted||!mapDivRef.current) return;
+      if(!mounted||!mapDivRef.current) return;
       const L=window.L;
       const map=L.map(mapDivRef.current,{zoomControl:true,attributionControl:false,worldCopyJump:true,tap:true,tapTolerance:15}).setView([20,0],2);
       L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',{subdomains:'abcd',maxZoom:18,noWrap:false}).addTo(map);
       mapRef.current=map;
       map.on('click',e=>{
-        if (!mounted) return;
-        const {lat,lng}=e.latlng;
+        if(!mounted) return;
+        const{lat,lng}=e.latlng;
         setPoints(prev=>{
           const n=prev.length;
           return [...prev,{lat:parseFloat(lat.toFixed(5)),lng:parseFloat(lng.toFixed(5)),name:n===0?'Start':`WP${n}`,flag:n===0?'🟢':'⚓',type:n===0?'start':'wp'}];
@@ -863,21 +690,17 @@ function VoyageAnimation({ onClose, portsDb = [] }) {
       });
     };
     init();
-    return ()=>{mounted=false;if(mapRef.current){mapRef.current.remove();mapRef.current=null;leafletReady.current=false;}};
+    return()=>{mounted=false;if(mapRef.current){mapRef.current.remove();mapRef.current=null;leafletReady.current=false;}};
   },[]);
 
-  // ── Sync Leaflet markers + polyline ──
   useEffect(()=>{
     const L=window.L;
-    if (!L||!mapRef.current) return;
+    if(!L||!mapRef.current) return;
     markersRef.current.forEach(m=>m.remove());markersRef.current=[];
-    if (Array.isArray(polylineRef.current)){polylineRef.current.forEach(p=>p.remove());polylineRef.current=[];}
-    if (points.length>=2){
+    if(Array.isArray(polylineRef.current)){polylineRef.current.forEach(p=>p.remove());polylineRef.current=[];}
+    if(points.length>=2){
       const segs=[];let seg=[points[0]];
-      for (let i=1;i<points.length;i++){
-        if (Math.abs(points[i].lng-points[i-1].lng)>180){segs.push(seg);seg=[points[i]];}
-        else seg.push(points[i]);
-      }
+      for(let i=1;i<points.length;i++){if(Math.abs(points[i].lng-points[i-1].lng)>180){segs.push(seg);seg=[points[i]];}else seg.push(points[i]);}
       segs.push(seg);
       polylineRef.current=segs.map(s=>L.polyline(s.map(p=>[p.lat,p.lng]),{color:'#FF3B30',weight:3,opacity:0.85,dashArray:'8,5'}).addTo(mapRef.current));
     }
@@ -893,9 +716,8 @@ function VoyageAnimation({ onClose, portsDb = [] }) {
     setDistStats(points.length>=2?computeStats(points):null);
   },[points]);
 
-  // ── Finish route + auto-detect ──
   const finishRoute=async()=>{
-    if (points.length<2){setStatus('⚠️ Add at least 2 points first');return;}
+    if(points.length<2){setStatus('⚠️ Add at least 2 points first');return;}
     const updated=points.map((p,i)=>i===points.length-1?{...p,flag:'🔴',type:'end',name:p.name==='Start'?'End':p.name}:p);
     setPoints(updated);setRouteFinished(true);
     await detectCountries(updated);
@@ -905,40 +727,33 @@ function VoyageAnimation({ onClose, portsDb = [] }) {
     setRouteFinished(false);setCountries([]);countriesRef.current=[];setStatus('');
   };
   const fitMap=()=>{
-    if (!mapRef.current||points.length===0) return;
-    if (points.length===1){mapRef.current.setView([points[0].lat,points[0].lng],5);return;}
+    if(!mapRef.current||points.length===0) return;
+    if(points.length===1){mapRef.current.setView([points[0].lat,points[0].lng],5);return;}
     mapRef.current.fitBounds(window.L.latLngBounds(points.map(p=>[p.lat,p.lng])),{padding:[40,40],maxZoom:7});
   };
   const clearAll=()=>{
-    if (animRef.current) cancelAnimationFrame(animRef.current);
+    if(animRef.current) cancelAnimationFrame(animRef.current);
     setPoints([]);setCountries([]);countriesRef.current=[];
     setDistStats(null);setProgress(0);setStatus('');
     setPlaying(false);setRecording(false);setShowCanvas(false);setRouteFinished(false);
   };
   const startAnimation=async()=>{
     const pts=pointsRef.current;
-    if (pts.length<2){setStatus('⚠️ Add at least 2 points');return;}
+    if(pts.length<2){setStatus('⚠️ Add at least 2 points');return;}
     const interp=buildInterp(pts),stats=computeStats(pts),fitResult=autoFit(pts);
-    setStatus('🗺 Loading map tiles…');
-    // Prewarm tiles at departure zoom so first frames render immediately
-    const startZoom=getZoomState(0,interp,pts,fitResult);
-    await prewarmTiles(startZoom.z,startZoom.cLat,startZoom.cLng);
     setShowCanvas(true);setPlaying(true);setProgress(0);setStatus('');
     runAnimation(canvasRef.current,interp,pts,countriesRef.current,stats,fitResult,videoSecsRef.current,()=>{
       setPlaying(false);setStatus('✅ Preview done! Click ⏺ Record to export.');
     });
   };
   const stopAnimation=()=>{
-    if (animRef.current) cancelAnimationFrame(animRef.current);
+    if(animRef.current) cancelAnimationFrame(animRef.current);
     setPlaying(false);setShowCanvas(false);setProgress(0);
   };
   const startRecording=async()=>{
     const pts=pointsRef.current;
-    if (pts.length<2){setStatus('⚠️ Add at least 2 points');return;}
+    if(pts.length<2){setStatus('⚠️ Add at least 2 points');return;}
     const interp=buildInterp(pts),stats=computeStats(pts),fitResult=autoFit(pts);
-    setStatus('🗺 Preparing map tiles…');
-    const startZoom=getZoomState(0,interp,pts,fitResult);
-    await prewarmTiles(startZoom.z,startZoom.cLat,startZoom.cLng);
     const canvas=canvasRef.current;if(!canvas)return;
     chunksRef.current=[];
     const stream=canvas.captureStream(30);
@@ -957,8 +772,8 @@ function VoyageAnimation({ onClose, portsDb = [] }) {
     runAnimation(canvas,interp,pts,countriesRef.current,stats,fitResult,videoSecsRef.current,()=>{setTimeout(()=>mr.stop(),300);});
   };
   const stopRecording=()=>{
-    if (animRef.current) cancelAnimationFrame(animRef.current);
-    if (recorderRef.current?.state==='recording') recorderRef.current.stop();
+    if(animRef.current) cancelAnimationFrame(animRef.current);
+    if(recorderRef.current?.state==='recording') recorderRef.current.stop();
     else{setRecording(false);setShowCanvas(false);}
   };
   useEffect(()=>()=>{if(animRef.current)cancelAnimationFrame(animRef.current);},[]);
@@ -972,20 +787,17 @@ function VoyageAnimation({ onClose, portsDb = [] }) {
       <div style={{background:'#0B1D35',border:'1px solid rgba(0,180,216,0.3)',borderRadius:16,width:'100%',maxWidth:540,overflow:'hidden',display:'flex',flexDirection:'column'}}
         onClick={e=>e.stopPropagation()} onTouchStart={e=>e.stopPropagation()}>
 
-        {/* HEADER */}
         <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'0.7rem 1rem',borderBottom:'1px solid rgba(0,180,216,0.15)',background:'rgba(4,12,26,0.7)',flexShrink:0}}>
           <div>
             <div style={{fontFamily:'Orbitron,monospace',fontSize:'0.8rem',fontWeight:700,color:'#00B4D8'}}>🎬 VOYAGE ANIMATION STUDIO</div>
-            <div style={{fontSize:'0.6rem',color:'rgba(255,255,255,0.32)',marginTop:1}}>Portrait 9:16 · Close Ship Follow · 7s Summary Card</div>
+            <div style={{fontSize:'0.6rem',color:'rgba(255,255,255,0.32)',marginTop:1}}>Portrait 9:16 · Self-Contained Map · 4-Phase · 7s Summary</div>
           </div>
           <button onClick={onClose} style={{background:'none',border:'none',color:'rgba(255,255,255,0.4)',fontSize:'1.4rem',cursor:'pointer',padding:'4px 8px'}}>✕</button>
         </div>
 
-        {/* MAP / CANVAS — full width */}
         <div style={{position:'relative',width:'100%',height:340,flexShrink:0,background:'#040C1A'}}>
           <div ref={mapDivRef} style={{position:'absolute',inset:0,display:showCanvas?'none':'block'}}/>
-          <canvas ref={canvasRef} width={CW} height={CH}
-            style={{position:'absolute',inset:0,width:'100%',height:'100%',display:showCanvas?'block':'none',objectFit:'cover'}}/>
+          <canvas ref={canvasRef} width={CW} height={CH} style={{position:'absolute',inset:0,width:'100%',height:'100%',display:showCanvas?'block':'none',objectFit:'cover'}}/>
           {!mapRef.current&&!showCanvas&&(
             <div style={{position:'absolute',inset:0,display:'flex',alignItems:'center',justifyContent:'center',background:'#040C1A',color:'rgba(0,180,216,0.6)',fontSize:'0.72rem',flexDirection:'column',gap:8}}>
               <div style={{width:20,height:20,border:'2px solid rgba(0,180,216,0.2)',borderTopColor:'#00B4D8',borderRadius:'50%',animation:'spin 0.8s linear infinite'}}/>
@@ -1004,11 +816,9 @@ function VoyageAnimation({ onClose, portsDb = [] }) {
           )}
         </div>
 
-        {/* CONTROLS */}
         <div style={{overflowY:'auto',maxHeight:'62vh',display:'flex',flexDirection:'column',gap:'0.6rem',padding:'0.8rem'}}
           onTouchStart={e=>e.stopPropagation()} onTouchMove={e=>e.stopPropagation()}>
 
-          {/* Route points */}
           {points.length>0&&(
             <div style={{background:'rgba(255,255,255,0.03)',border:'1px solid rgba(255,255,255,0.07)',borderRadius:10,padding:'0.7rem'}}>
               <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}}>
@@ -1031,7 +841,6 @@ function VoyageAnimation({ onClose, portsDb = [] }) {
             </div>
           )}
 
-          {/* Finish Route */}
           {points.length>=2&&!routeFinished&&!playing&&!recording&&!detectingCtry&&(
             <button onClick={finishRoute} style={{width:'100%',padding:'12px',borderRadius:10,background:'linear-gradient(135deg,#00C896,#00a87a)',color:'#000',border:'none',fontWeight:700,fontSize:'0.82rem',cursor:'pointer'}}>
               ✅ Finish Route + Auto-Detect Countries 🌍
@@ -1051,8 +860,6 @@ function VoyageAnimation({ onClose, portsDb = [] }) {
               <button onClick={unfinishRoute} style={{padding:'8px 12px',borderRadius:10,background:'rgba(255,255,255,0.05)',border:'1px solid rgba(255,255,255,0.1)',color:'rgba(255,255,255,0.4)',fontSize:'0.7rem',cursor:'pointer'}}>✏️ Edit</button>
             </div>
           )}
-
-          {/* Countries */}
           {countries.length>0&&(
             <div style={{display:'flex',flexWrap:'wrap',gap:5}}>
               {countries.map((c,i)=>(
@@ -1060,8 +867,6 @@ function VoyageAnimation({ onClose, portsDb = [] }) {
               ))}
             </div>
           )}
-
-          {/* Distance */}
           {distStats&&(
             <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
               <div style={{background:'rgba(0,200,150,0.07)',border:'1px solid rgba(0,200,150,0.18)',borderRadius:10,padding:'0.65rem',textAlign:'center'}}>
@@ -1074,8 +879,6 @@ function VoyageAnimation({ onClose, portsDb = [] }) {
               </div>
             </div>
           )}
-
-          {/* Video length */}
           <div>
             <div style={{fontSize:'0.6rem',color:'rgba(255,255,255,0.38)',marginBottom:7,textTransform:'uppercase',letterSpacing:'0.08em'}}>Video Length</div>
             <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:6}}>
@@ -1087,8 +890,6 @@ function VoyageAnimation({ onClose, portsDb = [] }) {
               ))}
             </div>
           </div>
-
-          {/* 4-phase legend */}
           <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr 1fr',gap:4}}>
             {[['🔍','Depart','0–10%','#00B4D8'],['🚢','Route','10–88%','#00C896'],['🌍','Reveal','88–93%','#F0A500'],['🏆','Summary','7 secs','#FFD166']].map(([icon,label,pct,col])=>(
               <div key={label} style={{background:`${col}0f`,border:`1px solid ${col}28`,borderRadius:8,padding:'6px 4px',textAlign:'center'}}>
@@ -1098,33 +899,22 @@ function VoyageAnimation({ onClose, portsDb = [] }) {
               </div>
             ))}
           </div>
-
-          {/* Buttons */}
           {!playing&&!recording&&(
             <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
-              <button onClick={startAnimation} disabled={!canAnimate}
-                style={{padding:'12px',borderRadius:10,background:canAnimate?'linear-gradient(135deg,#00B4D8,#1565C0)':'rgba(255,255,255,0.05)',color:canAnimate?'#fff':'rgba(255,255,255,0.2)',border:'none',fontWeight:700,fontSize:'0.78rem',cursor:canAnimate?'pointer':'not-allowed'}}>
-                ▶ Preview
-              </button>
-              <button onClick={startRecording} disabled={!canAnimate}
-                style={{padding:'12px',borderRadius:10,background:canAnimate?'linear-gradient(135deg,#FF3B30,#FF9500)':'rgba(255,255,255,0.05)',color:canAnimate?'#fff':'rgba(255,255,255,0.2)',border:'none',fontWeight:700,fontSize:'0.78rem',cursor:canAnimate?'pointer':'not-allowed'}}>
-                ⏺ Record .webm
-              </button>
+              <button onClick={startAnimation} disabled={!canAnimate} style={{padding:'12px',borderRadius:10,background:canAnimate?'linear-gradient(135deg,#00B4D8,#1565C0)':'rgba(255,255,255,0.05)',color:canAnimate?'#fff':'rgba(255,255,255,0.2)',border:'none',fontWeight:700,fontSize:'0.78rem',cursor:canAnimate?'pointer':'not-allowed'}}>▶ Preview</button>
+              <button onClick={startRecording} disabled={!canAnimate} style={{padding:'12px',borderRadius:10,background:canAnimate?'linear-gradient(135deg,#FF3B30,#FF9500)':'rgba(255,255,255,0.05)',color:canAnimate?'#fff':'rgba(255,255,255,0.2)',border:'none',fontWeight:700,fontSize:'0.78rem',cursor:canAnimate?'pointer':'not-allowed'}}>⏺ Record .webm</button>
             </div>
           )}
           {playing&&<button onClick={stopAnimation} style={{width:'100%',padding:'12px',borderRadius:10,background:'rgba(255,71,87,0.12)',color:'#ff4757',border:'1px solid rgba(255,71,87,0.3)',fontWeight:700,fontSize:'0.78rem',cursor:'pointer'}}>⏹ Stop Preview</button>}
           {recording&&<button onClick={stopRecording} style={{width:'100%',padding:'12px',borderRadius:10,background:'rgba(255,165,0,0.12)',color:'#ffa502',border:'1px solid rgba(255,165,0,0.3)',fontWeight:700,fontSize:'0.78rem',cursor:'pointer'}}>⏹ Stop Recording</button>}
-
           {status&&<div style={{fontSize:'0.72rem',padding:'9px 12px',borderRadius:9,lineHeight:1.5,background:'rgba(0,0,0,0.3)',color:status.startsWith('✅')?'#00C896':status.startsWith('⚠️')?'#FF9500':status.startsWith('🔴')?'#FF3B30':'rgba(255,255,255,0.6)'}}>{status}</div>}
-
           <div style={{fontSize:'0.62rem',color:'rgba(255,255,255,0.26)',lineHeight:1.7,background:'rgba(255,255,255,0.02)',borderRadius:9,padding:'8px 11px',border:'1px solid rgba(255,255,255,0.05)'}}>
             💡 <strong style={{color:'rgba(255,255,255,0.45)'}}>How to use:</strong><br/>
             1. Click map to add waypoints<br/>
             2. Tap <strong style={{color:'#00C896'}}>✅ Finish Route</strong> → countries auto-detected<br/>
             3. Pick length → Preview or Record<br/>
-            4. Video ends with Instagram summary card 🏆
+            4. Video ends with 7s Instagram summary card 🏆
           </div>
-
         </div>
       </div>
     </div>
