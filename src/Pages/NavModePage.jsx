@@ -373,10 +373,11 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
         setAisTargets(prev=>({...prev,[target.mmsi]:{
           mmsi:target.mmsi,lat:target.lat,lon:target.lon,
           cog:target.cog||0,sog:target.sog||0,hdg:target.hdg||target.cog||0,
-          name:target.name||'',callsign:target.callsign||'',
+          name:target.name||'',callsign:target.callSign||'',
           shipType:target.shipType||target.type||'',imo:target.imo||'',
-          length:target.length||target.dim_a||0,beam:target.beam||target.dim_c||0,
-          draught:target.draught||0,destination:target.destination||'',
+          length:(target.dimA||target.dimB)?(target.dimA||0)+(target.dimB||0):(target.length||0),
+          beam:(target.dimC||target.dimD)?(target.dimC||0)+(target.dimD||0):(target.beam||0),
+          draught:target.draught||0,destination:target.dest||target.destination||'',
           navStatus:target.navStatus||target.status||'',rot:target.rot||0,
           ts:Date.now()
         }}));
