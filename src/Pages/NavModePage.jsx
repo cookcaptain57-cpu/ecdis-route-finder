@@ -392,7 +392,9 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
               length:(target.dimA||target.dimB)?(target.dimA||0)+(target.dimB||0):'',
               beam:(target.dimC||target.dimD)?(target.dimC||0)+(target.dimD||0):'',
             }),
-          }).catch(()=>{});
+          }),
+        }).then(r=>r.text()).then(t=>notify(`AIS collect: ${t.slice(0,80)}`,'error'))
+          .catch(e=>notify(`AIS collect failed: ${e.message}`,'error'));
         }
         setLocalAisCount(targets?.size||0);
       });
