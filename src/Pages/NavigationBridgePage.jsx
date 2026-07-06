@@ -1720,22 +1720,341 @@ function renderPanel(id) {
 // ─────────────────────────────────────────────────────────────────────────────
 // MAIN PAGE
 // ─────────────────────────────────────────────────────────────────────────────
-// ─────────────────────────────────────────────────────────────────────────────
 // SHIP WEATHER ROUTING MAP
-// Leaflet map loaded via CDN script — self-contained, no imports needed
-// Features: live GPS ship icon, COG/SOG auto-track, dead reckoning predictions,
-//           RTZ/RT3/XML/GPX route file upload, weather fetch at each point,
-//           wind & swell arrows, click popups with full weather data
+// Uses iframe + srcDoc with self-contained Leaflet HTML — no CDN timing issues
+// Features: live GPS ship icon, COG/SOG 5-fix averaging, dead reckoning +1..+12h,
+//           RTZ/RT3/XML/GPX route file upload, weather at each point, wind/swell arrows
 // ─────────────────────────────────────────────────────────────────────────────
 function ShipWeatherMapPanel() {
-  const mapRef       = useRef(null);   // DOM node
-  const leafletRef   = useRef(null);   // L instance
-  const mapObjRef    = useRef(null);   // map object
-  const shipMarkerRef= useRef(null);
-  const drLayerRef   = useRef(null);
-  const wpLayerRef   = useRef(null);
+  const [shipPos,    setShipPos]    = useState(null);
+  const [cog,        setCog]        = useState(null);
+  const [sog,        setSog]        = useState(null);
+  const [tracking,   setTracking]   = useState(false);
+  const [trackStatus,setTrackStatus]= useState('');
+  const [trackErr,   setTrackErr]   = useState('');
+  const [waypoints,  setWaypoints]  = useState([]);
+  const [manLat,     setManLat]     = useState('');
+  const [manLon,     setManLon]     = useState('');
+  const [manName,    setManName]    = useState('');
+  const [drData,     setDrData]     = useState([]);
+  const [wxLoading,  setWxLoading]  = useState(false);
+  const [fileErr,    setFileErr]    = useState('');
+  const [routeName,  setRouteName]  = useState('');
+  const [mapHtml,    setMapHtml]    = useState('');
   const watchIdRef   = useRef(null);
-  const firstFixRef  = useRef(null);
+  const fixesRef     = useRef([]);
+  const { gpsLoading, gpsErr, getGPS } = useGPS();
+
+  const dirLabel = (deg) => {
+    if (deg == null) return '—';
+    const dirs = ['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'];
+    return dirs[Math.round(deg / 22.5) % 16];
+  };
+
+  // ── Great-circle dead reckoning ──
+  const drProject = (lat, lon, bearingDeg, distNm) => {
+    const R=3440.065, d=distNm/R, brng=bearingDeg*Math.PI/180;
+    const lat1=lat*Math.PI/180, lon1=lon*Math.PI/180;
+    const lat2=Math.asin(Math.sin(lat1)*Math.cos(d)+Math.cos(lat1)*Math.sin(d)*Math.cos(brng));
+    const lon2=lon1+Math.atan2(Math.sin(brng)*Math.sin(d)*Math.cos(lat1),Math.cos(d)-Math.sin(lat1)*Math.sin(lat2));
+    return { lat:lat2*180/Math.PI, lon:((lon2*180/Math.PI)+540)%360-180 };
+  };
+
+  // ── Build self-contained Leaflet HTML for iframe ──
+  const buildMapHtml = (ship, wpList, drList, cogDeg) => {
+    const center  = ship ? [ship.lat, ship.lon] : (wpList.length > 0 ? [wpList[0].lat, wpList[0].lon] : [15, 80]);
+    const zoom    = ship ? 6 : 4;
+    const wpJson  = JSON.stringify(wpList);
+    const drJson  = JSON.stringify(drList);
+    const cogRot  = cogDeg || 0;
+    return `<!DOCTYPE html><html><head>
+<meta charset="utf-8"/>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>html,body,#map{margin:0;padding:0;width:100%;height:100%;background:#0a1628;}
+.wp-label{background:#4a9ef5;color:#fff;font-size:9px;padding:2px 5px;border-radius:3px;font-family:monospace;white-space:nowrap;border:1px solid #fff;}
+.dr-label{background:rgba(0,0,0,0.8);border:1.5px solid #ffcc00;color:#ffcc00;font-size:9px;padding:2px 5px;border-radius:10px;font-family:monospace;white-space:nowrap;}
+</style></head><body>
+<div id="map"></div>
+<script>
+var map=L.map('map',{zoomControl:true,attributionControl:false}).setView(${JSON.stringify(center)},${zoom});
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{maxZoom:18}).addTo(map);
+var ship=${ship ? JSON.stringify(ship) : 'null'};
+var wpts=${wpJson};
+var drs=${drJson};
+var cogRot=${cogRot};
+function dirLabel(d){if(d==null)return'—';var dirs=['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'];return dirs[Math.round(d/22.5)%16];}
+// Ship marker
+if(ship){
+  var shipIcon=L.divIcon({html:'<div style="transform:rotate('+cogRot+'deg);font-size:30px;line-height:1;filter:drop-shadow(0 0 6px #00ffcc)">🚢</div><div style="position:absolute;top:-16px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.8);color:#00ffcc;font-size:9px;padding:1px 5px;border-radius:3px;white-space:nowrap;font-family:monospace">'+
+  (${cog!=null?`'COG:'+cogRot+'° SOG:'+(${JSON.stringify(sog)}||'—')+'kn'`:"'Live Position'"})+'</div>',iconSize:[40,40],iconAnchor:[20,20],className:''});
+  var sm=L.marker([ship.lat,ship.lon],{icon:shipIcon,zIndexOffset:1000}).addTo(map);
+  ${drData.length > 0 && drData[0]?.wx ? `sm.bindPopup('<b>Current Position</b><br/>See weather panel below').openPopup();` : ''}
+}
+// Waypoints
+if(wpts.length>0){
+  var lls=wpts.map(function(w){return[w.lat,w.lon];});
+  L.polyline(lls,{color:'#4a9ef5',weight:2.5,dashArray:'6,4',opacity:0.9}).addTo(map);
+  wpts.forEach(function(w,i){
+    var ic=L.divIcon({html:'<div class="wp-label">'+(i+1)+'. '+w.name+'</div>',className:'',iconAnchor:[0,10]});
+    L.marker([w.lat,w.lon],{icon:ic}).bindPopup('<b>WP'+(i+1)+': '+w.name+'</b><br/>'+w.lat.toFixed(5)+'°, '+w.lon.toFixed(5)+'°',{maxWidth:200}).addTo(map);
+  });
+}
+// Dead reckoning
+if(drs.length>0 && ship){
+  var drLls=[[ship.lat,ship.lon]].concat(drs.map(function(r){return[r.lat,r.lon];}));
+  L.polyline(drLls,{color:'#ffcc00',weight:2,dashArray:'4,6',opacity:0.8}).addTo(map);
+  drs.forEach(function(r){
+    if(r.wx&&r.wx.windDir!=null){
+      var rad=(r.wx.windDir||0)*Math.PI/180;
+      var x2=(20+16*Math.sin(rad)).toFixed(1),y2=(20-16*Math.cos(rad)).toFixed(1);
+      var svg='<svg width="40" height="40" xmlns="http://www.w3.org/2000/svg"><defs><marker id="a" markerWidth="6" markerHeight="6" refX="3" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#ffcc00"/></marker></defs><circle cx="20" cy="20" r="2" fill="#ffcc00"/><line x1="20" y1="20" x2="'+x2+'" y2="'+y2+'" stroke="#ffcc00" stroke-width="2" marker-end="url(#a)"/></svg>';
+      var ai=L.divIcon({html:svg,className:'',iconSize:[40,40],iconAnchor:[20,20]});
+      L.marker([r.lat,r.lon],{icon:ai}).addTo(map);
+    }
+    var popup='<div style="font-family:monospace;font-size:11px;min-width:180px;line-height:1.8"><b style="color:#1a5a90">DR +'+r.h+'h</b><br/><span style="color:#555">'+r.eta+'</span><hr style="margin:3px 0"/>'+
+    (r.wx?'🌡️ '+( r.wx.temp!=null?r.wx.temp+'°C':'—')+'<br/>💨 '+(r.wx.windSpd!=null?r.wx.windSpd+' kn':'—')+' from '+(r.wx.windDir!=null?r.wx.windDir+'° ('+dirLabel(r.wx.windDir)+')':'—')+'<br/>💨 Gusts: '+(r.wx.windGust!=null?r.wx.windGust+' kn':'—')+'<br/>🌊 Wave: '+(r.wx.waveHt!=null?r.wx.waveHt+' m':'—')+' from '+(r.wx.waveDir!=null?r.wx.waveDir+'° ('+dirLabel(r.wx.waveDir)+')':'—')+'<br/>🌀 Swell: '+(r.wx.swellHt!=null?r.wx.swellHt+' m':'—')+' from '+(r.wx.swellDir!=null?r.wx.swellDir+'° ('+dirLabel(r.wx.swellDir)+')':'—')+'<br/>📊 '+(r.wx.pressure!=null?r.wx.pressure+' hPa':'—'):'Weather unavailable')+'</div>';
+    var ic=L.divIcon({html:'<div class="dr-label">+'+r.h+'h '+(r.wx&&r.wx.windSpd!=null?'💨'+r.wx.windSpd+'kn':'')+(r.wx&&r.wx.waveHt!=null?' 🌊'+r.wx.waveHt+'m':'')+'</div>',className:'',iconAnchor:[0,12]});
+    L.marker([r.lat,r.lon],{icon:ic,zIndexOffset:500}).bindPopup(popup,{maxWidth:260}).addTo(map);
+  });
+}
+// Fit all
+var allPts=[];
+if(ship)allPts.push([ship.lat,ship.lon]);
+wpts.forEach(function(w){allPts.push([w.lat,w.lon]);});
+drs.forEach(function(r){allPts.push([r.lat,r.lon]);});
+if(allPts.length>1)map.fitBounds(L.latLngBounds(allPts).pad(0.15));
+</script></body></html>`;
+  };
+
+  // ── Regenerate iframe HTML whenever data changes ──
+  useEffect(() => {
+    setMapHtml(buildMapHtml(shipPos, waypoints, drData, cog));
+  }, [shipPos, waypoints, drData, cog, sog]);
+
+  // ── Cleanup GPS watch on unmount ──
+  useEffect(() => {
+    return () => { if (watchIdRef.current!=null) { navigator.geolocation.clearWatch(watchIdRef.current); watchIdRef.current=null; } };
+  }, []);
+
+  // ── Parse RTZ / RT3 / XML / GPX route files ──
+  const parseRouteFile = (file) => {
+    setFileErr('');
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const text = e.target.result;
+        const parser = new DOMParser();
+        const xml = parser.parseFromString(text, 'application/xml');
+        if (xml.querySelector('parsererror')) throw new Error('Invalid XML file');
+        let wpts = [];
+        const rName = xml.querySelector('route')?.getAttribute('name') || xml.querySelector('Route')?.getAttribute('Name') || file.name.replace(/\.(rtz|rt3|xml|gpx)$/i,'');
+        setRouteName(rName || file.name);
+        const rtzWpts = xml.querySelectorAll('Waypoint, waypoint');
+        if (rtzWpts.length > 0) {
+          rtzWpts.forEach((wp,i) => {
+            const pos = wp.querySelector('Position, position');
+            const lat = parseFloat(pos?.getAttribute('lat')||pos?.getAttribute('Lat')||'');
+            const lon = parseFloat(pos?.getAttribute('lon')||pos?.getAttribute('Lon')||pos?.getAttribute('lng')||'');
+            const name = wp.getAttribute('name')||wp.getAttribute('Name')||wp.getAttribute('id')||`WP${String(i+1).padStart(3,'0')}`;
+            if (!isNaN(lat)&&!isNaN(lon)) wpts.push({name,lat,lon});
+          });
+        }
+        if (wpts.length === 0) {
+          xml.querySelectorAll('wpt,rtept,trkpt').forEach((wp,i) => {
+            const lat=parseFloat(wp.getAttribute('lat')||''), lon=parseFloat(wp.getAttribute('lon')||'');
+            const name=wp.querySelector('name')?.textContent?.trim()||`WP${String(i+1).padStart(3,'0')}`;
+            if (!isNaN(lat)&&!isNaN(lon)) wpts.push({name,lat,lon});
+          });
+        }
+        if (wpts.length === 0) throw new Error('No waypoints found. Supported: RTZ, RT3, GPX, XML with lat/lon attributes.');
+        setWaypoints(wpts);
+      } catch(err) { setFileErr(`Parse error: ${err.message}`); }
+    };
+    reader.onerror = () => setFileErr('Failed to read file.');
+    reader.readAsText(file);
+  };
+
+  // ── Fetch weather for a lat/lon ──
+  const fetchWx = async (lat, lon) => {
+    try {
+      const [wRes,mRes] = await Promise.all([
+        fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat.toFixed(4)}&longitude=${lon.toFixed(4)}&current=temperature_2m,wind_speed_10m,wind_direction_10m,wind_gusts_10m,weather_code,pressure_msl,precipitation&wind_speed_unit=kn&timezone=auto`),
+        fetch(`https://marine-api.open-meteo.com/v1/marine?latitude=${lat.toFixed(4)}&longitude=${lon.toFixed(4)}&current=wave_height,wave_direction,swell_wave_height,swell_wave_direction&timezone=auto`),
+      ]);
+      const wj=await wRes.json(), mj=await mRes.json();
+      const c=wj.current||{}, m=(!mj.error&&mj.current)||{};
+      return { windSpd:c.wind_speed_10m, windDir:c.wind_direction_10m, windGust:c.wind_gusts_10m, pressure:c.pressure_msl, temp:c.temperature_2m, precip:c.precipitation, waveHt:m.wave_height, waveDir:m.wave_direction, swellHt:m.swell_wave_height, swellDir:m.swell_wave_direction };
+    } catch { return null; }
+  };
+
+  // ── Build dead reckoning + fetch weather at each point ──
+  const buildDR = async () => {
+    if (!shipPos||cog==null||sog==null) return;
+    setWxLoading(true); setDrData([]);
+    const hours=[1,2,4,6,8,10,12];
+    const results=[];
+    for (const h of hours) {
+      const pos=drProject(shipPos.lat,shipPos.lon,cog,sog*h);
+      const wx=await fetchWx(pos.lat,pos.lon);
+      const etaTime=new Date(Date.now()+h*3600000);
+      results.push({ h, lat:pos.lat, lon:pos.lon, wx, eta:etaTime.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})+' '+etaTime.toLocaleDateString() });
+    }
+    setDrData(results);
+    setWxLoading(false);
+  };
+
+  // ── Auto COG/SOG — 5 GPS fixes averaged over ~30s ──
+  const trackCogSog = () => {
+    if (!navigator.geolocation) { setTrackErr('GPS not supported.'); return; }
+    setTracking(true); setTrackErr(''); setTrackStatus('Starting — move device outdoors for best accuracy…');
+    setCog(null); setSog(null); fixesRef.current=[];
+    const onFix=(pos)=>{
+      if (pos.coords.accuracy>30) { setTrackStatus(`Fix ${fixesRef.current.length}/5 — accuracy ${pos.coords.accuracy.toFixed(0)}m too poor, waiting…`); return; }
+      setShipPos({lat:pos.coords.latitude,lon:pos.coords.longitude});
+      const fixes=fixesRef.current;
+      if (fixes.length>0&&(pos.timestamp-fixes[fixes.length-1].t)<2000) return;
+      fixes.push({lat:pos.coords.latitude,lon:pos.coords.longitude,t:pos.timestamp,acc:pos.coords.accuracy});
+      setTrackStatus(`Fix ${fixes.length}/5 — accuracy ${pos.coords.accuracy.toFixed(0)}m ✓`);
+      if (fixes.length<5) return;
+      const first=fixes[0],last=fixes[fixes.length-1];
+      const dtSec=(last.t-first.t)/1000;
+      const toRad=d=>d*Math.PI/180,R=6371000;
+      const dLat=toRad(last.lat-first.lat),dLon=toRad(last.lon-first.lon);
+      const a=Math.sin(dLat/2)**2+Math.cos(toRad(first.lat))*Math.cos(toRad(last.lat))*Math.sin(dLon/2)**2;
+      const distM=R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+      if (distM<10){setTrackErr('Less than 10m displacement — vessel stationary or GPS insufficient.');setTracking(false);setTrackStatus('');navigator.geolocation.clearWatch(watchIdRef.current);watchIdRef.current=null;return;}
+      let sinSum=0,cosSum=0;
+      for(let i=1;i<fixes.length;i++){const p=fixes[i-1],c=fixes[i];const dlo=toRad(c.lon-p.lon);const y=Math.sin(dlo)*Math.cos(toRad(c.lat));const x=Math.cos(toRad(p.lat))*Math.sin(toRad(c.lat))-Math.sin(toRad(p.lat))*Math.cos(toRad(c.lat))*Math.cos(dlo);sinSum+=Math.sin(Math.atan2(y,x));cosSum+=Math.cos(Math.atan2(y,x));}
+      const avgBrng=((Math.atan2(sinSum,cosSum)*180/Math.PI)+360)%360;
+      const speedKn=(distM/dtSec)*1.94384;
+      setCog(Math.round(avgBrng)); setSog(Math.round(speedKn*10)/10);
+      setTracking(false);
+      setTrackStatus(`✅ COG ${Math.round(avgBrng)}° · SOG ${(Math.round(speedKn*10)/10)} kn · from ${fixes.length} fixes over ${dtSec.toFixed(0)}s`);
+      navigator.geolocation.clearWatch(watchIdRef.current); watchIdRef.current=null; fixesRef.current=[];
+    };
+    const onErr=(e)=>{setTrackErr(e.code===1?'Permission denied.':e.code===2?'Position unavailable.':'Timed out.');setTracking(false);setTrackStatus('');};
+    watchIdRef.current=navigator.geolocation.watchPosition(onFix,onErr,{enableHighAccuracy:true,maximumAge:0,timeout:30000});
+    setTimeout(()=>{if(watchIdRef.current!=null){navigator.geolocation.clearWatch(watchIdRef.current);watchIdRef.current=null;if(fixesRef.current.length<5){setTracking(false);setTrackErr(`Only ${fixesRef.current.length}/5 fixes obtained. Try again in open sky.`);setTrackStatus();}}},60000);
+  };
+
+  const addManualWP=()=>{
+    const lat=parseFloat(manLat),lon=parseFloat(manLon);
+    if(isNaN(lat)||isNaN(lon)||Math.abs(lat)>90||Math.abs(lon)>180)return;
+    setWaypoints(w=>[...w,{name:manName||`WP${w.length+1}`,lat,lon}]);
+    setManLat('');setManLon('');setManName('');
+  };
+
+  return (
+    <div>
+      <div style={S.info}>Upload your ECDIS route file (RTZ / RT3 / XML / GPX) to plot waypoints on the map. Use live GPS to place ship. Auto-detect COG/SOG from 5 GPS fixes for accurate dead reckoning predictions.</div>
+
+      {/* Controls */}
+      <div style={{display:'flex',gap:8,flexWrap:'wrap',marginBottom:12,alignItems:'flex-end'}}>
+        <button style={{...S.btnGps,background:gpsLoading?'rgba(40,120,60,0.4)':'linear-gradient(135deg,#1a6a3a,#0d4a2a)'}}
+          onClick={()=>getGPS((la,lo)=>setShipPos({lat:parseFloat(la),lon:parseFloat(lo)}))} disabled={gpsLoading}>
+          {gpsLoading?'⏳ Getting GPS…':'📍 Set Ship Position (GPS)'}
+        </button>
+        <button style={{...S.btnGps,background:tracking?'rgba(40,120,60,0.4)':'linear-gradient(135deg,#1a4a8a,#0d2a6a)',borderColor:'#3a70d0',color:'#90c8f8'}}
+          onClick={trackCogSog} disabled={tracking}>
+          {tracking?`📡 ${trackStatus||'Collecting fixes…'}`:'🎯 Auto-Detect COG/SOG (5 fixes)'}
+        </button>
+        <label style={{...S.btnGps,background:'linear-gradient(135deg,#4a1a8a,#2a0a6a)',borderColor:'#8a50d0',color:'#c090f8',cursor:'pointer'}}>
+          📂 Upload Route File
+          <input type="file" accept=".rtz,.rt3,.xml,.gpx" style={{display:'none'}} onChange={e=>{if(e.target.files[0])parseRouteFile(e.target.files[0]);}}/>
+        </label>
+        {shipPos&&cog!=null&&sog!=null&&(
+          <button style={{...S.btn,marginTop:0,background:'linear-gradient(135deg,#8a5a00,#6a3a00)',borderColor:'#e8a840',color:'#ffd080'}}
+            onClick={buildDR} disabled={wxLoading}>
+            {wxLoading?'⏳ Fetching weather…':'🗺️ Build DR + Fetch Weather'}
+          </button>
+        )}
+      </div>
+
+      {/* Status */}
+      <div style={{display:'flex',gap:8,flexWrap:'wrap',marginBottom:8,fontSize:11}}>
+        {shipPos&&<span style={S.badge('#40c880')}>📍 {shipPos.lat.toFixed(4)}°, {shipPos.lon.toFixed(4)}°</span>}
+        {cog!=null&&<span style={S.badge('#ffd040')}>COG {cog}° ({dirLabel(cog)})</span>}
+        {sog!=null&&<span style={S.badge('#ffd040')}>SOG {sog} kn</span>}
+        {routeName&&<span style={S.badge('#c090f8')}>📋 {routeName} — {waypoints.length} wpts</span>}
+      </div>
+      {trackStatus&&!tracking&&<div style={{...S.info,marginBottom:8,fontSize:10}}>{trackStatus}</div>}
+      {gpsErr&&<div style={S.error}>{gpsErr}</div>}
+      {trackErr&&<div style={S.error}>{trackErr}</div>}
+      {fileErr&&<div style={S.error}>{fileErr}</div>}
+
+      {/* Manual waypoint entry */}
+      <div style={{background:'rgba(10,30,60,0.4)',border:'1px solid #1a3a60',borderRadius:8,padding:10,marginBottom:12}}>
+        <div style={{fontSize:11,color:'#7eb8d8',marginBottom:8,fontWeight:700}}>➕ Add Manual Waypoint</div>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr auto',gap:8,alignItems:'flex-end'}}>
+          <div><label style={S.label}>Name</label><input style={S.input} value={manName} onChange={e=>setManName(e.target.value)} placeholder="WP001"/></div>
+          <div><label style={S.label}>Latitude</label><input style={S.input} value={manLat} onChange={e=>setManLat(e.target.value)} placeholder="1.2900"/></div>
+          <div><label style={S.label}>Longitude</label><input style={S.input} value={manLon} onChange={e=>setManLon(e.target.value)} placeholder="103.8500"/></div>
+          <button style={{...S.btn,marginTop:0,padding:'8px 12px'}} onClick={addManualWP}>Add</button>
+        </div>
+        {waypoints.length>0&&(
+          <div style={{marginTop:8,display:'flex',gap:6,flexWrap:'wrap',alignItems:'center'}}>
+            <span style={{fontSize:10,color:'#4a7a9b'}}>{waypoints.length} waypoints:</span>
+            {waypoints.slice(0,5).map((w,i)=><span key={i} style={S.tag}>{i+1}. {w.name}</span>)}
+            {waypoints.length>5&&<span style={{fontSize:10,color:'#4a7a9b'}}>+{waypoints.length-5} more</span>}
+            <button style={{...S.btnSm,marginLeft:'auto'}} onClick={()=>{setWaypoints([]);setRouteName('');}}>Clear All</button>
+          </div>
+        )}
+      </div>
+
+      {/* Map iframe — always rendered, no timing issues */}
+      <div style={{borderRadius:10,overflow:'hidden',border:'1.5px solid #1e4070',marginBottom:12}}>
+        {mapHtml ? (
+          <iframe
+            key={mapHtml}
+            srcDoc={mapHtml}
+            style={{width:'100%',height:480,border:'none',display:'block'}}
+            title="Ship Weather Routing Map"
+            sandbox="allow-scripts"
+          />
+        ) : (
+          <div style={{width:'100%',height:480,background:'#0a1628',display:'flex',alignItems:'center',justifyContent:'center',flexDirection:'column',gap:12}}>
+            <div style={{fontSize:32}}>🗺️</div>
+            <div style={{fontSize:12,color:'#4a8ab5',fontFamily:"'Courier New',monospace",textAlign:'center'}}>
+              Map will appear here after setting ship position or adding waypoints.<br/>
+              <span style={{fontSize:10,color:'#2a5a7a'}}>Uses live internet to load map tiles.</span>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* DR table */}
+      {drData.length>0&&(
+        <div style={{marginTop:4}}>
+          <div style={{fontSize:11,color:'#ffd040',fontWeight:700,marginBottom:8,letterSpacing:0.5}}>🗺️ DEAD RECKONING WEATHER PREDICTIONS</div>
+          <div style={{overflowX:'auto'}}>
+            <table style={S.table}>
+              <thead><tr>
+                <th style={S.th}>ETA</th><th style={S.th}>Position</th>
+                <th style={S.th}>💨 Wind</th><th style={S.th}>🌊 Wave</th>
+                <th style={S.th}>🌀 Swell</th><th style={S.th}>📊 Pressure</th><th style={S.th}>🌡️ Temp</th>
+              </tr></thead>
+              <tbody>{drData.map((r,i)=>(
+                <tr key={i}>
+                  <td style={S.td}><b style={{color:'#ffd040'}}>+{r.h}h</b><br/><span style={{fontSize:9,color:'#4a7a9b'}}>{r.eta}</span></td>
+                  <td style={S.td}><code style={{fontSize:9}}>{r.lat.toFixed(3)}°<br/>{r.lon.toFixed(3)}°</code></td>
+                  <td style={S.td}>{r.wx?.windSpd!=null?<><b style={{color:'#e8d040'}}>{r.wx.windSpd}kn</b><br/><span style={{fontSize:9}}>{r.wx.windDir}° {dirLabel(r.wx.windDir)}</span></>:'—'}</td>
+                  <td style={S.td}>{r.wx?.waveHt!=null?<><b>{r.wx.waveHt}m</b><br/><span style={{fontSize:9}}>{r.wx.waveDir}° {dirLabel(r.wx.waveDir)}</span></>:'—'}</td>
+                  <td style={S.td}>{r.wx?.swellHt!=null?<><b>{r.wx.swellHt}m</b><br/><span style={{fontSize:9}}>{r.wx.swellDir}° {dirLabel(r.wx.swellDir)}</span></>:'—'}</td>
+                  <td style={S.td}>{r.wx?.pressure!=null?`${r.wx.pressure} hPa`:'—'}</td>
+                  <td style={S.td}>{r.wx?.temp!=null?`${r.wx.temp}°C`:'—'}</td>
+                </tr>
+              ))}</tbody>
+            </table>
+          </div>
+          <div style={{fontSize:10,color:'#4a7a9b',marginTop:8}}>
+            💡 Click any marker on the map for full weather popup. 🟡 Yellow = DR track. 🔵 Blue = loaded route. Yellow arrows = wind direction at DR position.
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
   const [shipPos,    setShipPos]    = useState(null);  // {lat,lon}
   const [cog,        setCog]        = useState(null);
@@ -1863,392 +2182,6 @@ function ShipWeatherMapPanel() {
     } catch { return null; }
   };
 
-  // ── Build SVG wind arrow (points in wind direction FROM) ──
-  const windArrowSVG = (deg, color='#ffdd00') => {
-    const rad = (deg || 0) * Math.PI / 180;
-    const x2 = 20 + 18 * Math.sin(rad);
-    const y2 = 20 - 18 * Math.cos(rad);
-    return `<svg width="40" height="40" xmlns="http://www.w3.org/2000/svg">
-      <circle cx="20" cy="20" r="3" fill="${color}"/>
-      <line x1="20" y1="20" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="${color}" stroke-width="2.5" marker-end="url(#arr)"/>
-      <defs><marker id="arr" markerWidth="6" markerHeight="6" refX="3" refY="3" orient="auto">
-        <path d="M0,0 L6,3 L0,6 Z" fill="${color}"/>
-      </marker></defs>
-    </svg>`;
-  };
-
-  // ── Popup HTML for a weather point ──
-  const popupHtml = (label, wx, eta) => {
-    if (!wx) return `<div style="font-family:monospace;font-size:11px;color:#333"><b>${label}</b><br/>Weather unavailable</div>`;
-    return `<div style="font-family:monospace;font-size:11px;min-width:200px;line-height:1.8">
-      <b style="color:#1a5a90;font-size:13px">${label}</b>${eta ? `<br/><span style="color:#555">ETA: ${eta}</span>` : ''}
-      <hr style="margin:4px 0;border-color:#ddd"/>
-      🌡️ Temp: <b>${wx.temp != null ? wx.temp+'°C' : '—'}</b><br/>
-      📊 Pressure: <b>${wx.pressure != null ? wx.pressure+' hPa' : '—'}</b><br/>
-      💨 Wind: <b>${wx.windSpd != null ? wx.windSpd+' kn' : '—'}</b> from <b>${wx.windDir != null ? wx.windDir+'° ('+dirLabel(wx.windDir)+')' : '—'}</b><br/>
-      💨 Gusts: <b>${wx.windGust != null ? wx.windGust+' kn' : '—'}</b><br/>
-      🌊 Wave: <b>${wx.waveHt != null ? wx.waveHt+' m' : '—'}</b> from <b>${wx.waveDir != null ? wx.waveDir+'° ('+dirLabel(wx.waveDir)+')' : '—'}</b><br/>
-      🌀 Swell: <b>${wx.swellHt != null ? wx.swellHt+' m' : '—'}</b> from <b>${wx.swellDir != null ? wx.swellDir+'° ('+dirLabel(wx.swellDir)+')' : '—'}</b><br/>
-      🌧️ Precip: <b>${wx.precip != null ? wx.precip+' mm' : '—'}</b>
-    </div>`;
-  };
-
-  // ── Callback ref — fires exactly when DOM node mounts (accordion-safe) ──
-  const mapCallbackRef = useCallback((node) => {
-    if (!node || mapObjRef.current) return;
-    mapRef.current = node;
-
-    const initMap = (L) => {
-      if (mapObjRef.current) return;
-      const map = L.map(node, { zoomControl:true, attributionControl:false }).setView([15, 80], 4);
-      L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { maxZoom:18 }).addTo(map);
-      mapObjRef.current = map;
-      drLayerRef.current = L.layerGroup().addTo(map);
-      wpLayerRef.current = L.layerGroup().addTo(map);
-      leafletRef.current = L;
-      setMapReady(true);
-      // Multiple invalidateSize calls to handle CSS transition timing
-      [100, 300, 600, 1000].forEach(ms =>
-        setTimeout(() => { try { map.invalidateSize(); } catch(e){} }, ms)
-      );
-    };
-
-    if (window.L) {
-      initMap(window.L);
-    } else {
-      if (!document.querySelector('link[href*="leaflet"]')) {
-        const link = document.createElement('link');
-        link.rel = 'stylesheet';
-        link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
-        document.head.appendChild(link);
-      }
-      if (!document.querySelector('script[src*="leaflet"]')) {
-        const script = document.createElement('script');
-        script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
-        script.onload = () => initMap(window.L);
-        script.onerror = () => setTrackErr('Map failed to load. Check internet.');
-        document.head.appendChild(script);
-      } else {
-        // Script tag exists but still loading — poll for window.L
-        const poll = setInterval(() => {
-          if (window.L) { clearInterval(poll); initMap(window.L); }
-        }, 100);
-        setTimeout(() => clearInterval(poll), 10000);
-      }
-    }
-  }, []);
-
-  // ── Cleanup on unmount ──
-  useEffect(() => {
-    return () => {
-      if (watchIdRef.current != null) { navigator.geolocation.clearWatch(watchIdRef.current); watchIdRef.current = null; }
-      if (mapObjRef.current) { try { mapObjRef.current.remove(); } catch(e){} mapObjRef.current = null; shipMarkerRef.current = null; }
-    };
-  }, []);
-
-  // ── Update ship marker when position/COG changes ──
-  useEffect(() => {
-    if (!mapReady || !shipPos || !leafletRef.current) return;
-    const L = leafletRef.current;
-    const map = mapObjRef.current;
-    const cogDeg = cog || 0;
-    const icon = L.divIcon({
-      html: `<div style="transform:rotate(${cogDeg}deg);font-size:28px;line-height:1;filter:drop-shadow(0 0 4px #00ffcc)">🚢</div>
-             <div style="position:absolute;top:-18px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.7);color:#00ffcc;font-size:9px;padding:1px 4px;border-radius:3px;white-space:nowrap;font-family:monospace">
-               ${cog!=null?`COG:${cog}° SOG:${sog}kn`:'Live Position'}
-             </div>`,
-      iconSize: [40,40], iconAnchor: [20,20], className:'',
-    });
-    if (shipMarkerRef.current) {
-      shipMarkerRef.current.setLatLng([shipPos.lat, shipPos.lon]).setIcon(icon);
-    } else {
-      shipMarkerRef.current = L.marker([shipPos.lat, shipPos.lon], { icon, zIndexOffset:1000 }).addTo(map);
-    }
-    map.panTo([shipPos.lat, shipPos.lon]);
-  }, [shipPos, cog, sog, mapReady]);
-
-  // ── Update waypoints layer ──
-  useEffect(() => {
-    if (!mapReady || !leafletRef.current || !wpLayerRef.current) return;
-    const L = leafletRef.current;
-    wpLayerRef.current.clearLayers();
-    if (waypoints.length === 0) return;
-    const latlngs = waypoints.map(w => [w.lat, w.lon]);
-    L.polyline(latlngs, { color:'#4a9ef5', weight:2.5, dashArray:'6,4', opacity:0.9 }).addTo(wpLayerRef.current);
-    waypoints.forEach((wp, i) => {
-      const icon = L.divIcon({
-        html:`<div style="background:#4a9ef5;color:#fff;font-size:9px;padding:2px 5px;border-radius:3px;font-family:monospace;white-space:nowrap;border:1px solid #fff">${i+1}. ${wp.name}</div>`,
-        className:'', iconAnchor:[0,10],
-      });
-      L.marker([wp.lat, wp.lon], { icon })
-        .bindPopup(`<b>WP${i+1}: ${wp.name}</b><br/>Lat: ${wp.lat.toFixed(5)}<br/>Lon: ${wp.lon.toFixed(5)}`, { maxWidth:200 })
-        .addTo(wpLayerRef.current);
-    });
-    // Fit map to show all waypoints + ship
-    const allPoints = [...latlngs, ...(shipPos ? [[shipPos.lat, shipPos.lon]] : [])];
-    if (allPoints.length > 0) mapObjRef.current.fitBounds(L.latLngBounds(allPoints).pad(0.15));
-  }, [waypoints, mapReady]);
-
-  // ── Build dead reckoning predictions + fetch weather at each ──
-  const buildDR = async () => {
-    if (!shipPos || cog == null || sog == null) return;
-    setWxLoading(true);
-    drLayerRef.current?.clearLayers();
-    const L = leafletRef.current;
-    const map = mapObjRef.current;
-    const hours = [1, 2, 4, 6, 8, 10, 12];
-    const results = [];
-    for (const h of hours) {
-      const distNm = sog * h;
-      const pos = drProject(shipPos.lat, shipPos.lon, cog, distNm);
-      const wx = await fetchWx(pos.lat, pos.lon);
-      const etaTime = new Date(Date.now() + h * 3600000);
-      const eta = etaTime.toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' }) + ' ' + etaTime.toLocaleDateString();
-      results.push({ h, lat: pos.lat, lon: pos.lon, wx, eta });
-    }
-    // Draw DR line from ship
-    const drLatlngs = [[shipPos.lat, shipPos.lon], ...results.map(r => [r.lat, r.lon])];
-    L.polyline(drLatlngs, { color:'#ffcc00', weight:2, dashArray:'4,6', opacity:0.8 }).addTo(drLayerRef.current);
-    results.forEach(r => {
-      const icon = L.divIcon({
-        html:`<div style="background:rgba(0,0,0,0.75);border:1.5px solid #ffcc00;color:#ffcc00;font-size:9px;padding:2px 5px;border-radius:10px;font-family:monospace;white-space:nowrap">
-                +${r.h}h ${r.wx && r.wx.windSpd!=null ? '💨'+r.wx.windSpd+'kn' : ''}
-                ${r.wx && r.wx.waveHt!=null ? ' 🌊'+r.wx.waveHt+'m' : ''}
-              </div>`,
-        className:'', iconAnchor:[0,12],
-      });
-      // Wind arrow at each DR point
-      if (r.wx?.windDir != null) {
-        const arrowIcon = L.divIcon({ html: windArrowSVG(r.wx.windDir, '#ffcc00'), className:'', iconSize:[40,40], iconAnchor:[20,20] });
-        L.marker([r.lat, r.lon], { icon: arrowIcon }).addTo(drLayerRef.current);
-      }
-      L.marker([r.lat, r.lon], { icon, zIndexOffset:500 })
-        .bindPopup(popupHtml(`DR +${r.h}h  (${r.lat.toFixed(3)}°, ${r.lon.toFixed(3)}°)`, r.wx, r.eta), { maxWidth:260 })
-        .addTo(drLayerRef.current);
-    });
-    // Fetch and show wx at current ship position too
-    const shipWx = await fetchWx(shipPos.lat, shipPos.lon);
-    if (shipWx?.windDir != null) {
-      const arrowIcon = L.divIcon({ html: windArrowSVG(shipWx.windDir, '#00ffcc'), className:'', iconSize:[40,40], iconAnchor:[20,20] });
-      L.marker([shipPos.lat, shipPos.lon], { icon: arrowIcon, zIndexOffset:900 }).addTo(drLayerRef.current);
-    }
-    if (shipWx?.swellDir != null) {
-      const swellIcon = L.divIcon({ html: windArrowSVG(shipWx.swellDir, '#60a0ff'), className:'', iconSize:[40,40], iconAnchor:[20,20] });
-      L.marker([shipPos.lat, shipPos.lon], { icon: swellIcon, zIndexOffset:890 }).addTo(drLayerRef.current);
-    }
-    if (shipMarkerRef.current) shipMarkerRef.current.bindPopup(popupHtml('Ship — Current Position', shipWx, null)).openPopup();
-    setDrData(results);
-    setWxLoading(false);
-  };
-
-  // ── Auto COG/SOG — 5 GPS fixes averaged over 30s for accuracy ──
-  const fixesRef = useRef([]);
-  const [trackStatus, setTrackStatus] = useState('');
-
-  const trackCogSog = () => {
-    if (!navigator.geolocation) { setTrackErr('GPS not supported.'); return; }
-    setTracking(true); setTrackErr(''); setTrackStatus('Fix 0/5 — keep device stationary or moving…');
-    setCog(null); setSog(null);
-    fixesRef.current = [];
-
-    const onFix = (pos) => {
-      // Reject fixes with poor accuracy (>30m)
-      if (pos.coords.accuracy > 30) return;
-      const fix = {
-        lat: pos.coords.latitude,
-        lon: pos.coords.longitude,
-        t:   pos.timestamp,
-        acc: pos.coords.accuracy,
-      };
-      // Update ship position continuously
-      setShipPos({ lat: fix.lat, lon: fix.lon });
-      // Only store fix if it's at least 2s after previous
-      const fixes = fixesRef.current;
-      if (fixes.length > 0 && (fix.t - fixes[fixes.length-1].t) < 2000) return;
-      fixes.push(fix);
-      setTrackStatus(`Fix ${fixes.length}/5 — accuracy ${fix.acc.toFixed(0)}m…`);
-
-      if (fixes.length < 5) return;
-
-      // Got 5 good fixes — compute COG/SOG from first to last (best span)
-      const first = fixes[0];
-      const last  = fixes[fixes.length - 1];
-      const dtSec = (last.t - first.t) / 1000;
-      const R=6371000, toRad=d=>d*Math.PI/180;
-      const dLat=toRad(last.lat-first.lat), dLon=toRad(last.lon-first.lon);
-      const a=Math.sin(dLat/2)**2+Math.cos(toRad(first.lat))*Math.cos(toRad(last.lat))*Math.sin(dLon/2)**2;
-      const distM=R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
-
-      // Require minimum 10m displacement to avoid stationary noise
-      if (distM < 10) {
-        setTrackErr('Less than 10m displacement across 5 fixes — vessel appears stationary or GPS accuracy insufficient.');
-        setTracking(false); setTrackStatus('');
-        navigator.geolocation.clearWatch(watchIdRef.current); watchIdRef.current = null;
-        return;
-      }
-
-      // Average bearing from consecutive fix pairs (unit vector averaging for accuracy)
-      let sinSum = 0, cosSum = 0;
-      for (let i = 1; i < fixes.length; i++) {
-        const prev = fixes[i-1], cur = fixes[i];
-        const dLo = toRad(cur.lon - prev.lon);
-        const y = Math.sin(dLo)*Math.cos(toRad(cur.lat));
-        const x = Math.cos(toRad(prev.lat))*Math.sin(toRad(cur.lat)) - Math.sin(toRad(prev.lat))*Math.cos(toRad(cur.lat))*Math.cos(dLo);
-        const brng = Math.atan2(y, x);
-        sinSum += Math.sin(brng); cosSum += Math.cos(brng);
-      }
-      const avgBrng = ((Math.atan2(sinSum, cosSum) * 180 / Math.PI) + 360) % 360;
-      const speedKn = (distM / dtSec) * 1.94384;
-
-      setCog(Math.round(avgBrng));
-      setSog(Math.round(speedKn * 10) / 10);
-      setTracking(false);
-      setTrackStatus(`✅ COG/SOG computed from ${fixes.length} fixes over ${dtSec.toFixed(0)}s · avg accuracy ${(fixes.reduce((s,f)=>s+f.acc,0)/fixes.length).toFixed(0)}m`);
-      navigator.geolocation.clearWatch(watchIdRef.current); watchIdRef.current = null;
-      fixesRef.current = [];
-    };
-
-    const onErr = (e) => {
-      const msg = e.code===1?'Location permission denied.':e.code===2?'GPS position unavailable.':'GPS timed out.';
-      setTrackErr(msg); setTracking(false); setTrackStatus('');
-    };
-
-    watchIdRef.current = navigator.geolocation.watchPosition(onFix, onErr, {
-      enableHighAccuracy: true, maximumAge: 0, timeout: 30000,
-    });
-
-    // Safety timeout — 60s max
-    setTimeout(() => {
-      if (watchIdRef.current != null) {
-        navigator.geolocation.clearWatch(watchIdRef.current); watchIdRef.current = null;
-        if (fixesRef.current.length < 5) {
-          setTracking(false);
-          setTrackErr(`Only got ${fixesRef.current.length}/5 fixes. Try again in open sky.`);
-          setTrackStatus('');
-        }
-      }
-    }, 60000);
-  };
-
-  const addManualWP = () => {
-    const lat = parseFloat(manLat), lon = parseFloat(manLon);
-    if (isNaN(lat)||isNaN(lon)||Math.abs(lat)>90||Math.abs(lon)>180) return;
-    setWaypoints(w => [...w, { name: manName||`WP${w.length+1}`, lat, lon }]);
-    setManLat(''); setManLon(''); setManName('');
-  };
-
-  return (
-    <div>
-      <div style={S.info}>Upload your ECDIS route file (RTZ / RT3 / XML / GPX) to plot waypoints. Use live GPS to place ship and auto-compute COG/SOG. Dead reckoning predictions show predicted positions with weather at each point.</div>
-
-      {/* ── Controls row ── */}
-      <div style={{display:'flex', gap:8, flexWrap:'wrap', marginBottom:12, alignItems:'flex-end'}}>
-        {/* GPS position */}
-        <button
-          style={{...S.btnGps, background: gpsLoading?'rgba(40,120,60,0.4)':'linear-gradient(135deg,#1a6a3a,#0d4a2a)'}}
-          onClick={() => getGPS((la,lo) => setShipPos({lat:parseFloat(la),lon:parseFloat(lo)}))}
-          disabled={gpsLoading}
-        >
-          {gpsLoading ? '⏳ Getting GPS…' : '📍 Set Ship Position (GPS)'}
-        </button>
-        {/* COG/SOG */}
-        <button
-          style={{...S.btnGps, background: tracking?'rgba(40,120,60,0.4)':'linear-gradient(135deg,#1a4a8a,#0d2a6a)', borderColor:'#3a70d0', color:'#90c8f8'}}
-          onClick={trackCogSog}
-          disabled={tracking}
-        >
-          {tracking ? `📡 ${trackStatus||'Collecting fixes…'}` : '🎯 Auto-Detect COG/SOG (5 fixes)'}
-        </button>
-        {/* Route file upload */}
-        <label style={{...S.btnGps, background:'linear-gradient(135deg,#4a1a8a,#2a0a6a)', borderColor:'#8a50d0', color:'#c090f8', cursor:'pointer'}}>
-          📂 Upload Route File
-          <input type="file" accept=".rtz,.rt3,.xml,.gpx" style={{display:'none'}} onChange={e => { if(e.target.files[0]) parseRouteFile(e.target.files[0]); }} />
-        </label>
-        {/* Build DR button */}
-        {shipPos && cog!=null && sog!=null && (
-          <button
-            style={{...S.btn, marginTop:0, background:'linear-gradient(135deg,#8a5a00,#6a3a00)', borderColor:'#e8a840', color:'#ffd080'}}
-            onClick={buildDR}
-            disabled={wxLoading}
-          >
-            {wxLoading ? '⏳ Fetching weather…' : '🗺️ Build DR + Fetch Weather'}
-          </button>
-        )}
-      </div>
-
-      {/* Status badges */}
-      <div style={{display:'flex', gap:8, flexWrap:'wrap', marginBottom:10, fontSize:11}}>
-        {shipPos && <span style={S.badge('#40c880')}>📍 {shipPos.lat.toFixed(4)}°, {shipPos.lon.toFixed(4)}°</span>}
-        {cog!=null && <span style={S.badge('#ffd040')}>COG {cog}° ({dirLabel(cog)})</span>}
-        {sog!=null && <span style={S.badge('#ffd040')}>SOG {sog} kn</span>}
-        {routeName && <span style={S.badge('#c090f8')}>📋 {routeName} — {waypoints.length} wpts</span>}
-      </div>
-
-      {gpsErr   && <div style={S.error}>{gpsErr}</div>}
-      {trackErr && <div style={S.error}>{trackErr}</div>}
-      {fileErr  && <div style={S.error}>{fileErr}</div>}
-
-      {/* ── Manual waypoint entry ── */}
-      <div style={{background:'rgba(10,30,60,0.4)', border:'1px solid #1a3a60', borderRadius:8, padding:10, marginBottom:12}}>
-        <div style={{fontSize:11, color:'#7eb8d8', marginBottom:8, fontWeight:700}}>➕ Add Manual Waypoint</div>
-        <div style={{display:'grid', gridTemplateColumns:'1fr 1fr 1fr auto', gap:8, alignItems:'flex-end'}}>
-          <div><label style={S.label}>Name</label><input style={S.input} value={manName} onChange={e=>setManName(e.target.value)} placeholder="WP001"/></div>
-          <div><label style={S.label}>Latitude</label><input style={S.input} value={manLat} onChange={e=>setManLat(e.target.value)} placeholder="1.2900"/></div>
-          <div><label style={S.label}>Longitude</label><input style={S.input} value={manLon} onChange={e=>setManLon(e.target.value)} placeholder="103.8500"/></div>
-          <button style={{...S.btn, marginTop:0, padding:'8px 12px'}} onClick={addManualWP}>Add</button>
-        </div>
-        {waypoints.length > 0 && (
-          <div style={{marginTop:8, display:'flex', gap:6, flexWrap:'wrap', alignItems:'center'}}>
-            <span style={{fontSize:10, color:'#4a7a9b'}}>{waypoints.length} waypoints loaded:</span>
-            {waypoints.slice(0,5).map((w,i) => <span key={i} style={S.tag}>{i+1}. {w.name}</span>)}
-            {waypoints.length > 5 && <span style={{fontSize:10,color:'#4a7a9b'}}>+{waypoints.length-5} more</span>}
-            <button style={{...S.btnSm, marginLeft:'auto'}} onClick={()=>{setWaypoints([]); setRouteName(''); wpLayerRef.current?.clearLayers();}}>Clear All</button>
-          </div>
-        )}
-      </div>
-
-      {/* ── Leaflet Map ── */}
-      <div style={{borderRadius:10, overflow:'hidden', border:'1.5px solid #1e4070', marginBottom:12}}>
-        <div ref={mapCallbackRef} style={{width:'100%', height:480, background:'#0a1628'}} />
-        {!mapReady && <div style={{...S.spinner, position:'absolute', top:'50%', left:'50%', transform:'translate(-50%,-50%)'}}>⏳ Loading map…</div>}
-      </div>
-
-      {/* ── DR predictions summary table ── */}
-      {drData.length > 0 && (
-        <div style={{marginTop:4}}>
-          <div style={{fontSize:11, color:'#ffd040', fontWeight:700, marginBottom:8, letterSpacing:0.5}}>🗺️ DEAD RECKONING WEATHER PREDICTIONS</div>
-          <div style={{overflowX:'auto'}}>
-            <table style={S.table}>
-              <thead><tr>
-                <th style={S.th}>ETA</th>
-                <th style={S.th}>Position</th>
-                <th style={S.th}>💨 Wind</th>
-                <th style={S.th}>🌊 Wave</th>
-                <th style={S.th}>🌀 Swell</th>
-                <th style={S.th}>📊 Pressure</th>
-                <th style={S.th}>🌡️ Temp</th>
-              </tr></thead>
-              <tbody>{drData.map((r,i)=>(
-                <tr key={i}>
-                  <td style={S.td}><b style={{color:'#ffd040'}}>+{r.h}h</b><br/><span style={{fontSize:9,color:'#4a7a9b'}}>{r.eta}</span></td>
-                  <td style={S.td}><code style={{fontSize:9}}>{r.lat.toFixed(3)}°<br/>{r.lon.toFixed(3)}°</code></td>
-                  <td style={S.td}>{r.wx?.windSpd!=null?<><b style={{color:'#e8d040'}}>{r.wx.windSpd}kn</b><br/><span style={{fontSize:9}}>{r.wx.windDir}° {dirLabel(r.wx.windDir)}</span></>:'—'}</td>
-                  <td style={S.td}>{r.wx?.waveHt!=null?<><b>{r.wx.waveHt}m</b><br/><span style={{fontSize:9}}>{r.wx.waveDir}° {dirLabel(r.wx.waveDir)}</span></>:'—'}</td>
-                  <td style={S.td}>{r.wx?.swellHt!=null?<><b>{r.wx.swellHt}m</b><br/><span style={{fontSize:9}}>{r.wx.swellDir}° {dirLabel(r.wx.swellDir)}</span></>:'—'}</td>
-                  <td style={S.td}>{r.wx?.pressure!=null?`${r.wx.pressure} hPa`:'—'}</td>
-                  <td style={S.td}>{r.wx?.temp!=null?`${r.wx.temp}°C`:'—'}</td>
-                </tr>
-              ))}</tbody>
-            </table>
-          </div>
-          <div style={{fontSize:10,color:'#4a7a9b',marginTop:8}}>
-            💡 Click any marker on the map for full weather popup. 🟡 Yellow line = dead reckoning track. 🔵 Blue line = loaded route. 🟢 Arrow = wind direction at position. 🔵 Arrow = swell direction.
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
 
 export default function NavigationBridgePage() {
   const [active, setActive] = useState(null);
