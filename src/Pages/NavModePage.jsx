@@ -11,6 +11,7 @@ import {
 
 const VESSEL_API_KEY = '7da0c40c639a5f2a7532e75d9cdad6156b65f61932d778c1ce8580f9786e4506';
 const AISSTREAM_KEY  = 'e66d76190c2bf6c206264e3cb894308b853d73df';
+const AIS_SHEET_WEBHOOK_URL = 'https://script.google.com/macros/s/AKfycbz2hQwDyXbGIfxgiWb5EPlcQhY_g9tzBTnDAkzY4BN-7wlqGT9mqhXGZ5rkAJLZ9NUq/exec';
 const DEFAULT_COLORS = { route:'#E74C3C', vector:'#00D4FF', ship:'#00D4FF', track:'#00FF88', xtd:'#FFB300', chart:'#FF2020' };
 const INDONESIA_ENC_URL = 'https://raw.githubusercontent.com/cookcaptain57-cpu/ecdis-route-finder/main/public/EA200004_Indonesia_ENC.geojson';
 const ZONE_OVERLAY_CFG = [
@@ -153,7 +154,7 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
   const cogCanvasRef=useRef(null);
   const aisPopupMmsiRef=useRef(null);
   const aisPopupDataRef=useRef(null);
-
+  const collectedMmsiRef=useRef(new Set());
   const ls=k=>localStorage.getItem(k);
   const [mapReady,setMapReady]=useState(false);
   const [gpsOn,setGpsOn]=useState(()=>ls('nav_gpsOn')==='true');
@@ -381,6 +382,18 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
           navStatus:target.navStatus||target.status||'',rot:target.rot||0,
           ts:Date.now()
         }}));
+        if(target.msgType===5&&target.mmsi&&!collectedMmsiRef.current.has(String(target.mmsi))){
+          collectedMmsiRef.current.add(String(target.mmsi));
+          fetch(AIS_SHEET_WEBHOOK_URL,{
+            method:'POST',
+            body:JSON.stringify({
+              mmsi:target.mmsi, imo:target.imo||'', name:target.name||'',
+              callsign:target.callSign||'', vesselType:target.shipType||'',
+              length:(target.dimA||target.dimB)?(target.dimA||0)+(target.dimB||0):'',
+              beam:(target.dimC||target.dimD)?(target.dimC||0)+(target.dimD||0):'',
+            }),
+          }).catch(()=>{});
+        }
         setLocalAisCount(targets?.size||0);
       });
       return()=>{try{off1();off2();off3();}catch{}aisService.stop();};
