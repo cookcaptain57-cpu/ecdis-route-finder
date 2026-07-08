@@ -13,7 +13,7 @@
 //   6. useCallback on toggle — no unnecessary re-renders
 //   7. useRef for scroll-to-card
 
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // STATIC DATA — GMDSS STATIONS
@@ -1761,70 +1761,83 @@ function ShipWeatherMapPanel() {
   };
 
   // ── Build self-contained Leaflet HTML for iframe ──
+  // IMPORTANT: Must NOT use template literal containing </script> </html> etc.
+  // Babel parses those as JSX tags and crashes the build.
+  // Solution: build HTML as array of strings joined together.
   const buildMapHtml = (ship, wpList, drList, cogDeg) => {
     const center  = ship ? [ship.lat, ship.lon] : (wpList.length > 0 ? [wpList[0].lat, wpList[0].lon] : [15, 80]);
     const zoom    = ship ? 6 : 4;
     const wpJson  = JSON.stringify(wpList);
     const drJson  = JSON.stringify(drList);
     const cogRot  = cogDeg || 0;
-    return `<!DOCTYPE html><html><head>
-<meta charset="utf-8"/>
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<style>html,body,#map{margin:0;padding:0;width:100%;height:100%;background:#0a1628;}
-.wp-label{background:#4a9ef5;color:#fff;font-size:9px;padding:2px 5px;border-radius:3px;font-family:monospace;white-space:nowrap;border:1px solid #fff;}
-.dr-label{background:rgba(0,0,0,0.8);border:1.5px solid #ffcc00;color:#ffcc00;font-size:9px;padding:2px 5px;border-radius:10px;font-family:monospace;white-space:nowrap;}
-</style></head><body>
-<div id="map"></div>
-<script>
-var map=L.map('map',{zoomControl:true,attributionControl:false}).setView(${JSON.stringify(center)},${zoom});
-L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{maxZoom:18}).addTo(map);
-var ship=${ship ? JSON.stringify(ship) : 'null'};
-var wpts=${wpJson};
-var drs=${drJson};
-var cogRot=${cogRot};
-function dirLabel(d){if(d==null)return'—';var dirs=['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'];return dirs[Math.round(d/22.5)%16];}
-// Ship marker
-if(ship){
-  var shipIcon=L.divIcon({html:'<div style="transform:rotate('+cogRot+'deg);font-size:30px;line-height:1;filter:drop-shadow(0 0 6px #00ffcc)">🚢</div><div style="position:absolute;top:-16px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.8);color:#00ffcc;font-size:9px;padding:1px 5px;border-radius:3px;white-space:nowrap;font-family:monospace">'+
-  (${cog!=null?`'COG:'+cogRot+'° SOG:'+(${JSON.stringify(sog)}||'—')+'kn'`:"'Live Position'"})+'</div>',iconSize:[40,40],iconAnchor:[20,20],className:''});
-  var sm=L.marker([ship.lat,ship.lon],{icon:shipIcon,zIndexOffset:1000}).addTo(map);
-  ${drData.length > 0 && drData[0]?.wx ? `sm.bindPopup('<b>Current Position</b><br/>See weather panel below').openPopup();` : ''}
-}
-// Waypoints
-if(wpts.length>0){
-  var lls=wpts.map(function(w){return[w.lat,w.lon];});
-  L.polyline(lls,{color:'#4a9ef5',weight:2.5,dashArray:'6,4',opacity:0.9}).addTo(map);
-  wpts.forEach(function(w,i){
-    var ic=L.divIcon({html:'<div class="wp-label">'+(i+1)+'. '+w.name+'</div>',className:'',iconAnchor:[0,10]});
-    L.marker([w.lat,w.lon],{icon:ic}).bindPopup('<b>WP'+(i+1)+': '+w.name+'</b><br/>'+w.lat.toFixed(5)+'°, '+w.lon.toFixed(5)+'°',{maxWidth:200}).addTo(map);
-  });
-}
-// Dead reckoning
-if(drs.length>0 && ship){
-  var drLls=[[ship.lat,ship.lon]].concat(drs.map(function(r){return[r.lat,r.lon];}));
-  L.polyline(drLls,{color:'#ffcc00',weight:2,dashArray:'4,6',opacity:0.8}).addTo(map);
-  drs.forEach(function(r){
-    if(r.wx&&r.wx.windDir!=null){
-      var rad=(r.wx.windDir||0)*Math.PI/180;
-      var x2=(20+16*Math.sin(rad)).toFixed(1),y2=(20-16*Math.cos(rad)).toFixed(1);
-      var svg='<svg width="40" height="40" xmlns="http://www.w3.org/2000/svg"><defs><marker id="a" markerWidth="6" markerHeight="6" refX="3" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#ffcc00"/></marker></defs><circle cx="20" cy="20" r="2" fill="#ffcc00"/><line x1="20" y1="20" x2="'+x2+'" y2="'+y2+'" stroke="#ffcc00" stroke-width="2" marker-end="url(#a)"/></svg>';
-      var ai=L.divIcon({html:svg,className:'',iconSize:[40,40],iconAnchor:[20,20]});
-      L.marker([r.lat,r.lon],{icon:ai}).addTo(map);
-    }
-    var popup='<div style="font-family:monospace;font-size:11px;min-width:180px;line-height:1.8"><b style="color:#1a5a90">DR +'+r.h+'h</b><br/><span style="color:#555">'+r.eta+'</span><hr style="margin:3px 0"/>'+
-    (r.wx?'🌡️ '+( r.wx.temp!=null?r.wx.temp+'°C':'—')+'<br/>💨 '+(r.wx.windSpd!=null?r.wx.windSpd+' kn':'—')+' from '+(r.wx.windDir!=null?r.wx.windDir+'° ('+dirLabel(r.wx.windDir)+')':'—')+'<br/>💨 Gusts: '+(r.wx.windGust!=null?r.wx.windGust+' kn':'—')+'<br/>🌊 Wave: '+(r.wx.waveHt!=null?r.wx.waveHt+' m':'—')+' from '+(r.wx.waveDir!=null?r.wx.waveDir+'° ('+dirLabel(r.wx.waveDir)+')':'—')+'<br/>🌀 Swell: '+(r.wx.swellHt!=null?r.wx.swellHt+' m':'—')+' from '+(r.wx.swellDir!=null?r.wx.swellDir+'° ('+dirLabel(r.wx.swellDir)+')':'—')+'<br/>📊 '+(r.wx.pressure!=null?r.wx.pressure+' hPa':'—'):'Weather unavailable')+'</div>';
-    var ic=L.divIcon({html:'<div class="dr-label">+'+r.h+'h '+(r.wx&&r.wx.windSpd!=null?'💨'+r.wx.windSpd+'kn':'')+(r.wx&&r.wx.waveHt!=null?' 🌊'+r.wx.waveHt+'m':'')+'</div>',className:'',iconAnchor:[0,12]});
-    L.marker([r.lat,r.lon],{icon:ic,zIndexOffset:500}).bindPopup(popup,{maxWidth:260}).addTo(map);
-  });
-}
-// Fit all
-var allPts=[];
-if(ship)allPts.push([ship.lat,ship.lon]);
-wpts.forEach(function(w){allPts.push([w.lat,w.lon]);});
-drs.forEach(function(r){allPts.push([r.lat,r.lon]);});
-if(allPts.length>1)map.fitBounds(L.latLngBounds(allPts).pad(0.15));
-</script></body></html>`;
+    const cogLabel = cog != null
+      ? "'COG:'+cogRot+'° SOG:'+" + JSON.stringify(sog||'—') + "+'kn'"
+      : "'Live Position'";
+    const shipPopup = drData.length > 0 && drData[0]?.wx
+      ? "sm.bindPopup('<b>Current Position</b><br/>See weather panel below').openPopup();"
+      : '';
+
+    // Build as parts array — no closing HTML tags inside template literals
+    const parts = [
+      '<!DOCTYPE html><html><head>',
+      '<meta charset="utf-8"/>',
+      '<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>',
+      '<scr'+'ipt src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"><'+'/scr'+'ipt>',
+      '<style>',
+      'html,body,#map{margin:0;padding:0;width:100%;height:100%;background:#0a1628;}',
+      '.wp-label{background:#4a9ef5;color:#fff;font-size:9px;padding:2px 5px;border-radius:3px;font-family:monospace;white-space:nowrap;border:1px solid #fff;}',
+      '.dr-label{background:rgba(0,0,0,0.8);border:1.5px solid #ffcc00;color:#ffcc00;font-size:9px;padding:2px 5px;border-radius:10px;font-family:monospace;white-space:nowrap;}',
+      '</'+'style></'+'head><body>',
+      '<div id="map"></div>',
+      '<scr'+'ipt>',
+      'var map=L.map("map",{zoomControl:true,attributionControl:false}).setView(' + JSON.stringify(center) + ',' + zoom + ');',
+      'L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",{maxZoom:18}).addTo(map);',
+      'var ship=' + (ship ? JSON.stringify(ship) : 'null') + ';',
+      'var wpts=' + wpJson + ';',
+      'var drs=' + drJson + ';',
+      'var cogRot=' + cogRot + ';',
+      'function dirLabel(d){if(d==null)return"\u2014";var dirs=["N","NNE","NE","ENE","E","ESE","SE","SSE","S","SSW","SW","WSW","W","WNW","NW","NNW"];return dirs[Math.round(d/22.5)%16];}',
+      // Ship marker
+      'if(ship){',
+      '  var shipIcon=L.divIcon({html:"<div style=\\"transform:rotate("+cogRot+"deg);font-size:28px;line-height:1;filter:drop-shadow(0 0 6px #00ffcc)\\">\\u26F4</div><div style=\\"position:absolute;top:-16px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.8);color:#00ffcc;font-size:9px;padding:1px 5px;border-radius:3px;white-space:nowrap;font-family:monospace\\">"+('+cogLabel+')+"\u003c/div>",iconSize:[40,40],iconAnchor:[20,20],className:""});',
+      '  var sm=L.marker([ship.lat,ship.lon],{icon:shipIcon,zIndexOffset:1000}).addTo(map);',
+      shipPopup,
+      '}',
+      // Waypoints
+      'if(wpts.length>0){',
+      '  var lls=wpts.map(function(w){return[w.lat,w.lon];});',
+      '  L.polyline(lls,{color:"#4a9ef5",weight:2.5,dashArray:"6,4",opacity:0.9}).addTo(map);',
+      '  wpts.forEach(function(w,i){',
+      '    var ic=L.divIcon({html:"<div class=\\"wp-label\\">"+(i+1)+". "+w.name+"\u003c/div>",className:"",iconAnchor:[0,10]});',
+      '    L.marker([w.lat,w.lon],{icon:ic}).bindPopup("<b>WP"+(i+1)+": "+w.name+"\u003c/b><br/>"+w.lat.toFixed(5)+"\u00b0, "+w.lon.toFixed(5)+"\u00b0",{maxWidth:200}).addTo(map);',
+      '  });',
+      '}',
+      // Dead reckoning
+      'if(drs.length>0&&ship){',
+      '  var drLls=[[ship.lat,ship.lon]].concat(drs.map(function(r){return[r.lat,r.lon];}));',
+      '  L.polyline(drLls,{color:"#ffcc00",weight:2,dashArray:"4,6",opacity:0.8}).addTo(map);',
+      '  drs.forEach(function(r){',
+      '    if(r.wx&&r.wx.windDir!=null){',
+      '      var rad=(r.wx.windDir||0)*Math.PI/180;',
+      '      var x2=(20+16*Math.sin(rad)).toFixed(1),y2=(20-16*Math.cos(rad)).toFixed(1);',
+      '      var svg="<svg width=\\"40\\" height=\\"40\\" xmlns=\\"http://www.w3.org/2000/svg\\"><defs><marker id=\\"a\\" markerWidth=\\"6\\" markerHeight=\\"6\\" refX=\\"3\\" refY=\\"3\\" orient=\\"auto\\"><path d=\\"M0,0 L6,3 L0,6 Z\\" fill=\\"#ffcc00\\"/>\u003c/marker>\u003c/defs><circle cx=\\"20\\" cy=\\"20\\" r=\\"2\\" fill=\\"#ffcc00\\"/><line x1=\\"20\\" y1=\\"20\\" x2=\\""+x2+"\\" y2=\\""+y2+"\\" stroke=\\"#ffcc00\\" stroke-width=\\"2\\" marker-end=\\"url(#a)\\"/>\u003c/svg>";',
+      '      var ai=L.divIcon({html:svg,className:"",iconSize:[40,40],iconAnchor:[20,20]});',
+      '      L.marker([r.lat,r.lon],{icon:ai}).addTo(map);',
+      '    }',
+      '    var popup="<div style=\\"font-family:monospace;font-size:11px;min-width:180px;line-height:1.8\\"><b style=\\"color:#1a5a90\\">DR +"+r.h+"h\u003c/b><br/><span style=\\"color:#555\\">"+r.eta+"\u003c/span><hr style=\\"margin:3px 0\\"/>"+(r.wx?"\\u{1F321}\\uFE0F "+(r.wx.temp!=null?r.wx.temp+"\\u00b0C":"\\u2014")+"<br/>\\uD83D\\uDCA8 "+(r.wx.windSpd!=null?r.wx.windSpd+" kn":"\\u2014")+" from "+(r.wx.windDir!=null?r.wx.windDir+"\\u00b0 ("+dirLabel(r.wx.windDir)+")":"\\u2014")+"<br/>Gusts: "+(r.wx.windGust!=null?r.wx.windGust+" kn":"\\u2014")+"<br/>Wave: "+(r.wx.waveHt!=null?r.wx.waveHt+" m":"\\u2014")+" from "+(r.wx.waveDir!=null?r.wx.waveDir+"\\u00b0 ("+dirLabel(r.wx.waveDir)+")":"\\u2014")+"<br/>Swell: "+(r.wx.swellHt!=null?r.wx.swellHt+" m":"\\u2014")+" from "+(r.wx.swellDir!=null?r.wx.swellDir+"\\u00b0 ("+dirLabel(r.wx.swellDir)+")":"\\u2014")+"<br/>"+( r.wx.pressure!=null?r.wx.pressure+" hPa":"\\u2014"):"Weather unavailable")+"\u003c/div>";',
+      '    var ic=L.divIcon({html:"<div class=\\"dr-label\\">+"+r.h+"h "+(r.wx&&r.wx.windSpd!=null?"\\uD83D\\uDCA8"+r.wx.windSpd+"kn":"")+(r.wx&&r.wx.waveHt!=null?" \\uD83C\\uDF0A"+r.wx.waveHt+"m":"")+"\u003c/div>",className:"",iconAnchor:[0,12]});',
+      '    L.marker([r.lat,r.lon],{icon:ic,zIndexOffset:500}).bindPopup(popup,{maxWidth:260}).addTo(map);',
+      '  });',
+      '}',
+      'var allPts=[];',
+      'if(ship)allPts.push([ship.lat,ship.lon]);',
+      'wpts.forEach(function(w){allPts.push([w.lat,w.lon]);});',
+      'drs.forEach(function(r){allPts.push([r.lat,r.lon]);});',
+      'if(allPts.length>1)map.fitBounds(L.latLngBounds(allPts).pad(0.15));',
+      '</'+'scr'+'ipt>',
+      '</'+'body></'+'html>',
+    ];
+    return parts.join('\n');
   };
 
   // ── Regenerate iframe HTML whenever data changes ──
