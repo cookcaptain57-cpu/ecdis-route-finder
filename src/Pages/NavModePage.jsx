@@ -2,6 +2,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import ETACalculator from "../components/ETACalculator";
 import aisService from "../services/aisService";
+import { idbGet, idbSet } from "../sheets";
 import {
   PSSA_ZONES, NOX_ZONES, LOAD_LINE_ZONES,
   MARITIME_RESTRICTIONS, CHINA_MSC_NO_G, EEZ_ZONES,
@@ -277,7 +278,36 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
   const loadRoute=e=>{const fi=e.target.files?.[0];if(!fi)return;const r=new FileReader();r.onload=ev=>{try{const rt=parseRoute(ev.target.result,fi.name);if(!rt?.waypoints?.length)throw new Error('No waypoints');setActiveRoute(rt);setSelectedWpIdx(rt.waypoints.length-1);notify(`✓ ${rt.name} (${rt.waypoints.length} WPs)`,'error');}catch(er){notify(`Load failed: ${er.message}`,'error');}};r.readAsText(fi);e.target.value='';};
   const saveRoute=()=>{if(!activeRoute)return;setSavedRoutes(prev=>{const i=prev.findIndex(r=>r.name===activeRoute.name);const u=i>=0?prev.map((r,j)=>j===i?activeRoute:r):[activeRoute,...prev].slice(0,100);localStorage.setItem('nav_savedRoutes',JSON.stringify(u));return u;});notify(`✓ Saved: ${activeRoute.name}`,'error');};
   const delRoute=n=>{setSavedRoutes(prev=>{const u=prev.filter(r=>r.name!==n);localStorage.setItem('nav_savedRoutes',JSON.stringify(u));return u;});};
+  const AIS_PENDING_KEY='ais_pending_sync_v1';
 
+  const queueAisForSync=async(record)=>{
+    try{
+      const pending=(await idbGet(AIS_PENDING_KEY))||[];
+      if(pending.some(p=>String(p.mmsi)===String(record.mmsi)))return;
+      pending.push(record);
+      await idbSet(AIS_PENDING_KEY,pending);
+    }catch(e){console.warn('[AIS queue]',e);}
+  };
+
+  const syncPendingAisToSheet=async()=>{
+    try{
+      const pending=(await idbGet(AIS_PENDING_KEY))||[];
+      if(!pending.length)return;
+      const stillPending=[];
+      for(const record of pending){
+        try{
+          const res=await fetch(AIS_SHEET_WEBHOOK_URL,{method:'POST',body:JSON.stringify(record)});
+          if(!res.ok)throw new Error(`HTTP ${res.status}`);
+        }catch{
+          stillPending.push(record);
+        }
+      }
+      await idbSet(AIS_PENDING_KEY,stillPending);
+      if(stillPending.length<pending.length){
+        notify(`✓ Synced ${pending.length-stillPending.length} ship(s) to AIS sheet`,'error');
+      }
+    }catch(e){console.warn('[AIS sync]',e);}
+  };
   // ── CHANGE 1: S-52 sounding color helper — reads mariner's contour settings from ref ──
   const getSoundingColor=useCallback((depth)=>{
     const {shallow,safety,deep}=contoursRef.current;
@@ -384,17 +414,12 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
         }}));
         if(target.msgType===5&&target.mmsi&&!collectedMmsiRef.current.has(String(target.mmsi))){
           collectedMmsiRef.current.add(String(target.mmsi));
-          fetch(AIS_SHEET_WEBHOOK_URL,{
-            method:'POST',
-            body:JSON.stringify({
-              mmsi:target.mmsi, imo:target.imo||'', name:target.name||'',
-              callsign:target.callSign||'', vesselType:target.shipType||'',
-              length:(target.dimA||target.dimB)?(target.dimA||0)+(target.dimB||0):'',
-              beam:(target.dimC||target.dimD)?(target.dimC||0)+(target.dimD||0):'',
-            }),
-          
-        }).then(r=>r.text()).then(t=>notify(`AIS collect: ${t.slice(0,80)}`,'error'))
-          .catch(e=>notify(`AIS collect failed: ${e.message}`,'error'));
+          queueAisForSync({
+            mmsi:target.mmsi, imo:target.imo||'', name:target.name||'',
+            callsign:target.callSign||'', vesselType:target.shipType||'',
+            length:(target.dimA||target.dimB)?(target.dimA||0)+(target.dimB||0):'',
+            beam:(target.dimC||target.dimD)?(target.dimC||0)+(target.dimD||0):'',
+          });
         }
         setLocalAisCount(targets?.size||0);
       });
@@ -479,7 +504,11 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
   },[gpsOn]);
 
   useEffect(()=>{localStorage.setItem('nav_aisVectors',showAllAisVectors);},[showAllAisVectors]);
-
+  useEffect(()=>{
+    syncPendingAisToSheet();
+    const timer=setInterval(syncPendingAisToSheet,180000);
+    return()=>clearInterval(timer);
+  },[]);
   useEffect(()=>{
     if(!leafRef.current||!window.L)return;
     const L=window.L,m=leafRef.current;
