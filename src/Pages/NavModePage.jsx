@@ -30,7 +30,45 @@ const ZONE_OVERLAY_CFG = [
 
 const toDMS=(d,isLat)=>{const a=Math.abs(d),deg=Math.floor(a),mf=(a-deg)*60,min=Math.floor(mf);const sec=((mf-min)*60).toFixed(1),dir=isLat?(d>=0?'N':'S'):(d>=0?'E':'W');return `${deg}°${String(min).padStart(2,'0')}'${String(sec).padStart(4,'0')}"${dir}`;};
 const normalizeRoute=wps=>{if(!wps?.length)return wps;const out=[{...wps[0]}];for(let i=1;i<wps.length;i++){let lon=wps[i].lon;const p=out[i-1].lon;while(lon-p>180)lon-=360;while(lon-p<-180)lon+=360;out.push({...wps[i],lon});}return out;};
-
+// ── AIS ship type & nav status decoders (ITU-R M.1371 standard codes) ──
+const shipTypeLabel=(code)=>{
+  if(code===''||code==null)return '—';
+  const c=Number(code);
+  if(isNaN(c))return '—';
+  if(c===0)return 'Not available';
+  if(c>=20&&c<=29)return 'Wing in Ground';
+  if(c===30)return 'Fishing';
+  if(c===31||c===32)return 'Towing';
+  if(c===33)return 'Dredging/Underwater Ops';
+  if(c===34)return 'Diving Ops';
+  if(c===35)return 'Military Ops';
+  if(c===36)return 'Sailing';
+  if(c===37)return 'Pleasure Craft';
+  if(c>=40&&c<=49)return 'High Speed Craft';
+  if(c===50)return 'Pilot Vessel';
+  if(c===51)return 'Search and Rescue';
+  if(c===52)return 'Tug';
+  if(c===53)return 'Port Tender';
+  if(c===54)return 'Anti-Pollution';
+  if(c===55)return 'Law Enforcement';
+  if(c===58)return 'Medical Transport';
+  if(c===59)return 'Noncombatant Ship';
+  if(c>=60&&c<=69)return 'Passenger';
+  if(c>=70&&c<=79)return 'Cargo';
+  if(c>=80&&c<=89)return 'Tanker';
+  if(c>=90&&c<=99)return 'Other';
+  return `Type ${code}`;
+};
+const navStatusLabel=(code)=>{
+  if(code===''||code==null)return '—';
+  const c=Number(code);
+  if(isNaN(c))return '—';
+  const M=['Under way using engine','At anchor','Not under command','Restricted manoeuvrability',
+    'Constrained by draught','Moored','Aground','Engaged in fishing','Under way sailing',
+    'Reserved','Reserved','Reserved','Reserved','Reserved',
+    'AIS-SART/MOB/EPIRB active','Undefined'];
+  return M[c]!==undefined?M[c]:`Status ${code}`;
+};
 // ── Correct vector CPA/TCPA — pure math, works 100% offline ──
 const computeCPA=(own,tgt)=>{
   if(!own||!tgt)return{cpa:9999,tcpa:0};
@@ -405,11 +443,11 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
           mmsi:target.mmsi,lat:target.lat,lon:target.lon,
           cog:target.cog||0,sog:target.sog||0,hdg:target.hdg||target.cog||0,
           name:target.name||'',callsign:target.callSign||'',
-          shipType:target.shipType||target.type||'',imo:target.imo||'',
+          shipType:target.shipType??target.type??'',imo:target.imo||'',
           length:(target.dimA||target.dimB)?(target.dimA||0)+(target.dimB||0):(target.length||0),
           beam:(target.dimC||target.dimD)?(target.dimC||0)+(target.dimD||0):(target.beam||0),
           draught:target.draught||0,destination:target.dest||target.destination||'',
-          navStatus:target.navStatus||target.status||'',rot:target.rot||0,
+          navStatus:target.navStatus??target.status??'',rot:target.rot||0,
           ts:Date.now()
         }}));
         if(target.msgType===5&&target.mmsi&&!collectedMmsiRef.current.has(String(target.mmsi))){
@@ -1209,8 +1247,8 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
                   ['MMSI', String(aisPopupData.mmsi||'—')],
                   ['Call Sign', aisPopupData.callsign||'—'],
                   ['IMO', aisPopupData.imo||'—'],
-                  ['Ship Type', aisPopupData.shipType||'—'],
-                  ['Nav Status', aisPopupData.navStatus||'—'],
+                  ['Ship Type', shipTypeLabel(aisPopupData.shipType)],
+                  ['Nav Status', navStatusLabel(aisPopupData.navStatus)],
                   ['LOA', aisPopupData.length?`${aisPopupData.length} m`:'—'],
                   ['Beam', aisPopupData.beam?`${aisPopupData.beam} m`:'—'],
                   ['Draught', aisPopupData.draught?`${aisPopupData.draught} m`:'—'],
