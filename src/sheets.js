@@ -308,14 +308,24 @@ export const fetchTerminalsFromSheet = async () => {
     for (let page = 0; page < MAX_PAGES; page++) {
       const tq  = encodeURIComponent(`select * limit ${PAGE_SIZE} offset ${offset}`);
       const url = `https://docs.google.com/spreadsheets/d/${TERMINAL_SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(TAB_NAME)}&tq=${tq}`;
+      if (page === 0) console.log('[terminals] fetching:', url);
       const r = await fetch(url);
-      if (!r.ok) break;
+      if (!r.ok) { console.warn('[terminals] non-OK response:', r.status, r.statusText); break; }
 
       const csv   = await r.text();
       const lines = csv.trim().split('\n').filter(l => l.trim().length > 0);
+      if (page === 0) console.log('[terminals] page 0 raw lines:', lines.length, '| first line:', lines[0]?.slice(0, 200));
       if (lines.length === 0) break;
 
       let startLine = 0;
+
+      // Check THIS page's own first line for a header row every time — not just
+      // when cols is still unknown. fetchPortsFromSheet above unconditionally
+      // skips line 0 on every page, which implies GViz repeats a header line on
+      // each paginated offset response; this defends against that on top of the
+      // dynamic scan (which handles the metadata rows ahead of the real header).
+      const firstCells = parseLine(lines[0]).map(c => c.replace(/"/g, '').trim().toLowerCase());
+      const pageStartsWithHeader = firstCells.includes('port name');
 
       if (!cols) {
         for (let i = 0; i < Math.min(5, lines.length); i++) {
@@ -333,10 +343,16 @@ export const fetchTerminalsFromSheet = async () => {
               lon:    findCol(cells, 'longitude (dms)', 'longitude'),
             };
             startLine = i + 1;
+            console.log('[terminals] page', page, '— header resolved:', cols);
             break;
           }
         }
-        if (!cols) { offset += PAGE_SIZE; continue; } // header not on this page yet — keep paging
+        if (!cols) {
+          if (page === 0) console.warn('[terminals] "Port Name" header not found in first 5 lines of page 0:', lines.slice(0, 5).map(l => l.slice(0, 120)));
+          offset += PAGE_SIZE; continue;
+        } // header not on this page yet — keep paging
+      } else if (pageStartsWithHeader) {
+        startLine = 1; // cols already known, but this page still repeats the header line — skip it
       }
 
       for (let i = startLine; i < lines.length; i++) {
@@ -366,6 +382,8 @@ export const fetchTerminalsFromSheet = async () => {
         });
       }
 
+      if (allRows.length > 0) console.log('[terminals] page', page, 'sample row:', allRows[allRows.length - 1]);
+      if (page === 0) console.log('[terminals] cols resolved:', cols, '| rows so far:', allRows.length);
       if (lines.length < PAGE_SIZE - 20) break; // short page = last page (small buffer for the header-row overhead on page 1)
       offset += PAGE_SIZE;
     }
