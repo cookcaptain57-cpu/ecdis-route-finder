@@ -273,6 +273,23 @@ export const fetchPortsFromSheet = async () => {
 // there. Exact duplicate port+terminal+locode rows are dropped on the way in.
 const IDB_TERMINALS = 'mnav_terminals';
 
+// Mirrors console output into an array PortSearchPage.jsx can render on-screen,
+// for diagnosing this on a device where opening devtools isn't practical.
+export const terminalDebugLog = [];
+const _fmt = (a) => (typeof a === 'string' ? a : JSON.stringify(a));
+const dbg = (...args) => {
+  const msg = args.map(_fmt).join(' ');
+  console.log(msg);
+  terminalDebugLog.push(msg);
+  if (terminalDebugLog.length > 60) terminalDebugLog.shift();
+};
+const dbgWarn = (...args) => {
+  const msg = '⚠ ' + args.map(_fmt).join(' ');
+  console.warn(msg);
+  terminalDebugLog.push(msg);
+  if (terminalDebugLog.length > 60) terminalDebugLog.shift();
+};
+
 export const fetchTerminalsFromSheet = async () => {
   const PAGE_SIZE  = 3000;
   const TAB_NAME   = 'Port & Terminal Database';
@@ -308,13 +325,13 @@ export const fetchTerminalsFromSheet = async () => {
     for (let page = 0; page < MAX_PAGES; page++) {
       const tq  = encodeURIComponent(`select * limit ${PAGE_SIZE} offset ${offset}`);
       const url = `https://docs.google.com/spreadsheets/d/${TERMINAL_SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(TAB_NAME)}&tq=${tq}`;
-      if (page === 0) console.log('[terminals] fetching:', url);
+      if (page === 0) dbg('[terminals] fetching:', url);
       const r = await fetch(url);
-      if (!r.ok) { console.warn('[terminals] non-OK response:', r.status, r.statusText); break; }
+      if (!r.ok) { dbgWarn('[terminals] non-OK response:', r.status, r.statusText); break; }
 
       const csv   = await r.text();
       const lines = csv.trim().split('\n').filter(l => l.trim().length > 0);
-      if (page === 0) console.log('[terminals] page 0 raw lines:', lines.length, '| first line:', lines[0]?.slice(0, 200));
+      if (page === 0) dbg('[terminals] page 0 raw lines:', lines.length, '| first line:', lines[0]?.slice(0, 200));
       if (lines.length === 0) break;
 
       let startLine = 0;
@@ -343,12 +360,12 @@ export const fetchTerminalsFromSheet = async () => {
               lon:    findCol(cells, 'longitude (dms)', 'longitude'),
             };
             startLine = i + 1;
-            console.log('[terminals] page', page, '— header resolved:', cols);
+            dbg('[terminals] page', page, '— header resolved:', cols);
             break;
           }
         }
         if (!cols) {
-          if (page === 0) console.warn('[terminals] "Port Name" header not found in first 5 lines of page 0:', lines.slice(0, 5).map(l => l.slice(0, 120)));
+          if (page === 0) dbgWarn('[terminals] "Port Name" header not found in first 5 lines of page 0:', lines.slice(0, 5).map(l => l.slice(0, 120)));
           offset += PAGE_SIZE; continue;
         } // header not on this page yet — keep paging
       } else if (pageStartsWithHeader) {
@@ -382,20 +399,25 @@ export const fetchTerminalsFromSheet = async () => {
         });
       }
 
-      if (allRows.length > 0) console.log('[terminals] page', page, 'sample row:', allRows[allRows.length - 1]);
-      if (page === 0) console.log('[terminals] cols resolved:', cols, '| rows so far:', allRows.length);
+      if (allRows.length > 0) dbg('[terminals] page', page, 'sample row:', allRows[allRows.length - 1]);
+      if (page === 0) dbg('[terminals] cols resolved:', cols, '| rows so far:', allRows.length);
       if (lines.length < PAGE_SIZE - 20) break; // short page = last page (small buffer for the header-row overhead on page 1)
       offset += PAGE_SIZE;
     }
 
     if (allRows.length > 0) {
+      dbg('[terminals] TOTAL rows parsed:', allRows.length);
+      const busan = allRows.filter(r => r.portLower.includes('busan'));
+      const singapore = allRows.filter(r => r.portLower.includes('singapore'));
+      dbg('[terminals] Busan rows found:', busan.length, busan.slice(0, 2));
+      dbg('[terminals] Singapore rows found:', singapore.length, singapore.slice(0, 2));
       try { await idbSet(IDB_TERMINALS, allRows); } catch {}
       return allRows;
     }
     throw new Error('empty result');
 
   } catch (e) {
-    console.warn('Terminal sheet fetch failed, trying IDB cache:', e.message);
+    dbgWarn('Terminal sheet fetch failed, trying IDB cache:', e.message);
     try {
       const cached = await idbGet(IDB_TERMINALS);
       if (cached && Array.isArray(cached) && cached.length > 0) return cached;
