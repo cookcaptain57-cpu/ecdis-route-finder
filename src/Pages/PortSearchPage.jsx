@@ -28,10 +28,11 @@ function PortSearchPage({ portsDb = [], sheetLoading, refreshSheets }) {
   // ports search above (fetchTerminalsFromSheet / TERMINAL_SHEET_ID). Does
   // not touch idbPorts, portsDb, or PORTS_DB, so RoutePlannerPage is unaffected.
   const [terminals, setTerminals] = useState([]);
+  const [terminalsLoading, setTerminalsLoading] = useState(true);
   useEffect(() => {
-    fetchTerminalsFromSheet().then(rows => {
-      if (rows && rows.length > 0) setTerminals(rows);
-    });
+    fetchTerminalsFromSheet()
+      .then(rows => { if (rows && rows.length > 0) setTerminals(rows); })
+      .finally(() => setTerminalsLoading(false));
   }, []);
 
   // NEW: which terminal row (if any) is expanded to show full detail
@@ -141,8 +142,10 @@ function PortSearchPage({ portsDb = [], sheetLoading, refreshSheets }) {
               <div style={{ fontSize: '0.7rem', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 700 }}>🏗️ Terminals</div>
               <span className="badge">{matchedTerminals.length}</span>
             </div>
-            {terminals.length === 0 ? (
+            {terminalsLoading ? (
               <div style={{ fontSize: '0.76rem', color: 'var(--text3)', padding: '0.6rem 0' }}>⏳ Loading terminal data…</div>
+            ) : terminals.length === 0 ? (
+              <div style={{ fontSize: '0.76rem', color: 'var(--text3)', padding: '0.6rem 0' }}>⚠️ Terminal data unavailable right now.</div>
             ) : matchedTerminals.length === 0 ? (
               <div style={{ fontSize: '0.76rem', color: 'var(--text3)', padding: '0.6rem 0' }}>No terminal records found for this port.</div>
             ) : (
