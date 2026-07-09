@@ -1112,9 +1112,8 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
   const filteredSaved=savedRoutes.filter(r=>!savedSearch.trim()||(r.name||'').toLowerCase().includes(savedSearch.toLowerCase())).slice(0,100);
   const filteredDbRoutes=(sheetRoutes||[]).filter(r=>{if(!dbRouteSearch.trim())return true;return[r.name,r.Name,r['Route Name'],r.from,r.to].filter(Boolean).join(' ').toLowerCase().includes(dbRouteSearch.toLowerCase());}).slice(0,60);
   const filteredDB=(sheetRoutes||[]).filter(r=>{if(!dbSearch.trim())return true;return[r.name,r.Name,r['Route Name'],r.from,r.to].filter(Boolean).join(' ').toLowerCase().includes(dbSearch.toLowerCase());}).slice(0,50);
-
-  const onTS=e=>{const t=e.touches[0];hudDragRef.current={dx:t.clientX-hudPos.x,dy:t.clientY-hudPos.y};};
-  const onTM=e=>{if(!hudDragRef.current)return;e.stopPropagation();const t=e.touches[0];setHudPos({x:Math.max(0,Math.min(window.innerWidth-185,t.clientX-hudDragRef.current.dx)),y:Math.max(50,Math.min(window.innerHeight-200,t.clientY-hudDragRef.current.dy))});};
+const onTS=e=>{const t=e.touches[0];if(!t)return;hudDragRef.current={dx:t.clientX-hudPos.x,dy:t.clientY-hudPos.y};};
+const onTM=e=>{if(!hudDragRef.current)return;e.stopPropagation();const t=e.touches[0];if(!t)return;setHudPos({x:Math.max(0,Math.min(window.innerWidth-185,t.clientX-hudDragRef.current.dx)),y:Math.max(50,Math.min(window.innerHeight-200,t.clientY-hudDragRef.current.dy))});};
   const onTE=()=>{hudDragRef.current=null;};
   const toggleDepth=id=>{setDepthSources(prev=>{const next=new Set(prev);if(next.has(id))next.delete(id);else next.add(id);return next;});};
 
@@ -1216,8 +1215,8 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
       {aisPopup&&aisPopupData&&(
         <div
           style={{position:'absolute',left:aisPopup.x,top:aisPopup.y,zIndex:800,background:'rgba(2,8,20,0.97)',border:`2px solid ${aisPopupData.cpaTcpa?.cpa<1?'#FF3030':aisPopupData.cpaTcpa?.cpa<3?'#FF9500':'rgba(0,212,255,0.55)'}`,borderRadius:10,minWidth:205,maxWidth:260,backdropFilter:'blur(14px)',boxShadow:'0 4px 24px rgba(0,0,0,0.7)',touchAction:'none',userSelect:'none'}}
-          onTouchStart={e=>{const t=e.touches[0];aisPopupDragRef.current={dx:t.clientX-aisPopup.x,dy:t.clientY-aisPopup.y};}}
-          onTouchMove={e=>{if(!aisPopupDragRef.current)return;e.stopPropagation();const t=e.touches[0];setAisPopup(p=>p?{...p,x:Math.max(0,Math.min(window.innerWidth-220,t.clientX-aisPopupDragRef.current.dx)),y:Math.max(56,Math.min(window.innerHeight-200,t.clientY-aisPopupDragRef.current.dy))}:p);}}
+          onTouchStart={e=>{const t=e.touches[0];if(!t)return;aisPopupDragRef.current={dx:t.clientX-aisPopup.x,dy:t.clientY-aisPopup.y};}}
+          onTouchMove={e=>{if(!aisPopupDragRef.current)return;e.stopPropagation();const t=e.touches[0];if(!t)return;setAisPopup(p=>p?{...p,x:Math.max(0,Math.min(window.innerWidth-220,t.clientX-aisPopupDragRef.current.dx)),y:Math.max(56,Math.min(window.innerHeight-200,t.clientY-aisPopupDragRef.current.dy))}:p);}}
           onTouchEnd={()=>{aisPopupDragRef.current=null;}}
           onMouseDown={e=>{if(e.button!==0||e.target.tagName==='BUTTON')return;const ox=e.clientX-aisPopup.x,oy=e.clientY-aisPopup.y;const mm=ev=>{setAisPopup(p=>p?{...p,x:Math.max(0,Math.min(window.innerWidth-220,ev.clientX-ox)),y:Math.max(56,Math.min(window.innerHeight-200,ev.clientY-oy))}:p);};const mu=()=>{window.removeEventListener('mousemove',mm);window.removeEventListener('mouseup',mu);};window.addEventListener('mousemove',mm);window.addEventListener('mouseup',mu);}}
         >
@@ -1269,8 +1268,8 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
       {/* COG panel */}
       {cogPanelVisible&&livePos&&(
         <div style={{position:'absolute',left:cogPanelPos.x!==null?cogPanelPos.x:'50%',top:cogPanelPos.y,transform:cogPanelPos.x===null?'translateX(-50%)':'none',zIndex:601,touchAction:'none',cursor:'grab'}}
-          onTouchStart={e=>{const t=e.touches[0];cogDragRef.current={dx:t.clientX-(cogPanelPos.x||window.innerWidth/2-120),dy:t.clientY-cogPanelPos.y};}}
-          onTouchMove={e=>{if(!cogDragRef.current)return;e.stopPropagation();const t=e.touches[0];setCogPanelPos({x:Math.max(0,Math.min(window.innerWidth-260,t.clientX-cogDragRef.current.dx)),y:Math.max(50,Math.min(window.innerHeight-120,t.clientY-cogDragRef.current.dy))});}}
+          onTouchStart={e=>{const t=e.touches[0];if(!t)return;cogDragRef.current={dx:t.clientX-(cogPanelPos.x||window.innerWidth/2-120),dy:t.clientY-cogPanelPos.y};}}
+onTouchMove={e=>{if(!cogDragRef.current)return;e.stopPropagation();const t=e.touches[0];if(!t)return;setCogPanelPos({x:Math.max(0,Math.min(window.innerWidth-260,t.clientX-cogDragRef.current.dx)),y:Math.max(50,Math.min(window.innerHeight-120,t.clientY-cogDragRef.current.dy))});}}
           onTouchEnd={()=>{cogDragRef.current=null;}}
           onMouseDown={e=>{if(e.button!==0)return;const sx=cogPanelPos.x!==null?cogPanelPos.x:e.currentTarget.getBoundingClientRect().left;const ox=e.clientX-sx,oy=e.clientY-cogPanelPos.y;const mm=ev=>{setCogPanelPos({x:Math.max(0,Math.min(window.innerWidth-260,ev.clientX-ox)),y:Math.max(50,Math.min(window.innerHeight-120,ev.clientY-oy))});};const mu=()=>{window.removeEventListener('mousemove',mm);window.removeEventListener('mouseup',mu);};window.addEventListener('mousemove',mm);window.addEventListener('mouseup',mu);}}
         >
