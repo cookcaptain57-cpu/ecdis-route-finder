@@ -2,7 +2,7 @@
 // src/pages/PortSearchPage.jsx
 import { useState, useEffect, useRef, useMemo } from "react";
 import { PORTS_DB } from "../constants";
-import { fetchPortsFromSheet, fetchTerminalsFromSheet } from "../sheets"; // NEW: IDB port loader + terminal loader
+import { fetchPortsFromSheet, fetchTerminalsFromSheet, terminalDebugLog } from "../sheets"; // NEW: IDB port loader + terminal loader + debug log
 
 function PortSearchPage({ portsDb = [], sheetLoading, refreshSheets }) {
   const [q, setQ] = useState('');
@@ -38,6 +38,9 @@ function PortSearchPage({ portsDb = [], sheetLoading, refreshSheets }) {
   // NEW: which terminal row (if any) is expanded to show full detail
   const [expandedTerminal, setExpandedTerminal] = useState(null);
   useEffect(() => { setExpandedTerminal(null); }, [selected]);
+
+  // NEW: toggle for the on-screen terminal-fetch debug log (temporary diagnostic aid)
+  const [showDebug, setShowDebug] = useState(false);
 
   // NEW: terminals matching the selected port. Primary match is a case-
   // insensitive substring check on port/city name (handles spelling variants
@@ -172,6 +175,25 @@ function PortSearchPage({ portsDb = [], sheetLoading, refreshSheets }) {
                     </div>
                   );
                 })}
+              </div>
+            )}
+
+            {/* NEW: temporary on-screen debug log for diagnosing the terminal fetch — tap to expand */}
+            {!terminalsLoading && (
+              <div style={{ marginTop: 10 }}>
+                <div onClick={() => setShowDebug(v => !v)}
+                  style={{ fontSize: '0.65rem', color: 'var(--text3)', cursor: 'pointer', textDecoration: 'underline' }}>
+                  🐛 {showDebug ? 'Hide' : 'Show'} debug log ({terminalDebugLog.length})
+                </div>
+                {showDebug && (
+                  <div style={{ marginTop: 6, maxHeight: 260, overflowY: 'auto', background: 'rgba(0,0,0,0.35)', border: '1px solid var(--border2)', borderRadius: 8, padding: 8 }}>
+                    {terminalDebugLog.length === 0 ? (
+                      <div style={{ fontSize: '0.65rem', color: 'var(--text3)' }}>No log lines captured.</div>
+                    ) : terminalDebugLog.map((line, i) => (
+                      <div key={i} style={{ fontFamily: 'monospace', fontSize: '0.62rem', color: 'var(--text2)', whiteSpace: 'pre-wrap', wordBreak: 'break-all', marginBottom: 4 }}>{line}</div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
           </div>
