@@ -10,22 +10,22 @@ root.render(
   </React.StrictMode>
 );
 
-// ── Register service worker for offline-first / 2G-friendly loading ──
-// This makes the app shell load INSTANTLY on repeat visits (even fully
-// offline), which matters on ship internet (VSAT/2G). Data (Firestore,
-// Sheets, weather) still goes network-first with cache fallback so it
-// stays fresh when a connection is available.
+// Register service worker for offline-first caching.
+// After first load online, ALL app assets (JS chunks, CSS, HTML) are
+// cached in the browser. Subsequent visits — including fully offline —
+// load instantly from cache without any network request.
 serviceWorkerRegistration.register({
   onSuccess: () => {
-    console.log('NavisphereX Marine is ready to work offline.');
+    console.log('NavisphereX: cached for offline use.');
   },
   onUpdate: (registration) => {
-    // A new version was downloaded in the background. Activate it
-    // immediately so the sailor always gets the latest build without
-    // needing to manually clear cache.
+    // New version available — activate it silently without forcing
+    // a reload (which was breaking the offline experience).
     if (registration && registration.waiting) {
       registration.waiting.postMessage({ type: 'SKIP_WAITING' });
     }
-    window.location.reload();
+    // Do NOT call window.location.reload() — let user stay on current page.
+    // They'll get the new version on their next natural navigation.
+    console.log('NavisphereX: updated in background.');
   },
 });
