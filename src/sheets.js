@@ -7,6 +7,7 @@ import { doc, getDoc, setDoc, writeBatch } from 'firebase/firestore';
 export const ROUTE_SHEET_ID = '1ILzyQODb4Ig2mdq9auZ7aJOfdKBBM01t192VE59WbCE';
 export const CHART_SHEET_ID = '1zuZxqUSFtxzg-E8CkTGj01YehhXCZIPodCisCicpxRA';
 export const PORTS_SHEET_ID = '1BFpUuo-nqS3MaUTtANtKT4CFem-X3nZJYGRADZtuIdk';
+export const TERMINAL_SHEET_ID = '1Eih9f0_YISxr9SxuIxaXbM6TSV0X0yXV'; // NEW: Port & Terminal Database sheet
 
 // ─── Firestore collection + chunk size ─────────────────────────────────────
 const CACHE_COL  = 'app_cache';
@@ -254,6 +255,134 @@ export const fetchPortsFromSheet = async () => {
   } catch (e) {
     console.warn('Port sheet fetch failed:', e.message);
     return allRows.length > 0 ? allRows : [];
+  }
+};
+
+// ─── fetchTerminalsFromSheet ────────────────────────────────────────────────
+// NEW: Port & Terminal Database (12,900+ rows: Country, Port Name, Terminal/
+// Facility Name, UN/LOCODE, Description, Lat/Long DMS). Completely separate
+// dataset from fetchPortsFromSheet/PORTS_SHEET_ID above — that one is untouched.
+//
+// Network-first + IndexedDB cache fallback (same pattern as fetchLibrarySheet),
+// paginated the same way as fetchPortsFromSheet since a single unpaginated
+// request is unreliable at this row count.
+//
+// The header row is NOT assumed to be line 0 — the source sheet has a 2-row
+// title/date block above the real header, so the first page's lines are
+// scanned for the row containing "Port Name" and columns are mapped from
+// there. Exact duplicate port+terminal+locode rows are dropped on the way in.
+const IDB_TERMINALS = 'mnav_terminals';
+
+export const fetchTerminalsFromSheet = async () => {
+  const PAGE_SIZE  = 3000;
+  const TAB_NAME   = 'Port & Terminal Database';
+  const MAX_PAGES  = 30; // safety cap — 30 * 3000 = 90,000 rows, well above the ~12,900 expected
+
+  const parseLine = (line) => {
+    const vals = []; let cur = ''; let inQ = false;
+    for (const ch of line) {
+      if (ch === '"') inQ = !inQ;
+      else if (ch === ',' && !inQ) { vals.push(cur.trim()); cur = ''; }
+      else cur += ch;
+    }
+    vals.push(cur.trim());
+    return vals;
+  };
+
+  const findCol = (headerCells, ...names) => {
+    for (const n of names) {
+      const idx = headerCells.findIndex(h => h.replace(/[\s_/]/g, '') === n.replace(/[\s_/]/g, ''));
+      if (idx >= 0) return idx;
+    }
+    return -1;
+  };
+
+  const cleanText = (s) => (s || '').replace(/_x00[0-9a-fA-F]{2}_/g, '').trim();
+
+  const allRows = [];
+  const seen = new Set(); // dedupe on port+terminal+locode
+  let cols = null; // resolved column indices once header row is found
+
+  try {
+    let offset = 0;
+    for (let page = 0; page < MAX_PAGES; page++) {
+      const tq  = encodeURIComponent(`select * limit ${PAGE_SIZE} offset ${offset}`);
+      const url = `https://docs.google.com/spreadsheets/d/${TERMINAL_SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(TAB_NAME)}&tq=${tq}`;
+      const r = await fetch(url);
+      if (!r.ok) break;
+
+      const csv   = await r.text();
+      const lines = csv.trim().split('\n').filter(l => l.trim().length > 0);
+      if (lines.length === 0) break;
+
+      let startLine = 0;
+
+      if (!cols) {
+        for (let i = 0; i < Math.min(5, lines.length); i++) {
+          const cells = parseLine(lines[i]).map(c => c.replace(/"/g, '').trim().toLowerCase());
+          const portIdx = cells.findIndex(c => c === 'port name');
+          if (portIdx >= 0) {
+            cols = {
+              cc:     findCol(cells, 'country code'),
+              cn:     findCol(cells, 'country name'),
+              port:   portIdx,
+              term:   findCol(cells, 'terminal / facility name', 'terminal facility name', 'terminal name'),
+              locode: findCol(cells, 'un/locode', 'unlocode'),
+              desc:   findCol(cells, 'description'),
+              lat:    findCol(cells, 'latitude (dms)', 'latitude'),
+              lon:    findCol(cells, 'longitude (dms)', 'longitude'),
+            };
+            startLine = i + 1;
+            break;
+          }
+        }
+        if (!cols) { offset += PAGE_SIZE; continue; } // header not on this page yet — keep paging
+      }
+
+      for (let i = startLine; i < lines.length; i++) {
+        const vals = parseLine(lines[i]).map(v => v.replace(/"/g, ''));
+        const port = (vals[cols.port] || '').trim();
+        const term = (vals[cols.term] || '').trim();
+        if (!port || !term) continue;
+
+        const locode = (vals[cols.locode] || '').trim();
+        const key = `${port}|${term}|${locode}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+
+        const latVal = cols.lat >= 0 ? parseDMS(vals[cols.lat]) : NaN;
+        const lonVal = cols.lon >= 0 ? parseDMS(vals[cols.lon]) : NaN;
+
+        allRows.push({
+          port,
+          portLower:   port.toLowerCase(),
+          terminal:    term,
+          locode,
+          country:     (vals[cols.cn] || '').trim(),
+          countryCode: (vals[cols.cc] || '').trim(),
+          description: cleanText(vals[cols.desc]),
+          lat: isNaN(latVal) ? null : latVal,
+          lon: isNaN(lonVal) ? null : lonVal,
+        });
+      }
+
+      if (lines.length < PAGE_SIZE - 20) break; // short page = last page (small buffer for the header-row overhead on page 1)
+      offset += PAGE_SIZE;
+    }
+
+    if (allRows.length > 0) {
+      try { await idbSet(IDB_TERMINALS, allRows); } catch {}
+      return allRows;
+    }
+    throw new Error('empty result');
+
+  } catch (e) {
+    console.warn('Terminal sheet fetch failed, trying IDB cache:', e.message);
+    try {
+      const cached = await idbGet(IDB_TERMINALS);
+      if (cached && Array.isArray(cached) && cached.length > 0) return cached;
+    } catch {}
+    return [];
   }
 };
 
