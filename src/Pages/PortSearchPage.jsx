@@ -1,8 +1,14 @@
 /* eslint-disable */
 // src/pages/PortSearchPage.jsx
+//
+// CHANGED: this page now searches the Port & Terminal Database sheet directly
+// instead of the old ports sheet (fetchPortsFromSheet/PORTS_SHEET_ID). That old
+// sheet is untouched in sheets.js and stays wired for RoutePlannerPage — it's
+// just no longer used here, so there's no cross-matching between two sheets
+// with different naming conventions (Antwerp vs Antwerpen etc.) — search,
+// suggestions, and the terminal list all come from one dataset now.
 import { useState, useEffect, useRef, useMemo } from "react";
-import { PORTS_DB } from "../constants";
-import { fetchPortsFromSheet, fetchTerminalsFromSheet, terminalDebugLog } from "../sheets"; // NEW: IDB port loader + terminal loader + debug log
+import { fetchTerminalsFromSheet, terminalDebugLog } from "../sheets";
 
 function PortSearchPage({ portsDb = [], sheetLoading, refreshSheets }) {
   const [q, setQ] = useState('');
@@ -11,22 +17,6 @@ function PortSearchPage({ portsDb = [], sheetLoading, refreshSheets }) {
   const [showSugg, setShowSugg] = useState(false);
   const wRef = useRef();
 
-  // NEW: load ports from IDB on mount — fetchPortsFromSheet returns IDB data
-  // instantly if already cached, or fetches+caches on first load.
-  // Priority: idbPorts → portsDb prop → hardcoded PORTS_DB (existing fallback unchanged)
-  const [idbPorts, setIdbPorts] = useState([]);
-  useEffect(() => {
-    fetchPortsFromSheet().then(rows => {
-      if (rows && rows.length > 0) setIdbPorts(rows);
-    });
-  }, []);
-
-  // CHANGED: idbPorts is now preferred source; existing prop/constant fallback preserved
-  const db = idbPorts.length > 0 ? idbPorts : portsDb.length > 0 ? portsDb : PORTS_DB;
-
-  // NEW: load port+terminal database on mount — separate dataset from the
-  // ports search above (fetchTerminalsFromSheet / TERMINAL_SHEET_ID). Does
-  // not touch idbPorts, portsDb, or PORTS_DB, so RoutePlannerPage is unaffected.
   const [terminals, setTerminals] = useState([]);
   const [terminalsLoading, setTerminalsLoading] = useState(true);
   useEffect(() => {
@@ -35,36 +25,43 @@ function PortSearchPage({ portsDb = [], sheetLoading, refreshSheets }) {
       .finally(() => setTerminalsLoading(false));
   }, []);
 
-  // NEW: which terminal row (if any) is expanded to show full detail
+  // One row per unique port name, derived from the terminal dataset — the
+  // port-level LOCODE is taken from the prefix before the dash on any of its
+  // terminal LOCODEs (e.g. "KRPUS-0192" -> "KRPUS"), and lat/lon is filled
+  // from whichever terminal row under that port happens to have it, since
+  // coverage is roughly half the rows.
+  const ports = useMemo(() => {
+    const map = new Map();
+    for (const t of terminals) {
+      const existing = map.get(t.portLower);
+      if (!existing) {
+        map.set(t.portLower, {
+          name: t.port,
+          portLower: t.portLower,
+          country: t.country,
+          lat: t.lat,
+          lon: t.lon,
+          id: (t.locode || '').split('-')[0] || '',
+          terminalCount: 1,
+        });
+      } else {
+        existing.terminalCount++;
+        if (existing.lat == null && t.lat != null) { existing.lat = t.lat; existing.lon = t.lon; }
+      }
+    }
+    return Array.from(map.values());
+  }, [terminals]);
+
   const [expandedTerminal, setExpandedTerminal] = useState(null);
   useEffect(() => { setExpandedTerminal(null); }, [selected]);
 
-  // NEW: toggle for the on-screen terminal-fetch debug log (temporary diagnostic aid)
   const [showDebug, setShowDebug] = useState(false);
 
-  // NEW: terminals matching the selected port. Primary match is a case-
-  // insensitive substring check on port/city name (handles spelling variants
-  // like "Antwerp" vs the terminal sheet's "Antwerpen"). Falls back to
-  // country-name match for the few ports where the terminal sheet has no
-  // row under that exact name (e.g. Bahrain, Kuwait — real entries are named
-  // after the specific terminal/anchorage, not the country's capital).
+  // Terminals for the selected port — direct match on the same dataset now,
+  // no substring/country-fallback matching needed since there's only one source.
   const matchedTerminals = useMemo(() => {
-    if (!selected || terminals.length === 0) return [];
-    const nameKey = (selected.name || '').toLowerCase().trim();
-    const cityKey = (selected.city || '').toLowerCase().trim();
-    const countryKey = (selected.country || '').toLowerCase().trim();
-    if (!nameKey) return [];
-
-    const byName = terminals.filter(t =>
-      t.portLower.includes(nameKey) || nameKey.includes(t.portLower) ||
-      (cityKey && (t.portLower.includes(cityKey) || cityKey.includes(t.portLower)))
-    );
-    if (byName.length > 0) return byName;
-
-    if (countryKey) {
-      return terminals.filter(t => (t.country || '').toLowerCase().trim() === countryKey);
-    }
-    return [];
+    if (!selected) return [];
+    return terminals.filter(t => t.portLower === selected.portLower);
   }, [selected, terminals]);
 
   useEffect(() => {
@@ -75,27 +72,25 @@ function PortSearchPage({ portsDb = [], sheetLoading, refreshSheets }) {
   useEffect(() => {
     if (!q.trim() || q.length < 2) { setSugg([]); return; }
     const ql = q.toLowerCase().trim();
-    setSugg(db.filter(p => {
-      const kw = (p.keywords || [p.name, p.city, p.country, p.id].filter(Boolean).join(' ')).toLowerCase();
-      return p.name?.toLowerCase().includes(ql) || p.city?.toLowerCase().includes(ql) ||
-        p.id?.toLowerCase().includes(ql) || p.country?.toLowerCase().includes(ql) || kw.includes(ql);
-    }).slice(0, 10));
-  }, [q, db]);
+    setSugg(ports.filter(p =>
+      p.name?.toLowerCase().includes(ql) || p.country?.toLowerCase().includes(ql) || p.id?.toLowerCase().includes(ql)
+    ).slice(0, 10));
+  }, [q, ports]);
 
   return (
     <div className="section">
       <div className="sec-hdr">
         <div className="sec-title">⚓ Ports Database</div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <span className="badge">{db.length.toLocaleString()} ports</span>
-          {sheetLoading && <span style={{ fontSize: '0.68rem', color: 'var(--text3)' }}>⏳ Loading…</span>}
+          <span className="badge">{ports.length.toLocaleString()} ports</span>
+          {terminalsLoading && <span style={{ fontSize: '0.68rem', color: 'var(--text3)' }}>⏳ Loading…</span>}
         </div>
       </div>
       <div ref={wRef} style={{ position: 'relative', marginBottom: '1.4rem' }}>
         <div className="siw">
           <span className="si-ic">🔍</span>
           <input className="si" style={{ paddingLeft: 42, fontSize: '0.92rem' }} autoFocus
-            placeholder="Search by port name, country, LOCODE… e.g. Mumbai, SIN, Rotterdam"
+            placeholder="Search by port name, country, LOCODE… e.g. Mumbai, Busan, Rotterdam"
             value={q} onChange={e => { setQ(e.target.value); setSelected(null); setShowSugg(true); }}
             onFocus={() => q.length >= 2 && setShowSugg(true)} />
           {q && <button onClick={() => { setQ(''); setSugg([]); setSelected(null); }}
@@ -111,7 +106,7 @@ function PortSearchPage({ portsDb = [], sheetLoading, refreshSheets }) {
                 <span style={{ fontSize: '1.1rem' }}>📍</span>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontWeight: 600, fontSize: '0.86rem', color: 'var(--cyan)' }}>{p.name}</div>
-                  <div style={{ fontSize: '0.7rem', color: 'var(--text2)' }}>{p.city && p.city !== p.name ? `${p.city} · ` : ''}{p.country}</div>
+                  <div style={{ fontSize: '0.7rem', color: 'var(--text2)' }}>{p.country}{p.terminalCount ? ` · ${p.terminalCount} terminal${p.terminalCount === 1 ? '' : 's'}` : ''}</div>
                 </div>
                 <span style={{ background: 'rgba(0,180,216,0.1)', color: 'var(--cyan)', border: '1px solid rgba(0,180,216,0.2)', borderRadius: 5, padding: '1px 7px', fontSize: '0.63rem', fontFamily: 'monospace', flexShrink: 0 }}>{p.id}</span>
               </div>
@@ -124,22 +119,21 @@ function PortSearchPage({ portsDb = [], sheetLoading, refreshSheets }) {
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1rem', flexWrap: 'wrap', gap: 8 }}>
             <div>
               <div style={{ fontFamily: 'Orbitron,monospace', fontSize: '1rem', fontWeight: 700, color: 'var(--cyan)', marginBottom: 4 }}>{selected.name}</div>
-              <div style={{ fontSize: '0.8rem', color: 'var(--text2)' }}>{selected.city && selected.city !== selected.name ? `${selected.city} · ` : ''}{selected.country}</div>
+              <div style={{ fontSize: '0.8rem', color: 'var(--text2)' }}>{selected.country}</div>
             </div>
-            <span style={{ background: 'rgba(0,180,216,0.1)', color: 'var(--cyan)', border: '1px solid rgba(0,180,216,0.25)', borderRadius: 8, padding: '4px 12px', fontSize: '0.78rem', fontFamily: 'monospace', fontWeight: 700 }}>{selected.id}</span>
+            {selected.id && <span style={{ background: 'rgba(0,180,216,0.1)', color: 'var(--cyan)', border: '1px solid rgba(0,180,216,0.25)', borderRadius: 8, padding: '4px 12px', fontSize: '0.78rem', fontFamily: 'monospace', fontWeight: 700 }}>{selected.id}</span>}
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.8rem', marginBottom: '1rem' }}>
             <div style={{ background: 'rgba(0,0,0,0.25)', borderRadius: 10, padding: '14px', textAlign: 'center' }}>
               <div style={{ fontSize: '0.58rem', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 6 }}>LATITUDE</div>
-              <div style={{ fontFamily: 'monospace', fontSize: '1.1rem', fontWeight: 700, color: 'var(--green)' }}>{Number(selected.lat).toFixed(5)}°{selected.lat >= 0 ? 'N' : 'S'}</div>
+              <div style={{ fontFamily: 'monospace', fontSize: '1.1rem', fontWeight: 700, color: 'var(--green)' }}>{selected.lat != null ? `${Number(selected.lat).toFixed(5)}°${selected.lat >= 0 ? 'N' : 'S'}` : '—'}</div>
             </div>
             <div style={{ background: 'rgba(0,0,0,0.25)', borderRadius: 10, padding: '14px', textAlign: 'center' }}>
               <div style={{ fontSize: '0.58rem', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 6 }}>LONGITUDE</div>
-              <div style={{ fontFamily: 'monospace', fontSize: '1.1rem', fontWeight: 700, color: 'var(--gold)' }}>{Number(selected.lon).toFixed(5)}°{selected.lon >= 0 ? 'E' : 'W'}</div>
+              <div style={{ fontFamily: 'monospace', fontSize: '1.1rem', fontWeight: 700, color: 'var(--gold)' }}>{selected.lon != null ? `${Number(selected.lon).toFixed(5)}°${selected.lon >= 0 ? 'E' : 'W'}` : '—'}</div>
             </div>
           </div>
 
-          {/* NEW: Terminals for this port — separate dataset (fetchTerminalsFromSheet), additive only */}
           <div style={{ marginTop: '1rem', borderTop: '1px solid var(--border2)', paddingTop: '1rem' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.7rem' }}>
               <div style={{ fontSize: '0.7rem', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 700 }}>🏗️ Terminals</div>
@@ -147,14 +141,12 @@ function PortSearchPage({ portsDb = [], sheetLoading, refreshSheets }) {
             </div>
             {terminalsLoading ? (
               <div style={{ fontSize: '0.76rem', color: 'var(--text3)', padding: '0.6rem 0' }}>⏳ Loading terminal data…</div>
-            ) : terminals.length === 0 ? (
-              <div style={{ fontSize: '0.76rem', color: 'var(--text3)', padding: '0.6rem 0' }}>⚠️ Terminal data unavailable right now.</div>
             ) : matchedTerminals.length === 0 ? (
               <div style={{ fontSize: '0.76rem', color: 'var(--text3)', padding: '0.6rem 0' }}>No terminal records found for this port.</div>
             ) : (
               <div style={{ maxHeight: 320, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}>
                 {matchedTerminals.map((t, i) => {
-                  const tKey = `${t.locode}|${t.terminal}|${i}`;
+                  const tKey = `${t.locode}|${i}`;
                   const isOpen = expandedTerminal === tKey;
                   return (
                     <div key={tKey} style={{ background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 10, overflow: 'hidden' }}>
@@ -166,10 +158,9 @@ function PortSearchPage({ portsDb = [], sheetLoading, refreshSheets }) {
                       {isOpen && (
                         <div style={{ padding: '0 12px 12px', fontSize: '0.74rem', color: 'var(--text2)', lineHeight: 1.6 }}>
                           {t.description && <div style={{ marginBottom: 6 }}>{t.description}</div>}
-                          <div style={{ color: 'var(--text3)' }}>
-                            {t.port}{t.country ? `, ${t.country}` : ''}
-                            {t.lat != null && t.lon != null ? ` · ${t.lat.toFixed(4)}°${t.lat >= 0 ? 'N' : 'S'}, ${t.lon.toFixed(4)}°${t.lon >= 0 ? 'E' : 'W'}` : ''}
-                          </div>
+                          {t.lat != null && t.lon != null && (
+                            <div style={{ color: 'var(--text3)' }}>{t.lat.toFixed(4)}°{t.lat >= 0 ? 'N' : 'S'}, {t.lon.toFixed(4)}°{t.lon >= 0 ? 'E' : 'W'}</div>
+                          )}
                         </div>
                       )}
                     </div>
@@ -178,7 +169,6 @@ function PortSearchPage({ portsDb = [], sheetLoading, refreshSheets }) {
               </div>
             )}
 
-            {/* NEW: temporary on-screen debug log for diagnosing the terminal fetch — tap to expand */}
             {!terminalsLoading && (
               <div style={{ marginTop: 10 }}>
                 <div onClick={() => setShowDebug(v => !v)}
@@ -202,7 +192,7 @@ function PortSearchPage({ portsDb = [], sheetLoading, refreshSheets }) {
         <div style={{ textAlign: 'center', padding: '3rem 1rem', color: 'var(--text3)' }}>
           <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>⚓</div>
           <div style={{ fontFamily: 'Orbitron,monospace', fontSize: '0.82rem', marginBottom: 6 }}>Search Any Port</div>
-          <div style={{ fontSize: '0.76rem', lineHeight: 1.6 }}>Type a port name, country or LOCODE above<br /><strong style={{ color: 'var(--cyan)' }}>{db.length.toLocaleString()} world ports</strong> in the database</div>
+          <div style={{ fontSize: '0.76rem', lineHeight: 1.6 }}>Type a port name, country or LOCODE above<br /><strong style={{ color: 'var(--cyan)' }}>{ports.length.toLocaleString()} world ports</strong> in the database</div>
         </div>
       )}
     </div>
