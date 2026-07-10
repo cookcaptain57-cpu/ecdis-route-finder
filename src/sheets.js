@@ -291,6 +291,7 @@ const dbgWarn = (...args) => {
 };
 
 export const fetchTerminalsFromSheet = async () => {
+  terminalDebugLog.length = 0; // clear stale entries from any previous attempt
   const PAGE_SIZE  = 3000;
   const TAB_NAME   = 'Port & Terminal Database';
   const MAX_PAGES  = 30; // safety cap — 30 * 3000 = 90,000 rows, well above the ~12,900 expected
