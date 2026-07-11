@@ -475,7 +475,10 @@ class AISService {
   }
 
   _emit(event, data) {
-    (this.callbacks[event] || []).forEach(cb => { try { cb(data); } catch {} });
+    (this.callbacks[event] || []).forEach(cb => {
+      try { cb(data); }
+      catch(e) { console.error('[aisService callback error]', event, e); }
+    });
   }
 }
 
