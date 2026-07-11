@@ -4,7 +4,7 @@ import { useState, useEffect, lazy, Suspense } from "react";
 import { auth, db } from "./firebase";
 import { signOut, onAuthStateChanged, setPersistence, browserLocalPersistence } from "firebase/auth";
 import { doc, getDoc, setDoc, serverTimestamp, collection, getDocs, query, orderBy } from "firebase/firestore";
-
+import ErrorBoundary from "./components/ErrorBoundary";
 import { PORTS_DB, ADMIN_EMAIL, normalizePortRow } from "./constants";
 import {
   fetchRouteSheet, fetchChartSheet, fetchPortsFromSheet,
@@ -845,6 +845,7 @@ export default function App() {
                 the moment the user navigates to them, not on first load. ── */}
             {tab==='home' && <HomePage routes={routes} charts={charts} onSearch={handleSearch} setTab={switchTab} user={user} portsDb={portsDb} userProfile={userProfile} installPrompt={installPrompt} onInstallApp={handleInstallApp} allTabs={TABS} />}
 
+            <ErrorBoundary key={tab}>
             <Suspense fallback={
               <div style={{display:'flex',alignItems:'center',justifyContent:'center',flex:1,gap:12,color:'var(--text2)',fontSize:'0.82rem',padding:'3rem'}}>
                 <div className="spin"/>Loading…
@@ -891,6 +892,7 @@ export default function App() {
               )}
               {tab==='info' && <InfoPage notify={notify} user={user} setTab={switchTab} />}
             </Suspense>
+            </ErrorBoundary>
 
             {authChecked && !user && tab!=='home' && tab!=='login' && !PUBLIC_TABS.has(tab) && (
               <div style={{ display:'flex', flex:1, alignItems:'center', justifyContent:'center', padding:'2rem' }}>
