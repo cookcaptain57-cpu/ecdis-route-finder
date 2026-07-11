@@ -144,12 +144,12 @@ function PortSearchPage({ portsDb = [], sheetLoading, refreshSheets }) {
             ) : matchedTerminals.length === 0 ? (
               <div style={{ fontSize: '0.76rem', color: 'var(--text3)', padding: '0.6rem 0' }}>No terminal records found for this port.</div>
             ) : (
-              <div style={{ maxHeight: 320, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <div style={{ maxHeight: 320, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
                 {matchedTerminals.map((t, i) => {
                   const tKey = `${t.locode}|${i}`;
                   const isOpen = expandedTerminal === tKey;
                   return (
-                    <div key={tKey} style={{ background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 10, overflow: 'hidden' }}>
+                    <div key={tKey} style={{ background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 10, overflow: 'hidden', marginBottom: 6 }}>
                       <div onClick={() => setExpandedTerminal(isOpen ? null : tKey)}
                         style={{ padding: '10px 12px', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
                         <div style={{ fontSize: '0.8rem', color: 'var(--text2)', flex: 1, minWidth: 0 }}>{t.terminal}</div>
