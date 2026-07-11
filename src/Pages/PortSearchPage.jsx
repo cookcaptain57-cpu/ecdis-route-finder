@@ -144,19 +144,22 @@ function PortSearchPage({ portsDb = [], sheetLoading, refreshSheets }) {
             ) : matchedTerminals.length === 0 ? (
               <div style={{ fontSize: '0.76rem', color: 'var(--text3)', padding: '0.6rem 0' }}>No terminal records found for this port.</div>
             ) : (
-              <div style={{ maxHeight: 320, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
+              <div style={{ maxHeight: 320, overflowY: 'auto' }}>
                 {matchedTerminals.map((t, i) => {
                   const tKey = `${t.locode}|${i}`;
                   const isOpen = expandedTerminal === tKey;
                   return (
-                    <div key={tKey} style={{ background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 10, overflow: 'hidden', marginBottom: 6 }}>
-                      <div onClick={() => setExpandedTerminal(isOpen ? null : tKey)}
-                        style={{ padding: '10px 12px', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
-                        <div style={{ fontSize: '0.8rem', color: 'var(--text2)', flex: 1, minWidth: 0 }}>{t.terminal}</div>
-                        {t.locode && <span style={{ background: 'rgba(0,180,216,0.1)', color: 'var(--cyan)', border: '1px solid rgba(0,180,216,0.2)', borderRadius: 5, padding: '1px 7px', fontSize: '0.6rem', fontFamily: 'monospace', flexShrink: 0 }}>{t.locode}</span>}
+                    <div key={tKey} style={{ background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 10, marginBottom: 8, padding: '10px 12px' }}>
+                      <div onClick={() => setExpandedTerminal(isOpen ? null : tKey)} style={{ cursor: 'pointer' }}>
+                        <div style={{ fontSize: '0.8rem', color: 'var(--text2)' }}>{t.terminal}</div>
+                        {t.locode && (
+                          <div style={{ marginTop: 4 }}>
+                            <span style={{ background: 'rgba(0,180,216,0.1)', color: 'var(--cyan)', border: '1px solid rgba(0,180,216,0.2)', borderRadius: 5, padding: '1px 7px', fontSize: '0.6rem', fontFamily: 'monospace' }}>{t.locode}</span>
+                          </div>
+                        )}
                       </div>
                       {isOpen && (
-                        <div style={{ padding: '0 12px 12px', fontSize: '0.74rem', color: 'var(--text2)', lineHeight: 1.6 }}>
+                        <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid rgba(255,255,255,0.06)', fontSize: '0.74rem', color: 'var(--text2)', lineHeight: 1.6 }}>
                           {t.description && <div style={{ marginBottom: 6 }}>{t.description}</div>}
                           {t.lat != null && t.lon != null && (
                             <div style={{ color: 'var(--text3)' }}>{t.lat.toFixed(4)}°{t.lat >= 0 ? 'N' : 'S'}, {t.lon.toFixed(4)}°{t.lon >= 0 ? 'E' : 'W'}</div>
