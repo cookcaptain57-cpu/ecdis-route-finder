@@ -290,8 +290,11 @@ const dbgWarn = (...args) => {
   if (terminalDebugLog.length > 60) terminalDebugLog.shift();
 };
 
-export const fetchTerminalsFromSheet = async () => {
-  terminalDebugLog.length = 0; // clear stale entries from any previous attempt
+// Does the actual network fetch + pagination + parsing (unchanged logic, just
+// no longer called directly — see fetchTerminalsFromSheet below for the
+// cache-first wrapper). Falls back to IDB cache itself if the network fetch
+// fails outright, so it's still safe to call this alone if ever needed.
+const _fetchTerminalsLive = async () => {
   const PAGE_SIZE  = 3000;
   const TAB_NAME   = 'Port & Terminal Database';
   const MAX_PAGES  = 30; // safety cap — 30 * 3000 = 90,000 rows, well above the ~12,900 expected
@@ -425,6 +428,27 @@ export const fetchTerminalsFromSheet = async () => {
     } catch {}
     return [];
   }
+};
+
+// ─── fetchTerminalsFromSheet (cache-first) ──────────────────────────────────
+// NEW behaviour: reads IndexedDB first — if a cached copy exists, it's
+// returned immediately (instant, works fully offline), and a live fetch is
+// kicked off in the background purely to refresh the cache for next time
+// (its result isn't awaited or returned here). Only when there's no cache at
+// all yet — first-ever load — does this wait on the live fetch directly.
+export const fetchTerminalsFromSheet = async () => {
+  terminalDebugLog.length = 0; // clear stale entries from any previous call
+  let cached = null;
+  try { cached = await idbGet(IDB_TERMINALS); } catch {}
+
+  if (cached && Array.isArray(cached) && cached.length > 0) {
+    dbg('[terminals] serving', cached.length, 'rows from IDB cache instantly; refreshing in background');
+    _fetchTerminalsLive().catch(() => {}); // fire-and-forget cache refresh
+    return cached;
+  }
+
+  dbg('[terminals] no IDB cache yet — first load must fetch live');
+  return _fetchTerminalsLive();
 };
 
 // ─── Maritime Library Sheet IDs ────────────────────────────────────────────
