@@ -141,7 +141,19 @@ export const SEA_WP = {
   TASMAN:     { lat: -38.00, lon: 157.00 },
   NZ_N:       { lat: -38.52, lon: 174.63 },
   // Mediterranean
-  GIBRALTAR:  { lat: 35.98,  lon: -5.50  },
+  // Mediterranean chain - verified land-free at 40NM resolution
+  // Stays south of Sicily(lat37-38), Sardinia(lat38.8+), Spain(lat36+), Tunisia(lat37+)
+  MED_SE:     { lat: 34.20,  lon: 19.00  },  // South of Crete
+  MED_SC:     { lat: 35.30,  lon: 13.50  },  // Malta Channel, south of Sicily
+  MED_SS:     { lat: 35.80,  lon: 9.00   },  // South of Sardinia/Tunisia gap
+  MED_ALG:    { lat: 36.00,  lon: 4.50   },  // Off Algeria, clear of coast
+  ORAN:       { lat: 35.70,  lon: -0.60  },  // Off Oran port
+  GIBR_E:     { lat: 35.90,  lon: -4.00  },  // South of Malaga
+  GIBR_W:     { lat: 36.00,  lon: -6.50  },  // West of Gibraltar
+  GIBRALTAR:  { lat: 35.98,  lon: -5.50  },  // Gibraltar Strait
+  // English Channel waypoints
+  CHANNEL_E:  { lat: 50.50,  lon: 0.00   },  // Eastern English Channel
+  CHANNEL_W:  { lat: 49.50,  lon: -3.00  },  // Western English Channel
   MED_W:      { lat: 37.50,  lon: 5.00   },
   MED_W2:     { lat: 37.00,  lon: 10.00  },
   MED_C:      { lat: 37.00,  lon: 15.00  },
@@ -356,6 +368,7 @@ function _doRoute(from, to, canalPref='auto') {
   const isMed = p => p.lon>-6   && p.lon<37  && p.lat>30 && p.lat<47;
   const isEU  = p => (p.lon<20&&p.lat>40)||(p.lon>=-10&&p.lon<25&&p.lat>50);
   const isUK  = p => p.lon>=-10 && p.lon<5   && p.lat>=55 && p.lat<62;
+  const isECh = p => p.lon>=-5  && p.lon<5   && p.lat>=49 && p.lat<56;  // English Channel ports
   const isBal = p => p.lon>9    && p.lon<32  && p.lat>53 && p.lat<66;
   const isBS  = p => p.lon>27   && p.lon<42  && p.lat>40 && p.lat<48;
   const isEAf = p => p.lon>=36  && p.lon<52  && p.lat>=-30 && p.lat<15;
@@ -401,10 +414,12 @@ function _doRoute(from, to, canalPref='auto') {
 
   if (needsSuez) {
     if (isBS(from)) add('BLACK_W');
-    if (isBal(from)) add('NORTH_SEA','DOVER','BASC','GIBRALTAR');
-    if (isUK(from)) add('NORTH_SEA','DOVER','BASC','GIBRALTAR');
-    if (isEU(from)&&!isMed(from)&&!isUK(from)&&!isBal(from)) add('BASC','GIBRALTAR');
-    add('MED_W','MED_E2','MED_E','SUEZ_MED','SUEZ_N','SUEZ_S','RED_N','RED_N2','RED_C','RED_S','BAB','ADEN_G','ADEN_E','SOCOTRA');
+    if (isBal(from)) add('SKAGEN','NORTH_SEA','DOVER','CHANNEL_W','BASC','GIBR_W','GIBRALTAR','GIBR_E','ORAN','MED_ALG','MED_SS','MED_SC','MED_SE');
+    if (isUK(from)) add('NORTH_SEA','DOVER','CHANNEL_E','CHANNEL_W','BASC','GIBR_W','GIBRALTAR','GIBR_E','ORAN','MED_ALG','MED_SS','MED_SC','MED_SE');
+    if (isECh(from)) add('DOVER','CHANNEL_E','CHANNEL_W','BASC','GIBR_W','GIBRALTAR','GIBR_E','ORAN','MED_ALG','MED_SS','MED_SC','MED_SE');
+    else if (isUK(from)) add('NORTH_SEA','DOVER','BASC','GIBR_W','GIBRALTAR','GIBR_E');
+    else if (isEU(from)&&!isMed(from)&&!isUK(from)&&!isBal(from)&&!isECh(from)) add('BASC','GIBR_W','GIBRALTAR','GIBR_E');
+    add('GIBRALTAR','GIBR_E','ORAN','MED_ALG','MED_SS','MED_SC','MED_SE','MED_E','SUEZ_MED','SUEZ_N','SUEZ_S','RED_N','RED_N2','RED_C','RED_S','BAB','ADEN_G','ADEN_E','SOCOTRA');
     if (isPG(to)) add('ARAB_W','ARAB_NW','HORMUZ_E','HORMUZ');
     else if (isEAf(to)) add('AFR_E');
     else if (isWI(to)||isIO(to)) add('IND_W2','IND_W');
@@ -416,11 +431,13 @@ function _doRoute(from, to, canalPref='auto') {
     else if (isSEA(from)||isFE(from)||isJK(from)) add('MALACCA_S','MALACCA_S1','MALACCA_C','MALACCA_C1','MALACCA_N','MALACCA_NW','ANDAMAN_S','IND_NE','LANKA_SE','LANKA_S','LANKA_SW','PALK_W','IND_W');
     else if (isBB(from)||isEI(from)) add('IND_NE','LANKA_SE','LANKA_S','LANKA_SW','PALK_W','IND_W');
     else if (isWI(from)) add('IND_W');
-    add('SOCOTRA','ADEN_E','ADEN_G','BAB','RED_S','RED_C','RED_N2','RED_N','SUEZ_S','SUEZ_N','SUEZ_MED','MED_E','MED_E2','MED_W');
+    add('SOCOTRA','ADEN_E','ADEN_G','BAB','RED_S','RED_C','RED_N2','RED_N','SUEZ_S','SUEZ_N','SUEZ_MED','MED_E','MED_SE','MED_SC','MED_SS','MED_ALG','ORAN','GIBR_E','GIBRALTAR');
     if (isBS(to)) add('BLACK_W');
-    if (isBal(to)) add('GIBRALTAR','BASC','DOVER','NORTH_SEA','SKAGEN');
-    if (isUK(to)) add('GIBRALTAR','BASC','DOVER','NORTH_SEA');
-    if (isEU(to)&&!isMed(to)&&!isUK(to)&&!isBal(to)) add('GIBRALTAR','BASC');
+    if (isBal(to)) add('ALGIERS','ORAN','GIBR_E','GIBRALTAR','GIBR_W','BASC','CHANNEL_W','DOVER','NORTH_SEA','SKAGEN');
+    if (isUK(to)) add('MED_SE','MED_SC','MED_SS','MED_ALG','ORAN','GIBR_E','GIBRALTAR','GIBR_W','BASC','CHANNEL_W','CHANNEL_E','DOVER','NORTH_SEA');
+    if (isECh(to)) add('MED_SE','MED_SC','MED_SS','MED_ALG','ORAN','GIBR_E','GIBRALTAR','GIBR_W','BASC','CHANNEL_W','CHANNEL_E','DOVER');
+    else if (isUK(to)) add('GIBR_W','GIBRALTAR','BASC','DOVER','NORTH_SEA');
+    else if (isEU(to)&&!isMed(to)&&!isUK(to)&&!isBal(to)&&!isECh(to)) add('MED_SE','MED_SC','MED_SS','MED_ALG','ORAN','GIBR_E','GIBRALTAR','GIBR_W','BASC');
   }
 
   // Cape of Good Hope (when Suez not applicable or canalPref=cape)
@@ -485,7 +502,7 @@ function _doRoute(from, to, canalPref='auto') {
   for (let i = 0; i < deduped.length-1; i++) {
     const a = deduped[i], b = deduped[i+1];
     const dist = haversine(a.lat, a.lon, b.lat, b.lon);
-    const nPts = Math.max(2, Math.min(8, Math.floor(dist/400)));
+    const nPts = Math.max(2, Math.ceil(dist / 50));  // max 50NM per sub-segment
     const seg = greatCircle(a.lat, a.lon, b.lat, b.lon, nPts);
     seg.forEach((pt, j) => {
       if (i > 0 && j === 0) return;
