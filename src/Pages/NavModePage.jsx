@@ -194,8 +194,6 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
   const aisPopupMmsiRef=useRef(null);
   const aisPopupDataRef=useRef(null);
   const collectedMmsiRef=useRef(new Set());
-  const aisDebugRef=useRef({received:0,noLatLon:0,ownFiltered:0,accepted:0});
-  const [aisDebugTick,setAisDebugTick]=useState(0);
   const ls=k=>localStorage.getItem(k);
   const [mapReady,setMapReady]=useState(false);
   const [gpsOn,setGpsOn]=useState(()=>ls('nav_gpsOn')==='true');
@@ -437,12 +435,10 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
       const off1=aisService.on('status',({status,targets})=>{setLocalAisStatus(status||'connected');setLocalAisCount(typeof targets==='number'?targets:(targets?.size||0));});
       const off2=aisService.on('alert',al=>{setLocalAisAlert(al);notify(`⚠ COLLISION: ${al?.name||al?.mmsi} CPA ${al?.cpa}NM`,'error');setTimeout(()=>setLocalAisAlert(null),30000);});
       const off3=aisService.on('update',({target,targets})=>{
-        aisDebugRef.current.received++;
-        if(!target?.lat||!target?.lon){aisDebugRef.current.noLatLon++;return;}
+        if(!target?.lat||!target?.lon)return;
         const ownM=shipProfile?.mmsi?String(shipProfile.mmsi):null;
         ownMmsiRef.current=ownM;
-        if(ownM&&String(target.mmsi)===ownM){aisDebugRef.current.ownFiltered++;return;}
-        aisDebugRef.current.accepted++;
+        if(ownM&&String(target.mmsi)===ownM)return;
         setAisTargets(prev=>({...prev,[target.mmsi]:{
           mmsi:target.mmsi,lat:target.lat,lon:target.lon,
           cog:target.cog||0,sog:target.sog||0,hdg:target.hdg||target.cog||0,
@@ -550,10 +546,6 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
     syncPendingAisToSheet();
     const timer=setInterval(syncPendingAisToSheet,180000);
     return()=>clearInterval(timer);
-  },[]);
-  useEffect(()=>{
-    const t=setInterval(()=>setAisDebugTick(x=>x+1),1000);
-    return()=>clearInterval(t);
   },[]);
   useEffect(()=>{
     if(!leafRef.current||!window.L)return;
@@ -1420,9 +1412,6 @@ onTouchMove={e=>{if(!cogDragRef.current)return;e.stopPropagation();const t=e.tou
           {activePanel==='ais_src'&&(<div style={{display:'flex',flexDirection:'column',gap:6}}>
             <div style={{color:S.dm,fontSize:S.lb,marginBottom:2}}>AIS SOURCE</div>
             {[['bridge','📡 AIS PILOT (WiFi)','#00FF88'],['internet','🌐 Internet','#FFD700'],['off','⭕ Off','#4A6080']].map(([id,lb,col])=>(<label key={id} style={{display:'flex',alignItems:'center',gap:6,cursor:'pointer',fontSize:'0.72rem',color:aisSource===id?col:S.dm,background:aisSource===id?`${col}18`:'transparent',border:`1px solid ${aisSource===id?col+'50':'transparent'}`,borderRadius:5,padding:'4px 8px',minHeight:26}}><input type="radio" name="aisSrc" value={id} checked={aisSource===id} onChange={()=>setAisSource(id)} style={{accentColor:col}}/><span style={{flex:1}}>{lb}</span>{aisSource===id&&id!=='off'&&<span style={{fontSize:'0.6rem',color:(aisSource==='internet'?aisStatus:localAisStatus)==='connected'?'#00FF88':'#FFD700'}}>{(aisSource==='internet'?aisStatus:localAisStatus)==='connected'?`✅${aisSource==='internet'?Object.keys(aisTargets).length:localAisCount}`:'⏳'}</span>}</label>))}
-            <div style={{fontSize:'0.58rem',color:S.gd,fontFamily:'monospace',background:'rgba(0,0,0,0.3)',borderRadius:5,padding:'4px 7px'}}>
-              DBG rx:{aisDebugRef.current.received} noPos:{aisDebugRef.current.noLatLon} ownFilt:{aisDebugRef.current.ownFiltered} ok:{aisDebugRef.current.accepted}
-            </div>
             {aisSource==='bridge'&&(
               <div style={{display:'flex',flexDirection:'column',gap:4}}>
                 <input value={localAisHost} onChange={e=>setLocalAisHost(e.target.value)} placeholder="ws://192.168.x.x:4002" style={{width:'100%',boxSizing:'border-box',background:'#06101C',color:S.cy,border:'1px solid #1A3050',borderRadius:4,padding:'5px 7px',fontSize:'0.63rem',outline:'none'}}/>
@@ -1631,4 +1620,4 @@ onTouchMove={e=>{if(!cogDragRef.current)return;e.stopPropagation();const t=e.tou
       </div>)}
     </div>
   );
-}
+                                                                                                                                                                                                                                                                                                                                                           }
