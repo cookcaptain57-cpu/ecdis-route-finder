@@ -65,9 +65,6 @@ const normalizeStr = (str) =>
   str.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
 
 // ── Build Google Drive direct download URL ─────────────────────────────────
-// Uses drive.usercontent.google.com — Google's newer direct-download endpoint.
-// Unlike drive.google.com/uc, this bypasses the viewer in PWA standalone mode
-// and forces a binary file download on both browser and installed PWA.
 const buildDriveUrl = (row) => {
   const fileId = row['Fileid'] || row['fileId'] || row['FileID'];
   if (fileId && fileId.trim()) {
@@ -81,21 +78,48 @@ const buildDriveUrl = (row) => {
   return url;
 };
 
-// ── Detect if running as installed PWA (standalone mode) ──────────────────
-const isStandalonePWA = () =>
-  window.matchMedia('(display-mode: standalone)').matches ||
-  window.navigator.standalone === true;
+// ── Platform detection ─────────────────────────────────────────────────────
+const isIOS = () =>
+  /iPhone|iPad|iPod/i.test(navigator.userAgent) ||
+  (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 
-// ── PWA-aware download trigger ─────────────────────────────────────────────
-// PWA standalone: window.open() opens Drive viewer instead of downloading.
-// Fix: programmatic anchor click with rel="noopener" — Android Chrome
-// intercepts the content-disposition:attachment header and hands it to
-// the download manager without opening a viewer page.
-// Regular browser: hidden iframe (no page navigation needed).
-const triggerIframeDownload = (driveUrl, fname) => {
-  return new Promise((resolve) => {
-    if (isStandalonePWA()) {
-      // PWA mode — anchor click, Android download manager intercepts it
+const isStandalonePWA = () =>
+  !isIOS() && (
+    window.matchMedia('(display-mode: standalone)').matches ||
+    window.navigator.standalone === true
+  );
+
+// ── Smart download trigger — 3-way platform handling ──────────────────────
+//
+//  iOS (any browser)    → fetch blob → window.open(blobURL) → Share Sheet
+//  Android PWA          → anchor click → Android download manager
+//  Desktop / Android    → hidden iframe → silent background download
+//  browser
+//
+const triggerDownload = async (driveUrl, fname) => {
+  // ── iOS: blob fetch → Share Sheet ───────────────────────────────────────
+  if (isIOS()) {
+    const response = await fetch(driveUrl);
+    if (!response.ok) throw new Error(`Fetch failed: ${response.status}`);
+    const blob = await response.blob();
+    const objectUrl = URL.createObjectURL(blob);
+    const newTab = window.open(objectUrl, '_blank');
+    if (!newTab) {
+      const a = document.createElement('a');
+      a.href = objectUrl;
+      a.download = fname || '';
+      a.style.display = 'none';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    }
+    setTimeout(() => URL.revokeObjectURL(objectUrl), 30000);
+    return;
+  }
+
+  // ── Android PWA: anchor click ────────────────────────────────────────────
+  if (isStandalonePWA()) {
+    return new Promise((resolve) => {
       const a = document.createElement('a');
       a.href = driveUrl;
       a.download = fname || '';
@@ -105,13 +129,13 @@ const triggerIframeDownload = (driveUrl, fname) => {
       a.click();
       document.body.removeChild(a);
       setTimeout(() => resolve(), 1000);
-      return;
-    }
+    });
+  }
 
-    // Regular browser — hidden iframe (works perfectly in browser)
+  // ── Desktop / Android browser: hidden iframe ─────────────────────────────
+  return new Promise((resolve) => {
     const old = document.getElementById('__mnav_dl_frame');
     if (old) old.remove();
-
     const iframe = document.createElement('iframe');
     iframe.id = '__mnav_dl_frame';
     iframe.style.display = 'none';
@@ -119,12 +143,11 @@ const triggerIframeDownload = (driveUrl, fname) => {
     iframe.style.top = '-9999px';
     iframe.src = driveUrl;
     document.body.appendChild(iframe);
-
     setTimeout(() => resolve(), 3500);
   });
 };
 
-// ── Simulated progress bar during iframe download ─────────────────────────
+// ── Simulated progress bar ─────────────────────────────────────────────────
 const useSimulatedProgress = () => {
   const [progress, setProgress] = useState(null);
   const timerRef = useRef(null);
@@ -150,7 +173,6 @@ const useSimulatedProgress = () => {
   }, []);
 
   useEffect(() => () => clearInterval(timerRef.current), []);
-
   return { progress, startProgress, completeProgress, resetProgress };
 };
 
@@ -169,15 +191,13 @@ const ProgressBar = ({ progress, filename }) => (
       <div style={{
         height: '100%', borderRadius: 4,
         background: progress < 100 ? 'var(--gold)' : 'var(--green)',
-        width: `${progress}%`,
-        transition: 'width 0.25s ease'
+        width: `${progress}%`, transition: 'width 0.25s ease'
       }} />
     </div>
   </div>
 );
 
 // ──────────────────────────────────────────────────────────────────────────
-
 const PAGE_SIZE = 100;
 
 function ChartsPage({ notify, user, setTab, isAdmin: isAdminProp, sheetCharts = [], sheetLoading }) {
@@ -190,19 +210,14 @@ function ChartsPage({ notify, user, setTab, isAdmin: isAdminProp, sheetCharts = 
   const [brandResults,    setBrandResults]    = useState([]);
   const [brandSearching,  setBrandSearching]  = useState(false);
 
-  // Pagination
   const [globalVisible, setGlobalVisible] = useState(PAGE_SIZE);
   const [brandVisible,  setBrandVisible]  = useState(PAGE_SIZE);
 
-  // Download state
   const [dlFilename,  setDlFilename]  = useState('');
   const [dlLoadingId, setDlLoadingId] = useState(null);
   const { progress: dlProgress, startProgress, completeProgress, resetProgress } = useSimulatedProgress();
 
-  // Download history
   const [dlHistory, setDlHistory] = useState(() => getTodayHistory());
-
-  // ── Live daily limit (for notice text) — fetched from Firestore ─────────
   const [maxChartsPerDay, setMaxChartsPerDay] = useState(10);
 
   const debounceRef = useRef(null);
@@ -217,9 +232,7 @@ function ChartsPage({ notify, user, setTab, isAdmin: isAdminProp, sheetCharts = 
     setGlobalSearching(true); setGlobalSearched(true); setSelBrand(null);
     const ql = normalizeStr(s);
     const res = sheetCharts.filter(r => {
-      const hay = normalizeStr(
-        Object.values(r).filter(v => v && typeof v === 'string').join(' ')
-      );
+      const hay = normalizeStr(Object.values(r).filter(v => v && typeof v === 'string').join(' '));
       return hay.includes(ql);
     });
     setGlobalResults(res);
@@ -234,15 +247,11 @@ function ChartsPage({ notify, user, setTab, isAdmin: isAdminProp, sheetCharts = 
     if (v.trim().length >= 2) debounceRef.current = setTimeout(() => doGlobalSearch(v), 200);
   };
 
-  // ── Fetch live download limit for notice text display ───────────────────
   useEffect(() => {
     (async () => {
       try {
         const snap = await getDoc(doc(db, 'app_config', 'limits'));
-        if (snap.exists()) {
-          const data = snap.data();
-          setMaxChartsPerDay(Number(data.maxChartsPerDay ?? 10));
-        }
+        if (snap.exists()) setMaxChartsPerDay(Number(snap.data().maxChartsPerDay ?? 10));
       } catch {}
     })();
   }, []);
@@ -254,9 +263,7 @@ function ChartsPage({ notify, user, setTab, isAdmin: isAdminProp, sheetCharts = 
     setBrandSearching(true);
     const ql = normalizeStr(s);
     const res = sheetCharts.filter(r => {
-      const hay = normalizeStr(
-        Object.values(r).filter(v => v && typeof v === 'string').join(' ')
-      );
+      const hay = normalizeStr(Object.values(r).filter(v => v && typeof v === 'string').join(' '));
       const brandMatch = hay.includes(normalizeStr(b.name)) || hay.includes(b.id.toLowerCase());
       const queryMatch = !s || hay.includes(ql);
       return brandMatch && queryMatch;
@@ -281,7 +288,7 @@ function ChartsPage({ notify, user, setTab, isAdmin: isAdminProp, sheetCharts = 
     debRef2.current = setTimeout(() => doBrandSearch(v), 200);
   };
 
-  // ── Main download handler — iframe silent download, no Drive page jump ────
+  // ── Main download handler ─────────────────────────────────────────────────
   const handleDL = async (c) => {
     if (!user) { notify('Login required to download', 'error'); setTab('login'); return; }
 
@@ -291,7 +298,7 @@ function ChartsPage({ notify, user, setTab, isAdmin: isAdminProp, sheetCharts = 
       return;
     }
 
-    const fname = (c['Filename'] || c['File Name'] || c.fileName || c['Chart Name'] || 'chart').trim();
+    const fname    = (c['Filename'] || c['File Name'] || c.fileName || c['Chart Name'] || 'chart').trim();
     const driveUrl = buildDriveUrl(c);
     if (!driveUrl) { notify('No download link for this file', 'error'); return; }
 
@@ -301,43 +308,41 @@ function ChartsPage({ notify, user, setTab, isAdmin: isAdminProp, sheetCharts = 
     startProgress();
 
     try {
-      // ── FIXED: iframe silent download ──────────────────────────────────
-      // Bypasses CORS entirely. Browser download manager intercepts the
-      // content-disposition header and saves the file — no Drive page opens.
-      await triggerIframeDownload(driveUrl, fname);
+      await triggerDownload(driveUrl, fname);
 
       completeProgress();
-
       if (!isAdmin) await incrementDownloadCount(user.uid);
-
       addToHistory(fname);
       setDlHistory(getTodayHistory());
 
-      notify(
-        `✅ Downloading: ${fname}${isAdmin ? '' : ` — ${limit.remaining - 1} left today`}`,
-        'success'
-      );
+      if (isIOS()) {
+        notify(`📂 Tap Share → "Save to Files" to save: ${fname}`, 'success');
+      } else {
+        notify(
+          `✅ Downloading: ${fname}${isAdmin ? '' : ` — ${limit.remaining - 1} left today`}`,
+          'success'
+        );
+      }
 
     } catch (err) {
-      // ── FIXED fallback: anchor download WITHOUT target='_blank' ────────
-      // No target means browser handles it as a download, not navigation.
       resetProgress();
-      console.warn('iframe download error, using anchor fallback:', err?.message);
-
+      console.warn('Download error, trying fallback:', err?.message);
       try {
         const a = document.createElement('a');
         a.href = driveUrl;
         a.download = fname;
-        // NOTE: NO a.target — omitting target prevents Drive page from opening
         a.style.display = 'none';
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
-
         if (!isAdmin) await incrementDownloadCount(user.uid);
         addToHistory(fname);
         setDlHistory(getTodayHistory());
-        notify(`⬇ Download started: ${fname} — check your Downloads folder`, 'success');
+        notify(isIOS()
+          ? `📂 Tap Share → "Save to Files" to save: ${fname}`
+          : `⬇ Download started: ${fname} — check your Downloads folder`,
+          'success'
+        );
       } catch {
         notify('❌ Download failed. Check your connection and try again.', 'error');
       }
@@ -351,9 +356,7 @@ function ChartsPage({ notify, user, setTab, isAdmin: isAdminProp, sheetCharts = 
 
   const getBrand = r => {
     const hay = normalizeStr(Object.values(r).filter(v => v && typeof v === 'string').join(' '));
-    return ECDIS_BRANDS.find(b =>
-      hay.includes(normalizeStr(b.name)) || hay.includes(b.id.toLowerCase())
-    ) || null;
+    return ECDIS_BRANDS.find(b => hay.includes(normalizeStr(b.name)) || hay.includes(b.id.toLowerCase())) || null;
   };
 
   const ResultCard = ({ r }) => {
@@ -371,22 +374,15 @@ function ChartsPage({ notify, user, setTab, isAdmin: isAdminProp, sheetCharts = 
         <div className="file-tags">
           <span className="ftag tag-chart">Chart File</span>
           <span className="ftag" style={{ background: 'rgba(0,200,100,0.07)', color: 'var(--green)', border: '1px solid rgba(0,200,100,0.2)' }}>Firebase</span>
-          {alreadyDl && (
-            <span className="ftag" style={{ background: 'rgba(240,165,0,0.1)', color: 'var(--gold)', border: '1px solid rgba(240,165,0,0.25)' }}>✓ Today</span>
-          )}
+          {alreadyDl && <span className="ftag" style={{ background: 'rgba(240,165,0,0.1)', color: 'var(--gold)', border: '1px solid rgba(240,165,0,0.25)' }}>✓ Today</span>}
         </div>
-        {/* Inline progress bar for active card */}
         {isLoading && dlProgress !== null && (
           <div style={{ margin: '6px 0 4px', height: 3, background: 'rgba(255,255,255,0.08)', borderRadius: 3, overflow: 'hidden' }}>
             <div style={{ height: '100%', background: 'var(--gold)', width: `${dlProgress}%`, transition: 'width 0.25s ease', borderRadius: 3 }} />
           </div>
         )}
         {user
-          ? <button
-              className="dl-btn"
-              onClick={() => handleDL(r)}
-              disabled={isLoading}
-              style={{ opacity: isLoading ? 0.6 : 1 }}>
+          ? <button className="dl-btn" onClick={() => handleDL(r)} disabled={isLoading} style={{ opacity: isLoading ? 0.6 : 1 }}>
               {isLoading ? '⬇ Downloading…' : '⬇ Download'}
             </button>
           : <button className="login-req" onClick={() => setTab('login')}>🔐 Login to Download</button>
@@ -397,10 +393,7 @@ function ChartsPage({ notify, user, setTab, isAdmin: isAdminProp, sheetCharts = 
 
   return (
     <div className="section">
-      {/* Progress bar overlay */}
-      {dlProgress !== null && (
-        <ProgressBar progress={dlProgress} filename={dlFilename} />
-      )}
+      {dlProgress !== null && <ProgressBar progress={dlProgress} filename={dlFilename} />}
 
       <div className="sec-hdr">
         <div className="sec-title">📊 ECDIS Charts</div>
@@ -411,7 +404,13 @@ function ChartsPage({ notify, user, setTab, isAdmin: isAdminProp, sheetCharts = 
         </div>
       </div>
 
-      {/* Download limit notice */}
+      {/* iOS download notice */}
+      {isIOS() && user && (
+        <div style={{ background: 'rgba(240,165,0,0.06)', border: '1px solid rgba(240,165,0,0.2)', borderRadius: 8, padding: '7px 12px', fontSize: '0.7rem', color: 'var(--text2)', marginBottom: '0.8rem' }}>
+          🍎 <strong style={{ color: 'var(--gold)' }}>iOS tip:</strong> After tapping Download, tap <strong>Share → Save to Files</strong> to save the file.
+        </div>
+      )}
+
       {user && !isAdmin && (
         <div style={{ background: 'rgba(240,165,0,0.06)', border: '1px solid rgba(240,165,0,0.2)', borderRadius: 8, padding: '7px 12px', fontSize: '0.7rem', color: 'var(--text2)', marginBottom: '0.8rem' }}>
           📥 Free account: up to <strong style={{ color: 'var(--gold)' }}>{maxChartsPerDay} chart downloads per day</strong>. Resets at midnight.
@@ -423,21 +422,14 @@ function ChartsPage({ notify, user, setTab, isAdmin: isAdminProp, sheetCharts = 
         </div>
       )}
 
-      {/* Download history panel */}
       {dlHistory.length > 0 && (
         <div style={{ background: 'rgba(240,165,0,0.04)', border: '1px solid rgba(240,165,0,0.12)', borderRadius: 8, padding: '8px 12px', marginBottom: '0.8rem' }}>
-          <div style={{ fontSize: '0.65rem', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 5 }}>
-            📂 Downloaded today ({dlHistory.length})
-          </div>
+          <div style={{ fontSize: '0.65rem', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 5 }}>📂 Downloaded today ({dlHistory.length})</div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
             {dlHistory.slice(0, 10).map((f, i) => (
-              <span key={i} style={{ fontSize: '0.65rem', background: 'rgba(240,165,0,0.1)', color: 'var(--gold)', border: '1px solid rgba(240,165,0,0.2)', borderRadius: 4, padding: '2px 7px', fontFamily: 'monospace' }}>
-                {f}
-              </span>
+              <span key={i} style={{ fontSize: '0.65rem', background: 'rgba(240,165,0,0.1)', color: 'var(--gold)', border: '1px solid rgba(240,165,0,0.2)', borderRadius: 4, padding: '2px 7px', fontFamily: 'monospace' }}>{f}</span>
             ))}
-            {dlHistory.length > 10 && (
-              <span style={{ fontSize: '0.65rem', color: 'var(--text3)' }}>+{dlHistory.length - 10} more</span>
-            )}
+            {dlHistory.length > 10 && <span style={{ fontSize: '0.65rem', color: 'var(--text3)' }}>+{dlHistory.length - 10} more</span>}
           </div>
         </div>
       )}
@@ -462,30 +454,21 @@ function ChartsPage({ notify, user, setTab, isAdmin: isAdminProp, sheetCharts = 
           <div style={{ fontSize: '0.65rem', color: 'var(--text3)', lineHeight: 1.7 }}>
             Search ECDIS charts by port name or port code (UNLOCODE).<br />
             <span style={{ color: 'var(--text2)' }}>Examples: </span>
-            <span style={{ fontFamily: 'monospace', color: 'var(--gold)', background: 'rgba(240,165,0,0.1)', borderRadius: 3, padding: '1px 5px', marginRight: 4 }}>Mundra</span>
-            <span style={{ fontFamily: 'monospace', color: 'var(--gold)', background: 'rgba(240,165,0,0.1)', borderRadius: 3, padding: '1px 5px', marginRight: 4 }}>INMUN</span>
-            <span style={{ fontFamily: 'monospace', color: 'var(--gold)', background: 'rgba(240,165,0,0.1)', borderRadius: 3, padding: '1px 5px', marginRight: 4 }}>MUN</span>
-            <span style={{ fontFamily: 'monospace', color: 'var(--gold)', background: 'rgba(240,165,0,0.1)', borderRadius: 3, padding: '1px 5px', marginRight: 4 }}>Singapore</span>
-            <span style={{ fontFamily: 'monospace', color: 'var(--gold)', background: 'rgba(240,165,0,0.1)', borderRadius: 3, padding: '1px 5px' }}>SGP</span>
+            {['Mundra','INMUN','MUN','Singapore','SGP'].map(ex => (
+              <span key={ex} style={{ fontFamily: 'monospace', color: 'var(--gold)', background: 'rgba(240,165,0,0.1)', borderRadius: 3, padding: '1px 5px', marginRight: 4 }}>{ex}</span>
+            ))}
           </div>
         </div>
 
-        {sheetLoading && !globalSearched && (
-          <div className="loading" style={{ padding: '8px 0' }}><div className="spin" /><span>Loading chart database from Firebase…</span></div>
-        )}
+        {sheetLoading && !globalSearched && <div className="loading" style={{ padding: '8px 0' }}><div className="spin" /><span>Loading chart database from Firebase…</span></div>}
         {!sheetLoading && sheetCharts.length === 0 && (
-          <div className="empty">
-            <div className="empty-icon">🗄</div>
-            <div className="empty-t">No Charts in Firebase Yet</div>
-            <div className="empty-d">Admin needs to sync charts from Google Sheet to Firebase first.</div>
-          </div>
+          <div className="empty"><div className="empty-icon">🗄</div><div className="empty-t">No Charts in Firebase Yet</div><div className="empty-d">Admin needs to sync charts from Google Sheet to Firebase first.</div></div>
         )}
         {globalSearching && <div className="loading" style={{ padding: '8px 0' }}><div className="spin" /><span>Searching…</span></div>}
         {globalSearched && !globalSearching && globalResults.length === 0 && (
           <div style={{ color: 'var(--text3)', fontSize: '0.78rem', padding: '6px 0', textAlign: 'center' }}>No charts found — try different keywords</div>
         )}
 
-        {/* Paginated global results */}
         {globalResults.length > 0 && (
           <>
             <div className="files-grid" style={{ marginTop: 8 }}>
@@ -493,10 +476,7 @@ function ChartsPage({ notify, user, setTab, isAdmin: isAdminProp, sheetCharts = 
             </div>
             {globalResults.length > globalVisible && (
               <div style={{ textAlign: 'center', marginTop: '1rem' }}>
-                <button
-                  className="btn btn-secondary"
-                  onClick={() => setGlobalVisible(v => v + PAGE_SIZE)}
-                  style={{ padding: '10px 28px', fontSize: '0.8rem' }}>
+                <button className="btn btn-secondary" onClick={() => setGlobalVisible(v => v + PAGE_SIZE)} style={{ padding: '10px 28px', fontSize: '0.8rem' }}>
                   Load More ({globalResults.length - globalVisible} remaining)
                 </button>
               </div>
@@ -516,34 +496,16 @@ function ChartsPage({ notify, user, setTab, isAdmin: isAdminProp, sheetCharts = 
           </div>
 
           {!selBrand && (
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: '1fr 1fr',
-                gap: 8,
-              }}
-            >
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
               {ECDIS_BRANDS.map(b => {
                 const cnt = sheetCharts.filter(r => {
                   const hay = normalizeStr(Object.values(r).filter(v => v && typeof v === 'string').join(' '));
                   return hay.includes(normalizeStr(b.name)) || hay.includes(b.id.toLowerCase());
                 }).length;
                 return (
-                  <div
-                    key={b.id}
+                  <div key={b.id}
                     onClick={() => { setSelBrand(b.id); setGlobalQ(''); setGlobalResults([]); setGlobalSearched(false); }}
-                    style={{
-                      display: 'flex',
-                      flexDirection: 'row',
-                      alignItems: 'center',
-                      gap: 10,
-                      padding: '10px 14px',
-                      borderRadius: 10,
-                      border: `1px solid ${b.color}44`,
-                      background: 'rgba(255,255,255,0.02)',
-                      cursor: 'pointer',
-                      transition: 'background 0.15s ease, border-color 0.15s ease',
-                    }}
+                    style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 10, padding: '10px 14px', borderRadius: 10, border: `1px solid ${b.color}44`, background: 'rgba(255,255,255,0.02)', cursor: 'pointer', transition: 'background 0.15s ease, border-color 0.15s ease' }}
                     onMouseEnter={e => { e.currentTarget.style.background = `${b.color}18`; e.currentTarget.style.borderColor = `${b.color}88`; }}
                     onMouseLeave={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.02)'; e.currentTarget.style.borderColor = `${b.color}44`; }}
                   >
@@ -581,14 +543,8 @@ function ChartsPage({ notify, user, setTab, isAdmin: isAdminProp, sheetCharts = 
               </div>
               {brandSearching && <div className="loading"><div className="spin" /><span>Searching {sb?.name} charts…</span></div>}
               {!brandSearching && brandResults.length === 0 && (
-                <div className="empty">
-                  <div className="empty-icon">{sb?.emoji}</div>
-                  <div className="empty-t">No {sb?.name} Charts Found</div>
-                  <div className="empty-d">Try a port name or leave blank to see all {sb?.name} charts</div>
-                </div>
+                <div className="empty"><div className="empty-icon">{sb?.emoji}</div><div className="empty-t">No {sb?.name} Charts Found</div><div className="empty-d">Try a port name or leave blank to see all {sb?.name} charts</div></div>
               )}
-
-              {/* Paginated brand results */}
               {brandResults.length > 0 && (
                 <>
                   <div className="files-grid">
@@ -596,10 +552,7 @@ function ChartsPage({ notify, user, setTab, isAdmin: isAdminProp, sheetCharts = 
                   </div>
                   {brandResults.length > brandVisible && (
                     <div style={{ textAlign: 'center', marginTop: '1rem' }}>
-                      <button
-                        className="btn btn-secondary"
-                        onClick={() => setBrandVisible(v => v + PAGE_SIZE)}
-                        style={{ padding: '10px 28px', fontSize: '0.8rem' }}>
+                      <button className="btn btn-secondary" onClick={() => setBrandVisible(v => v + PAGE_SIZE)} style={{ padding: '10px 28px', fontSize: '0.8rem' }}>
                         Load More ({brandResults.length - brandVisible} remaining)
                       </button>
                     </div>
