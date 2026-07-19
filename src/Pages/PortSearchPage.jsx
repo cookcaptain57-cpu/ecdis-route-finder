@@ -8,7 +8,7 @@
 // with different naming conventions (Antwerp vs Antwerpen etc.) — search,
 // suggestions, and the terminal list all come from one dataset now.
 import { useState, useEffect, useRef, useMemo } from "react";
-import { fetchTerminalsFromSheet, terminalDebugLog } from "../sheets";
+import { fetchTerminalsFromSheet } from "../sheets";
 
 function PortSearchPage({ portsDb = [], sheetLoading, refreshSheets }) {
   const [q, setQ] = useState('');
@@ -55,8 +55,6 @@ function PortSearchPage({ portsDb = [], sheetLoading, refreshSheets }) {
   const [expandedTerminal, setExpandedTerminal] = useState(null);
   useEffect(() => { setExpandedTerminal(null); }, [selected]);
 
-  const [showDebug, setShowDebug] = useState(false);
-
   // Terminals for the selected port — direct match on the same dataset now,
   // no substring/country-fallback matching needed since there's only one source.
   const matchedTerminals = useMemo(() => {
@@ -86,6 +84,7 @@ function PortSearchPage({ portsDb = [], sheetLoading, refreshSheets }) {
           {terminalsLoading && <span style={{ fontSize: '0.68rem', color: 'var(--text3)' }}>⏳ Loading…</span>}
         </div>
       </div>
+      <div style={{ fontSize: '0.76rem', color: 'var(--text3)', marginBottom: '1rem' }}>Port database with terminal details for every port</div>
       <div ref={wRef} style={{ position: 'relative', marginBottom: '1.4rem' }}>
         <div className="siw">
           <span className="si-ic">🔍</span>
@@ -169,24 +168,6 @@ function PortSearchPage({ portsDb = [], sheetLoading, refreshSheets }) {
                     </div>
                   );
                 })}
-              </div>
-            )}
-
-            {!terminalsLoading && (
-              <div style={{ marginTop: 10 }}>
-                <div onClick={() => setShowDebug(v => !v)}
-                  style={{ fontSize: '0.65rem', color: 'var(--text3)', cursor: 'pointer', textDecoration: 'underline' }}>
-                  🐛 {showDebug ? 'Hide' : 'Show'} debug log ({terminalDebugLog.length})
-                </div>
-                {showDebug && (
-                  <div style={{ marginTop: 6, maxHeight: 260, overflowY: 'auto', background: 'rgba(0,0,0,0.35)', border: '1px solid var(--border2)', borderRadius: 8, padding: 8 }}>
-                    {terminalDebugLog.length === 0 ? (
-                      <div style={{ fontSize: '0.65rem', color: 'var(--text3)' }}>No log lines captured.</div>
-                    ) : terminalDebugLog.map((line, i) => (
-                      <div key={i} style={{ fontFamily: 'monospace', fontSize: '0.62rem', color: 'var(--text2)', whiteSpace: 'pre-wrap', wordBreak: 'break-all', marginBottom: 4 }}>{line}</div>
-                    ))}
-                  </div>
-                )}
               </div>
             )}
           </div>
