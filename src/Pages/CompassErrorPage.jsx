@@ -329,8 +329,8 @@ export default function CompassErrorPage({user}){
             'UTC time is locked at that exact moment for calculation.',
             'Nautical LMT shown (longitude-based). Device local time (timezone) shown alongside.',
           ]},
-          {n:'2',title:'Enter Ship's Headings (manual — required)',color:'var(--gold)',steps:[
-            'In Ship's Heading section — enter Gyro Compass heading as read from gyro repeater (e.g. 285).',
+          {n:'2',title:'Enter Ships Headings (manual — required)',color:'var(--gold)',steps:[
+            'In Ships Heading section — enter Gyro Compass heading as read from gyro repeater (e.g. 285).',
             'Enter Standard (Magnetic) heading as read from bridge magnetic compass (e.g. 287).',
             'GPS COG badge is direction of travel only — do NOT use as heading.',
             'These two values are always entered manually by the officer.',
