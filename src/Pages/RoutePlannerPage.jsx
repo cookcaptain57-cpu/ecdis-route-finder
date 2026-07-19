@@ -616,6 +616,8 @@ function RoutePlannerPage({notify,sheetRoutes=[],portsDb=[]}){
   // ── Generate auto route — uses canalPref ──────────────────────────────────
   // ── Generate auto route — FIXED: validates Render API response ─────────────
   const handleGenerateAutoRoute=async()=>{
+    notify('🔒 Auto Route is a Pro feature — coming soon in NavisphereX Pro!','error');
+    return;
     const f=portF,t=portT;
     if(!f||!t)return;
     setIsGenerating(true);setSearchMode('generating');
