@@ -273,27 +273,8 @@ export const fetchPortsFromSheet = async () => {
 // there. Exact duplicate port+terminal+locode rows are dropped on the way in.
 const IDB_TERMINALS = 'mnav_terminals';
 
-// Mirrors console output into an array PortSearchPage.jsx can render on-screen,
-// for diagnosing this on a device where opening devtools isn't practical.
-export const terminalDebugLog = [];
-const _fmt = (a) => (typeof a === 'string' ? a : JSON.stringify(a));
-const dbg = (...args) => {
-  const msg = args.map(_fmt).join(' ');
-  console.log(msg);
-  terminalDebugLog.push(msg);
-  if (terminalDebugLog.length > 60) terminalDebugLog.shift();
-};
-const dbgWarn = (...args) => {
-  const msg = '⚠ ' + args.map(_fmt).join(' ');
-  console.warn(msg);
-  terminalDebugLog.push(msg);
-  if (terminalDebugLog.length > 60) terminalDebugLog.shift();
-};
-
-// Does the actual network fetch + pagination + parsing (unchanged logic, just
-// no longer called directly — see fetchTerminalsFromSheet below for the
-// cache-first wrapper). Falls back to IDB cache itself if the network fetch
-// fails outright, so it's still safe to call this alone if ever needed.
+// Does the actual network fetch + pagination + parsing. Falls back to IDB
+// cache itself if the network fetch fails outright.
 const _fetchTerminalsLive = async () => {
   const PAGE_SIZE  = 3000;
   const TAB_NAME   = 'Port & Terminal Database';
@@ -329,22 +310,19 @@ const _fetchTerminalsLive = async () => {
     for (let page = 0; page < MAX_PAGES; page++) {
       const tq  = encodeURIComponent(`select * limit ${PAGE_SIZE} offset ${offset}`);
       const url = `https://docs.google.com/spreadsheets/d/${TERMINAL_SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(TAB_NAME)}&tq=${tq}`;
-      if (page === 0) dbg('[terminals] fetching:', url);
       const r = await fetch(url);
-      if (!r.ok) { dbgWarn('[terminals] non-OK response:', r.status, r.statusText); break; }
+      if (!r.ok) { console.warn('[terminals] non-OK response:', r.status, r.statusText); break; }
 
       const csv   = await r.text();
       const lines = csv.trim().split('\n').filter(l => l.trim().length > 0);
-      if (page === 0) dbg('[terminals] page 0 raw lines:', lines.length, '| first line:', lines[0]?.slice(0, 200));
       if (lines.length === 0) break;
 
       let startLine = 0;
 
       // Check THIS page's own first line for a header row every time — not just
-      // when cols is still unknown. fetchPortsFromSheet above unconditionally
-      // skips line 0 on every page, which implies GViz repeats a header line on
-      // each paginated offset response; this defends against that on top of the
-      // dynamic scan (which handles the metadata rows ahead of the real header).
+      // when cols is still unknown. GViz repeats a header line on each
+      // paginated offset response, and the source sheet also has a 2-row
+      // title/date block above the real header on page 0.
       const firstCells = parseLine(lines[0]).map(c => c.replace(/"/g, '').trim().toLowerCase());
       const pageStartsWithHeader = firstCells.includes('port name');
 
@@ -364,14 +342,10 @@ const _fetchTerminalsLive = async () => {
               lon:    findCol(cells, 'longitude (dms)', 'longitude'),
             };
             startLine = i + 1;
-            dbg('[terminals] page', page, '— header resolved:', cols);
             break;
           }
         }
-        if (!cols) {
-          if (page === 0) dbgWarn('[terminals] "Port Name" header not found in first 5 lines of page 0:', lines.slice(0, 5).map(l => l.slice(0, 120)));
-          offset += PAGE_SIZE; continue;
-        } // header not on this page yet — keep paging
+        if (!cols) { offset += PAGE_SIZE; continue; } // header not on this page yet — keep paging
       } else if (pageStartsWithHeader) {
         startLine = 1; // cols already known, but this page still repeats the header line — skip it
       }
@@ -403,25 +377,18 @@ const _fetchTerminalsLive = async () => {
         });
       }
 
-      if (allRows.length > 0) dbg('[terminals] page', page, 'sample row:', allRows[allRows.length - 1]);
-      if (page === 0) dbg('[terminals] cols resolved:', cols, '| rows so far:', allRows.length);
       if (lines.length < PAGE_SIZE - 20) break; // short page = last page (small buffer for the header-row overhead on page 1)
       offset += PAGE_SIZE;
     }
 
     if (allRows.length > 0) {
-      dbg('[terminals] TOTAL rows parsed:', allRows.length);
-      const busan = allRows.filter(r => r.portLower.includes('busan'));
-      const singapore = allRows.filter(r => r.portLower.includes('singapore'));
-      dbg('[terminals] Busan rows found:', busan.length, busan.slice(0, 2));
-      dbg('[terminals] Singapore rows found:', singapore.length, singapore.slice(0, 2));
       try { await idbSet(IDB_TERMINALS, allRows); } catch {}
       return allRows;
     }
     throw new Error('empty result');
 
   } catch (e) {
-    dbgWarn('Terminal sheet fetch failed, trying IDB cache:', e.message);
+    console.warn('Terminal sheet fetch failed, trying IDB cache:', e.message);
     try {
       const cached = await idbGet(IDB_TERMINALS);
       if (cached && Array.isArray(cached) && cached.length > 0) return cached;
@@ -431,23 +398,19 @@ const _fetchTerminalsLive = async () => {
 };
 
 // ─── fetchTerminalsFromSheet (cache-first) ──────────────────────────────────
-// NEW behaviour: reads IndexedDB first — if a cached copy exists, it's
-// returned immediately (instant, works fully offline), and a live fetch is
-// kicked off in the background purely to refresh the cache for next time
-// (its result isn't awaited or returned here). Only when there's no cache at
-// all yet — first-ever load — does this wait on the live fetch directly.
+// Reads IndexedDB first — if a cached copy exists, it's returned immediately
+// (instant, works fully offline), and a live fetch is kicked off in the
+// background purely to refresh the cache for next time. Only when there's no
+// cache at all yet — first-ever load — does this wait on the live fetch directly.
 export const fetchTerminalsFromSheet = async () => {
-  terminalDebugLog.length = 0; // clear stale entries from any previous call
   let cached = null;
   try { cached = await idbGet(IDB_TERMINALS); } catch {}
 
   if (cached && Array.isArray(cached) && cached.length > 0) {
-    dbg('[terminals] serving', cached.length, 'rows from IDB cache instantly; refreshing in background');
     _fetchTerminalsLive().catch(() => {}); // fire-and-forget cache refresh
     return cached;
   }
 
-  dbg('[terminals] no IDB cache yet — first load must fetch live');
   return _fetchTerminalsLive();
 };
 
