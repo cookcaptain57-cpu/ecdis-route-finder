@@ -84,8 +84,9 @@ const S = `
   .ntab.active{color:var(--cyan);background:rgba(0,180,216,0.1);border:1px solid rgba(0,180,216,0.2);}
   .sd{width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 7px var(--green);animation:pulse 2s infinite;}
   @keyframes pulse{0%,100%{opacity:1;}50%{opacity:0.4;}}
-  .burger{display:none;flex-direction:column;gap:4px;cursor:pointer;padding:8px;background:none;border:none;}
+  .burger{display:none;flex-direction:column;align-items:center;justify-content:center;gap:4px;cursor:pointer;padding:6px 8px;background:none;border:none;}
   .burger span{width:20px;height:2px;background:var(--text);border-radius:2px;}
+  .burger-label{font-size:0.5rem;color:var(--text2);text-transform:uppercase;letter-spacing:0.05em;margin-top:1px;line-height:1;}
   @media(max-width:900px){.burger{display:flex;}.app-sidebar{display:none !important;}}
   @media(min-width:901px){.burger{display:none;}}
   .app-body{display:flex;flex:1;min-height:0;overflow:hidden;}
@@ -194,6 +195,7 @@ const S = `
   [data-theme="light"] .nav{background:rgba(240,245,250,0.97);border-color:rgba(0,0,0,0.12);}
   [data-theme="light"] .app-sidebar{background:rgba(240,245,250,0.97);border-color:rgba(0,0,0,0.12);}
   [data-theme="light"] .burger span{background:#0a1628 !important;}
+  [data-theme="light"] .burger-label{color:#0a1628 !important;}
   [data-theme="light"] .nav-title,[data-theme="light"] .ntab,[data-theme="light"] .si-btn{color:#0a1628 !important;}
   [data-theme="light"] .ntab.active,[data-theme="light"] .si-btn.active{color:var(--cyan) !important;}
   [data-theme="light"] .file-card,[data-theme="light"] .auth-card{background:#ffffff;}
@@ -693,7 +695,10 @@ export default function App() {
               {!user && !authChecked && (
                 <div className="spin" style={{ width:14, height:14, flexShrink:0 }} />
               )}
-              <button className="burger" onClick={() => setMenuOpen(o => !o)}><span /><span /><span /></button>
+              <button className="burger" onClick={() => setMenuOpen(o => !o)} aria-label="Menu">
+                <span /><span /><span />
+                <small className="burger-label">Menu</small>
+              </button>
             </div>
           </div>
         </nav>
