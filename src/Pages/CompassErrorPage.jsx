@@ -444,6 +444,7 @@ export default function CompassErrorPage({user}){
         {/* Ship Heading */}
         <div style={DC.card}>
           <div style={DC.hdr}>🚢 SHIP'S HEADING</div>
+          <div style={{fontSize:'0.68rem',color:'var(--text3)',fontStyle:'italic',marginBottom:'0.5rem',paddingBottom:'0.5rem',borderBottom:'1px solid var(--border)'}}>Only make entry here</div>
           {gpsCOG!==null&&<div style={{marginBottom:'0.6rem',padding:'6px 9px',background:'rgba(0,200,150,0.06)',border:'1px solid rgba(0,200,150,0.2)',borderRadius:7,fontSize:'0.68rem',color:'var(--text3)'}}>
             🛳 GPS COG: <strong style={{color:'var(--green)'}}>{gpsCOG.toFixed(0)}°</strong>{gpsSOG!==null?` · ${gpsSOG}kt`:''} — direction of travel. Enter actual gyro/magnetic compass headings below.
           </div>}
@@ -468,6 +469,7 @@ export default function CompassErrorPage({user}){
             {adjBtn('‹',()=>adjGyro(-0.1))}{adjBtn('›',()=>adjGyro(0.1))}
           </div>
           <div style={{marginTop:6,fontSize:'0.67rem',color:'var(--text3)'}}>{gyroLock?'✏️ Manual entry — ‹ › to fine-adjust':'🔄 Pre-filled with true azimuth — enter your gyro observation'}</div>
+          <div style={{marginTop:4,fontSize:'0.67rem',color:'var(--gold)'}}>✍️ Adjust bearing to whole number or enter actual observation</div>
         </div>
 
         {/* Variation */}
@@ -479,12 +481,14 @@ export default function CompassErrorPage({user}){
             {adjBtn('‹',()=>adjVar(-0.01))}{adjBtn('›',()=>adjVar(0.01))}
           </div>
           {varDDdt!==null&&<div style={{marginTop:6,fontSize:'0.67rem',color:'var(--text3)'}}>Annual change: <span style={{color:'var(--cyan)'}}>{varDDdt>=0?'+':''}{(varDDdt*60).toFixed(2)}′/yr</span></div>}
+          <div style={{marginTop:4,fontSize:'0.67rem',color:'var(--text3)',fontStyle:'italic'}}>Auto calculated based on your location</div>
         </div>
       </div>
 
       {/* Output Card */}
       <div>
         <div style={LT.card}>
+          <div style={{fontSize:'0.7rem',color:'#1a3a8a',fontWeight:600,marginBottom:'0.6rem',paddingBottom:'0.5rem',borderBottom:'1px solid #ccd8e8',letterSpacing:'0.03em'}}>✍️ Observations Results — Make log entry as per below output</div>
           <div style={{display:'flex',alignItems:'center',gap:9,marginBottom:'0.75rem',paddingBottom:'0.75rem',borderBottom:'1.5px solid #ccd8e8'}}>
             <div style={{width:34,height:34,borderRadius:8,background:'linear-gradient(135deg,#1565C0,#003d99)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'1.1rem',flexShrink:0}}>🧭</div>
             <div style={{flex:1}}>
