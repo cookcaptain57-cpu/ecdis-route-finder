@@ -303,7 +303,7 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
     if(!layersRef.current.vessel)layersRef.current.vessel=L.marker([fix.lat,fix.lon],{icon,zIndexOffset:9999}).addTo(leafRef.current);
     else{layersRef.current.vessel.setLatLng([fix.lat,fix.lon]);layersRef.current.vessel.setIcon(icon);}
     const r2=Math.PI/180,nm=Math.max(fix.sog,0.3)*(vectorMinsRef.current/60);
-    const vl=fix.lat+(nm/60)*Math.cos(fix.cog*r2),vn=fix.lon+(nm/60)*Math.sin(fix.cog*r2);
+    const vl=fix.lat+(nm/60)*Math.cos(fix.cog*r2),vn=fix.lon+(nm/60)*Math.sin(fix.cog*r2)/Math.cos(fix.lat*r2);
     if(layersRef.current.vector){layersRef.current.vector.setLatLngs([[fix.lat,fix.lon],[vl,vn]]);layersRef.current.vector.setStyle({color:c.vector});}
     else layersRef.current.vector=L.polyline([[fix.lat,fix.lon],[vl,vn]],{color:c.vector,weight:2,opacity:0.85,dashArray:'5 3'}).addTo(leafRef.current);
     if(autoCenterRef.current){try{const m=leafRef.current,s=m.getSize(),p=m.project([fix.lat,fix.lon],m.getZoom());m.panTo(m.unproject(p.subtract([0,s.y*0.2]),m.getZoom()),{animate:true,duration:0.3});}catch{leafRef.current.panTo([fix.lat,fix.lon]);}}
@@ -604,7 +604,7 @@ export default function NavModePage({notify,sheetRoutes=[],portsDb=[],setTab}){
       const showVec=showAllAisVectors||(selectedAisMmsi===String(v.mmsi));
       if(showVec&&(v.sog||0)>0.1){
         const r2=Math.PI/180,nm2=(v.sog||0)*(vectorMinsRef.current/60);
-        const vl=v.lat+(nm2/60)*Math.cos((v.cog||0)*r2),vn=v.lon+(nm2/60)*Math.sin((v.cog||0)*r2);
+        const vl=v.lat+(nm2/60)*Math.cos((v.cog||0)*r2),vn=v.lon+(nm2/60)*Math.sin((v.cog||0)*r2)/Math.cos(v.lat*r2);
         if(layersRef.current.ais[v.mmsi]?.vec){layersRef.current.ais[v.mmsi].vec.setLatLngs([[v.lat,v.lon],[vl,vn]]);layersRef.current.ais[v.mmsi].vec.setStyle({color:col});}
         else layersRef.current.ais[v.mmsi].vec=L.polyline([[v.lat,v.lon],[vl,vn]],{color:col,weight:1.5,opacity:0.7,dashArray:'4 3'}).addTo(m);
       } else if(layersRef.current.ais[v.mmsi]?.vec){try{m.removeLayer(layersRef.current.ais[v.mmsi].vec);}catch{}layersRef.current.ais[v.mmsi].vec=null;}
@@ -1620,4 +1620,4 @@ onTouchMove={e=>{if(!cogDragRef.current)return;e.stopPropagation();const t=e.tou
       </div>)}
     </div>
   );
-                                                                                                                                                                                                                                                                                                                                                           }
+    }
