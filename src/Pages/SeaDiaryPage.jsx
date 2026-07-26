@@ -163,9 +163,8 @@ function StarRating({ value, onChange }) {
   );
 }
 
-// ─── VOYAGE ANIMATION v14 — MAPBOX GL (NATIVE CANVAS, REAL TILES) ─────────────
-// Mapbox GL JS renders directly to WebGL canvas — no CORS issues ever.
-// Same tiles as you see in other apps (Image 2). Free tier: 50k loads/month.
+// ─── VOYAGE ANIMATION v15 — FIXED MAPBOX GL RECORDING ──────────────────────
+// Mapbox GL JS renders directly to WebGL canvas — now using toDataURL() for reliable capture.
 
 function VoyageAnimation({ onClose, portsDb = [] }) {
 
@@ -233,9 +232,6 @@ function VoyageAnimation({ onClose, portsDb = [] }) {
   };
 
   // ── Load Mapbox GL JS ──────────────────────────────────────────────────────
-  // Mapbox GL renders to its own WebGL canvas — we copy that canvas to our
-  // recording canvas each frame. This is the correct approach used by
-  // professional map video apps (TravelBoast, Google Maps recorder, etc.)
   const loadMapbox = () => new Promise((res,rej) => {
     if (window.mapboxgl) { res(); return; }
     const link = document.createElement('link');
@@ -249,7 +245,6 @@ function VoyageAnimation({ onClose, portsDb = [] }) {
   });
 
   // ── Mapbox public token (pk.* — client-side safe) ──
-  // Using a publicly available demo token — user can replace with their own
   const MB_TOKEN = 'pk.eyJ1IjoibWFwYm94IiwiYSI6ImNpejY4NXVycTA2emYycXBndHRqcmZ3N3gifQ.rJcFIG214AriISLbB6B5aw';
 
   // ── Init Mapbox GL (hidden div, used only for tile capture) ──
@@ -269,7 +264,7 @@ function VoyageAnimation({ onClose, portsDb = [] }) {
         center: [lng, lat],
         zoom: zoom,
         interactive: false,
-        preserveDrawingBuffer: true,  // CRITICAL — allows canvas.toDataURL() / drawImage()
+        preserveDrawingBuffer: true,  // CRITICAL — allows canvas.toDataURL()
         fadeDuration: 0,
         attributionControl: false,
       });
@@ -282,28 +277,49 @@ function VoyageAnimation({ onClose, portsDb = [] }) {
     }
   };
 
-  // ── Copy Mapbox canvas → recording canvas (the key frame draw) ──
+  // ── FIXED: Copy Mapbox canvas → recording canvas using toDataURL() ──
   const drawMapboxToCanvas = async (ctx, lat, lng, zoom) => {
     const mb = mbMapRef.current;
     if (!mb) return false;
+    
     // Move map to new center/zoom
     mb.setCenter([lng, lat]);
     mb.setZoom(zoom);
+    
     // Wait for tiles to render
     await new Promise(res => {
       if (mb.isStyleLoaded() && !mb.isMoving()) { res(); return; }
       const onIdle = () => { mb.off('idle', onIdle); res(); };
       mb.on('idle', onIdle);
-      setTimeout(res, 800); // max wait
+      setTimeout(res, 1200); // Increased timeout for slow connections
     });
-    // Copy Mapbox WebGL canvas to our recording canvas
+    
     try {
+      // Method 1: Use toDataURL (most reliable for WebGL canvases)
       const mbCanvas = mb.getCanvas();
-      ctx.drawImage(mbCanvas, 0, 0, CW, CH);
+      const dataUrl = mbCanvas.toDataURL('image/png');
+      const img = new Image();
+      await new Promise((resolve, reject) => {
+        img.onload = resolve;
+        img.onerror = reject;
+        img.src = dataUrl;
+      });
+      ctx.drawImage(img, 0, 0, CW, CH);
       return true;
     } catch(e) {
-      console.warn('Mapbox copy failed:', e);
-      return false;
+      console.warn('Mapbox copy with toDataURL failed:', e);
+      
+      // Method 2: Fallback - use createImageBitmap (faster, but less supported)
+      try {
+        const mbCanvas = mb.getCanvas();
+        const bitmap = await createImageBitmap(mbCanvas);
+        ctx.drawImage(bitmap, 0, 0, CW, CH);
+        bitmap.close();
+        return true;
+      } catch(e2) {
+        console.warn('Mapbox copy with createImageBitmap failed:', e2);
+        return false;
+      }
     }
   };
 
@@ -572,9 +588,9 @@ function VoyageAnimation({ onClose, portsDb = [] }) {
 
       ctx.clearRect(0,0,CW,CH);
 
-      // Draw map background
-      if(useMB&&!inSummary){
-        // Mapbox GL → copy WebGL canvas
+      // Draw map background - using Mapbox during recording too
+      if(useMB && !inSummary){
+        // Mapbox GL → copy WebGL canvas using toDataURL() method
         const drawn=await drawMapboxToCanvas(ctx,cLat,cLng,z);
         if(!drawn) drawFallbackMap(ctx,z,cLat,cLng);
       } else if(!inSummary){
@@ -701,8 +717,19 @@ function VoyageAnimation({ onClose, portsDb = [] }) {
 
   return (
     <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.94)',zIndex:9998,display:'flex',alignItems:'flex-start',justifyContent:'center',padding:'0.4rem',overflowY:'auto'}} onClick={onClose}>
-      {/* Hidden Mapbox div — used for tile rendering during recording */}
-      <div ref={mbDivRef} style={{position:'fixed',top:-9999,left:-9999,width:CW,height:CH,visibility:'hidden',pointerEvents:'none'}}/>
+      
+      {/* ── FIXED: Mapbox div now visible during recording ── */}
+      <div ref={mbDivRef} style={{
+        position: 'fixed',
+        top: recording ? 0 : -9999,
+        left: recording ? 0 : -9999,
+        width: CW,
+        height: CH,
+        visibility: recording ? 'visible' : 'hidden',
+        pointerEvents: 'none',
+        zIndex: recording ? 9999 : -1,
+        opacity: recording ? 0.01 : 0
+      }}/>
 
       <div style={{background:'#0B1D35',border:'1px solid rgba(0,180,216,0.3)',borderRadius:16,width:'100%',maxWidth:540,overflow:'hidden',display:'flex',flexDirection:'column'}}
         onClick={e=>e.stopPropagation()} onTouchStart={e=>e.stopPropagation()}>
