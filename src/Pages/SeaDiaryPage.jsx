@@ -163,8 +163,9 @@ function StarRating({ value, onChange }) {
   );
 }
 
-// ─── VOYAGE ANIMATION v15 — FIXED MAPBOX GL RECORDING ──────────────────────
-// Mapbox GL JS renders directly to WebGL canvas — now using toDataURL() for reliable capture.
+// ─── VOYAGE ANIMATION v16 — FIXED RECORDING (createImageBitmap, no visible div) ──
+// Uses createImageBitmap() for fast, low-memory WebGL capture.
+// Mapbox div remains hidden at all times — WebGL renders fine in background.
 
 function VoyageAnimation({ onClose, portsDb = [] }) {
 
@@ -244,10 +245,10 @@ function VoyageAnimation({ onClose, portsDb = [] }) {
     document.head.appendChild(s);
   });
 
-  // ── Mapbox public token (pk.* — client-side safe) ──
+  // ── Mapbox public token ──
   const MB_TOKEN = 'pk.eyJ1IjoibWFwYm94IiwiYSI6ImNpejY4NXVycTA2emYycXBndHRqcmZ3N3gifQ.rJcFIG214AriISLbB6B5aw';
 
-  // ── Init Mapbox GL (hidden div, used only for tile capture) ──
+  // ── Init Mapbox GL ──
   const initMapbox = async (lat, lng, zoom) => {
     if (mbMapRef.current) {
       mbMapRef.current.setCenter([lng, lat]);
@@ -264,7 +265,7 @@ function VoyageAnimation({ onClose, portsDb = [] }) {
         center: [lng, lat],
         zoom: zoom,
         interactive: false,
-        preserveDrawingBuffer: true,  // CRITICAL — allows canvas.toDataURL()
+        preserveDrawingBuffer: true,
         fadeDuration: 0,
         attributionControl: false,
       });
@@ -277,49 +278,32 @@ function VoyageAnimation({ onClose, portsDb = [] }) {
     }
   };
 
-  // ── FIXED: Copy Mapbox canvas → recording canvas using toDataURL() ──
+  // ── FIXED: Copy Mapbox canvas → recording canvas using createImageBitmap ──
   const drawMapboxToCanvas = async (ctx, lat, lng, zoom) => {
     const mb = mbMapRef.current;
     if (!mb) return false;
     
-    // Move map to new center/zoom
     mb.setCenter([lng, lat]);
     mb.setZoom(zoom);
     
-    // Wait for tiles to render
+    // Wait for tiles to render (reduced timeout to prevent freezes)
     await new Promise(res => {
       if (mb.isStyleLoaded() && !mb.isMoving()) { res(); return; }
       const onIdle = () => { mb.off('idle', onIdle); res(); };
       mb.on('idle', onIdle);
-      setTimeout(res, 1200); // Increased timeout for slow connections
+      setTimeout(res, 600);
     });
     
     try {
-      // Method 1: Use toDataURL (most reliable for WebGL canvases)
       const mbCanvas = mb.getCanvas();
-      const dataUrl = mbCanvas.toDataURL('image/png');
-      const img = new Image();
-      await new Promise((resolve, reject) => {
-        img.onload = resolve;
-        img.onerror = reject;
-        img.src = dataUrl;
-      });
-      ctx.drawImage(img, 0, 0, CW, CH);
+      // createImageBitmap is fast and memory-efficient
+      const bitmap = await createImageBitmap(mbCanvas);
+      ctx.drawImage(bitmap, 0, 0, CW, CH);
+      bitmap.close();
       return true;
     } catch(e) {
-      console.warn('Mapbox copy with toDataURL failed:', e);
-      
-      // Method 2: Fallback - use createImageBitmap (faster, but less supported)
-      try {
-        const mbCanvas = mb.getCanvas();
-        const bitmap = await createImageBitmap(mbCanvas);
-        ctx.drawImage(bitmap, 0, 0, CW, CH);
-        bitmap.close();
-        return true;
-      } catch(e2) {
-        console.warn('Mapbox copy with createImageBitmap failed:', e2);
-        return false;
-      }
+      console.warn('Mapbox bitmap copy failed:', e);
+      return false;
     }
   };
 
@@ -329,11 +313,9 @@ function VoyageAnimation({ onClose, portsDb = [] }) {
     oceanGrad.addColorStop(0,'#c8e8f4');
     oceanGrad.addColorStop(1,'#a0d0ea');
     ctx.fillStyle=oceanGrad; ctx.fillRect(0,0,CW,CH);
-    // Grid
     ctx.strokeStyle='rgba(100,160,210,0.12)'; ctx.lineWidth=0.5;
     for(let lo=-180;lo<=180;lo+=30){ctx.beginPath();for(let la=-80;la<=80;la+=10){const p=project(la,lo,zoom,cLat,cLng);la===-80?ctx.moveTo(p.x,p.y):ctx.lineTo(p.x,p.y);}ctx.stroke();}
     for(let la=-60;la<=80;la+=30){ctx.beginPath();for(let lo=-180;lo<=180;lo+=10){const p=project(la,lo,zoom,cLat,cLng);lo===-180?ctx.moveTo(p.x,p.y):ctx.lineTo(p.x,p.y);}ctx.stroke();}
-    // Simple land masses
     const lands=[
       [[-168,72],[-130,55],[-125,49],[-97,26],[-83,10],[-77,8],[-62,12],[-35,-5],[-40,-20],[-55,-34],[-68,-55],[-74,-30],[-80,0],[-77,8],[-90,16],[-104,19],[-117,32],[-140,70],[-168,72]],
       [[2,36],[10,37],[18,37],[32,30],[44,10],[50,12],[44,10],[38,15],[34,30],[32,31],[8,5],[2,4],[-2,2],[2,-5],[10,-22],[18,-34],[28,-33],[32,-30],[32,-28],[26,-18],[20,-10],[15,0],[8,5],[10,37]],
@@ -446,13 +428,11 @@ function VoyageAnimation({ onClose, portsDb = [] }) {
     const idx=clamp(Math.floor(tRoute*total),0,total-1);
     const frac=(tRoute*total)-idx;
 
-    // Full dashed route
     ctx.save();ctx.setLineDash([7,5]);ctx.strokeStyle='rgba(255,255,255,0.4)';ctx.lineWidth=2;
     ctx.beginPath();let pd=false;
     pts.forEach((pt,i)=>{const p=pj(pt.lat,pt.lng);if(pd&&i>0){const prev=pj(pts[i-1].lat,pts[i-1].lng);if(Math.abs(p.x-prev.x)>CW*0.5){ctx.stroke();ctx.beginPath();pd=false;}}pd?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y);pd=true;});
     ctx.stroke();ctx.setLineDash([]);ctx.restore();
 
-    // Travelled route (red)
     ctx.save();ctx.strokeStyle='#FF3B30';ctx.lineWidth=4;ctx.lineJoin='round';ctx.lineCap='round';
     ctx.shadowColor='rgba(255,59,48,0.8)';ctx.shadowBlur=14;ctx.beginPath();pd=false;
     for(let i=0;i<=idx+1&&i<interp.length;i++){
@@ -463,10 +443,8 @@ function VoyageAnimation({ onClose, portsDb = [] }) {
     }
     ctx.stroke();ctx.shadowBlur=0;ctx.restore();
 
-    // Trails
     trails.forEach((tr,ti)=>{const a=tr.alpha*(1-ti/trails.length)*0.8;ctx.beginPath();ctx.arc(tr.x,tr.y,tr.r,0,Math.PI*2);ctx.fillStyle=`rgba(255,100,80,${a})`;ctx.fill();});
 
-    // Boat
     const curLat=interp[idx].lat+(interp[Math.min(idx+1,total)].lat-interp[idx].lat)*frac;
     const curLng=interp[idx].lng+(interp[Math.min(idx+1,total)].lng-interp[idx].lng)*frac;
     const bp=pj(curLat,curLng);
@@ -476,7 +454,6 @@ function VoyageAnimation({ onClose, portsDb = [] }) {
     ctx.fillStyle=glow;ctx.beginPath();ctx.arc(bp.x,bp.y,30*pulse,0,Math.PI*2);ctx.fill();
     ctx.font='28px serif';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('🚢',bp.x,bp.y);
 
-    // Waypoint flags
     const showAll=t>P2;
     pts.forEach((pt,i)=>{
       const pct=i/Math.max(pts.length-1,1);if(!showAll&&pct>tRoute+0.02) return;
@@ -487,10 +464,8 @@ function VoyageAnimation({ onClose, portsDb = [] }) {
       ctx.font='18px serif';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(pt.flag,p.x,p.y-24);ctx.globalAlpha=1;
     });
 
-    // Finish glow
     if(t>P2&&pts.length>0){const ep=pj(pts[pts.length-1].lat,pts[pts.length-1].lng);const re=clamp(easeIO((t-P2)/(P3-P2)),0,1);const gr=ctx.createRadialGradient(ep.x,ep.y,0,ep.x,ep.y,55*re);gr.addColorStop(0,`rgba(255,215,0,${0.6*re})`);gr.addColorStop(1,'transparent');ctx.fillStyle=gr;ctx.beginPath();ctx.arc(ep.x,ep.y,55*re,0,Math.PI*2);ctx.fill();}
 
-    // TOP BAR
     const topH=72;
     ctx.fillStyle='rgba(4,12,26,0.90)';ctx.fillRect(0,0,CW,topH);
     ctx.font='bold 16px "Orbitron",monospace';ctx.fillStyle='#00B4D8';ctx.textAlign='left';ctx.fillText('NAVISPHERE X',18,30);
@@ -500,7 +475,6 @@ function VoyageAnimation({ onClose, portsDb = [] }) {
     ctx.font='bold 9px "Exo 2",sans-serif';ctx.fillStyle='rgba(0,180,216,0.65)';ctx.fillText(phLabel,CW-18,55);
     ctx.strokeStyle='rgba(0,180,216,0.5)';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(0,topH);ctx.lineTo(CW,topH);ctx.stroke();
 
-    // BOTTOM BAR
     const botH=165;
     ctx.fillStyle='rgba(4,12,26,0.92)';ctx.fillRect(0,CH-botH,CW,botH);
     ctx.strokeStyle='rgba(0,180,216,0.5)';ctx.lineWidth=1.5;ctx.beginPath();ctx.moveTo(0,CH-botH);ctx.lineTo(CW,CH-botH);ctx.stroke();
@@ -561,10 +535,10 @@ function VoyageAnimation({ onClose, portsDb = [] }) {
     ctx.font='bold 11px "Orbitron",monospace';ctx.fillStyle='rgba(0,180,216,0.7)';ctx.textAlign='center';ctx.fillText('NAVISPHERE X  ·  MARINE SYSTEMS',CW/2,CH*0.94);ctx.globalAlpha=1;
   };
 
-  // ── Animation loop — async (waits for Mapbox to render each frame) ──
+  // ── Animation loop ──
   const SUMMARY_SECS=7;
   const runAnimation=(canvas,interp,pts,ctryList,stats,fitResult,secs,onDone)=>{
-    const ctx=canvas.getContext('2d');
+    const ctx=canvas.getContext('2d', { willReadFrequently: false });
     const fps=30,routeFrames=secs*fps,summaryFrames=SUMMARY_SECS*fps,totalFrames=routeFrames+summaryFrames;
     let frame=0,trails=[];
     const totalDays=Math.max(pts.length,3);
@@ -588,9 +562,7 @@ function VoyageAnimation({ onClose, portsDb = [] }) {
 
       ctx.clearRect(0,0,CW,CH);
 
-      // Draw map background - using Mapbox during recording too
       if(useMB && !inSummary){
-        // Mapbox GL → copy WebGL canvas using toDataURL() method
         const drawn=await drawMapboxToCanvas(ctx,cLat,cLng,z);
         if(!drawn) drawFallbackMap(ctx,z,cLat,cLng);
       } else if(!inSummary){
@@ -600,7 +572,6 @@ function VoyageAnimation({ onClose, portsDb = [] }) {
       if(!inSummary){
         drawOverlay(ctx,interp,t,z,cLat,cLng,pts,ctryList,trails,stats?.totalNM||'0',stats?.totalKM||'0',day,totalDays);
       } else {
-        // For summary: show full route on fallback map
         drawFallbackMap(ctx,getZoomState(1,interp,pts,fitResult).z,fitResult.lat,fitResult.lng);
         drawOverlay(ctx,interp,1,getZoomState(1,interp,pts,fitResult).z,fitResult.lat,fitResult.lng,pts,ctryList,[],stats?.totalNM||'0',stats?.totalKM||'0',totalDays,totalDays);
         drawSummary(ctx,summaryT,stats?.totalNM||'0',stats?.totalKM||'0',totalDays,ctryList);
@@ -639,7 +610,6 @@ function VoyageAnimation({ onClose, portsDb = [] }) {
         const{lat,lng}=e.latlng;
         setPoints(prev=>{const n=prev.length;return[...prev,{lat:parseFloat(lat.toFixed(5)),lng:parseFloat(lng.toFixed(5)),name:n===0?'Start':`WP${n}`,flag:n===0?'🟢':'⚓',type:n===0?'start':'wp'}];});
       });
-      // Init Mapbox GL in background for recording
       if(mbDivRef.current) initMapbox(20,0,2).catch(()=>{});
     };
     init();
@@ -681,7 +651,6 @@ function VoyageAnimation({ onClose, portsDb = [] }) {
   const startAnimation=async()=>{
     const pts=pointsRef.current;if(pts.length<2){setStatus('⚠️ Add at least 2 points');return;}
     const interp=buildInterp(pts),stats=computeStats(pts),fitResult=autoFit(pts);
-    // Init Mapbox at start zoom
     const startZ=getZoomState(0,interp,pts,fitResult);
     setStatus('🗺 Initialising map…');
     await initMapbox(startZ.cLat,startZ.cLng,startZ.z);
@@ -718,17 +687,17 @@ function VoyageAnimation({ onClose, portsDb = [] }) {
   return (
     <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.94)',zIndex:9998,display:'flex',alignItems:'flex-start',justifyContent:'center',padding:'0.4rem',overflowY:'auto'}} onClick={onClose}>
       
-      {/* ── FIXED: Mapbox div now visible during recording ── */}
+      {/* ── Mapbox div stays hidden at all times ── */}
       <div ref={mbDivRef} style={{
         position: 'fixed',
-        top: recording ? 0 : -9999,
-        left: recording ? 0 : -9999,
+        top: -9999,
+        left: -9999,
         width: CW,
         height: CH,
-        visibility: recording ? 'visible' : 'hidden',
+        visibility: 'hidden',
         pointerEvents: 'none',
-        zIndex: recording ? 9999 : -1,
-        opacity: recording ? 0.01 : 0
+        zIndex: -1,
+        opacity: 0
       }}/>
 
       <div style={{background:'#0B1D35',border:'1px solid rgba(0,180,216,0.3)',borderRadius:16,width:'100%',maxWidth:540,overflow:'hidden',display:'flex',flexDirection:'column'}}
@@ -1367,14 +1336,11 @@ function SeaDiaryPage({ user, notify, portsDb = [] }) {
     const ctx    = canvas.getContext('2d');
     const W = canvas.width, H = canvas.height;
     ctx.clearRect(0,0,W,H);
-    // Ocean bg
     ctx.fillStyle = '#020d1f';
     ctx.fillRect(0,0,W,H);
-    // Grid
     ctx.strokeStyle='rgba(0,180,216,0.05)';ctx.lineWidth=0.5;
     for(let x=0;x<W;x+=W/12){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,H);ctx.stroke();}
     for(let y=0;y<H;y+=H/6) {ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke();}
-    // Continents
     ctx.fillStyle='#0d2137';ctx.strokeStyle='rgba(0,180,216,0.2)';ctx.lineWidth=0.7;
     CONTINENTS.forEach(d=>{
       const path=new Path2D(d.replace(/(\d+\.?\d*)/g,(m,v,i,str)=>{
@@ -1384,20 +1350,16 @@ function SeaDiaryPage({ user, notify, portsDb = [] }) {
       }));
       ctx.fill(path);ctx.stroke(path);
     });
-    // Plot positions
     const posEntries = entries.filter(e=>e.lat&&e.lng);
     posEntries.forEach((e,i) => {
       const lat=parseFloat(e.lat),lng=parseFloat(e.lng);
       const x=(lng+180)/360*W, y=(90-lat)/180*H;
-      // Glow
       const g=ctx.createRadialGradient(x,y,0,x,y,14);
       g.addColorStop(0,'rgba(0,180,216,0.55)');
       g.addColorStop(1,'transparent');
       ctx.fillStyle=g;ctx.beginPath();ctx.arc(x,y,14,0,Math.PI*2);ctx.fill();
-      // Dot
       ctx.fillStyle='rgba(0,200,150,0.9)';ctx.beginPath();ctx.arc(x,y,3,0,Math.PI*2);ctx.fill();
     });
-    // Legend
     ctx.fillStyle='rgba(0,180,216,0.6)';ctx.font=`bold ${Math.max(8,W*0.012)}px Orbitron,monospace`;
     ctx.textAlign='left';ctx.fillText(`${posEntries.length} POSITIONS LOGGED`,10,H-8);
   }, [view, entries]);
@@ -1471,7 +1433,6 @@ function SeaDiaryPage({ user, notify, portsDb = [] }) {
       ═══════════════════════════════════════════════════════════════════ */}
       {view==='stats' && (
         <div style={{ display:'grid',gap:'1rem' }}>
-          {/* KPI row */}
           <div style={{ display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(130px,1fr))',gap:10 }}>
             {[
               { label:'Days Logged',    value:entries.length,       color:'var(--cyan,#00B4D8)',   icon:'📔' },
